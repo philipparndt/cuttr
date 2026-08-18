@@ -221,9 +221,13 @@ enum MainMenu {
 
 		func menuNeedsUpdate(_ menu: NSMenu) {
 			menu.removeAllItems()
+			// Filtered as well as gated on the way in, so takes recorded before
+			// that rule existed drop out of the menu rather than lingering in
+			// somebody's list for ever.
 			let urls = NSDocumentController.shared.recentDocumentURLs
+				.filter { $0.pathExtension.lowercased() == "cuttrproj" }
 			guard !urls.isEmpty else {
-				let empty = NSMenuItem(title: "Nothing Yet", action: nil, keyEquivalent: "")
+				let empty = NSMenuItem(title: "No Projects Yet", action: nil, keyEquivalent: "")
 				empty.isEnabled = false
 				menu.addItem(empty)
 				return

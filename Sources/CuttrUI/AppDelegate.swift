@@ -145,19 +145,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		present(controller.window)
 	}
 
-	/// Records a file in the recents list.
+	/// Records a file in the recents list. Projects only.
+	///
+	/// A take is opened *from* the project that uses it — it is listed down the
+	/// side of the project window with its clip count beside it — so putting
+	/// takes in Open Recent fills the menu with the material and buries the
+	/// thing somebody actually wants to reopen. One rule, here, rather than a
+	/// judgement at each of the five call sites.
 	///
 	/// Standardised first. `/tmp/x` and `/private/tmp/x` are the same file and
 	/// two different URLs, and noting both puts the same document in the menu
 	/// twice under the same name — which looks like a bug in the menu and is
 	/// really a bug at the call site.
 	static func remember(_ url: URL) {
+		guard url.pathExtension.lowercased() == "cuttrproj" else { return }
 		NSDocumentController.shared.noteNewRecentDocumentURL(url.standardizedFileURL.resolvingSymlinksInPath())
 	}
 
 	@objc func openRecent(_ sender: NSMenuItem) {
 		guard let url = sender.representedObject as? URL else { return }
-		url.pathExtension.lowercased() == "cuttrproj" ? openProject(url) : open(url)
+		openProject(url)
 	}
 
 	@objc func clearRecents(_ sender: Any?) {
