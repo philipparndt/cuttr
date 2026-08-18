@@ -36,10 +36,24 @@ enum MainMenu {
 		openProject.keyEquivalentModifierMask = [.command, .shift]
 		file.addItem(openProject)
 		let recents = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
-		recents.submenu = NSMenu(title: "Open Recent")
-		// The tag AppKit looks for when it fills this in itself.
-		recents.submenu?.identifier = NSUserInterfaceItemIdentifier("NSRecentDocumentsMenu")
+		let recentsMenu = NSMenu(title: "Open Recent")
+		// Filled in by hand when it opens.
+		//
+		// Naming the submenu `NSRecentDocumentsMenu` is the trick that makes
+		// AppKit fill it in, and it is a trick that works when the menu comes
+		// out of a nib and this program's menus do not — so the item sat there
+		// empty. `NSDocumentController` still keeps the list, which is the part
+		// worth having; only the filling in was missing.
+		recentsMenu.delegate = RecentsMenuFiller.shared
+		recents.submenu = recentsMenu
 		file.addItem(recents)
+		file.addItem(.separator())
+		// Aimed at the project window through the responder chain, so they are
+		// enabled exactly when one is in front.
+		file.addItem(command("Add Take to Project…",
+		                     #selector(ComposeWindowController.addTake(_:)), "a", [.command, .shift]))
+		file.addItem(command("New Take in Project…",
+		                     #selector(ComposeWindowController.newTake(_:)), "t", [.command, .shift]))
 		file.addItem(.separator())
 		let importItem = NSMenuItem(title: "Import Subclips from Resolve…",
 		                            action: #selector(AppDelegate.importSubclips(_:)), keyEquivalent: "i")
@@ -87,11 +101,19 @@ enum MainMenu {
 		// keys needed a key-code fallback to.
 		let clipItem = NSMenuItem()
 		let clip = NSMenu(title: "Clip")
-		clip.addItem(command("Split at Playhead", #selector(MainWindowController.splitAction(_:)), "k"))
+		// ⌘B, the blade, because that is what it is called in every editor
+		// somebody arrives here from. The bare `S` stays: it is the key the
+		// marking loop runs on, and it does not need a modifier.
+		clip.addItem(command("Split at Playhead", #selector(MainWindowController.splitAction(_:)), "b"))
 		clip.addItem(command("New Clip from In/Out", #selector(MainWindowController.commitPendingAction(_:)), "\r"))
 		clip.addItem(.separator())
-		clip.addItem(command("Set In", #selector(MainWindowController.setInAction(_:)), "["))
-		clip.addItem(command("Set Out", #selector(MainWindowController.setOutAction(_:)), "]"))
+		// No key equivalent, deliberately. `[` and `]` as menu equivalents render
+		// as whatever the layout puts on those physical keys — on a German
+		// keyboard the menu advertised ⌘Ö and ⌘Ä, which is worse than
+		// advertising nothing. The bare `I` and `O` are the real shortcuts and
+		// they are in Help ▸ Keys.
+		clip.addItem(command("Set In", #selector(MainWindowController.setInAction(_:)), ""))
+		clip.addItem(command("Set Out", #selector(MainWindowController.setOutAction(_:)), ""))
 		clip.addItem(.separator())
 		clip.addItem(command("Rename…", #selector(MainWindowController.renameSelected(_:)), "r"))
 		clip.addItem(command("Edit Slug…", #selector(MainWindowController.editSlugOfSelected(_:)), "R", [.command, .shift]))
@@ -193,6 +215,51 @@ enum MainMenu {
 		return item
 	}
 
+	/// Fills Open Recent from the document controller's list.
+	final class RecentsMenuFiller: NSObject, NSMenuDelegate {
+		static let shared = RecentsMenuFiller()
+
+		func menuNeedsUpdate(_ menu: NSMenu) {
+			menu.removeAllItems()
+			let urls = NSDocumentController.shared.recentDocumentURLs
+			guard !urls.isEmpty else {
+				let empty = NSMenuItem(title: "Nothing Yet", action: nil, keyEquivalent: "")
+				empty.isEnabled = false
+				menu.addItem(empty)
+				return
+			}
+			// Two files can share a name — a take and a project beside each
+			// other usually do — so the ones that collide say which folder they
+			// are in, and the ones that do not stay short.
+			var counts: [String: Int] = [:]
+			for url in urls {
+				counts[url.deletingPathExtension().lastPathComponent, default: 0] += 1
+			}
+
+			for url in urls {
+				let name = url.deletingPathExtension().lastPathComponent
+				let folder = url.deletingLastPathComponent().lastPathComponent
+				let item = NSMenuItem(
+					title: counts[name, default: 0] > 1 ? "\(name)  —  \(folder)" : name,
+					action: #selector(AppDelegate.openRecent(_:)), keyEquivalent: "")
+				item.representedObject = url
+				// The icon says which kind it is without a second column of
+				// text: a take and a project are different documents and the
+				// names are often the same word.
+				let icon = NSWorkspace.shared.icon(forFile: url.path)
+				icon.size = NSSize(width: 16, height: 16)
+				item.image = icon
+				// A file that has moved is still worth listing — its absence is
+				// information — but it is not worth pretending it will open.
+				item.isEnabled = FileManager.default.fileExists(atPath: url.path)
+				menu.addItem(item)
+			}
+			menu.addItem(.separator())
+			menu.addItem(NSMenuItem(
+				title: "Clear Menu", action: #selector(AppDelegate.clearRecents(_:)), keyEquivalent: ""))
+		}
+	}
+
 	/// Fills the Clip menu's Colour submenu from whichever window is front.
 	///
 	/// A submenu in the menu bar cannot be built once at launch, because it has
@@ -228,7 +295,7 @@ enum MainMenu {
 	  home end     start / end of the take
 
 	Cutting
-	  S            split here — or close off the clip since the last one
+	  S  or  ⌘B    split here — or close off the clip since the last one
 	  double-click a clip's bar to name it in place
 	  I O          set in / out
 	  ⏎            make a clip from the in/out span —

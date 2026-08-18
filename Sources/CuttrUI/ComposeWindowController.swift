@@ -21,6 +21,11 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private var playerView: PlayerView!
 	private let strip = ProgrammeStrip()
 	private let markers = AnchorMarkerView()
+	private let takesTable = TakesTable()
+
+	/// Opening a take is the application's business, not this window's: it may
+	/// already be open in another tab.
+	public var onOpenTake: ((URL) -> Void)?
 	private let bar = ComposeBar()
 	private let problemLabel = NSTextField(labelWithString: "")
 
@@ -107,6 +112,15 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		split.addArrangedSubview(playerView)
 		split.addArrangedSubview(strip)
 
+		// The takes down the side. A project is a programme made of recordings,
+		// and the recordings are the thing somebody reaches for next — to open
+		// one, to cut another, to find out why one of them stopped resolving.
+		let withTakes = NSSplitView()
+		withTakes.isVertical = true
+		withTakes.dividerStyle = .thin
+		withTakes.addArrangedSubview(takesTable)
+		withTakes.addArrangedSubview(split)
+
 		let content = DropView()
 		content.onDrop = { [weak self] urls in
 			guard let url = urls.first(where: { $0.pathExtension == "cuttrproj" }) else { return }
@@ -115,7 +129,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		content.wantsLayer = true
 		content.layer?.backgroundColor = Theme.background.cgColor
 
-		for view in [bar, problemLabel, split] as [NSView] {
+		for view in [bar, problemLabel, withTakes] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			content.addSubview(view)
 		}
@@ -130,10 +144,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			problemLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
 			problemLabel.heightAnchor.constraint(equalToConstant: 14),
 
-			split.topAnchor.constraint(equalTo: problemLabel.bottomAnchor, constant: 2),
-			split.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-			split.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-			split.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+			withTakes.topAnchor.constraint(equalTo: problemLabel.bottomAnchor, constant: 2),
+			withTakes.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+			withTakes.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+			withTakes.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 		])
 		window.contentView = content
 
@@ -147,6 +161,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		])
 
 		DispatchQueue.main.async {
+			withTakes.setPosition(230, ofDividerAt: 0)
 			split.setPosition(split.bounds.height - 170, ofDividerAt: 0)
 		}
 
@@ -159,6 +174,11 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private func wire() {
 		composeDocument.onChange = { [weak self] in self?.rebuild() }
 		strip.onScrub = { [weak self] time in self?.seek(to: time) }
+
+		takesTable.onOpen = { [weak self] url in self?.onOpenTake?(url) }
+		takesTable.onRemove = { [weak self] path in self?.composeDocument.removeTake(path) }
+		takesTable.onAdd = { [weak self] in self?.addTake(nil) }
+		takesTable.onNew = { [weak self] in self?.newTake(nil) }
 
 		// The same arrangement as the cutting window, for the same reason: the
 		// keys have to work wherever the focus happens to be.
@@ -193,6 +213,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard let window else { return }
 		window.title = composeDocument.displayName
 		window.representedURL = composeDocument.url
+		takesTable.reload(composeDocument.takes)
 		strip.resolved = composeDocument.resolved
 		markers.markers = (composeDocument.resolved?.anchors ?? []).compactMap { entry in
 			entry.path.map { (entry.anchor.name, $0) }
@@ -298,6 +319,80 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// the video is aspect-fitted, so most of the time there are bars. The
 	/// markers are placed against this, not against the view.
 	private var pictureRect: NSRect { markers.picture }
+
+	// MARK: - Takes
+
+	/// Puts an existing take into the project.
+	@objc public func addTake(_ sender: Any?) {
+		guard ensureSaved() else { return }
+		let panel = NSOpenPanel()
+		panel.allowedContentTypes = [UTType(filenameExtension: "cuttr") ?? .plainText]
+		panel.allowsMultipleSelection = true
+		panel.message = "Choose the takes this programme is made from"
+		guard panel.runModal() == .OK else { return }
+		let added = panel.urls.filter { composeDocument.addTake($0) }.count
+		bar.setStatus(added == 0 ? "already in this project" : "added \(added)")
+	}
+
+	/// Cuts a new take from a recording, and adds it.
+	///
+	/// The take file is written before the window opens, beside the project in
+	/// `takes/`, so the project can point at it straight away — an untitled take
+	/// has nowhere to be referenced from.
+	@objc public func newTake(_ sender: Any?) {
+		guard ensureSaved() else { return }
+		let panel = NSOpenPanel()
+		panel.allowedContentTypes = [.movie, .video, .audio]
+		panel.allowsMultipleSelection = true
+		panel.message = "Choose the recording to cut"
+		guard panel.runModal() == .OK, let first = panel.urls.first else { return }
+
+		var video: URL?
+		var audio: URL?
+		for url in panel.urls {
+			guard let type = UTType(filenameExtension: url.pathExtension) else { continue }
+			if type.conforms(to: .movie) || type.conforms(to: .video) { video = video ?? url }
+			else if type.conforms(to: .audio) { audio = audio ?? url }
+		}
+		guard let place = composeDocument.placeForNewTake(
+			named: (video ?? first).deletingPathExtension().lastPathComponent) else { return }
+
+		let document = TakeDocument()
+		document.setMedia(video: video, audio: audio)
+		do {
+			try document.write(to: place)
+		} catch {
+			report(error)
+			return
+		}
+		composeDocument.addTake(place)
+		bar.setStatus("added \(place.lastPathComponent) — cut it in its own tab")
+		onOpenTake?(place)
+	}
+
+	/// A project must be on disk before it can point at anything: every path in
+	/// it is relative to where it sits.
+	private func ensureSaved() -> Bool {
+		if composeDocument.url != nil { return true }
+		let panel = NSSavePanel()
+		panel.allowedContentTypes = [UTType(filenameExtension: "cuttrproj") ?? .plainText]
+		panel.nameFieldStringValue = "programme.cuttrproj"
+		panel.message = "Save the project first — takes are named relative to it."
+		guard panel.runModal() == .OK, let url = panel.url else { return false }
+		do {
+			try composeDocument.saveAs(url)
+			AppDelegate.remember(url)
+			return true
+		} catch {
+			report(error)
+			return false
+		}
+	}
+
+	private func report(_ error: Error) {
+		guard let window else { return }
+		NSAlert(error: error).beginSheetModal(for: window)
+	}
 
 	// MARK: - Rendering
 

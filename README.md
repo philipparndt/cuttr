@@ -186,8 +186,15 @@ the same files.
 
 ## The composer
 
-The second half: a programme assembled from clips across many separately-cut
-takes, with things drawn over it. Also plain text, also meant to be edited by
+The second half, and the half you start from: a programme assembled from clips
+across many separately-cut takes, with things drawn over it.
+
+The project window lists its takes down the side — name, clip count, and where
+each one is. Double-click to open one in a tab beside the project; **Add Take…**
+puts an existing `.cuttr` in, **New Take…** cuts a fresh one from a recording,
+writes it into `takes/` and opens it. A project has to be saved before it can
+point at anything, because every path in it is relative to where it sits, so the
+first add is what asks where to put it. Also plain text, also meant to be edited by
 hand — `programme.cuttrproj`:
 
 ```yaml

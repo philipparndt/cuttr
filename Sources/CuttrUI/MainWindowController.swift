@@ -934,7 +934,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 				return
 			}
 			else if url.pathExtension == "cuttr" {
-				NSDocumentController.shared.noteNewRecentDocumentURL(url)
+				AppDelegate.remember(url)
 				try? takeDocument.read(from: url)
 				refresh()
 				return
@@ -1006,7 +1006,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	private func write(to url: URL) {
 		do {
 			try takeDocument.write(to: url)
-			NSDocumentController.shared.noteNewRecentDocumentURL(url)
+			AppDelegate.remember(url)
 			header.setStatus("saved \(url.lastPathComponent)")
 			refresh()
 		} catch {

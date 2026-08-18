@@ -81,6 +81,15 @@ public final class ComposeDocument {
 		resolve()
 	}
 
+	/// Saves an untitled project to a chosen place, and starts watching it.
+	public func saveAs(_ fileURL: URL) throws {
+		url = fileURL
+		try ProjectWriter.write(project).write(to: fileURL, atomically: true, encoding: .utf8)
+		isDirty = false
+		resolve()
+		watch()
+	}
+
 	public func write() throws {
 		guard let url else { return }
 		// The watcher would see this write and reload what was just written.
@@ -144,6 +153,81 @@ public final class ComposeDocument {
 		watcher?.cancel()
 		watcher = nil
 		watchedDescriptor = -1
+	}
+
+	// MARK: - Takes
+
+	/// The take files this project draws on, resolved and reported on.
+	///
+	/// Reported rather than assumed: a project is a list of paths, and a path
+	/// that has moved is the commonest thing to go wrong with one. The window
+	/// shows what each entry actually is, so "no clip called intro" is not the
+	/// first anybody hears of it.
+	public struct TakeEntry: Sendable {
+		public let path: String
+		public let url: URL
+		public let name: String
+		public let clips: Int
+		public let problem: String?
+	}
+
+	public var takes: [TakeEntry] {
+		guard let baseURL else { return [] }
+		return project.takes.map { path in
+			let url = URL(fileURLWithPath: path, relativeTo: baseURL).standardizedFileURL
+			let name = url.deletingPathExtension().lastPathComponent
+			do {
+				let take = try TakeReader.read(try String(contentsOf: url, encoding: .utf8))
+				return TakeEntry(path: path, url: url, name: name, clips: take.clips.count, problem: nil)
+			} catch {
+				return TakeEntry(path: path, url: url, name: name, clips: 0,
+				                 problem: error.localizedDescription)
+			}
+		}
+	}
+
+	/// Adds a take, as a path relative to the project.
+	///
+	/// Relative is the point: a project, its takes and its media are one folder
+	/// that gets copied to another disk, and a list full of `/Users/somebody/…`
+	/// survives none of that.
+	@discardableResult
+	public func addTake(_ url: URL) -> Bool {
+		guard let baseURL else { return false }
+		let path = relativePath(url, from: baseURL)
+		guard !project.takes.contains(path) else { return false }
+		var next = project
+		next.takes.append(path)
+		apply(next)
+		try? write()
+		return true
+	}
+
+	public func removeTake(_ path: String) {
+		var next = project
+		next.takes.removeAll { $0 == path }
+		apply(next)
+		try? write()
+	}
+
+	private func relativePath(_ url: URL, from base: URL) -> String {
+		let baseParts = base.standardizedFileURL.pathComponents
+		let target = url.standardizedFileURL.pathComponents
+		var shared = 0
+		while shared < baseParts.count, shared < target.count, baseParts[shared] == target[shared] { shared += 1 }
+		let ups = baseParts.count - shared
+		// More than a couple of `..` is not a folder anybody will copy around,
+		// and an absolute path at least says where the file is.
+		guard ups <= 2 else { return url.path }
+		return (Array(repeating: "..", count: ups) + target[shared...]).joined(separator: "/")
+	}
+
+	/// Where a new take should be written: a `takes/` folder beside the project.
+	public func placeForNewTake(named name: String) -> URL? {
+		guard let baseURL else { return nil }
+		let folder = baseURL.appendingPathComponent("takes", isDirectory: true)
+		try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+		return folder.appendingPathComponent(name).appendingPathExtension("cuttr")
 	}
 
 	// Anchors are marked in the cutting window now, on the take. This window

@@ -35,7 +35,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		// actually asked for.
 		DispatchQueue.main.async { [weak self] in
 			guard let self, self.controllers.isEmpty, self.composers.isEmpty else { return }
-			self.newTake(nil)
+			// A project, not a take. The project is the thing somebody works
+			// from — it lists the takes, opens them, and makes new ones — so
+			// starting in a take is starting one level down.
+			//
+			// Untitled, and it says so: demanding a save location before the
+			// window has appeared is a file panel as a splash screen. Adding a
+			// take is what asks, because that is the first moment a path has to
+			// be relative to something.
+			self.showComposer(ComposeDocument())
 		}
 	}
 
@@ -108,15 +116,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 			existing.window?.makeKeyAndOrderFront(nil)
 			return
 		}
+		// An untitled project window that nobody has touched is a placeholder,
+		// not a document: opening a real one takes its place rather than piling
+		// a second tab on top.
+		if let blank = composers.first(where: { $0.composeDocument.url == nil && !$0.composeDocument.isDirty }) {
+			do { try blank.composeDocument.read(from: url) } catch {
+				NSAlert(error: error).runModal()
+				return
+			}
+			AppDelegate.remember(url)
+			blank.window?.makeKeyAndOrderFront(nil)
+			return
+		}
 		let document = ComposeDocument()
 		do { try document.read(from: url) } catch {
 			NSAlert(error: error).runModal()
 			return
 		}
-		NSDocumentController.shared.noteNewRecentDocumentURL(url)
+		AppDelegate.remember(url)
+		showComposer(document)
+	}
+
+	private func showComposer(_ document: ComposeDocument) {
 		let controller = ComposeWindowController(document: document)
+		// The project opens its takes, and they arrive as tabs beside it.
+		controller.onOpenTake = { [weak self] url in self?.open(url) }
 		composers.append(controller)
 		present(controller.window)
+	}
+
+	/// Records a file in the recents list.
+	///
+	/// Standardised first. `/tmp/x` and `/private/tmp/x` are the same file and
+	/// two different URLs, and noting both puts the same document in the menu
+	/// twice under the same name — which looks like a bug in the menu and is
+	/// really a bug at the call site.
+	static func remember(_ url: URL) {
+		NSDocumentController.shared.noteNewRecentDocumentURL(url.standardizedFileURL.resolvingSymlinksInPath())
+	}
+
+	@objc func openRecent(_ sender: NSMenuItem) {
+		guard let url = sender.representedObject as? URL else { return }
+		url.pathExtension.lowercased() == "cuttrproj" ? openProject(url) : open(url)
+	}
+
+	@objc func clearRecents(_ sender: Any?) {
+		NSDocumentController.shared.clearRecentDocuments(nil)
 	}
 
 	@objc func openTake(_ sender: Any?) {
@@ -152,7 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 			NSAlert(error: error).runModal()
 			return
 		}
-		NSDocumentController.shared.noteNewRecentDocumentURL(url)
+		AppDelegate.remember(url)
 		show(MainWindowController(document: document))
 	}
 
@@ -191,7 +236,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// which is what somebody working on both actually has.
 	private func present(_ window: NSWindow?) {
 		guard let window else { return }
-		if let host = (NSApp.keyWindow ?? allWindows.first), host !== window {
+		// Hosted by the project window when there is one, so the project keeps
+		// its place as the first tab and takes accumulate after it rather than
+		// in front of it.
+		let host = composers.compactMap(\.window).first { $0.isVisible && $0 !== window }
+			?? NSApp.keyWindow
+			?? allWindows.first { $0 !== window }
+		if let host, host !== window {
 			host.addTabbedWindow(window, ordered: .above)
 		}
 		window.makeKeyAndOrderFront(nil)
