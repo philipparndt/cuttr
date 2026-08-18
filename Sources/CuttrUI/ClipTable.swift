@@ -99,23 +99,8 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 		// Fixed column widths and a horizontal scroller. Without both, AppKit
 		// squeezes every column to fit the pane and the ones on the right —
 		// which is where tags and order are — become unreachable slivers.
-		table.columnAutoresizingStyle = .noColumnAutoresizing
 
-		// Scrollers declared before the document view, and nothing forced
-		// afterwards.
-		//
-		// The previous attempt at this gave the scroll view a frame, forced the
-		// table's frame to match it and then called `tile()`. All three fight
-		// what the table is trying to do: with `noColumnAutoresizing` the table
-		// sizes itself to the sum of its columns, and overriding that leaves the
-		// scrollers tiled against a width that is about to change — which is
-		// what drew the horizontal scroller as a stub in the corner.
-		let scroll = NSScrollView()
-		scroll.hasVerticalScroller = true
-		scroll.hasHorizontalScroller = true
-		scroll.autohidesScrollers = true
-		scroll.drawsBackground = false
-		scroll.documentView = table
+		let scroll = TableScroll.make(table)
 		scroll.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(scroll)
 		NSLayoutConstraint.activate([
