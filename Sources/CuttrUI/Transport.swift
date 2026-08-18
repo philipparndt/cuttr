@@ -262,9 +262,36 @@ public final class Transport {
 		}
 	}
 
-	public func play() { player.play() }
+	public func play() {
+		clearRange()
+		player.play()
+	}
+
 	public func pause() { player.pause() }
 	public func togglePlay() { isPlaying ? pause() : play() }
+
+	/// Plays one span and stops at the end of it.
+	///
+	/// `forwardPlaybackEndTime` rather than watching the clock and pausing when
+	/// it goes past: the player stops exactly on the frame asked for, where a
+	/// tick-based stop overshoots by however long it was between ticks. On a
+	/// four-second clip that difference is the last word of a sentence.
+	public func play(from start: Double, to end: Double) {
+		guard let item = player.currentItem else { return }
+		item.forwardPlaybackEndTime = CMTime(seconds: end, preferredTimescale: 600)
+		seek(to: start)
+		player.play()
+	}
+
+	/// Back to playing until the end of the programme.
+	///
+	/// The limit lives on the item, so it outlasts the play that set it and has
+	/// to be taken off — otherwise the next plain `space` stops at the end of
+	/// whichever clip was played last, which looks exactly like a bug in the
+	/// player.
+	public func clearRange() {
+		player.currentItem?.forwardPlaybackEndTime = .invalid
+	}
 
 	/// Shuttle. Negative rates need the item to say it can do them, and a
 	/// composition of a long-GOP camera file often cannot go backwards at all —

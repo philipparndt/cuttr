@@ -294,7 +294,7 @@ enum MainMenu {
 
 	static let shortcutSheet = """
 	Playing
-	  space        play / pause
+	  space        play / pause — with a clip selected, play just that clip
 	  J K L        rewind · stop · forward   (⇧ for 4×)
 	  ← →          one frame                 (⌥ 0.1 s, ⇧ 1 s)
 	  ⌘← ⌘→        previous / next cut mark

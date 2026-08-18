@@ -485,6 +485,30 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
 	private func step(_ seconds: Double) { move(to: playhead + seconds) }
 
+	/// Space: play the selected clip, beginning to end.
+	///
+	/// With a clip selected, that is the question being asked — "does this cut
+	/// work" — and answering it should not need scrubbing to the head first and
+	/// hitting stop before the next one starts. With nothing selected it is the
+	/// ordinary play/pause from wherever the playhead is.
+	///
+	/// Playing always stops, whichever it was, so the key never has two
+	/// meanings at once.
+	private func playSelectionOrToggle() {
+		if transport.isPlaying {
+			transport.pause()
+			return
+		}
+		guard let id = selectedClip,
+		      let clip = takeDocument.take.clips.first(where: { $0.id == id })
+		else {
+			transport.togglePlay()
+			return
+		}
+		transport.play(from: clip.start, to: clip.end)
+		header.setStatus("\(clip.slug) — \(Timecode.string(clip.duration))")
+	}
+
 	/// The next place something starts or ends, in the given direction.
 	private func stepToMark(forward: Bool) {
 		var marks = takeDocument.take.clips.flatMap { [$0.start, $0.end] }
@@ -1222,7 +1246,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
 		switch event.keyCode {
 		case 49:   // space
-			transport.togglePlay()
+			playSelectionOrToggle()
 			return true
 		case 123:  // ←
 			step(-stepSize(shift: shift, option: option))
