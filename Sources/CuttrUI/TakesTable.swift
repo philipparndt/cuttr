@@ -15,6 +15,8 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 	public var onOpen: ((URL) -> Void)?
 	public var onRemove: ((String) -> Void)?
 	public var onAdd: (() -> Void)?
+	/// The name typed into the Take column: the file is renamed to match.
+	public var onRename: ((String, String) -> Void)?
 	public var onNew: (() -> Void)?
 
 	private let table = NSTableView()
@@ -92,6 +94,18 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 	@objc private func addTapped() { onAdd?() }
 	@objc private func newTapped() { onNew?() }
 
+	@objc private func nameCommitted(_ sender: NSTextField) {
+		let row = table.row(for: sender)
+		guard row >= 0, row < rows.count else { return }
+		onRename?(rows[row].path, sender.stringValue)
+	}
+
+	public func beginRenaming(_ path: String) {
+		guard let row = rows.firstIndex(where: { $0.path == path }) else { return }
+		table.selectRowIndexes([row], byExtendingSelection: false)
+		table.editColumn(0, row: row, with: nil, select: true)
+	}
+
 	@objc private func doubleClicked() {
 		guard table.clickedRow >= 0, table.clickedRow < rows.count else { return }
 		onOpen?(rows[table.clickedRow].url)
@@ -104,6 +118,7 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		let entry = rows[row]
 		let menu = NSMenu()
 		for (title, action) in [("Open in a Tab", #selector(openSelected)),
+		                        ("Rename…", #selector(renameSelected)),
 		                        ("Reveal in Finder", #selector(revealSelected)),
 		                        ("Remove from Project", #selector(removeSelected))] {
 			let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
@@ -118,6 +133,11 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 	@objc private func openSelected() {
 		guard table.selectedRow >= 0, table.selectedRow < rows.count else { return }
 		onOpen?(rows[table.selectedRow].url)
+	}
+
+	@objc private func renameSelected() {
+		guard table.selectedRow >= 0, table.selectedRow < rows.count else { return }
+		beginRenaming(rows[table.selectedRow].path)
 	}
 
 	@objc private func revealSelected() {
@@ -145,11 +165,15 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 				field.identifier = tableColumn.identifier
 				field.isBordered = false
 				field.drawsBackground = false
-				field.isEditable = false
 				field.lineBreakMode = .byTruncatingHead
 				return field
 			}()
 		field.font = Theme.mono
+		// Only the name is typed into; the rest is what the file turned out to
+		// be.
+		field.isEditable = tableColumn.identifier.rawValue == "take"
+		field.target = self
+		field.action = #selector(nameCommitted(_:))
 
 		switch tableColumn.identifier.rawValue {
 		case "take":

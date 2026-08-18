@@ -144,14 +144,38 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		// it back when it is done.
 		window.initialFirstResponder = timeline
 
-		// Proportions rather than a saved layout: the timeline wants about a
-		// third of the height and the clip list about a quarter of the width,
-		// and a first launch that needs dragging before it is usable is a
-		// first launch nobody finishes.
+		// The panes are sized by constraints, not by placing dividers.
+		//
+		// This used to be a `DispatchQueue.main.async` block computing positions
+		// from `bounds`, and it crashed the app on launch: the split views had
+		// not been laid out when it ran, so `bounds.height` was zero and
+		// `bounds.height - 150` handed `setPosition` a divider position of
+		// −150. AppKit raised out of the layout pass and the process aborted.
+		//
+		// A constraint at a low priority says the same thing without depending
+		// on when it is read: this pane would like to be this big, the other one
+		// takes the slack, and dragging the divider overrides both. The minimums
+		// are required, so no pane can be collapsed to nothing by a small
+		// window.
+		let preferred = NSLayoutConstraint.Priority(250)
+		let sizes: [(NSLayoutConstraint, NSLayoutConstraint)] = [
+			(lists.widthAnchor.constraint(equalToConstant: 380),
+			 lists.widthAnchor.constraint(greaterThanOrEqualToConstant: 220)),
+			(anchorTable.heightAnchor.constraint(equalToConstant: 150),
+			 anchorTable.heightAnchor.constraint(greaterThanOrEqualToConstant: 60)),
+			(timeline.heightAnchor.constraint(equalToConstant: 280),
+			 timeline.heightAnchor.constraint(greaterThanOrEqualToConstant: 140)),
+			(picture.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
+			 picture.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)),
+		]
+		for (wish, floor) in sizes {
+			wish.priority = wish.relation == .equal ? preferred : .required
+			floor.priority = .required
+			wish.isActive = true
+			floor.isActive = true
+		}
+
 		DispatchQueue.main.async {
-			outer.setPosition(outer.bounds.height * 0.62, ofDividerAt: 0)
-			top.setPosition(top.bounds.width * 0.68, ofDividerAt: 0)
-			lists.setPosition(lists.bounds.height - 150, ofDividerAt: 0)
 			self.timeline.zoomToFit()
 			// The timeline holds the focus to begin with, so the first `space`
 			// rolls the tape rather than doing nothing.

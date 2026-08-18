@@ -26,6 +26,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// Opening a take is the application's business, not this window's: it may
 	/// already be open in another tab.
 	public var onOpenTake: ((URL) -> Void)?
+	/// Whether a take already has a tab of its own. Renaming one that is open
+	/// would leave that tab writing to a file that no longer exists.
+	public var isTakeOpen: ((URL) -> Bool)?
 	private let bar = ComposeBar()
 	private let problemLabel = NSTextField(labelWithString: "")
 
@@ -160,10 +163,21 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			markers.bottomAnchor.constraint(equalTo: playerView.bottomAnchor),
 		])
 
-		DispatchQueue.main.async {
-			withTakes.setPosition(230, ofDividerAt: 0)
-			split.setPosition(split.bounds.height - 170, ofDividerAt: 0)
-		}
+		// Constraints rather than divider positions, for the reason the cutting
+		// window's layout carries in full: a position computed from `bounds`
+		// before the first layout pass is computed from zero, and a negative
+		// divider position aborts the process.
+		let preferred = NSLayoutConstraint.Priority(250)
+		let wishes = [
+			takesTable.widthAnchor.constraint(equalToConstant: 230),
+			strip.heightAnchor.constraint(equalToConstant: 170),
+		]
+		for wish in wishes { wish.priority = preferred; wish.isActive = true }
+		NSLayoutConstraint.activate([
+			takesTable.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
+			strip.heightAnchor.constraint(greaterThanOrEqualToConstant: 90),
+			playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
+		])
 
 		// No marking here: an anchor is marked on the take, in the cutting
 		// window, where the footage is. This window shows what was found.
@@ -178,6 +192,21 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		takesTable.onOpen = { [weak self] url in self?.onOpenTake?(url) }
 		takesTable.onRemove = { [weak self] path in self?.composeDocument.removeTake(path) }
 		takesTable.onAdd = { [weak self] in self?.addTake(nil) }
+		takesTable.onRename = { [weak self] path, name in
+			guard let self else { return }
+			let url = URL(fileURLWithPath: path, relativeTo: self.composeDocument.baseURL)
+			// Refused rather than half-done: the open tab holds the old URL and
+			// would recreate the old file on its next save.
+			if self.isTakeOpen?(url.standardizedFileURL) == true {
+				self.bar.setStatus("close that take's tab before renaming it")
+				self.rebuild()
+				return
+			}
+			if let problem = self.composeDocument.renameTake(path, to: name) {
+				self.bar.setStatus(problem)
+				self.rebuild()
+			}
+		}
 		takesTable.onNew = { [weak self] in self?.newTake(nil) }
 
 		// The same arrangement as the cutting window, for the same reason: the

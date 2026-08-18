@@ -141,6 +141,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		let controller = ComposeWindowController(document: document)
 		// The project opens its takes, and they arrive as tabs beside it.
 		controller.onOpenTake = { [weak self] url in self?.open(url) }
+		controller.isTakeOpen = { [weak self] url in
+			self?.controllers.contains { $0.takeDocument.url?.standardizedFileURL == url } ?? false
+		}
 		composers.append(controller)
 		present(controller.window)
 	}

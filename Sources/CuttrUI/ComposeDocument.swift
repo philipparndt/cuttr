@@ -203,6 +203,41 @@ public final class ComposeDocument {
 		return true
 	}
 
+	/// Renames a take's file, and updates the project to match.
+	///
+	/// The file, not a label: a take's name *is* its file name, which is what a
+	/// project's `takes:` list holds and what shows in the list. Sidecar paths
+	/// inside the take are relative to the take and do not mention its name, so
+	/// they keep resolving.
+	///
+	/// Returns what went wrong, or `nil` when it worked.
+	public func renameTake(_ path: String, to requested: String) -> String? {
+		guard let baseURL else { return "Save the project first." }
+		let name = requested.trimmingCharacters(in: .whitespacesAndNewlines)
+			// A file name, so the characters a path cannot hold come out.
+			.replacingOccurrences(of: "/", with: "-")
+			.replacingOccurrences(of: ":", with: "-")
+		guard !name.isEmpty else { return nil }
+
+		let from = URL(fileURLWithPath: path, relativeTo: baseURL).standardizedFileURL
+		guard from.deletingPathExtension().lastPathComponent != name else { return nil }
+		let to = from.deletingLastPathComponent()
+			.appendingPathComponent(name).appendingPathExtension("cuttr")
+		guard !FileManager.default.fileExists(atPath: to.path) else {
+			return "There is already a take called \(name) in that folder."
+		}
+		do { try FileManager.default.moveItem(at: from, to: to) } catch {
+			return error.localizedDescription
+		}
+
+		var next = project
+		let replacement = relativePath(to, from: baseURL)
+		next.takes = next.takes.map { $0 == path ? replacement : $0 }
+		apply(next)
+		try? write()
+		return nil
+	}
+
 	public func removeTake(_ path: String) {
 		var next = project
 		next.takes.removeAll { $0 == path }
