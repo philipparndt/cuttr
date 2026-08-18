@@ -59,28 +59,26 @@ public enum AnchorSolver {
 	/// blink or a half-second of a turned head does not end it but leaving the
 	/// frame does. Bounded by `limit` seconds each way so that marking a face
 	/// in a five-minute recording is not a five-minute wait.
-	/// How far a single follow reaches from the mark, each way.
-	///
-	/// A bound rather than "until it stops", because marking a face in a
-	/// five-minute recording would otherwise be a five-minute wait. Ninety
-	/// seconds each way covers most shots; past that, "continue here" picks it
-	/// up again — which is the same gesture as picking up after a lost face, and
-	/// produces the same one anchor with two stretches.
-	public static let reach: Double = 90
-
 	public static func solveShot(
 		videoURL: URL,
 		method: Anchor.Method,
 		markedAt: Double,
 		point: CGPoint,
 		within bounds: ClosedRange<Double>,
-		limit: Double = AnchorSolver.reach,
 		lossTolerance: Int = 15,
 		onProgress: @Sendable (Progress) -> Void = { _ in }
 	) async throws -> AnchorPath {
+		// To the ends of the recording, or until the face is genuinely lost.
+		//
+		// There was a ninety-second cap here, on the argument that marking a
+		// face in a five-minute recording should not be a five-minute wait. It
+		// was the wrong trade: the answer somebody wants is "how far does this
+		// shot go", and a bound that stops before the answer makes them do the
+		// same job again from further along. It is cancellable and it shows a
+		// bar; that is the right way to make a long job bearable.
 		let step = 1 / sampleRate
-		let earliest = max(bounds.lowerBound, markedAt - limit)
-		let latest = min(bounds.upperBound, markedAt + limit)
+		let earliest = bounds.lowerBound
+		let latest = bounds.upperBound
 
 		let asset = AVURLAsset(url: videoURL)
 		guard try await asset.loadTracks(withMediaType: .video).first != nil else {

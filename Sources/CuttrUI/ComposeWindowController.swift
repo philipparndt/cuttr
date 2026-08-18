@@ -394,6 +394,55 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		NSAlert(error: error).beginSheetModal(for: window)
 	}
 
+	/// Copies the project and everything it depends on into one folder.
+	@objc public func exportProject(_ sender: Any?) {
+		guard ensureSaved(), let baseURL = composeDocument.baseURL else { return }
+		let panel = NSOpenPanel()
+		panel.canChooseDirectories = true
+		panel.canChooseFiles = false
+		panel.canCreateDirectories = true
+		panel.prompt = "Export"
+		panel.message = "Choose a new, empty folder. Everything the project uses is copied into it."
+		guard panel.runModal() == .OK, let target = panel.url else { return }
+
+		let project = composeDocument.project
+		let name = composeDocument.displayName
+		bar.setProgress(0)
+		bar.setStatus("exporting…")
+		Task { [weak self] in
+			// Off the main thread: on a real shoot this is gigabytes of copying.
+			let outcome = await Task.detached(priority: .userInitiated) { () -> Result<ProjectExporter.Report, Error> in
+				do { return .success(try ProjectExporter.export(project, named: name, from: baseURL, to: target)) }
+				catch { return .failure(error) }
+			}.value
+			guard let self else { return }
+			self.bar.setProgress(nil)
+			switch outcome {
+			case .success(let report):
+				self.bar.setStatus("exported to \(target.lastPathComponent) — \(report.summary)")
+				// Missing files are worth a sheet rather than a status line:
+				// the folder is complete apart from them, and somebody has to
+				// know which before they hand it over.
+				if !report.missing.isEmpty {
+					let alert = NSAlert()
+					alert.messageText = "Exported, but \(report.missing.count) files were not found"
+					alert.informativeText = report.missing.prefix(12).joined(separator: "\n")
+						+ (report.missing.count > 12 ? "\n…" : "")
+					alert.addButton(withTitle: "Show Folder")
+					alert.addButton(withTitle: "OK")
+					if alert.runModal() == .alertFirstButtonReturn {
+						NSWorkspace.shared.activateFileViewerSelecting([target])
+					}
+				} else {
+					NSWorkspace.shared.activateFileViewerSelecting([target])
+				}
+			case .failure(let error):
+				self.bar.setStatus(error.localizedDescription)
+				self.report(error)
+			}
+		}
+	}
+
 	// MARK: - Rendering
 
 	@objc public func render(_ sender: Any?) {
@@ -429,6 +478,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	public func validateMenuItem(_ item: NSMenuItem) -> Bool {
 		switch item.action {
 		case #selector(render(_:)): return composeDocument.resolved != nil
+		case #selector(exportProject(_:)): return !composeDocument.project.takes.isEmpty
 		default: return true
 		}
 	}

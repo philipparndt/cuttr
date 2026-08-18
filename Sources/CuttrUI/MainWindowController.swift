@@ -411,17 +411,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 				let where_ = spans
 					.map { "\(Timecode.string($0.lowerBound))–\(Timecode.string($0.upperBound))" }
 					.joined(separator: ", ")
-				// Why it stopped, not just where. Hitting the search bound and
-				// losing the face look identical in the numbers and call for
-				// opposite responses: one wants continuing from further on, the
-				// other wants a fresh mark where she comes back.
+				// Where it got to, and — when it stopped short of the end of the
+				// recording — that it stopped because it lost her, which is the
+				// cue to pick her up again further on.
 				let end = path.timeRange?.upperBound ?? time
-				let bounded = end >= min(time + AnchorSolver.reach, duration) - 0.2
 				var status = spans.count > 1
 					? "\(anchor.name): \(spans.count) stretches — \(where_)"
 					: "\(anchor.name): \(where_), \(path.samples.count) samples"
-				if bounded && end < duration - 0.2 {
-					status += "  ·  stopped at the search limit — right-click later to continue"
+				if end < duration - 0.5 {
+					status += "  ·  lost her here — right-click later to continue"
 				}
 				self.header.setStatus(status)
 			} catch {

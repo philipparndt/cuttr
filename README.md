@@ -294,13 +294,15 @@ remembers where the eye sits on the head and holds it there until the landmark
 comes back. Without that, following one real shot stopped after 78 seconds; with
 it, 155.
 
+It follows to the ends of the recording, or until the face is genuinely lost —
+there is no search limit. On five minutes of 1080p that is a couple of minutes
+of Vision; it shows a bar and it can be cancelled, which is the right way to
+make a long job bearable rather than stopping early and making you ask again.
+
 **When it does stop, continue.** Right-click later in the picture and pick
 *Continue "mia" Here*. The new stretch is merged into the same anchor, leaving a
 hole where the tracker genuinely could not see — one name, two spans of truth,
-and nothing drawn over the gap. The same gesture picks up after the
-ninety-seconds-each-way search bound, which the status line names when it is
-what stopped things, because "lost her" and "ran out of search" want opposite
-responses.
+and nothing drawn over the gap.
 
 **More than one at a time.** A two-shot is two anchors; they are named apart
 automatically and tracked independently, and each frame's face is matched to the
@@ -415,6 +417,34 @@ called `clip-4` is better than one confidently named after the wrong person.
 `cuttr-render --speaking take.cuttr --from 62 --to 68` asks the same question
 from a terminal. On real footage, talking spans measured 0.007–0.015 of mouth
 movement a sample and quiet ones fell below the 0.006 threshold.
+
+### Exporting a project
+
+**File ▸ Export Project to Folder…** copies the project and everything it
+depends on into one folder, with every path rewritten to point inside it:
+
+    programme.cuttrproj
+    takes/
+      take-01.cuttr
+      anchors/take-01/mia.path
+    media/
+      IMG_1800.mov
+      mia.wav
+
+What comes out can be zipped, put on a disk, and opened on a machine that has
+never seen the originals. Names that collide are suffixed — two takes both
+called `take` become `take` and `take-2` — and a recording referenced by several
+takes is copied once and pointed at from each. Sidecars go under their take's
+name, because two takes may both have an anchor called `mia`.
+
+It copies whole recordings, not the parts in use. Trimming to the cut would make
+a smaller folder and a worse one: clips are *named ranges of a recording*, and a
+recording cut down is no longer the thing those ranges are ranges of — the
+exported project could never be re-cut.
+
+Missing files are reported rather than fatal. One recording left on a card
+should not stop the other nine being exported, and the take still points at
+where the file should be, so dropping it in later is the whole fix.
 
 ### Rendering
 

@@ -54,6 +54,8 @@ enum MainMenu {
 		                     #selector(ComposeWindowController.addTake(_:)), "a", [.command, .shift]))
 		file.addItem(command("New Take in Project…",
 		                     #selector(ComposeWindowController.newTake(_:)), "t", [.command, .shift]))
+		file.addItem(command("Export Project to Folder…",
+		                     #selector(ComposeWindowController.exportProject(_:)), "E", [.command, .shift]))
 		file.addItem(.separator())
 		let importItem = NSMenuItem(title: "Import Subclips from Resolve…",
 		                            action: #selector(AppDelegate.importSubclips(_:)), keyEquivalent: "i")
