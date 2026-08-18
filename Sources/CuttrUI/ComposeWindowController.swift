@@ -22,6 +22,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private let strip = ProgrammeStrip()
 	private let markers = AnchorMarkerView()
 	private let takesTable = TakesTable()
+	private let library = LibraryView()
 	private let inspector = ProjectInspector()
 	private let source = ProjectTextEditor()
 	private let modes = NSTabView()
@@ -157,10 +158,21 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// The takes belong with the editor: they are the material the programme
 		// is made of, and choosing one is an editing act rather than something
 		// to look at while the picture plays.
+		//
+		// Under them, everything those takes contain: the clips, the tags, the
+		// tracked faces. A project is assembled by dragging from that list onto
+		// the programme, which is why the two live in one column — the material
+		// on the left, the programme in the middle, its properties on the right.
+		let material = NSSplitView()
+		material.isVertical = false
+		material.dividerStyle = .thin
+		material.addArrangedSubview(takesTable)
+		material.addArrangedSubview(library)
+
 		let editing = NSSplitView()
 		editing.isVertical = true
 		editing.dividerStyle = .thin
-		editing.addArrangedSubview(takesTable)
+		editing.addArrangedSubview(material)
 		editing.addArrangedSubview(inspector)
 
 		// A tab view with no tabs of its own: the segmented control in the bar
@@ -205,12 +217,15 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 		let preferred = NSLayoutConstraint.Priority(250)
 		let wishes = [
-			takesTable.widthAnchor.constraint(equalToConstant: 250),
+			material.widthAnchor.constraint(equalToConstant: 260),
+			takesTable.heightAnchor.constraint(equalToConstant: 180),
 			strip.heightAnchor.constraint(equalToConstant: 200),
 		]
 		for wish in wishes { wish.priority = preferred; wish.isActive = true }
 		NSLayoutConstraint.activate([
-			takesTable.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+			material.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
+			takesTable.heightAnchor.constraint(greaterThanOrEqualToConstant: 90),
+			library.heightAnchor.constraint(greaterThanOrEqualToConstant: 120),
 			strip.heightAnchor.constraint(greaterThanOrEqualToConstant: 90),
 			playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
 		])
@@ -255,6 +270,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			}
 		}
 		takesTable.onNew = { [weak self] in self?.newTake(nil) }
+		library.onInsert = { [weak self] reference in self?.inspector.insert(reference: reference) }
 
 		// The same arrangement as the cutting window, for the same reason: the
 		// keys have to work wherever the focus happens to be.
@@ -290,7 +306,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		window.title = composeDocument.displayName
 		window.representedURL = composeDocument.url
 		takesTable.reload(composeDocument.takes)
-		inspector.reload(composeDocument.project, vocabulary: composeDocument.vocabulary)
+		let vocabulary = composeDocument.vocabulary
+		library.reload(vocabulary)
+		inspector.reload(composeDocument.project, vocabulary: vocabulary)
 		if mode == .text { source.show(sourceText) }
 		strip.resolved = composeDocument.resolved
 		markers.markers = (composeDocument.resolved?.anchors ?? []).compactMap { entry in

@@ -57,7 +57,37 @@ public enum Theme {
 
 	public static let playhead = NSColor(calibratedRed: 0.95, green: 0.30, blue: 0.35, alpha: 1)
 
+	/// The editor's own furniture: a card ground that lifts off the panel, a
+	/// rule that separates without drawing a line anybody notices, and one
+	/// accent — the same blue the system uses for selection, so a selected row
+	/// looks selected rather than decorated.
+	public static let card = NSColor(calibratedWhite: 0.17, alpha: 1)
+	public static let cardHigh = NSColor(calibratedWhite: 0.21, alpha: 1)
+	public static let accent = NSColor(calibratedRed: 0.30, green: 0.56, blue: 0.95, alpha: 1)
+	public static let faintText = NSColor(calibratedWhite: 0.40, alpha: 1)
+
+	/// One hue per kind of thing a project names, used everywhere that kind
+	/// appears — in the library, on the programme, on its badge, in the
+	/// properties. Colour is how somebody learns what `#` and `@` mean without
+	/// being told.
+	public enum Kind { case clip, query, list, section, text, spinner, anchor, tag, take }
+
+	public static func color(_ kind: Kind) -> NSColor {
+		switch kind {
+		case .clip, .take: return base(.green)
+		case .query, .tag: return base(.amber)
+		case .list: return base(.teal)
+		case .section: return base(.violet)
+		case .text: return NSColor(calibratedWhite: 0.85, alpha: 1)
+		case .spinner: return base(.rose)
+		case .anchor: return base(.teal)
+		}
+	}
+
 	public static let mono = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 	public static let monoSmall = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
 	public static let label = NSFont.systemFont(ofSize: 11, weight: .medium)
+	public static let heading = NSFont.systemFont(ofSize: 10, weight: .semibold)
+	public static let body = NSFont.systemFont(ofSize: 12, weight: .regular)
+	public static let bodyStrong = NSFont.systemFont(ofSize: 12, weight: .medium)
 }

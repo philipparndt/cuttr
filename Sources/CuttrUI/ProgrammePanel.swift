@@ -1,0 +1,650 @@
+import AppKit
+import CuttrCompose
+import CuttrKit
+
+/// What is selected, and therefore what the properties panel is about.
+public enum ProjectSelection: Equatable {
+	case output
+	case entry([Int])
+	case overlay(Int)
+}
+
+/// The programme: what plays, in order, with what is drawn over it.
+///
+/// An outline rather than a table, because a project nests — a section holds
+/// clips and a section may hold a section — and a list with two spaces of
+/// indent is a tree that has been flattened and hopes nobody notices. Sections
+/// open and close, entries are dragged into them, and the shape on screen is
+/// the shape in the file.
+///
+/// Nothing is typed into here. Structure is what this panel is for — order,
+/// nesting, what is on and what is off — and the properties of whatever is
+/// selected are edited beside it, where there is room for them to be labelled.
+@MainActor
+public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
+                                   NSTableViewDataSource, NSTableViewDelegate {
+
+	/// A whole project, edited.
+	public var onChange: ((Project) -> Void)?
+	/// What is selected now.
+	public var onSelect: ((ProjectSelection) -> Void)?
+
+	private var project = Project()
+	private var roots: [Node] = []
+	private var vocabulary = ComposeDocument.Vocabulary()
+	private var collapsed: Set<String> = []
+
+	private let outline = NSOutlineView()
+	private let overlayTable = NSTableView()
+	/// What to do when there is nothing there yet. An empty list that says
+	/// nothing looks like a list that is broken.
+	private let programmeHint = ProgrammePanel.hint(
+		"Drag a clip or a #tag from the library, or press + Clip")
+	private let overlayHint = ProgrammePanel.hint(
+		"Select where it should go, then + Text or + Spinner")
+
+	/// Dragging an entry means dragging its position, so the position is what
+	/// travels: `0.2.1` is the second entry of the third entry of the first.
+	private static let entryType = NSPasteboard.PasteboardType("de.rnd7.cuttr.entry")
+
+	// MARK: - Tree
+
+	/// One entry, wrapped so the outline view has an object to hold on to.
+	fileprivate final class Node: NSObject {
+		let path: [Int]
+		let entry: TimelineEntry
+		let children: [Node]
+
+		init(path: [Int], entry: TimelineEntry, children: [Node]) {
+			self.path = path
+			self.entry = entry
+			self.children = children
+		}
+
+		var groupName: String? {
+			if case .group(let name, _) = entry.source { return name }
+			return nil
+		}
+	}
+
+	public override init(frame: NSRect) {
+		super.init(frame: frame)
+		wantsLayer = true
+		layer?.backgroundColor = Theme.panel.cgColor
+
+		let programme = buildOutline()
+		let overlays = buildOverlays()
+
+		// The cut above, what is laid over it below, in that order because that
+		// is the order they happen in: a caption is drawn over a clip that has
+		// to exist first.
+		let split = NSSplitView()
+		split.isVertical = false
+		split.dividerStyle = .thin
+		split.addArrangedSubview(programme)
+		split.addArrangedSubview(overlays)
+		split.translatesAutoresizingMaskIntoConstraints = false
+		addSubview(split)
+		NSLayoutConstraint.activate([
+			split.topAnchor.constraint(equalTo: topAnchor),
+			split.bottomAnchor.constraint(equalTo: bottomAnchor),
+			split.leadingAnchor.constraint(equalTo: leadingAnchor),
+			split.trailingAnchor.constraint(equalTo: trailingAnchor),
+			programme.heightAnchor.constraint(greaterThanOrEqualToConstant: 160),
+			overlays.heightAnchor.constraint(greaterThanOrEqualToConstant: 120),
+		])
+	}
+
+	@available(*, unavailable) required init?(coder: NSCoder) { nil }
+
+	// MARK: - Furniture
+
+	/// A titled pane: heading, list, and the buttons that act on it.
+	private func pane(_ title: String, _ list: NSView, _ buttons: [NSButton]) -> NSView {
+		let heading = NSTextField(labelWithString: title.uppercased())
+		heading.font = Theme.heading
+		heading.textColor = Theme.faintText
+
+		let row = NSStackView(views: [heading] + buttons)
+		row.orientation = .horizontal
+		row.spacing = 6
+		row.setHuggingPriority(.defaultHigh, for: .horizontal)
+
+		let stack = NSStackView(views: [row, list])
+		stack.orientation = .vertical
+		stack.spacing = 6
+		stack.alignment = .leading
+		stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+
+		let holder = NSView()
+		stack.translatesAutoresizingMaskIntoConstraints = false
+		list.translatesAutoresizingMaskIntoConstraints = false
+		holder.addSubview(stack)
+		NSLayoutConstraint.activate([
+			stack.topAnchor.constraint(equalTo: holder.topAnchor),
+			stack.bottomAnchor.constraint(equalTo: holder.bottomAnchor),
+			stack.leadingAnchor.constraint(equalTo: holder.leadingAnchor),
+			stack.trailingAnchor.constraint(equalTo: holder.trailingAnchor),
+			list.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
+			row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
+		])
+		return holder
+	}
+
+	private static func hint(_ text: String) -> NSTextField {
+		let label = NSTextField(labelWithString: text)
+		label.font = Theme.monoSmall
+		label.textColor = Theme.faintText
+		label.alignment = .center
+		return label
+	}
+
+	private func over(_ scroll: NSScrollView, _ label: NSTextField) {
+		label.translatesAutoresizingMaskIntoConstraints = false
+		scroll.addSubview(label)
+		NSLayoutConstraint.activate([
+			label.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
+			label.topAnchor.constraint(equalTo: scroll.topAnchor, constant: 24),
+		])
+	}
+
+	private func button(_ title: String, _ action: Selector, _ tip: String) -> NSButton {
+		let button = NSButton()
+		button.title = title
+		button.bezelStyle = .rounded
+		button.controlSize = .small
+		button.font = NSFont.systemFont(ofSize: 11)
+		button.target = self
+		button.action = action
+		button.toolTip = tip
+		return button
+	}
+
+	// MARK: - The cut
+
+	private func buildOutline() -> NSView {
+		outline.dataSource = self
+		outline.delegate = self
+		outline.rowHeight = 26
+		outline.backgroundColor = Theme.panel
+		outline.gridStyleMask = []
+		outline.headerView = nil
+		outline.indentationPerLevel = 16
+		outline.autosaveExpandedItems = false
+		outline.floatsGroupRows = false
+		outline.intercellSpacing = NSSize(width: 0, height: 2)
+		outline.selectionHighlightStyle = .regular
+		let column = NSTableColumn(identifier: .init("entry"))
+		column.width = 420
+		outline.addTableColumn(column)
+		outline.outlineTableColumn = column
+
+		// Dropped on from the library, and dragged about within itself.
+		outline.registerForDraggedTypes([.string, Self.entryType])
+		outline.setDraggingSourceOperationMask(.move, forLocal: true)
+
+		let scroll = TableScroll.make(outline)
+		over(scroll, programmeHint)
+		return pane("programme", scroll, [
+			button("+ Clip", #selector(addClip), "A clip by slug, or a #tag query"),
+			button("+ Section", #selector(addGroup), "A named section overlays can be hung on"),
+			button("Duplicate", #selector(duplicateEntry), "Another one just like it"),
+			button("↑", #selector(moveEntryUp), "Earlier"),
+			button("↓", #selector(moveEntryDown), "Later"),
+			button("Remove", #selector(removeEntry), "Take it off the programme"),
+		])
+	}
+
+	private var selectedPath: [Int]? {
+		(outline.item(atRow: outline.selectedRow) as? Node)?.path
+	}
+
+	@objc private func addClip() { insert(TimelineEntry(clip: ClipReference("clip"))) }
+	@objc private func addGroup() { insert(TimelineEntry(group: "section", entries: [])) }
+
+	private func insert(_ entry: TimelineEntry) {
+		var next = project
+		next.insertEntry(entry, after: selectedPath)
+		onChange?(next)
+	}
+
+	/// Puts a reference on the programme — dropped, or double-clicked in the
+	/// library. Read by the same rule the file uses, so `#tag` arrives as a
+	/// query and `@name` as a section.
+	public func insert(reference: String) {
+		guard let entry = try? TimelineEntry(text: reference) else { return }
+		insert(entry)
+	}
+
+	@objc private func duplicateEntry() {
+		guard let path = selectedPath, let entry = project.entry(at: path) else { return }
+		var next = project
+		next.insertEntry(entry, after: path)
+		onChange?(next)
+	}
+
+	@objc private func removeEntry() {
+		guard let path = selectedPath else { return }
+		var next = project
+		next.removeEntry(at: path)
+		onChange?(next)
+	}
+
+	@objc private func moveEntryUp() { move(by: -1) }
+	@objc private func moveEntryDown() { move(by: 1) }
+
+	private func move(by offset: Int) {
+		guard let path = selectedPath else { return }
+		var next = project
+		let landed = next.moveEntry(at: path, by: offset)
+		pending = .entry(landed)
+		onChange?(next)
+	}
+
+	/// Where the selection should land once the project comes back through
+	/// ``reload(_:vocabulary:)`` — an edit changes the paths under it.
+	private var pending: ProjectSelection?
+
+	// MARK: - What is drawn over it
+
+	private func buildOverlays() -> NSView {
+		overlayTable.dataSource = self
+		overlayTable.delegate = self
+		overlayTable.rowHeight = 34
+		overlayTable.backgroundColor = Theme.panel
+		overlayTable.gridStyleMask = []
+		overlayTable.headerView = nil
+		overlayTable.intercellSpacing = NSSize(width: 0, height: 2)
+		let column = NSTableColumn(identifier: .init("overlay"))
+		column.width = 420
+		overlayTable.addTableColumn(column)
+
+		let scroll = TableScroll.make(overlayTable)
+		over(scroll, overlayHint)
+		return pane("overlays", scroll, [
+			button("+ Text", #selector(addText), "A caption, bound to what is selected"),
+			button("+ Spinner", #selector(addSpinner), "A spinner; give it an anchor to pin it to a face"),
+			button("Duplicate", #selector(duplicateOverlay), "Another one just like it"),
+			button("Remove", #selector(removeOverlay), "Take it off"),
+		])
+	}
+
+	/// The clip or section a new overlay should cover: whatever is selected on
+	/// the programme, or the first thing on it.
+	private var spanForNewOverlay: Overlay.Span {
+		let source = selectedPath.flatMap { project.entry(at: $0)?.source } ?? project.timeline.first?.source
+		switch source {
+		case .group(let name, _):
+			return .marks(from: .group(name), to: .group(name))
+		case .clip(let reference):
+			return .clips(from: reference, to: reference)
+		default:
+			return .clips(from: ClipReference("clip"), to: ClipReference("clip"))
+		}
+	}
+
+	@objc private func addText() {
+		var next = project
+		next.overlays.append(Overlay(kind: .text("Caption", style: nil), span: spanForNewOverlay))
+		pending = .overlay(next.overlays.count - 1)
+		onChange?(next)
+	}
+
+	@objc private func addSpinner() {
+		var next = project
+		next.overlays.append(Overlay(
+			kind: .spinner(Spinner(words: [SpinnerWord("Working")])), span: spanForNewOverlay,
+			arrival: .fade(over: 0.3), departure: .fade(over: 0.3)))
+		pending = .overlay(next.overlays.count - 1)
+		onChange?(next)
+	}
+
+	@objc private func duplicateOverlay() {
+		let row = overlayTable.selectedRow
+		guard row >= 0, row < project.overlays.count else { return }
+		var next = project
+		next.overlays.insert(project.overlays[row], at: row + 1)
+		pending = .overlay(row + 1)
+		onChange?(next)
+	}
+
+	@objc private func removeOverlay() {
+		let row = overlayTable.selectedRow
+		guard row >= 0, row < project.overlays.count else { return }
+		var next = project
+		next.overlays.remove(at: row)
+		pending = .output
+		onChange?(next)
+	}
+
+	// MARK: - Loading
+
+	public func reload(_ project: Project, vocabulary: ComposeDocument.Vocabulary) {
+		self.project = project
+		self.vocabulary = vocabulary
+		roots = tree(project.timeline, at: [])
+
+		let keep = pending ?? selection
+		pending = nil
+		outline.reloadData()
+		overlayTable.reloadData()
+		programmeHint.isHidden = !project.timeline.isEmpty
+		overlayHint.isHidden = !project.overlays.isEmpty
+		expandAll()
+
+		switch keep {
+		case .entry(let path):
+			if let row = row(for: path) {
+				outline.selectRowIndexes([row], byExtendingSelection: false)
+			} else {
+				outline.deselectAll(nil)
+			}
+			overlayTable.deselectAll(nil)
+		case .overlay(let index) where index < project.overlays.count:
+			overlayTable.selectRowIndexes([index], byExtendingSelection: false)
+			outline.deselectAll(nil)
+		default:
+			outline.deselectAll(nil)
+			overlayTable.deselectAll(nil)
+		}
+		selection = keep
+		onSelect?(selection)
+	}
+
+	private var selection: ProjectSelection = .output
+
+	private func tree(_ entries: [TimelineEntry], at prefix: [Int]) -> [Node] {
+		entries.enumerated().map { index, entry in
+			let path = prefix + [index]
+			if case .group(_, let inner) = entry.source {
+				return Node(path: path, entry: entry, children: tree(inner, at: path))
+			}
+			return Node(path: path, entry: entry, children: [])
+		}
+	}
+
+	private func row(for path: [Int]) -> Int? {
+		for row in 0..<outline.numberOfRows where (outline.item(atRow: row) as? Node)?.path == path {
+			return row
+		}
+		return nil
+	}
+
+	/// Sections stand open unless somebody closed them. A collapsed section
+	/// hides work, and the commonest reason a project looks empty is that it is
+	/// not.
+	private func expandAll() {
+		func walk(_ nodes: [Node]) {
+			for node in nodes where !node.children.isEmpty {
+				if let name = node.groupName, collapsed.contains(name) {
+					outline.collapseItem(node)
+				} else {
+					outline.expandItem(node)
+				}
+				walk(node.children)
+			}
+		}
+		walk(roots)
+	}
+
+	// MARK: - Outline
+
+	public func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
+		((item as? Node)?.children ?? roots).count
+	}
+
+	public func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
+		((item as? Node)?.children ?? roots)[index]
+	}
+
+	public func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
+		(item as? Node)?.groupName != nil
+	}
+
+	public func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+		guard let node = item as? Node else { return nil }
+		let view = (outlineView.makeView(withIdentifier: .init("entry"), owner: self) as? EntryRow)
+			?? { let view = EntryRow(); view.identifier = .init("entry"); return view }()
+		view.entry = node.entry
+		view.count = node.children.count
+		view.needsDisplay = true
+		return view
+	}
+
+	public func outlineViewItemDidCollapse(_ notification: Notification) {
+		if let name = (notification.userInfo?["NSObject"] as? Node)?.groupName { collapsed.insert(name) }
+	}
+
+	public func outlineViewItemDidExpand(_ notification: Notification) {
+		if let name = (notification.userInfo?["NSObject"] as? Node)?.groupName { collapsed.remove(name) }
+	}
+
+	// MARK: - Dragging
+
+	public func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
+		guard let node = item as? Node else { return nil }
+		let pasteboardItem = NSPasteboardItem()
+		pasteboardItem.setString(node.path.map(String.init).joined(separator: "."), forType: Self.entryType)
+		pasteboardItem.setString(node.entry.source.description, forType: .string)
+		return pasteboardItem
+	}
+
+	public func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo,
+	                        proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
+		// Onto a clip means nothing — a clip holds nothing — so a drop there is
+		// retargeted to the gap after it, which is what the pointer is over.
+		if let node = item as? Node, node.groupName == nil {
+			let parent = self.node(at: Array(node.path.dropLast()))
+			outlineView.setDropItem(parent, dropChildIndex: (node.path.last ?? 0) + 1)
+		}
+		return info.draggingSource as? NSOutlineView === outlineView ? .move : .copy
+	}
+
+	public func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo,
+	                        item: Any?, childIndex index: Int) -> Bool {
+		let parent = (item as? Node)?.path ?? []
+		let board = info.draggingPasteboard
+		var next = project
+
+		if let moved = board.string(forType: Self.entryType) {
+			let from = moved.split(separator: ".").compactMap { Int($0) }
+			guard let entry = project.entry(at: from) else { return false }
+			// Refused rather than losing the entry: a section cannot be dropped
+			// inside itself, and neither can anything it contains.
+			if parent.count >= from.count, Array(parent.prefix(from.count)) == from { return false }
+			next.removeEntry(at: from)
+			// Removing above the destination shifts it up by one.
+			var at = index < 0 ? Int.max : index
+			if from.count == parent.count + 1, Array(from.dropLast()) == parent, (from.last ?? 0) < at {
+				at -= 1
+			}
+			pending = .entry(insert(entry, into: parent, at: at, of: &next))
+			onChange?(next)
+			return true
+		}
+
+		guard let text = board.string(forType: .string),
+		      let entry = try? TimelineEntry(text: text) else { return false }
+		pending = .entry(insert(entry, into: parent, at: index < 0 ? Int.max : index, of: &next))
+		onChange?(next)
+		return true
+	}
+
+	private func node(at path: [Int]) -> Node? {
+		guard !path.isEmpty else { return nil }
+		var list = roots
+		var found: Node?
+		for index in path {
+			guard index < list.count else { return nil }
+			found = list[index]
+			list = list[index].children
+		}
+		return found
+	}
+
+	/// Puts `entry` at a position given as parent-and-index, which is what a
+	/// drop lands as, and answers with the path it ended up at.
+	private func insert(_ entry: TimelineEntry, into parent: [Int], at index: Int,
+	                    of project: inout Project) -> [Int] {
+		let siblings: [TimelineEntry]
+		if parent.isEmpty {
+			siblings = project.timeline
+		} else if case .group(_, let inner)? = project.entry(at: parent)?.source {
+			siblings = inner
+		} else {
+			siblings = []
+		}
+		let at = min(max(0, index), siblings.count)
+		if at == 0 {
+			// `insertEntry` puts things *after* a path, so the first position is
+			// the one case it cannot express: before the first sibling.
+			if parent.isEmpty {
+				project.timeline.insert(entry, at: 0)
+			} else if case .group(let name, var inner)? = project.entry(at: parent)?.source {
+				inner.insert(entry, at: 0)
+				project.replaceEntry(at: parent, with: TimelineEntry(
+					group: name, entries: inner,
+					transition: project.entry(at: parent)?.transition ?? 0))
+			}
+			return parent + [0]
+		}
+		project.insertEntry(entry, after: parent + [at - 1])
+		return parent + [at]
+	}
+
+	// MARK: - Overlay list
+
+	public func numberOfRows(in tableView: NSTableView) -> Int { project.overlays.count }
+
+	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+		guard row < project.overlays.count else { return nil }
+		let view = (tableView.makeView(withIdentifier: .init("overlay"), owner: self) as? OverlayRow)
+			?? { let view = OverlayRow(); view.identifier = .init("overlay"); return view }()
+		view.overlay = project.overlays[row]
+		view.needsDisplay = true
+		return view
+	}
+
+	// MARK: - Selection
+
+	public func outlineViewSelectionDidChange(_ notification: Notification) {
+		guard let path = selectedPath else { return }
+		if overlayTable.selectedRow >= 0 { overlayTable.deselectAll(nil) }
+		selection = .entry(path)
+		onSelect?(selection)
+	}
+
+	public func tableViewSelectionDidChange(_ notification: Notification) {
+		let row = overlayTable.selectedRow
+		guard row >= 0, row < project.overlays.count else { return }
+		if outline.selectedRow >= 0 { outline.deselectAll(nil) }
+		selection = .overlay(row)
+		onSelect?(selection)
+	}
+
+	/// Clears the selection back to the project itself, which is what the
+	/// output properties are about.
+	public func selectOutput() {
+		outline.deselectAll(nil)
+		overlayTable.deselectAll(nil)
+		selection = .output
+		onSelect?(selection)
+	}
+
+	// MARK: - Rows
+
+	/// One entry, drawn: what kind of thing it is, what it names, and how it
+	/// arrives.
+	fileprivate final class EntryRow: NSTableCellView {
+		var entry = TimelineEntry(clip: ClipReference(""))
+		var count = 0
+
+		override func draw(_ dirtyRect: NSRect) {
+			let kind: (String, Theme.Kind)
+			switch entry.source {
+			case .clip: kind = ("CLIP", .clip)
+			case .list: kind = ("LIST", .list)
+			case .query: kind = ("QUERY", .query)
+			case .group: kind = ("SECTION", .section)
+			}
+			let colour = Theme.color(kind.1)
+			var x = badge(kind.0, colour: colour, at: 4)
+
+			(entry.source.description as NSString).draw(
+				at: NSPoint(x: x, y: bounds.height / 2 - 7),
+				withAttributes: [.font: Theme.bodyStrong, .foregroundColor: Theme.text])
+			x += (entry.source.description as NSString)
+				.size(withAttributes: [.font: Theme.bodyStrong]).width + 10
+
+			if case .group = entry.source {
+				_ = note("\(count) entr\(count == 1 ? "y" : "ies")", at: x)
+			}
+			if entry.transition > 0 {
+				let text = "⤫ \(TakeWriter.number(entry.transition, places: 2))s"
+				let size = (text as NSString).size(withAttributes: [.font: Theme.monoSmall])
+				_ = note(text, at: bounds.width - size.width - 10)
+			}
+		}
+
+		private func badge(_ text: String, colour: NSColor, at x: CGFloat) -> CGFloat {
+			let attributes: [NSAttributedString.Key: Any] = [
+				.font: Theme.heading, .foregroundColor: colour,
+			]
+			let size = (text as NSString).size(withAttributes: attributes)
+			let box = NSRect(x: x, y: bounds.height / 2 - 8, width: size.width + 10, height: 16)
+			colour.withAlphaComponent(0.16).setFill()
+			NSBezierPath(roundedRect: box, xRadius: 3, yRadius: 3).fill()
+			(text as NSString).draw(at: NSPoint(x: x + 5, y: box.minY + 3), withAttributes: attributes)
+			return box.maxX + 8
+		}
+
+		@discardableResult
+		private func note(_ text: String, at x: CGFloat) -> CGFloat {
+			let attributes: [NSAttributedString.Key: Any] = [
+				.font: Theme.monoSmall, .foregroundColor: Theme.dimText,
+			]
+			(text as NSString).draw(at: NSPoint(x: x, y: bounds.height / 2 - 6), withAttributes: attributes)
+			return x + (text as NSString).size(withAttributes: attributes).width
+		}
+	}
+
+	/// One overlay, drawn: what it says, when it is on, and what it follows.
+	fileprivate final class OverlayRow: NSTableCellView {
+		var overlay = Overlay(kind: .text("", style: nil), span: .times(from: 0, to: 0))
+
+		override func draw(_ dirtyRect: NSRect) {
+			let colour: NSColor
+			let title: String
+			switch overlay.kind {
+			case .text(let text, _):
+				colour = Theme.color(.text)
+				title = "“\(text)”"
+			case .spinner(let spinner):
+				colour = Theme.color(.spinner)
+				title = spinner.words.isEmpty
+					? "spinner (\(spinner.style.rawValue))"
+					: spinner.words.map(\.text).joined(separator: " · ")
+			}
+
+			colour.setFill()
+			NSBezierPath(ovalIn: NSRect(x: 8, y: bounds.height / 2 - 3, width: 6, height: 6)).fill()
+
+			(title as NSString).draw(
+				at: NSPoint(x: 22, y: bounds.height - 20),
+				withAttributes: [.font: Theme.bodyStrong, .foregroundColor: Theme.text])
+
+			var where_ = ""
+			switch overlay.span {
+			case .marks(let from, let to):
+				where_ = from == to ? "over \(from.description)"
+					: "\(from.description) → \(to.description)"
+			case .times(let from, let to):
+				where_ = "\(Timecode.string(from)) → \(Timecode.string(to))"
+			}
+			if let anchor = overlay.anchor { where_ += "   ⌖ \(anchor)" }
+			(where_ as NSString).draw(
+				at: NSPoint(x: 22, y: 5),
+				withAttributes: [.font: Theme.monoSmall, .foregroundColor: Theme.dimText])
+		}
+	}
+}

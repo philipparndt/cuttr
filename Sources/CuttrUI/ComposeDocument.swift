@@ -182,6 +182,25 @@ public final class ComposeDocument {
 		public var tags: [String] = []
 		public var anchors: [String] = []
 		public var groups: [String] = []
+		/// Every clip with what it is, take by take. The flat lists above are
+		/// what a combo box offers; this is what a library shows.
+		public var items: [Item] = []
+		/// The takes, in the order the project lists them.
+		public var takeNames: [String] = []
+		/// Which anchors came from which take, so the library can say where a
+		/// tracked face lives.
+		public var anchorTakes: [String: String] = [:]
+
+		public struct Item: Sendable {
+			public var take: String
+			public var slug: String
+			public var name: String
+			public var tags: [String]
+			public var length: Double
+			/// What a project would write to mean this clip: bare when the slug
+			/// is unique across the takes, `take/slug` when it is not.
+			public var reference: String
+		}
 	}
 
 	public var vocabulary: Vocabulary {
@@ -204,6 +223,31 @@ public final class ComposeDocument {
 				return [name] + names(inner)
 			}
 		}
+		var items: [Vocabulary.Item] = []
+		var takeNames: [String] = []
+		var anchorTakes: [String: String] = [:]
+		var slugCounts: [String: Int] = [:]
+		for entry in takes {
+			guard let text = try? String(contentsOf: entry.url, encoding: .utf8),
+			      let take = try? TakeReader.read(text) else { continue }
+			takeNames.append(entry.name)
+			for clip in take.clips { slugCounts[clip.slug, default: 0] += 1 }
+			for anchor in take.anchors { anchorTakes[anchor.name] = entry.name }
+		}
+		for entry in takes {
+			guard let text = try? String(contentsOf: entry.url, encoding: .utf8),
+			      let take = try? TakeReader.read(text) else { continue }
+			for clip in take.clips {
+				items.append(Vocabulary.Item(
+					take: entry.name, slug: clip.slug, name: clip.name, tags: clip.tags,
+					length: clip.end - clip.start,
+					reference: (slugCounts[clip.slug] ?? 0) > 1
+						? "\(entry.name)/\(clip.slug)" : clip.slug))
+			}
+		}
+		found.items = items
+		found.takeNames = takeNames
+		found.anchorTakes = anchorTakes
 		found.clips = clips.sorted()
 		found.tags = tags.sorted()
 		found.anchors = anchors.sorted()

@@ -4,430 +4,127 @@ import CuttrKit
 
 /// Editing the project, and learning its file format while you do.
 ///
-/// The panel is a teaching aid as much as an editor, and that decides how it
-/// looks. Every field is labelled with the **key it writes** — `fps`, `from`,
-/// `match.reference` — rather than with a friendly paraphrase, and the pane at
-/// the bottom shows the YAML the current selection produces, live, straight out
-/// of the same emitter that writes the file. Nothing here renders a description
-/// of the format; it shows the format.
+/// Two panels and a pane. The programme on the left is structure — what plays,
+/// in what order, inside which section, with what drawn over it. The properties
+/// on the right are everything about whatever is selected there, labelled with
+/// the **key it writes** rather than a friendly paraphrase. Underneath them, the
+/// YAML that selection produces, live, straight out of the emitter that writes
+/// the file.
 ///
-/// The intended arc is that somebody uses the panel, reads what it wrote, and
-/// after a week stops using the panel. A tool whose UI hides its file is a tool
-/// you can never graduate from.
+/// A normal user never has to open the text. Everything the format can express
+/// is reachable from these controls, which is the point: the file is for
+/// refactoring, for copying a section between projects, for handing to an
+/// editor or to a model — not the only way in. And because the panel shows what
+/// it writes as it writes it, somebody who does open the file already knows
+/// what they are looking at.
 @MainActor
-public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewDelegate {
+public final class ProjectInspector: NSView {
 
 	/// A whole project, edited. The window applies and saves it.
 	public var onChange: ((Project) -> Void)?
 
-	private var project = Project()
-	private var rows: [Project.Row] = []
-	private var vocabulary = ComposeDocument.Vocabulary()
-
-	private let timelineTable = NSTableView()
-	private let overlayTable = NSTableView()
+	private let programme = ProgrammePanel()
+	private let properties = PropertiesPanel()
 	private let yaml = NSTextView()
+	private let writesTitle = NSTextField(labelWithString: "WHAT THIS WRITES")
 
-	private let width = NSTextField()
-	private let height = NSTextField()
-	private let fps = NSTextField()
-	private let target = NSTextField()
-	private let ceiling = NSTextField()
-	private let reference = NSComboBox()
+	private var project = Project()
+	private var selection: ProjectSelection = .output
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
 		wantsLayer = true
 		layer?.backgroundColor = Theme.panel.cgColor
 
-		// Laid out for a whole window rather than a strip down the side.
-		//
-		// This lived in a 330-point column beside the picture and the takes, and
-		// three lists in a third of a window is three lists nobody can use. It
-		// gets the window now, and the arrangement follows what the file looks
-		// like: what comes out at the top, the programme and the things drawn
-		// over it side by side underneath, and the text they produce along the
-		// bottom.
-		let lists = NSSplitView()
-		lists.isVertical = true
-		lists.dividerStyle = .thin
-		lists.addArrangedSubview(section("timeline", timeline()))
-		lists.addArrangedSubview(section("overlays", overlays()))
+		programme.onChange = { [weak self] project in self?.onChange?(project) }
+		programme.onSelect = { [weak self] selection in
+			guard let self else { return }
+			self.selection = selection
+			self.properties.reload(self.project, vocabulary: self.vocabulary, selection: selection)
+			self.showWhatItWrites()
+		}
+		properties.onChange = { [weak self] project in self?.onChange?(project) }
 
-		let stack = NSStackView(views: [
-			section("output", output()),
-			lists,
-			section("what this writes", writes()),
-		])
-		stack.orientation = .vertical
-		stack.spacing = 10
-		stack.alignment = .leading
-		stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
-		// The lists take whatever the window has; the other two are as tall as
-		// their contents.
-		lists.setContentHuggingPriority(.defaultLow, for: .vertical)
-		stack.translatesAutoresizingMaskIntoConstraints = false
-		addSubview(stack)
+		let side = NSSplitView()
+		side.isVertical = false
+		side.dividerStyle = .thin
+		side.addArrangedSubview(properties)
+		side.addArrangedSubview(writes())
+
+		let split = NSSplitView()
+		split.isVertical = true
+		split.dividerStyle = .thin
+		split.addArrangedSubview(programme)
+		split.addArrangedSubview(side)
+		split.translatesAutoresizingMaskIntoConstraints = false
+		addSubview(split)
+
+		let wide = programme.widthAnchor.constraint(equalToConstant: 620)
+		wide.priority = NSLayoutConstraint.Priority(250)
+		wide.isActive = true
 		NSLayoutConstraint.activate([
-			stack.topAnchor.constraint(equalTo: topAnchor),
-			stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-			stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-			stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+			split.topAnchor.constraint(equalTo: topAnchor),
+			split.bottomAnchor.constraint(equalTo: bottomAnchor),
+			split.leadingAnchor.constraint(equalTo: leadingAnchor),
+			split.trailingAnchor.constraint(equalTo: trailingAnchor),
+			programme.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
+			side.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
+			properties.heightAnchor.constraint(greaterThanOrEqualToConstant: 220),
 		])
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
 
-	// MARK: - Furniture
-
-	/// A heading in the file's own vocabulary, so the panel and the file read
-	/// as one thing.
-	private func section(_ title: String, _ body: NSView) -> NSView {
-		let label = NSTextField(labelWithString: title)
-		label.font = Theme.monoSmall
-		label.textColor = Theme.dimText
-		let stack = NSStackView(views: [label, body])
-		stack.orientation = .vertical
-		stack.spacing = 4
-		stack.alignment = .leading
-		body.translatesAutoresizingMaskIntoConstraints = false
-		body.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-		return stack
-	}
-
-	private func field(_ control: NSTextField, _ width: CGFloat, _ placeholder: String) -> NSTextField {
-		control.font = Theme.mono
-		control.placeholderString = placeholder
-		control.target = self
-		control.action = #selector(outputEdited)
-		control.translatesAutoresizingMaskIntoConstraints = false
-		control.widthAnchor.constraint(equalToConstant: width).isActive = true
-		return control
-	}
-
-	private func caption(_ text: String) -> NSTextField {
-		let label = NSTextField(labelWithString: text)
-		label.font = Theme.monoSmall
-		label.textColor = Theme.dimText
-		return label
-	}
-
-	private func button(_ title: String, _ action: Selector, _ tip: String) -> NSButton {
-		let button = NSButton()
-		button.title = title
-		button.bezelStyle = .rounded
-		button.controlSize = .small
-		button.font = NSFont.systemFont(ofSize: 11)
-		button.target = self
-		button.action = action
-		button.toolTip = tip
-		return button
-	}
-
-	// MARK: - output
-
-	private func output() -> NSView {
-		let size = NSStackView(views: [
-			caption("size"), field(width, 56, "1920"), caption("x"), field(height, 56, "1080"),
-			caption("fps"), field(fps, 44, "25"),
-		])
-		size.orientation = .horizontal
-		size.spacing = 4
-
-		let sound = NSStackView(views: [
-			caption("audio.target"), field(target, 52, "-16"),
-			caption("ceiling"), field(ceiling, 46, "-1"),
-		])
-		sound.orientation = .horizontal
-		sound.spacing = 4
-
-		reference.font = Theme.mono
-		reference.completes = true
-		reference.placeholderString = "a clip slug"
-		reference.target = self
-		reference.action = #selector(outputEdited)
-		reference.translatesAutoresizingMaskIntoConstraints = false
-		reference.widthAnchor.constraint(equalToConstant: 160).isActive = true
-		let match = NSStackView(views: [caption("match.reference"), reference])
-		match.orientation = .horizontal
-		match.spacing = 4
-
-		let stack = NSStackView(views: [size, sound, match])
-		stack.orientation = .vertical
-		stack.spacing = 4
-		stack.alignment = .leading
-		return stack
-	}
-
-	@objc private func outputEdited() {
-		var next = project
-		next.output.width = Int(width.stringValue) ?? next.output.width
-		next.output.height = Int(height.stringValue) ?? next.output.height
-		next.output.framesPerSecond = Double(fps.stringValue) ?? next.output.framesPerSecond
-		// Blank means "say nothing about it", which is different from zero: a
-		// project with no `audio:` leaves the levels exactly as recorded.
-		if target.stringValue.isEmpty, ceiling.stringValue.isEmpty {
-			next.output.audio = nil
-		} else {
-			var audio = next.output.audio ?? AudioTarget()
-			if let value = Double(target.stringValue) { audio.target = value }
-			if let value = Double(ceiling.stringValue) { audio.ceiling = value }
-			next.output.audio = audio
-		}
-		let slug = reference.stringValue.trimmingCharacters(in: .whitespaces)
-		next.output.matchReference = slug.isEmpty ? nil : Slug.make(from: slug)
-		onChange?(next)
-	}
-
-	// MARK: - timeline
-
-	private func timeline() -> NSView {
-		timelineTable.dataSource = self
-		timelineTable.delegate = self
-		timelineTable.rowHeight = 20
-		timelineTable.backgroundColor = Theme.panel
-		timelineTable.gridStyleMask = []
-		timelineTable.usesAlternatingRowBackgroundColors = true
-		timelineTable.headerView = NSTableHeaderView()
-		let entry = NSTableColumn(identifier: .init("entry"))
-		entry.title = "clip / #query / @section"
-		entry.width = 260
-		timelineTable.addTableColumn(entry)
-		let transition = NSTableColumn(identifier: .init("transition"))
-		transition.title = "transition"
-		transition.width = 70
-		timelineTable.addTableColumn(transition)
-
-		let scroll = TableScroll.make(timelineTable)
-		scroll.translatesAutoresizingMaskIntoConstraints = false
-		scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
-
-		let buttons = NSStackView(views: [
-			button("+ clip", #selector(addClip), "A clip by slug. Type `#tag` for a query."),
-			button("+ group", #selector(addGroup), "A named section: overlays can be hung on it."),
-			button("−", #selector(removeEntry), "Take it off the timeline"),
-			button("↑", #selector(moveEntryUp), "Earlier"),
-			button("↓", #selector(moveEntryDown), "Later"),
-		])
-		buttons.orientation = .horizontal
-		buttons.spacing = 4
-
-		let stack = NSStackView(views: [scroll, buttons])
-		stack.orientation = .vertical
-		stack.spacing = 4
-		stack.alignment = .leading
-		scroll.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-		return stack
-	}
-
-	private var selectedPath: [Int]? {
-		let row = timelineTable.selectedRow
-		guard row >= 0, row < rows.count else { return nil }
-		return rows[row].path
-	}
-
-	@objc private func addClip() {
-		var next = project
-		let slug = next.timeline.isEmpty ? "intro" : "clip"
-		next.insertEntry(TimelineEntry(clip: ClipReference(slug)), after: selectedPath)
-		onChange?(next)
-	}
-
-	@objc private func addGroup() {
-		var next = project
-		next.insertEntry(TimelineEntry(group: "section", entries: []), after: selectedPath)
-		onChange?(next)
-	}
-
-	@objc private func removeEntry() {
-		guard let path = selectedPath else { return }
-		var next = project
-		next.removeEntry(at: path)
-		onChange?(next)
-	}
-
-	@objc private func moveEntryUp() { move(by: -1) }
-	@objc private func moveEntryDown() { move(by: 1) }
-
-	private func move(by offset: Int) {
-		guard let path = selectedPath else { return }
-		var next = project
-		next.moveEntry(at: path, by: offset)
-		onChange?(next)
-	}
-
-	@objc private func entryEdited(_ sender: NSControl) {
-		let row = timelineTable.row(for: sender)
-		guard row >= 0, row < rows.count else { return }
-		let path = rows[row].path
-		let existing = rows[row].entry
-		var next = project
-
-		if timelineTable.column(for: sender) == 1 {
-			next.replaceEntry(at: path, with: TimelineEntry(
-				source: existing.source, transition: Double(sender.stringValue) ?? 0))
-			onChange?(next)
-			return
-		}
-
-		// A group keeps its contents when it is renamed; anything else is
-		// re-read from what was typed, by the same rule the file uses.
-		if case .group(_, let inner) = existing.source, sender.stringValue.hasPrefix("@") {
-			next.replaceEntry(at: path, with: TimelineEntry(
-				group: Slug.make(from: String(sender.stringValue.dropFirst())),
-				entries: inner, transition: existing.transition))
-		} else if let replacement = try? TimelineEntry(
-			text: sender.stringValue, transition: existing.transition) {
-			next.replaceEntry(at: path, with: replacement)
-		} else {
-			reload(project)   // unreadable: put it back
-			return
-		}
-		onChange?(next)
-	}
-
-	// MARK: - overlays
-
-	private func overlays() -> NSView {
-		overlayTable.dataSource = self
-		overlayTable.delegate = self
-		overlayTable.rowHeight = 20
-		overlayTable.backgroundColor = Theme.panel
-		overlayTable.gridStyleMask = []
-		overlayTable.usesAlternatingRowBackgroundColors = true
-		for (identifier, title, width) in [("what", "text / spinner words", CGFloat(240)),
-		                                   ("from", "from", 120), ("to", "to", 120),
-		                                   ("anchor", "anchor", 110)] {
-			let column = NSTableColumn(identifier: .init(identifier))
-			column.title = title
-			column.width = width
-			overlayTable.addTableColumn(column)
-		}
-
-		let scroll = TableScroll.make(overlayTable)
-		scroll.translatesAutoresizingMaskIntoConstraints = false
-		scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
-
-		let buttons = NSStackView(views: [
-			button("+ text", #selector(addText), "A caption. It slides in and out by default."),
-			button("+ spinner", #selector(addSpinner), "A spinner. Give it an `anchor:` to pin it to a face."),
-			button("−", #selector(removeOverlay), "Remove it"),
-		])
-		buttons.orientation = .horizontal
-		buttons.spacing = 4
-
-		let stack = NSStackView(views: [scroll, buttons])
-		stack.orientation = .vertical
-		stack.spacing = 4
-		stack.alignment = .leading
-		scroll.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-		return stack
-	}
-
-	/// The clip or section a new overlay should cover: whatever is selected on
-	/// the timeline, or the first thing on it.
-	private var spanForNewOverlay: Overlay.Span {
-		let source = selectedPath.flatMap { project.entry(at: $0)?.source } ?? project.timeline.first?.source
-		switch source {
-		case .group(let name, _):
-			return .marks(from: .group(name), to: .group(name))
-		case .clip(let reference):
-			return .clips(from: reference, to: reference)
-		default:
-			return .clips(from: ClipReference("intro"), to: ClipReference("intro"))
-		}
-	}
-
-	@objc private func addText() {
-		var next = project
-		next.overlays.append(Overlay(kind: .text("Caption", style: nil), span: spanForNewOverlay))
-		onChange?(next)
-	}
-
-	@objc private func addSpinner() {
-		var next = project
-		next.overlays.append(Overlay(
-			kind: .spinner(Spinner()), span: spanForNewOverlay,
-			arrival: .fade(over: 0.3), departure: .fade(over: 0.3)))
-		onChange?(next)
-	}
-
-	@objc private func removeOverlay() {
-		let row = overlayTable.selectedRow
-		guard row >= 0, row < project.overlays.count else { return }
-		var next = project
-		next.overlays.remove(at: row)
-		onChange?(next)
-	}
-
-	@objc private func overlayEdited(_ sender: NSControl) {
-		let row = overlayTable.row(for: sender)
-		let column = overlayTable.column(for: sender)
-		guard row >= 0, row < project.overlays.count, column >= 0 else { return }
-		var next = project
-		var overlay = next.overlays[row]
-
-		switch overlayTable.tableColumns[column].identifier.rawValue {
-		case "what":
-			switch overlay.kind {
-			case .text(_, let style):
-				overlay.kind = .text(sender.stringValue, style: style)
-			case .spinner(var spinner):
-				// A spinner's words, comma separated — the same shape the file
-				// takes for the simple case.
-				spinner.words = sender.stringValue
-					.split(separator: ",")
-					.map { SpinnerWord($0.trimmingCharacters(in: .whitespaces)) }
-					.filter { !$0.text.isEmpty }
-				overlay.kind = .spinner(spinner)
-			}
-		case "anchor":
-			let name = sender.stringValue.trimmingCharacters(in: .whitespaces)
-			overlay.anchor = name.isEmpty ? nil : Slug.make(from: name)
-		case "from", "to":
-			let endpoint = Overlay.Span.Endpoint(sender.stringValue.trimmingCharacters(in: .whitespaces))
-			if case .marks(let from, let to) = overlay.span {
-				overlay.span = overlayTable.tableColumns[column].identifier.rawValue == "from"
-					? .marks(from: endpoint, to: to)
-					: .marks(from: from, to: endpoint)
-			} else {
-				overlay.span = .marks(from: endpoint, to: endpoint)
-			}
-		default:
-			return
-		}
-		next.overlays[row] = overlay
-		onChange?(next)
-	}
+	private var vocabulary = ComposeDocument.Vocabulary()
 
 	// MARK: - what this writes
 
 	private func writes() -> NSView {
-		let scroll = NSScrollView()
-		scroll.hasVerticalScroller = true
-		scroll.drawsBackground = false
+		writesTitle.font = Theme.heading
+		writesTitle.textColor = Theme.faintText
+
 		yaml.isEditable = false
 		yaml.drawsBackground = true
 		yaml.backgroundColor = Theme.background
 		yaml.textColor = Theme.text
 		yaml.font = Theme.monoSmall
-		yaml.textContainerInset = NSSize(width: 6, height: 6)
+		yaml.textContainerInset = NSSize(width: 8, height: 8)
 		yaml.isVerticallyResizable = true
+		yaml.isHorizontallyResizable = false
 		yaml.autoresizingMask = [.width]
-		scroll.documentView = yaml
+		yaml.textContainer?.widthTracksTextView = true
+
+		let scroll = TableScroll.wrap(yaml, horizontal: false)
+		let stack = NSStackView(views: [writesTitle, scroll])
+		stack.orientation = .vertical
+		stack.spacing = 6
+		stack.alignment = .leading
+		stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+
+		let holder = NSView()
+		stack.translatesAutoresizingMaskIntoConstraints = false
 		scroll.translatesAutoresizingMaskIntoConstraints = false
-		scroll.heightAnchor.constraint(equalToConstant: 160).isActive = true
-		return scroll
+		holder.addSubview(stack)
+		NSLayoutConstraint.activate([
+			stack.topAnchor.constraint(equalTo: holder.topAnchor),
+			stack.bottomAnchor.constraint(equalTo: holder.bottomAnchor),
+			stack.leadingAnchor.constraint(equalTo: holder.leadingAnchor),
+			stack.trailingAnchor.constraint(equalTo: holder.trailingAnchor),
+			scroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24),
+			holder.heightAnchor.constraint(greaterThanOrEqualToConstant: 120),
+		])
+		return holder
 	}
 
 	/// Straight out of the emitter that writes the file, so what is shown here
 	/// is what will be on disk — not a paraphrase of it.
 	private func showWhatItWrites() {
-		if overlayTable.selectedRow >= 0, overlayTable.selectedRow < project.overlays.count {
-			yaml.string = ProjectWriter.fragment(for: project.overlays[overlayTable.selectedRow])
-		} else if let path = selectedPath, let entry = project.entry(at: path) {
-			yaml.string = ProjectWriter.fragment(for: entry)
-		} else {
+		switch selection {
+		case .overlay(let index) where index < project.overlays.count:
+			yaml.string = ProjectWriter.fragment(for: project.overlays[index])
+		case .entry(let path):
+			yaml.string = project.entry(at: path).map { ProjectWriter.fragment(for: $0) } ?? ""
+		default:
 			yaml.string = ProjectWriter.fragment(for: project.output)
 		}
 	}
@@ -435,166 +132,13 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 	// MARK: - Loading
 
 	public func reload(_ project: Project, vocabulary: ComposeDocument.Vocabulary) {
-		self.vocabulary = vocabulary
-		reload(project)
-	}
-
-	public func reload(_ project: Project) {
-		// Not while something is being typed into: the document changes on every
-		// commit and a reload mid-edit ends it.
-		if window?.firstResponder is NSTextView, window?.firstResponder !== yaml,
-		   timelineTable.editedRow >= 0 || overlayTable.editedRow >= 0 { return }
-
 		self.project = project
-		rows = project.rows
-
-		width.stringValue = String(project.output.width)
-		height.stringValue = String(project.output.height)
-		fps.stringValue = TakeWriter.number(project.output.framesPerSecond, places: 3)
-		target.stringValue = project.output.audio.map { TakeWriter.number($0.target, places: 1) } ?? ""
-		ceiling.stringValue = project.output.audio.map { TakeWriter.number($0.ceiling, places: 1) } ?? ""
-		reference.removeAllItems()
-		reference.addItems(withObjectValues: [""] + vocabulary.clips)
-		reference.stringValue = project.output.matchReference ?? ""
-
-		let timelineSelection = timelineTable.selectedRow
-		let overlaySelection = overlayTable.selectedRow
-		timelineTable.reloadData()
-		overlayTable.reloadData()
-		if timelineSelection >= 0, timelineSelection < rows.count {
-			timelineTable.selectRowIndexes([timelineSelection], byExtendingSelection: false)
-		}
-		if overlaySelection >= 0, overlaySelection < project.overlays.count {
-			overlayTable.selectRowIndexes([overlaySelection], byExtendingSelection: false)
-		}
+		self.vocabulary = vocabulary
+		programme.reload(project, vocabulary: vocabulary)
+		properties.reload(project, vocabulary: vocabulary, selection: selection)
 		showWhatItWrites()
 	}
 
-	// MARK: - Tables
-
-	public func numberOfRows(in tableView: NSTableView) -> Int {
-		tableView === timelineTable ? rows.count : project.overlays.count
-	}
-
-	/// A field that offers the names that exist, and still takes anything.
-	///
-	/// A combo box rather than a menu, because both halves are needed: `from:`
-	/// wants one of the clips that are actually there, and a query wants
-	/// `#b-roll and not #reject`, which no menu can hold. Picking is for the
-	/// common case and typing is for the rest.
-	private func combo(_ identifier: NSUserInterfaceItemIdentifier, _ values: [String],
-	                   in tableView: NSTableView, action: Selector) -> NSComboBox {
-		let box = (tableView.makeView(withIdentifier: identifier, owner: self) as? NSComboBox)
-			?? {
-				let box = NSComboBox()
-				box.identifier = identifier
-				box.isBordered = false
-				box.drawsBackground = false
-				box.font = Theme.mono
-				box.completes = true
-				box.numberOfVisibleItems = 12
-				box.isButtonBordered = false
-				return box
-			}()
-		box.target = self
-		box.action = action
-		box.removeAllItems()
-		box.addItems(withObjectValues: values)
-		return box
-	}
-
-	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-		guard let tableColumn else { return nil }
-		let field = (tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? NSTextField)
-			?? {
-				let field = NSTextField()
-				field.identifier = tableColumn.identifier
-				field.isBordered = false
-				field.drawsBackground = false
-				field.lineBreakMode = .byTruncatingTail
-				field.font = Theme.mono
-				return field
-			}()
-		field.target = self
-		field.isEditable = true
-
-		if tableView === timelineTable {
-			guard row < rows.count else { return nil }
-			let entry = rows[row]
-			field.action = #selector(entryEdited(_:))
-			if tableColumn.identifier.rawValue == "transition" {
-				field.stringValue = entry.entry.transition == 0
-					? "" : TakeWriter.number(entry.entry.transition, places: 2)
-				field.placeholderString = "cut"
-				field.textColor = Theme.dimText
-				return field
-			}
-			// Everything a timeline entry may name: the clips there are, the
-			// tags there are, and the sections this project already has.
-			let box = combo(tableColumn.identifier,
-			                vocabulary.clips
-			                    + vocabulary.tags.map { "#\($0)" }
-			                    + vocabulary.groups.map { "@\($0)" },
-			                in: tableView, action: #selector(entryEdited(_:)))
-			// Indented by depth, so a section and its contents read as a tree
-			// the way they do in the file.
-			box.stringValue = String(repeating: "  ", count: entry.depth)
-				+ entry.entry.source.description
-			switch entry.entry.source {
-			case .group: box.textColor = Theme.base(.violet)
-			case .query: box.textColor = Theme.base(.amber)
-			default: box.textColor = Theme.clipStroke(.green)
-			}
-			return box
-		}
-
-		guard row < project.overlays.count else { return nil }
-		let overlay = project.overlays[row]
-		field.action = #selector(overlayEdited(_:))
-		switch tableColumn.identifier.rawValue {
-		case "what":
-			switch overlay.kind {
-			case .text(let text, _):
-				field.stringValue = text
-				field.textColor = Theme.text
-			case .spinner(let spinner):
-				field.stringValue = spinner.words.map(\.text).joined(separator: ", ")
-				field.placeholderString = "spinner — words, comma separated"
-				field.textColor = Theme.base(.amber)
-			}
-		case "from", "to":
-			let box = combo(tableColumn.identifier,
-			                vocabulary.clips + vocabulary.groups.map { "@\($0)" },
-			                in: tableView, action: #selector(overlayEdited(_:)))
-			box.textColor = Theme.dimText
-			switch overlay.span {
-			case .marks(let from, let to):
-				box.stringValue = (tableColumn.identifier.rawValue == "from" ? from : to).description
-			case .times(let from, let to):
-				box.stringValue = Timecode.string(tableColumn.identifier.rawValue == "from" ? from : to)
-			}
-			return box
-		case "anchor":
-			// The faces this project's takes have actually tracked. Blank is a
-			// real answer: an overlay with no anchor sits where its style says.
-			let box = combo(tableColumn.identifier, [""] + vocabulary.anchors,
-			                in: tableView, action: #selector(overlayEdited(_:)))
-			box.stringValue = overlay.anchor ?? ""
-			box.placeholderString = "none"
-			box.textColor = Theme.base(.teal)
-			return box
-		default:
-			break
-		}
-		return field
-	}
-
-	public func tableViewSelectionDidChange(_ notification: Notification) {
-		guard let table = notification.object as? NSTableView else { return }
-		// Selecting in one list clears the other, so "what this writes" has one
-		// thing to be about.
-		if table === timelineTable, overlayTable.selectedRow >= 0 { overlayTable.deselectAll(nil) }
-		if table === overlayTable, timelineTable.selectedRow >= 0 { timelineTable.deselectAll(nil) }
-		showWhatItWrites()
-	}
+	/// Puts a reference from the library on the programme.
+	public func insert(reference: String) { programme.insert(reference: reference) }
 }

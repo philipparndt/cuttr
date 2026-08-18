@@ -48,10 +48,7 @@ public final class ProjectTextEditor: NSView {
 		text.isAutomaticSpellingCorrectionEnabled = false
 		text.delegate = self
 
-		let scroll = NSScrollView()
-		scroll.hasVerticalScroller = true
-		scroll.drawsBackground = false
-		scroll.documentView = text
+		let scroll = TableScroll.wrap(text, horizontal: false)
 		scroll.translatesAutoresizingMaskIntoConstraints = false
 
 		status.font = Theme.monoSmall
