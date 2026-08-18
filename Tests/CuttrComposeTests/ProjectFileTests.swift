@@ -199,3 +199,63 @@ import Testing
 		#expect(again.words == spinner.words)
 	}
 }
+
+/// The panel teaches the format by showing what it is about to write, so the
+/// fragments have to be the real thing rather than a rendering of it.
+@Suite struct FragmentTests {
+
+    @Test func aTimelineFragmentIsWhatTheFileWouldSay() throws {
+        let entry = TimelineEntry(group: "introduction", entries: [
+            TimelineEntry(clip: ClipReference("intro")),
+            try TimelineEntry(query: "#b-roll"),
+        ])
+        let fragment = ProjectWriter.fragment(for: entry)
+        #expect(fragment.contains("- group: introduction"))
+        #expect(fragment.contains("- clip: intro"))
+        // And it parses, which is the check that it is the format and not a
+        // description of it.
+        let back = try ProjectReader.read(fragment)
+        #expect(back.rows.map(\.entry.source.description) == ["@introduction", "intro", "#b-roll"])
+    }
+
+    @Test func anOverlayFragmentParsesBack() throws {
+        let overlay = Overlay(
+            kind: .text("Installing the driver", style: "lower-third"),
+            span: .clips(from: ClipReference("intro"), to: ClipReference("demo")),
+            arrival: .slide(.left, over: 0.4), departure: .fade(over: 0.3))
+        let back = try ProjectReader.read(
+            "timeline: [intro]\n" + ProjectWriter.fragment(for: overlay))
+        #expect(back.overlays.count == 1)
+        #expect(back.overlays[0].arrival == .slide(.left, over: 0.4))
+        #expect(back.overlays[0].departure == .fade(over: 0.3))
+    }
+
+    @Test func anOutputFragmentParsesBack() throws {
+        let output = Output(width: 3840, height: 2160, framesPerSecond: 30,
+                            file: "out.mov", audio: AudioTarget(target: -16, ceiling: -1),
+                            matchReference: "intro")
+        let back = try ProjectReader.read(
+            ProjectWriter.fragment(for: output) + "timeline: [intro]\n")
+        #expect(back.output.width == 3840)
+        #expect(back.output.audio?.target == -16)
+        #expect(back.output.matchReference == "intro")
+    }
+
+    @Test func fragmentsMatchTheWholeFile() {
+        // If these ever drift, the panel is teaching a format the writer does
+        // not produce.
+        let project = Project(
+            timeline: [TimelineEntry(clip: ClipReference("intro"))],
+            overlays: [Overlay(kind: .text("Hello", style: nil),
+                               span: .clips(from: ClipReference("intro"), to: ClipReference("intro")))])
+        let whole = ProjectWriter.write(project)
+        for line in ProjectWriter.fragment(for: project.timeline[0])
+            .split(separator: "\n").dropFirst() {
+            #expect(whole.contains(line), "\(line)")
+        }
+        for line in ProjectWriter.fragment(for: project.overlays[0])
+            .split(separator: "\n").dropFirst() {
+            #expect(whole.contains(line), "\(line)")
+        }
+    }
+}

@@ -74,7 +74,82 @@ public enum ProjectWriter {
 
 		if !project.overlays.isEmpty {
 			out += "\noverlays:\n"
-			for (index, overlay) in project.overlays.enumerated() {
+			out += overlays(project.overlays)
+		}
+
+		if !project.unknownKeys.isEmpty {
+			out += "\n"
+			for key in project.unknownKeys.keys.sorted() {
+				out += (try? Yams.dump(object: [key: project.unknownKeys[key]!])) ?? ""
+			}
+		}
+		return out
+	}
+
+	// MARK: - Fragments, for showing somebody what they just wrote
+	//
+	// The same functions the file is written with, called on one piece. That is
+	// the point: a panel that teaches the format by showing a *rendering* of it
+	// teaches a format that does not exist. These are the bytes that will be on
+	// disk.
+
+	public static func fragment(for entry: TimelineEntry) -> String {
+		"timeline:\n" + entries([entry], indent: "  ")
+	}
+
+	public static func fragment(for overlay: Overlay) -> String {
+		"overlays:\n" + overlays([overlay])
+	}
+
+	public static func fragment(for output: Output) -> String {
+		var out = "output:\n"
+		out += "  size: \(output.width)x\(output.height)\n"
+		out += "  fps:  \(trim(output.framesPerSecond))\n"
+		if let file = output.file { out += "  file: \(scalar(file))\n" }
+		if let audio = output.audio {
+			out += "  audio: {target: \(trim(audio.target)), ceiling: \(trim(audio.ceiling))}"
+			out += "   # LUFS, dBFS\n"
+		}
+		if let reference = output.matchReference {
+			out += "  match: {reference: \(scalar(reference))}\n"
+		}
+		return out
+	}
+
+	/// The timeline, which nests: a group's clips are entries like any other.
+	private static func entries(_ list: [TimelineEntry], indent: String) -> String {
+		var out = ""
+		for entry in list {
+			switch entry.source {
+			case .group(let name, let inner):
+				out += "\(indent)- group: \(scalar(name))\n"
+				out += "\(indent)  clips:\n"
+				out += entries(inner, indent: indent + "    ")
+				if entry.transition != 0 {
+					out += "\(indent)  transition: \(trim(entry.transition))\n"
+				}
+			case .list(let references):
+				out += "\(indent)- clips: [\(references.map(\.description).joined(separator: ", "))]\n"
+				if entry.transition != 0 { out += "\(indent)  transition: \(trim(entry.transition))\n" }
+			case .clip(let reference):
+				out += scalarEntry("clip", reference.description, entry.transition, indent)
+			case .query(_, let source):
+				out += scalarEntry("query", source, entry.transition, indent)
+			}
+		}
+		return out
+	}
+
+	private static func scalarEntry(_ key: String, _ value: String, _ transition: Double, _ indent: String) -> String {
+		// The short form for a straight cut, which is nearly all of them.
+		if transition == 0 { return "\(indent)- \(key): \(scalar(value))\n" }
+		return "\(indent)- \(key):       \(scalar(value))\n"
+			+ "\(indent)  transition: \(trim(transition))\n"
+	}
+
+	private static func overlays(_ list: [Overlay]) -> String {
+		var out = ""
+		for (index, overlay) in list.enumerated() {
 				if index > 0 { out += "\n" }
 				switch overlay.kind {
 				case .text(let text, let style):
@@ -112,46 +187,7 @@ public enum ProjectWriter {
 				out += "    in:     \(transition(overlay.arrival))\n"
 				out += "    out:    \(transition(overlay.departure))\n"
 			}
-		}
-
-		if !project.unknownKeys.isEmpty {
-			out += "\n"
-			for key in project.unknownKeys.keys.sorted() {
-				out += (try? Yams.dump(object: [key: project.unknownKeys[key]!])) ?? ""
-			}
-		}
 		return out
-	}
-
-	/// The timeline, which nests: a group's clips are entries like any other.
-	private static func entries(_ list: [TimelineEntry], indent: String) -> String {
-		var out = ""
-		for entry in list {
-			switch entry.source {
-			case .group(let name, let inner):
-				out += "\(indent)- group: \(scalar(name))\n"
-				out += "\(indent)  clips:\n"
-				out += entries(inner, indent: indent + "    ")
-				if entry.transition != 0 {
-					out += "\(indent)  transition: \(trim(entry.transition))\n"
-				}
-			case .list(let references):
-				out += "\(indent)- clips: [\(references.map(\.description).joined(separator: ", "))]\n"
-				if entry.transition != 0 { out += "\(indent)  transition: \(trim(entry.transition))\n" }
-			case .clip(let reference):
-				out += scalarEntry("clip", reference.description, entry.transition, indent)
-			case .query(_, let source):
-				out += scalarEntry("query", source, entry.transition, indent)
-			}
-		}
-		return out
-	}
-
-	private static func scalarEntry(_ key: String, _ value: String, _ transition: Double, _ indent: String) -> String {
-		// The short form for a straight cut, which is nearly all of them.
-		if transition == 0 { return "\(indent)- \(key): \(scalar(value))\n" }
-		return "\(indent)- \(key):       \(scalar(value))\n"
-			+ "\(indent)  transition: \(trim(transition))\n"
 	}
 
 	private static func transition(_ value: Overlay.Transition) -> String {

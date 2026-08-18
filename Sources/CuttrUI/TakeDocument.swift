@@ -12,6 +12,17 @@ import CuttrKit
 /// clips is 100 kB a copy, on a keystroke — which is nothing, and is worth
 /// saying out loud because "snapshot undo does not scale" is the received
 /// wisdom and it is about documents four orders of magnitude bigger than this.
+public extension Notification.Name {
+	/// A take was written. The `object` is its URL.
+	///
+	/// How a project window notices that one of its takes was re-cut in another
+	/// tab. It could watch the files — the project already watches its own —
+	/// but a notification is exact and instant where a file watcher is neither:
+	/// no debounce, no atomic-replace dance, and no chance of reacting to a
+	/// half-written file, because it is posted after the write returns.
+	static let cuttrTakeChanged = Notification.Name("de.rnd7.cuttr.takeChanged")
+}
+
 @MainActor
 public final class TakeDocument {
 
@@ -207,6 +218,11 @@ public final class TakeDocument {
 		               framesPerSecond: grid.framesPerSecond)
 			.write(to: url, atomically: true, encoding: .utf8)
 		onChange?()
+		// Tracking is something a project draws with, so a solved path is a
+		// change a project window wants to hear about too.
+		if let url = self.url {
+			NotificationCenter.default.post(name: .cuttrTakeChanged, object: url.standardizedFileURL)
+		}
 	}
 
 	/// Reads whatever sidecars the take names. Called after opening one.
@@ -420,6 +436,7 @@ public final class TakeDocument {
 		try TakeWriter.write(take).write(to: fileURL, atomically: true, encoding: .utf8)
 		savedTake = take
 		onChange?()
+		NotificationCenter.default.post(name: .cuttrTakeChanged, object: fileURL.standardizedFileURL)
 	}
 
 	private func resolveAgainst(_ path: String, base: URL?) -> URL {

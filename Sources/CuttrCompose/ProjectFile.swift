@@ -218,11 +218,9 @@ public enum ProjectReader {
 		               unknownKeys: root)
 	}
 
+	/// One rule for "what does this string mean", shared with the panel.
 	private static func entryFromText(_ text: String, transition: Double) throws -> TimelineEntry {
-		let looksLikeQuery = text.contains("#") || text.contains("*") || text.contains(" ")
-		return looksLikeQuery
-			? try TimelineEntry(query: text, transition: transition)
-			: TimelineEntry(clip: ClipReference(text), transition: transition)
+		try TimelineEntry(text: text, transition: transition)
 	}
 
 	// MARK: - Pieces

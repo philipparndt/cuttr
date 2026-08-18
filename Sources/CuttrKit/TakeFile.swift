@@ -346,8 +346,9 @@ public enum TakeWriter {
 	}
 
 	/// A number without a trailing run of zeroes, because `1.040000` is not how
-	/// anybody writes it.
-	static func number(_ value: Double, places: Int) -> String {
+	/// anybody writes it. Public because the project panel shows the same
+	/// numbers in its fields as the file has in it.
+	public static func number(_ value: Double, places: Int) -> String {
 		var text = String(format: "%.\(places)f", value)
 		if text.contains(".") {
 			while text.hasSuffix("0") { text.removeLast() }

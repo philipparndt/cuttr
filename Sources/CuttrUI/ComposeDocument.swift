@@ -23,14 +23,28 @@ public final class ComposeDocument {
 
 	private var watcher: DispatchSourceFileSystemObject?
 	private var watchedDescriptor: CInt = -1
+	private var takeObserver: NSObjectProtocol?
 
 	public init(project: Project = Project(), url: URL? = nil) {
 		self.project = project
 		self.url = url
+		// Re-cutting a take in another tab changes this programme: a clip moved
+		// or renamed, a face newly tracked. The window should show that at
+		// once rather than when somebody thinks to reload.
+		takeObserver = NotificationCenter.default.addObserver(
+			forName: .cuttrTakeChanged, object: nil, queue: .main
+		) { [weak self] note in
+			MainActor.assumeIsolated {
+				guard let self, let changed = note.object as? URL else { return }
+				guard self.takes.contains(where: { $0.url == changed }) else { return }
+				self.resolve()
+			}
+		}
 	}
 
 	deinit {
 		watcher?.cancel()
+		if let takeObserver { NotificationCenter.default.removeObserver(takeObserver) }
 	}
 
 	public var baseURL: URL? {

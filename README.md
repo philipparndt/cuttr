@@ -189,6 +189,23 @@ the same files.
 The second half, and the half you start from: a programme assembled from clips
 across many separately-cut takes, with things drawn over it.
 
+The project window has an editor for all of this down the right-hand side — and
+it is a **teaching aid** as much as an editor. Every field is labelled with the
+key it writes (`fps`, `from`, `match.reference`) rather than a friendly
+paraphrase, and the pane at the bottom shows the YAML your current selection
+produces, live, straight out of the same emitter that writes the file. Nothing
+in it renders a *description* of the format; it shows the format.
+
+The intended arc is that you use the panel, read what it wrote, and after a week
+stop using the panel. A tool whose interface hides its file is one you can never
+graduate from.
+
+Typing in it follows the file's own rules, because it is the same rule: `intro`
+is a clip, `#b-roll and not #reject` is a query, `@introduction` is a section.
+
+Takes edited in another tab update the programme at once — re-cut a clip, track
+a face, and the project window has it before you have switched back.
+
 The project window lists its takes down the side — name, clip count, and where
 each one is. Double-click to open one in a tab beside the project; **Add Take…**
 puts an existing `.cuttr` in, **New Take…** cuts a fresh one from a recording,

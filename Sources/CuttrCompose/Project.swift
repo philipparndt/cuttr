@@ -182,6 +182,23 @@ public struct TimelineEntry: Sendable, Equatable {
 		self.init(source: .group(group, entries), transition: transition)
 	}
 
+	/// An entry written the way it is written in the file.
+	///
+	/// `intro` is a clip, `#b-roll and not #reject` is a query, `@introduction`
+	/// is a section. One rule, used by the reader and by the panel, so that what
+	/// somebody types in a field and what they type in the file mean the same
+	/// thing — which is most of what the panel is for.
+	public init(text: String, transition: Double = 0) throws {
+		let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+		if trimmed.hasPrefix("@") {
+			self.init(group: Slug.make(from: String(trimmed.dropFirst())), entries: [], transition: transition)
+		} else if trimmed.contains("#") || trimmed.contains("*") || trimmed.contains(" ") {
+			try self.init(query: trimmed, transition: transition)
+		} else {
+			self.init(clip: ClipReference(trimmed), transition: transition)
+		}
+	}
+
 	/// The single clip this names, for the cases that only make sense for one.
 	public var clip: ClipReference? {
 		if case .clip(let reference) = source { return reference }

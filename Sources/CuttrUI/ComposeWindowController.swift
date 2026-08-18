@@ -22,6 +22,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private let strip = ProgrammeStrip()
 	private let markers = AnchorMarkerView()
 	private let takesTable = TakesTable()
+	private let inspector = ProjectInspector()
 
 	/// Opening a take is the application's business, not this window's: it may
 	/// already be open in another tab.
@@ -123,6 +124,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		withTakes.dividerStyle = .thin
 		withTakes.addArrangedSubview(takesTable)
 		withTakes.addArrangedSubview(split)
+		withTakes.addArrangedSubview(inspector)
 
 		let content = DropView()
 		content.onDrop = { [weak self] urls in
@@ -170,11 +172,13 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		let preferred = NSLayoutConstraint.Priority(250)
 		let wishes = [
 			takesTable.widthAnchor.constraint(equalToConstant: 230),
+			inspector.widthAnchor.constraint(equalToConstant: 330),
 			strip.heightAnchor.constraint(equalToConstant: 170),
 		]
 		for wish in wishes { wish.priority = preferred; wish.isActive = true }
 		NSLayoutConstraint.activate([
 			takesTable.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
+			inspector.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
 			strip.heightAnchor.constraint(greaterThanOrEqualToConstant: 90),
 			playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
 		])
@@ -188,6 +192,15 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private func wire() {
 		composeDocument.onChange = { [weak self] in self?.rebuild() }
 		strip.onScrub = { [weak self] time in self?.seek(to: time) }
+
+		inspector.onChange = { [weak self] project in
+			guard let self else { return }
+			// Straight to the file. The panel is a way of writing the project,
+			// so an edit that only lived in memory would be a second source of
+			// truth — and the file is the one this program believes.
+			self.composeDocument.apply(project)
+			try? self.composeDocument.write()
+		}
 
 		takesTable.onOpen = { [weak self] url in self?.onOpenTake?(url) }
 		takesTable.onRemove = { [weak self] path in self?.composeDocument.removeTake(path) }
@@ -243,6 +256,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		window.title = composeDocument.displayName
 		window.representedURL = composeDocument.url
 		takesTable.reload(composeDocument.takes)
+		inspector.reload(composeDocument.project)
 		strip.resolved = composeDocument.resolved
 		markers.markers = (composeDocument.resolved?.anchors ?? []).compactMap { entry in
 			entry.path.map { (entry.anchor.name, $0) }
