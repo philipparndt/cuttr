@@ -280,9 +280,28 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			+ "and follows it for the length of the clip under the playhead."
 		menu.addItem(track)
 
-		// What already exists is managed in the list below, where it can be seen
-		// and renamed. Repeating every anchor twice in this menu made it longer
-		// with every face tracked and told you nothing about any of them.
+		// Picking up a lost face. Offered only for anchors that do *not* already
+		// cover this moment — continuing something already tracked here is not
+		// a thing anybody means to do, and listing it would be noise.
+		let resumable = takeDocument.take.anchors.filter { anchor in
+			takeDocument.anchorPaths[anchor.name]?.covers(playhead) != true
+		}
+		if !resumable.isEmpty {
+			menu.addItem(.separator())
+			for anchor in resumable {
+				let item = NSMenuItem(title: "Continue “\(anchor.name)” Here",
+				                      action: #selector(continueAnchorHere(_:)), keyEquivalent: "")
+				item.target = self
+				item.representedObject = anchor.name
+				item.toolTip = "Follow this face again from here and add it to \(anchor.name),\n"
+					+ "leaving a gap where the tracker had lost it."
+				menu.addItem(item)
+			}
+		}
+
+		// The rest is managed in the list below, where it can be seen and
+		// renamed. Repeating every anchor twice in this menu made it longer with
+		// every face tracked and told you nothing about any of them.
 		return menu
 	}
 
@@ -327,6 +346,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		solve(takeDocument.addAnchor(name: "anchor", at: playhead, point: point))
 	}
 
+	@objc private func continueAnchorHere(_ sender: NSMenuItem) {
+		guard let name = sender.representedObject as? String,
+		      let point = lastClick,
+		      let anchor = takeDocument.take.anchors.first(where: { $0.name == name })
+		else { return }
+		solve(anchor, from: playhead, at: point, extending: true)
+	}
+
 	@objc private func resolveAnchor(_ sender: NSMenuItem) {
 		guard let name = sender.representedObject as? String,
 		      let anchor = takeDocument.take.anchors.first(where: { $0.name == name })
@@ -341,34 +368,64 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	}
 
 	private func solve(_ anchor: Anchor) {
+		solve(anchor, from: anchor.markedAt, at: anchor.point, extending: false)
+	}
+
+	/// Follows a face from a mark. `extending` lays the result into whatever the
+	/// anchor already has rather than replacing it.
+	private func solve(_ anchor: Anchor, from time: Double, at point: CGPoint, extending: Bool) {
 		guard let video = takeDocument.videoURL else { return }
 		solveTask?.cancel()
 		header.setStatus("following \(anchor.name)…")
+		header.setProgress(0)
 		let duration = takeDocument.duration
 		solveTask = Task { [weak self] in
 			do {
 				let path = try await AnchorSolver.solveShot(
 					videoURL: video, method: anchor.method,
-					markedAt: anchor.markedAt, point: anchor.point,
-					within: 0 ... max(duration, anchor.markedAt),
+					markedAt: time, point: point,
+					within: 0 ... max(duration, time),
 					onProgress: { step in
 						Task { @MainActor in
-							self?.header.setStatus("following \(anchor.name)… \(step.solved) samples")
+							self?.header.setProgress(step.fraction)
+							self?.header.setStatus(String(
+								format: "following %@… %d of at most %d",
+								anchor.name, step.solved, step.total))
 						}
 					})
 				guard !Task.isCancelled, let self else { return }
 				var anchor = anchor
-				if let range = path.timeRange {
-					self.takeDocument.setRange(range, for: anchor.name)
-					anchor.from = range.lowerBound
-					anchor.to = range.upperBound
+				if extending {
+					try self.takeDocument.extendPath(path, for: anchor.name)
+				} else {
+					if let range = path.timeRange {
+						self.takeDocument.setRange(range, for: anchor.name)
+						anchor.from = range.lowerBound
+						anchor.to = range.upperBound
+					}
+					try self.takeDocument.writePath(path, for: anchor)
 				}
-				try self.takeDocument.writePath(path, for: anchor)
-				self.header.setStatus(String(
-					format: "%@: %@ to %@, %d samples — a project can say `anchor: %@`",
-					anchor.name, Timecode.string(anchor.from), Timecode.string(anchor.to),
-					path.samples.count, anchor.name))
+				self.header.setProgress(nil)
+
+				let spans = self.takeDocument.anchorPaths[anchor.name]?.covered ?? []
+				let where_ = spans
+					.map { "\(Timecode.string($0.lowerBound))–\(Timecode.string($0.upperBound))" }
+					.joined(separator: ", ")
+				// Why it stopped, not just where. Hitting the search bound and
+				// losing the face look identical in the numbers and call for
+				// opposite responses: one wants continuing from further on, the
+				// other wants a fresh mark where she comes back.
+				let end = path.timeRange?.upperBound ?? time
+				let bounded = end >= min(time + AnchorSolver.reach, duration) - 0.2
+				var status = spans.count > 1
+					? "\(anchor.name): \(spans.count) stretches — \(where_)"
+					: "\(anchor.name): \(where_), \(path.samples.count) samples"
+				if bounded && end < duration - 0.2 {
+					status += "  ·  stopped at the search limit — right-click later to continue"
+				}
+				self.header.setStatus(status)
 			} catch {
+				self?.header.setProgress(nil)
 				self?.header.setStatus(error.localizedDescription)
 			}
 		}

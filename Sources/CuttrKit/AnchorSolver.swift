@@ -33,9 +33,18 @@ public enum AnchorSolver {
 	public static let sampleRate: Double = 10
 
 	public struct Progress: Sendable {
+		/// Samples looked at so far.
 		public let solved: Int
+		/// The most there could be.
+		///
+		/// An upper bound rather than a count, and it has to be: following a
+		/// shot stops when the face is lost, and how far that is cannot be
+		/// known before it happens. What *is* known is the span being searched,
+		/// so the bar fills against that and jumps to the end when the tracker
+		/// stops early — which is the honest shape of the thing rather than a
+		/// number invented to make the bar behave.
 		public let total: Int
-		public var fraction: Double { total > 0 ? Double(solved) / Double(total) : 0 }
+		public var fraction: Double { total > 0 ? min(Double(solved) / Double(total), 1) : 0 }
 	}
 
 	/// Follows a marked point outward until the face is lost.
@@ -50,13 +59,22 @@ public enum AnchorSolver {
 	/// blink or a half-second of a turned head does not end it but leaving the
 	/// frame does. Bounded by `limit` seconds each way so that marking a face
 	/// in a five-minute recording is not a five-minute wait.
+	/// How far a single follow reaches from the mark, each way.
+	///
+	/// A bound rather than "until it stops", because marking a face in a
+	/// five-minute recording would otherwise be a five-minute wait. Ninety
+	/// seconds each way covers most shots; past that, "continue here" picks it
+	/// up again — which is the same gesture as picking up after a lost face, and
+	/// produces the same one anchor with two stretches.
+	public static let reach: Double = 90
+
 	public static func solveShot(
 		videoURL: URL,
 		method: Anchor.Method,
 		markedAt: Double,
 		point: CGPoint,
 		within bounds: ClosedRange<Double>,
-		limit: Double = 90,
+		limit: Double = AnchorSolver.reach,
 		lossTolerance: Int = 15,
 		onProgress: @Sendable (Progress) -> Void = { _ in }
 	) async throws -> AnchorPath {
@@ -77,19 +95,28 @@ public enum AnchorSolver {
 			return AnchorPath(samples: [(markedAt, point)])
 		}
 
+		// The whole span that could be searched, in samples: forward to the
+		// latest and backward to the earliest. Counted once, up front, so the
+		// two walks report against the same denominator instead of each filling
+		// a bar of its own.
+		let budget = max(Int((latest - earliest) / step), 1)
+		var looked = 0
+
 		/// Walks in one direction until the face is lost for long enough.
 		func walk(_ direction: Double, stopAt: Double) async -> [(time: Double, point: CGPoint)] {
 			var found: [(time: Double, point: CGPoint)] = []
 			var last = point
+			var placement: Placement?
 			var misses = 0
 			var time = markedAt + direction * step
-			let total = max(abs(stopAt - markedAt) / step, 1)
 			while direction > 0 ? time <= stopAt : time >= stopAt {
 				if Task.isCancelled { return found }
-				if let position = try? await landmarkPosition(wanted, in: generator, at: time, near: last) {
+				if let result = try? await landmarkPosition(
+					wanted, in: generator, at: time, near: last, placement: placement) {
 					misses = 0
-					last = position
-					found.append((time, position))
+					last = result.point
+					placement = result.placement
+					found.append((time, result.point))
 				} else {
 					misses += 1
 					if misses >= lossTolerance { break }
@@ -98,7 +125,8 @@ public enum AnchorSolver {
 					// across it at render time.
 					found.append((time, last))
 				}
-				onProgress(Progress(solved: found.count, total: Int(total)))
+				looked += 1
+				onProgress(Progress(solved: looked, total: budget))
 				time += direction * step
 			}
 			// The tail of held samples after the last real one is not tracking,
@@ -162,11 +190,15 @@ public enum AnchorSolver {
 
 		var samples: [(time: Double, point: CGPoint)] = []
 		var last = point
+		var placement: Placement?
 		for (index, time) in times.enumerated() {
 			if Task.isCancelled { throw CancellationError() }
 			var found: CGPoint?
-			if method == .faceLandmark, let wanted {
-				found = try? await landmarkPosition(wanted, in: generator, at: time, near: last)
+			if method == .faceLandmark, let wanted,
+			   let result = try? await landmarkPosition(
+				   wanted, in: generator, at: time, near: last, placement: placement) {
+				found = result.point
+				placement = result.placement
 			}
 			if found == nil {
 				// No face this frame — somebody turned away, or it is not a face
@@ -220,6 +252,19 @@ public enum AnchorSolver {
 		let which: Which
 	}
 
+	/// Where a landmark sits inside its face's box, in box units.
+	///
+	/// The thing that gets tracking through a blink. Vision keeps finding the
+	/// face when somebody closes their eyes or squints hard, but it often stops
+	/// returning the *eye*, and treating a missing landmark as a missing face
+	/// ended the shot every time she laughed. An eye does not move relative to
+	/// the head it is in, so the last known offset is a good enough answer for
+	/// the fraction of a second the lid is down — and the moment the landmark
+	/// comes back, it takes over again.
+	private struct Placement: Sendable {
+		let offset: CGPoint
+	}
+
 	private static func landmark(
 		nearest point: CGPoint, in generator: AVAssetImageGenerator, at time: Double
 	) async throws -> Landmark? {
@@ -239,21 +284,39 @@ public enum AnchorSolver {
 	}
 
 	private static func landmarkPosition(
-		_ wanted: Landmark, in generator: AVAssetImageGenerator, at time: Double, near previous: CGPoint
-	) async throws -> CGPoint? {
-		guard let faces = try await detect(generator, at: time) else { return nil }
-		// The nearest face to where it was, which is what keeps the right person
-		// when there are two in shot.
-		var best: (CGPoint, Double)?
+		_ wanted: Landmark, in generator: AVAssetImageGenerator, at time: Double,
+		near previous: CGPoint, placement: Placement?
+	) async throws -> (point: CGPoint, placement: Placement)? {
+		guard let faces = try await detect(generator, at: time), !faces.isEmpty else { return nil }
+
+		// The face nearest where the last one was — which is what keeps the
+		// right person when there are two in shot. Chosen by the *box*, not by
+		// the landmark, so a face whose eye is currently shut is still a
+		// candidate rather than dropping out of the running.
+		var best: (face: VNFaceObservation, distance: Double)?
 		for face in faces {
-			guard let candidate = position(of: wanted.which, in: face) else { continue }
-			let distance = hypot(candidate.x - previous.x, candidate.y - previous.y)
-			if best == nil || distance < best!.1 { best = (candidate, distance) }
+			let box = face.boundingBox
+			let centre = CGPoint(x: box.midX, y: box.midY)
+			let distance = hypot(centre.x - previous.x, centre.y - previous.y)
+			if best == nil || distance < best!.distance { best = (face, distance) }
 		}
 		// A jump of more than a fifth of the frame between two samples a tenth
 		// of a second apart is a different face, not the same one moving.
-		guard let best, best.1 < 0.2 else { return nil }
-		return best.0
+		guard let best, best.distance < 0.25 else { return nil }
+
+		let box = best.face.boundingBox
+		if let found = position(of: wanted.which, in: best.face) {
+			guard box.width > 0, box.height > 0 else { return (found, placement ?? Placement(offset: .zero)) }
+			return (found, Placement(offset: CGPoint(
+				x: (found.x - box.minX) / box.width,
+				y: (found.y - box.minY) / box.height)))
+		}
+		// No landmark this frame — a blink, usually. Put it where it was on the
+		// head, and keep going.
+		guard let placement else { return nil }
+		return (CGPoint(x: box.minX + placement.offset.x * box.width,
+		                y: box.minY + placement.offset.y * box.height),
+		        placement)
 	}
 
 	private static func detect(

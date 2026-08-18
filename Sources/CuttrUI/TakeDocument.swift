@@ -179,6 +179,22 @@ public final class TakeDocument {
 		anchorPaths[name] = nil
 	}
 
+	/// Lays a freshly solved stretch into an anchor that already has one.
+	///
+	/// Widens the anchor's range to cover both, so a project asking for the
+	/// anchor gets everything that was followed.
+	public func extendPath(_ addition: AnchorPath, for name: String) throws {
+		guard let index = take.anchors.firstIndex(where: { $0.name == name }) else { return }
+		let merged = (anchorPaths[name] ?? AnchorPath()).merging(addition)
+		var next = take
+		if let range = merged.timeRange {
+			next.anchors[index].from = range.lowerBound
+			next.anchors[index].to = range.upperBound
+		}
+		apply(next, actionName: "Continue Tracking")
+		try writePath(merged, for: next.anchors[index])
+	}
+
 	/// Writes a solved path beside the take, and keeps it for drawing.
 	public func writePath(_ path: AnchorPath, for anchor: Anchor) throws {
 		anchorPaths[anchor.name] = path

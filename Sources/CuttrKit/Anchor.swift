@@ -144,6 +144,44 @@ public struct AnchorPath: Sendable, Equatable {
 		               y: a.point.y + (b.point.y - a.point.y) * t)
 	}
 
+	/// This path with another laid into it.
+	///
+	/// What "continue from here" produces. A tracker that loses a face — she
+	/// turns away, somebody walks in front, the shot goes wide — stops, and the
+	/// honest record of that is a path with a hole in it rather than a path
+	/// that pretends. Marking her again further on solves a second stretch and
+	/// merges it in: one anchor, one name, two spans of truth and a gap in
+	/// between that nothing is drawn over.
+	///
+	/// Where the two overlap, the newer samples win: the later solve was made
+	/// from a mark somebody placed while looking at that part of the picture.
+	public func merging(_ other: AnchorPath) -> AnchorPath {
+		guard !other.isEmpty else { return self }
+		guard !isEmpty else { return other }
+
+		let incoming = other.covered
+		func replaced(_ time: Double) -> Bool { incoming.contains { $0.contains(time) } }
+		let combined = (samples.filter { !replaced($0.time) } + other.samples)
+			.sorted { $0.time < $1.time }
+		return AnchorPath(samples: combined, covered: AnchorPath.union(covered + other.covered))
+	}
+
+	/// Overlapping or touching spans, joined.
+	static func union(_ ranges: [ClosedRange<Double>]) -> [ClosedRange<Double>] {
+		let sorted = ranges.sorted { $0.lowerBound < $1.lowerBound }
+		var out: [ClosedRange<Double>] = []
+		for range in sorted {
+			// A hair of slack, so two stretches that meet at a sample boundary
+			// come out as one span rather than two abutting ones.
+			if let last = out.last, range.lowerBound <= last.upperBound + 1e-6 {
+				out[out.count - 1] = last.lowerBound ... Swift.max(last.upperBound, range.upperBound)
+			} else {
+				out.append(range)
+			}
+		}
+		return out
+	}
+
 	// MARK: - The sidecar
 
 	/// Three columns of text, because that is a file somebody can fix.

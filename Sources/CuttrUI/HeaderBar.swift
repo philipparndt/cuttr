@@ -29,6 +29,7 @@ public final class HeaderBar: NSView {
 	private let alignButton = NSButton()
 	private let monitor = NSSegmentedControl()
 	private let statusLabel = NSTextField(labelWithString: "")
+	private let progress = NSProgressIndicator()
 	private var swatches: [NSButton] = []
 
 	public override init(frame: NSRect) {
@@ -71,6 +72,15 @@ public final class HeaderBar: NSView {
 		statusLabel.textColor = Theme.dimText
 		statusLabel.lineBreakMode = .byTruncatingTail
 
+		progress.style = .bar
+		progress.isIndeterminate = false
+		progress.minValue = 0
+		progress.maxValue = 1
+		progress.controlSize = .small
+		// Hidden until there is something to report, and detached from the
+		// stack while hidden so it leaves no gap.
+		progress.isHidden = true
+
 		let offsetLabel = NSTextField(labelWithString: "offset")
 		offsetLabel.font = Theme.monoSmall
 		offsetLabel.textColor = Theme.dimText
@@ -106,7 +116,7 @@ public final class HeaderBar: NSView {
 		let stack = NSStackView(views: [
 			timeLabel, spacer(8), videoButton, audioButton, spacer(12),
 			offsetLabel, offsetField, alignButton, spacer(8), monitor,
-			spacer(10), colorStack, spacer(8), statusLabel,
+			spacer(10), colorStack, spacer(8), progress, statusLabel,
 		])
 		stack.orientation = .horizontal
 		stack.spacing = 6
@@ -118,6 +128,7 @@ public final class HeaderBar: NSView {
 			stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
 			stack.centerYAnchor.constraint(equalTo: centerYAnchor),
 			offsetField.widthAnchor.constraint(equalToConstant: 92),
+			progress.widthAnchor.constraint(equalToConstant: 110),
 		])
 		statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 	}
@@ -169,6 +180,12 @@ public final class HeaderBar: NSView {
 	}
 
 	public func setStatus(_ text: String) { statusLabel.stringValue = text }
+
+	/// `nil` puts the bar away.
+	public func setProgress(_ fraction: Double?) {
+		progress.isHidden = fraction == nil
+		if let fraction { progress.doubleValue = fraction }
+	}
 
 	// MARK: - Actions
 

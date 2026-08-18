@@ -283,11 +283,24 @@ a tracker that wandered onto a lamp is obvious in the second it happens rather
 than after a render.
 
 **An anchor tracks a shot, not a subclip.** It is followed outward from where
-you marked it until the face is lost — a blink or half a second of a turned head
-does not end it, leaving frame does — and the range it managed is written back
+you marked it until the face is lost, and the range it managed is written back
 into the take. Any subclip overlapping that range can use it, however many there
 are, and re-cutting the take does not invalidate the tracking. Marking does not
 even need a clip to exist yet.
+
+A blink does not end it. Vision keeps finding the face when somebody shuts their
+eyes or squints hard, but often stops returning the *eye* — so the tracker
+remembers where the eye sits on the head and holds it there until the landmark
+comes back. Without that, following one real shot stopped after 78 seconds; with
+it, 155.
+
+**When it does stop, continue.** Right-click later in the picture and pick
+*Continue "mia" Here*. The new stretch is merged into the same anchor, leaving a
+hole where the tracker genuinely could not see — one name, two spans of truth,
+and nothing drawn over the gap. The same gesture picks up after the
+ninety-seconds-each-way search bound, which the status line names when it is
+what stopped things, because "lost her" and "ran out of search" want opposite
+responses.
 
 **More than one at a time.** A two-shot is two anchors; they are named apart
 automatically and tracked independently, and each frame's face is matched to the

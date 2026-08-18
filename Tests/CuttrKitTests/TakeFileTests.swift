@@ -265,3 +265,56 @@ import Testing
 		#expect(!AnchorPath().covers(0))
 	}
 }
+
+/// Picking a face up again after the tracker loses it.
+@Suite struct AnchorMergeTests {
+
+	private func path(_ spans: [(Double, Double)]) -> AnchorPath {
+		var samples: [(time: Double, point: CGPoint)] = []
+		for (from, to) in spans {
+			var t = from
+			while t <= to + 1e-9 {
+				samples.append((t, CGPoint(x: t / 100, y: 0.5)))
+				t += 0.1
+			}
+		}
+		return AnchorPath(samples: samples, covered: spans.map { $0.0 ... $0.1 })
+	}
+
+	@Test func mergingLeavesTheGapAlone() {
+		// One anchor, two stretches, and nothing claimed in between: a hole is
+		// the honest record of a face the tracker could not see.
+		let merged = path([(0, 2)]).merging(path([(5, 7)]))
+		#expect(merged.covered.count == 2)
+		#expect(merged.covers(1))
+		#expect(merged.covers(6))
+		#expect(!merged.covers(3.5))
+		#expect(merged.timeRange == 0.0 ... 7.0)
+	}
+
+	@Test func overlappingStretchesBecomeOne() {
+		let merged = path([(0, 4)]).merging(path([(3, 8)]))
+		#expect(merged.covered.count == 1)
+		#expect(merged.covered.first == 0.0 ... 8.0)
+	}
+
+	@Test func theNewerSolveWins() {
+		// The second was made from a mark somebody placed while looking at that
+		// part of the picture, so where they disagree it is the better answer.
+		let old = AnchorPath(samples: [(1.0, CGPoint(x: 0.1, y: 0.1))], covered: [0.0 ... 2.0])
+		let new = AnchorPath(samples: [(1.0, CGPoint(x: 0.9, y: 0.9))], covered: [0.5 ... 1.5])
+		let merged = old.merging(new)
+		#expect(merged.point(at: 1)?.x == 0.9)
+	}
+
+	@Test func mergingWithNothingChangesNothing() {
+		let one = path([(0, 2)])
+		#expect(one.merging(AnchorPath()) == one)
+		#expect(AnchorPath().merging(one) == one)
+	}
+
+	@Test func touchingSpansDoNotStayApart() {
+		#expect(AnchorPath.union([0.0 ... 1.0, 1.0 ... 2.0]).count == 1)
+		#expect(AnchorPath.union([0.0 ... 1.0, 3.0 ... 4.0]).count == 2)
+	}
+}
