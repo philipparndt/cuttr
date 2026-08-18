@@ -14,6 +14,11 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 	public var onRename: ((Clip.ID, String) -> Void)?
 	public var onSlugChange: ((Clip.ID, String) -> Void)?
 	public var onNoteChange: ((Clip.ID, String) -> Void)?
+	/// Tags, typed as a comma-separated list. Text, because a tag is text and
+	/// this file is meant to be edited as text — a token field would be a nicer
+	/// noun and a worse verb.
+	public var onTagsChange: ((Clip.ID, String) -> Void)?
+	public var onOrderChange: ((Clip.ID, String) -> Void)?
 	/// A start or an end, typed in. The value is text because it is a timecode
 	/// and may be nonsense; the controller parses it and ignores what it cannot
 	/// read, which is what leaves the old value on screen.
@@ -27,7 +32,10 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 	private var rows: [Clip] = []
 
 	private enum Column: String, CaseIterable {
-		case slug, name, start, end, duration, note
+		// Tags sit next to the name on purpose: they are the thing a project
+		// selects on, and a column somebody has to scroll to find is a feature
+		// they do not know exists.
+		case slug, name, tags, start, end, duration, order, note
 		var title: String {
 			switch self {
 			case .slug: return "Slug"
@@ -35,6 +43,8 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 			case .start: return "Start"
 			case .end: return "End"
 			case .duration: return "Length"
+			case .tags: return "Tags"
+			case .order: return "Order"
 			case .note: return "Note"
 			}
 		}
@@ -45,6 +55,8 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 			case .start: return 78
 			case .end: return 78
 			case .duration: return 66
+			case .tags: return 150
+			case .order: return 56
 			case .note: return 150
 			}
 		}
@@ -84,10 +96,26 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 			table.addTableColumn(c)
 		}
 
-		let scroll = NSScrollView()
+		// Fixed column widths and a horizontal scroller. Without both, AppKit
+		// squeezes every column to fit the pane and the ones on the right —
+		// which is where tags and order are — become unreachable slivers.
+		table.columnAutoresizingStyle = .noColumnAutoresizing
+
+		// Born with a real size, not zero.
+		//
+		// A scroll view laid out from an empty frame tiles its scrollers before
+		// it knows which way round it is, and the horizontal one is drawn
+		// briefly as a vertical bar until something — a scroll, a resize —
+		// forces a second pass. Giving it plausible bounds up front means the
+		// first tile is the right one.
+		let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 420, height: 280))
+		table.frame = scroll.bounds
 		scroll.documentView = table
 		scroll.hasVerticalScroller = true
+		scroll.hasHorizontalScroller = true
+		scroll.autohidesScrollers = true
 		scroll.drawsBackground = false
+		scroll.tile()
 		scroll.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(scroll)
 		NSLayoutConstraint.activate([
@@ -132,13 +160,23 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 
 	/// The slug, for the menu item that edits it. A slug is a reference, so it
 	/// is worth being able to set one deliberately rather than only by renaming.
+	/// Puts the cursor in a clip's tags, for the menu item that does the same.
+	public func beginEditingTags(_ id: Clip.ID) {
+		edit(id, column: .tags)
+	}
+
 	public func beginEditingSlug(_ id: Clip.ID) {
+		edit(id, column: .slug)
+	}
+
+	private func edit(_ id: Clip.ID, column: Column) {
 		guard let row = rows.firstIndex(where: { $0.id == id }),
-		      let column = table.tableColumns.firstIndex(where: { $0.identifier.rawValue == Column.slug.rawValue })
+		      let index = table.tableColumns.firstIndex(where: { $0.identifier.rawValue == column.rawValue })
 		else { return }
 		table.scrollRowToVisible(row)
+		table.scrollColumnToVisible(index)
 		table.selectRowIndexes([row], byExtendingSelection: false)
-		table.editColumn(column, row: row, with: nil, select: true)
+		table.editColumn(index, row: row, with: nil, select: true)
 	}
 
 	@objc private func doubleClicked() {
@@ -190,6 +228,15 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 		case .duration:
 			field.stringValue = Timecode.string(clip.duration)
 			field.textColor = Theme.dimText
+		case .tags:
+			field.stringValue = clip.tags.joined(separator: ", ")
+			// Placeholder rather than an empty cell, because "how do I tag
+			// this" was not answerable from looking at it.
+			field.placeholderString = "b-roll, keep"
+			field.textColor = Theme.base(.amber)
+		case .order:
+			field.stringValue = String(clip.order)
+			field.textColor = clip.order == Clip.defaultOrder ? Theme.dimText : Theme.text
 		case .note:
 			field.stringValue = clip.note ?? ""
 			field.textColor = Theme.dimText
@@ -210,6 +257,8 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 		case .note: onNoteChange?(id, sender.stringValue)
 		case .start: onTimeChange?(id, true, sender.stringValue)
 		case .end: onTimeChange?(id, false, sender.stringValue)
+		case .tags: onTagsChange?(id, sender.stringValue)
+		case .order: onOrderChange?(id, sender.stringValue)
 		case .duration: break
 		}
 	}

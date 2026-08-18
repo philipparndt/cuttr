@@ -149,13 +149,17 @@ public final class Transport {
 	/// machinery — but it does want the part that works: one player, one view,
 	/// one set of seek and tick rules. Having a second `AVPlayer` set up by hand
 	/// over there was a second playback path to get wrong, and it was wrong.
-	public func present(_ composition: AVComposition, videoComposition: AVVideoComposition?, duration: Double) {
+	public func present(
+		_ composition: AVComposition, videoComposition: AVVideoComposition?,
+		audioMix: AVAudioMix? = nil, duration: Double
+	) {
 		loadTask?.cancel()
 		self.duration = duration
 		let resumeAt = min(currentTime, duration)
 		let wasPlaying = isPlaying
 		let item = AVPlayerItem(asset: composition)
 		item.videoComposition = videoComposition
+		item.audioMix = audioMix
 		player.replaceCurrentItem(with: item)
 		if resumeAt > 0 { seek(to: resumeAt) }
 		if wasPlaying { player.play() }

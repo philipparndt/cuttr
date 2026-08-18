@@ -132,7 +132,30 @@ public enum TakeReader {
 				path: nonEmpty(m["path"] as? String ?? "")))
 		}
 
-		return Take(video: video, audio: audio, clips: clips, anchors: anchors, unknownKeys: root)
+		var measured = Measured()
+		if let m = root.removeValue(forKey: "measured").flatMap(mapping) {
+			measured.loudness = number(m["loudness"])
+			measured.peak = number(m["peak"])
+			if let cast = (m["cast"] as? [Any])?.compactMap({ number($0) }), cast.count == 3 {
+				measured.cast = cast
+			}
+		}
+
+		var look = Look.none
+		if let m = root.removeValue(forKey: "look").flatMap(mapping) {
+			look.profile = (m["profile"] as? String).flatMap(nonEmpty).map { Slug.make(from: $0) }
+			look.exposure = number(m["exposure"]) ?? 0
+			look.temperature = number(m["temperature"]) ?? 0
+			look.tint = number(m["tint"]) ?? 0
+			look.saturation = number(m["saturation"]) ?? 1
+			look.contrast = number(m["contrast"]) ?? 1
+			if let gain = (m["gain"] as? [Any])?.compactMap({ number($0) }), gain.count == 3 {
+				look.gain = gain
+			}
+		}
+
+		return Take(video: video, audio: audio, clips: clips, anchors: anchors,
+		            measured: measured, look: look, unknownKeys: root)
 	}
 
 	static func number(_ value: Any?) -> Double? {
@@ -207,6 +230,37 @@ public enum TakeWriter {
 			for key in take.unknownKeys.keys.sorted() {
 				let node = try? Yams.dump(object: [key: take.unknownKeys[key]!])
 				out += node ?? ""
+			}
+		}
+
+		// What was measured, and what to do about it. Both left out entirely when
+		// there is nothing to say, so a take nobody has analysed does not carry
+		// a block of defaults that look like decisions.
+		if !take.measured.isEmpty {
+			out += "\nmeasured:\n"
+			if let loudness = take.measured.loudness {
+				out += "  loudness: \(number(loudness, places: 1))   # LUFS\n"
+			}
+			if let peak = take.measured.peak {
+				out += "  peak:     \(number(peak, places: 1))   # dBFS\n"
+			}
+			if let cast = take.measured.cast {
+				out += "  cast:     [\(cast.map { number($0, places: 4) }.joined(separator: ", "))]"
+				out += "   # mean linear RGB\n"
+			}
+		}
+
+		if !take.look.isEmpty {
+			out += "\nlook:\n"
+			if let profile = take.look.profile { out += "  profile:    \(scalar(profile))\n" }
+			if take.look.exposure != 0 { out += "  exposure:   \(number(take.look.exposure, places: 3))\n" }
+			if take.look.temperature != 0 { out += "  temperature: \(number(take.look.temperature, places: 0))\n" }
+			if take.look.tint != 0 { out += "  tint:       \(number(take.look.tint, places: 3))\n" }
+			if take.look.saturation != 1 { out += "  saturation: \(number(take.look.saturation, places: 3))\n" }
+			if take.look.contrast != 1 { out += "  contrast:   \(number(take.look.contrast, places: 3))\n" }
+			if let gain = take.look.gain {
+				out += "  gain:       [\(gain.map { number($0, places: 4) }.joined(separator: ", "))]"
+				out += "   # matched to the reference\n"
 			}
 		}
 
@@ -289,6 +343,17 @@ public enum TakeWriter {
 		// A name that is only digits would come back as a number.
 		if Double(value) != nil { return quoted(value) }
 		return value
+	}
+
+	/// A number without a trailing run of zeroes, because `1.040000` is not how
+	/// anybody writes it.
+	static func number(_ value: Double, places: Int) -> String {
+		var text = String(format: "%.\(places)f", value)
+		if text.contains(".") {
+			while text.hasSuffix("0") { text.removeLast() }
+			if text.hasSuffix(".") { text.removeLast() }
+		}
+		return text
 	}
 
 	private static func quoted(_ value: String) -> String {

@@ -57,6 +57,41 @@ public enum ProjectReader {
 			}
 			if let fps = number(m["fps"]) { output.framesPerSecond = fps }
 			output.file = (m["file"] as? String).flatMap(nonEmpty)
+			// `audio: {target: -16, ceiling: -1}`, or `audio: -16` for the
+			// common case where only the target matters.
+			if let value = m["audio"] {
+				var audio = AudioTarget()
+				if let level = number(value) {
+					audio.target = level
+				} else if let fields = mapping(value) {
+					audio.target = number(fields["target"]) ?? audio.target
+					audio.ceiling = number(fields["ceiling"]) ?? audio.ceiling
+				}
+				output.audio = audio
+			}
+			if let value = m["match"] {
+				if let slug = (value as? String).flatMap(nonEmpty) {
+					output.matchReference = Slug.make(from: slug)
+				} else if let fields = mapping(value),
+				          let slug = (fields["reference"] as? String).flatMap(nonEmpty) {
+					output.matchReference = Slug.make(from: slug)
+				}
+			}
+		}
+
+		// Named colour looks a take's `look: {profile: …}` can refer to.
+		var profiles: [String: Look] = [:]
+		if let m = root.removeValue(forKey: "profiles").flatMap(mapping) {
+			for (name, value) in m {
+				guard let fields = mapping(value) else { continue }
+				var look = Look.none
+				look.exposure = number(fields["exposure"]) ?? 0
+				look.temperature = number(fields["temperature"]) ?? 0
+				look.tint = number(fields["tint"]) ?? 0
+				look.saturation = number(fields["saturation"]) ?? 1
+				look.contrast = number(fields["contrast"]) ?? 1
+				profiles[Slug.make(from: name)] = look
+			}
 		}
 
 		var styles: [String: TextStyle] = [:]
@@ -179,7 +214,8 @@ public enum ProjectReader {
 		}
 
 		return Project(takes: takes, output: output, timeline: timeline,
-		               overlays: overlays, styles: styles, unknownKeys: root)
+		               overlays: overlays, styles: styles, profiles: profiles,
+		               unknownKeys: root)
 	}
 
 	private static func entryFromText(_ text: String, transition: Double) throws -> TimelineEntry {

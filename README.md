@@ -316,6 +316,86 @@ minute finding out.
 Not implemented: `method: point`, the non-face tracker. It is in the format and
 currently holds position rather than tracking.
 
+### Levelling and grading
+
+Measured once per recording, applied by every programme.
+
+```
+cuttr-render programme.cuttrproj --analyse
+```
+
+writes into each take what it found:
+
+```yaml
+measured:
+  loudness: -21.4   # LUFS
+  peak:     -3.1    # dBFS
+  cast:     [0.2630, 0.2970, 0.2848]   # mean linear RGB
+```
+
+**Loudness is EBU R128** — K-weighted and gated, not RMS and not peak. A clip
+with one door slam has a fine peak and a respectable RMS while the speech under
+it is inaudible; normalising on either leaves every voice at a different level,
+which is the problem. The gates are what make it work on real material: the
+absolute one throws away silence, the relative one throws away the pauses
+between sentences, so a take full of gaps measures the same as one without.
+Verified against a 1 kHz sine at −23 dBFS RMS: it reads −23.004 LUFS.
+
+It measures **only the spans the take contributes**, not the whole file. On real
+footage that was a fourteen-unit difference — a five-minute recording of which
+twenty seconds is used otherwise measures four and a half minutes of ambience.
+Re-cut, re-analyse; it takes a second.
+
+The project says what to aim at:
+
+```yaml
+output:
+  audio: {target: -20, ceiling: -1}   # LUFS, dBFS
+  match: {reference: first-bit}
+
+profiles:
+  camera-a:
+    saturation:  1.10
+    temperature: 300
+```
+
+The ceiling turns a clip *down* rather than limiting it — a limiter changes what
+the recording sounds like, and doing that silently to somebody's audio is not
+this program's business. When the ceiling binds, the clip lands under target and
+the number says so.
+
+**Colour matching** divides one take's average by the reference's, per channel,
+which corrects exposure and white balance in one number each. It is bounded, so
+a shot that is genuinely a different scene comes out partly matched rather than
+stained. Profiles are hand-written looks that a take names; the match composes
+over them, so "this camera, and then warmer" means what it reads like.
+
+Round trip, on real footage: target −20 LUFS in, render out, measure the render
+— −20.0 LUFS, peak −5.6 dBFS.
+
+Known limit: a recording with several audio tracks is measured and rendered from
+the first one only.
+
+### Naming clips after whoever is talking
+
+**An anchor is a person.** Rename a tracked face to `mia` and clips she speaks
+in are named `mia-1`, `mia-2`, …
+
+The method is mouth movement, not sound: telling voices apart from audio needs a
+model and a good deal of hope, where telling which face in shot is moving its
+mouth needs the landmarks Vision already returns for the tracking. Movement
+rather than openness, because a held smile is a wide mouth saying nothing.
+
+It happens *after* the mark, never during it — the marking loop must not stop
+for a second of Vision — so a clip appears as `clip-4` and becomes `mia-2` a
+moment later. It declines when nobody is clearly talking or when two candidates
+are too close to call, and it never overwrites a slug somebody typed. A clip
+called `clip-4` is better than one confidently named after the wrong person.
+
+`cuttr-render --speaking take.cuttr --from 62 --to 68` asks the same question
+from a terminal. On real footage, talking spans measured 0.007–0.015 of mouth
+movement a sample and quiet ones fell below the 0.006 threshold.
+
 ### Rendering
 
 ```

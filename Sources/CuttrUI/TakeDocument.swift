@@ -139,6 +139,39 @@ public final class TakeDocument {
 		apply(next, actionName: "Track a Point")
 	}
 
+	/// Renames an anchor, and takes its sidecar with it.
+	///
+	/// The name is what a project references, so this is a rename that reaches
+	/// outside the file: any project saying `anchor: old-name` stops resolving.
+	/// Returns the name actually used so the caller can say so — and say what it
+	/// means — rather than the rename happening quietly.
+	@discardableResult
+	public func renameAnchor(_ old: String, to requested: String) -> String? {
+		guard let index = take.anchors.firstIndex(where: { $0.name == old }) else { return nil }
+		var taken = Set(take.anchors.map(\.name))
+		taken.remove(old)
+		let cleaned = Slug.make(from: requested)
+		guard !cleaned.isEmpty else { return nil }
+		let name = Slug.unique(cleaned, taken: taken)
+		guard name != old else { return old }
+
+		var next = take
+		next.anchors[index].name = name
+		// The sidecar is named after the anchor, so it moves too — otherwise the
+		// files accumulate under old names and nobody can tell which is live.
+		if let baseURL, let oldPath = take.anchors[index].path {
+			let newPath = "anchors/\(name).path"
+			next.anchors[index].path = newPath
+			try? FileManager.default.moveItem(
+				at: URL(fileURLWithPath: oldPath, relativeTo: baseURL),
+				to: URL(fileURLWithPath: newPath, relativeTo: baseURL))
+		}
+		anchorPaths[name] = anchorPaths[old]
+		anchorPaths[old] = nil
+		apply(next, actionName: "Rename Anchor")
+		return name
+	}
+
 	public func removeAnchor(named name: String) {
 		var next = take
 		next.anchors.removeAll { $0.name == name }
@@ -183,6 +216,18 @@ public final class TakeDocument {
 		var next = take
 		guard next.setTimes(start: grid.snap(start), end: grid.snap(end), for: id) else { return }
 		apply(next, actionName: actionName)
+	}
+
+	public func setTags(_ tags: [String], for id: Clip.ID) {
+		var next = take
+		next.setTags(tags, for: id)
+		apply(next, actionName: "Edit Tags")
+	}
+
+	public func setOrder(_ order: Int, for id: Clip.ID) {
+		var next = take
+		next.setOrder(order, for: id)
+		apply(next, actionName: "Change Order")
 	}
 
 	public func setOffset(_ offset: Double) {

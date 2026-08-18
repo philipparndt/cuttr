@@ -11,6 +11,7 @@ public enum ResolveError: LocalizedError {
 	case emptyQuery(String)
 	case emptyGroup(String)
 	case unknownGroup(String)
+	case noReference(String)
 	case nothingOnTheTimeline
 	case emptyProgramme
 
@@ -34,6 +35,9 @@ public enum ResolveError: LocalizedError {
 			return "No section called `@\(name)` on this timeline."
 		case .emptyQuery(let source):
 			return "`\(source)` matches no clips. Check the tag \u{2014} tags are lower-case and hyphenated."
+		case .noReference(let slug):
+			return "`match: {reference: \(slug)}` names a clip that is not on this timeline, "
+				+ "or whose take has not been analysed."
 		case .nothingOnTheTimeline:
 			return "This project has no clips yet. Add them under `timeline:` — by slug "
 				+ "(`- intro`), as a query (`- \"#b-roll\"`), or in a `group:`."
@@ -45,6 +49,14 @@ public enum ResolveError: LocalizedError {
 
 /// One clip of the programme, placed on the programme's clock.
 public struct ResolvedClip: Sendable {
+	/// Decibels to apply so this clip sits at the programme's target loudness.
+	/// Zero when nothing has been measured, which is the honest default: an
+	/// unmeasured clip is left exactly as it was recorded.
+	public var gain: Double = 0
+	/// The grade to apply: the take's own look, over its profile, with whatever
+	/// the automatic match worked out.
+	public var look: Look = .none
+
 	public let reference: ClipReference
 	public let takeName: String
 	public let clip: Clip
@@ -239,6 +251,41 @@ public enum Resolver {
 		guard !project.timeline.isEmpty else { throw ResolveError.nothingOnTheTimeline }
 		try lay(out: project.timeline)
 		guard !clips.isEmpty else { throw ResolveError.emptyProgramme }
+
+		// Levels and grades.
+		//
+		// Both are worked out here rather than at render time, because both are
+		// a comparison between what a take measured and what the programme
+		// wants — and the programme is what this function knows about. The
+		// renderer is handed numbers, not a policy.
+		let takesByName = Dictionary(uniqueKeysWithValues: takes.map { ($0.name, $0.take) })
+		let referenceCast: [Double]? = project.output.matchReference.flatMap { slug in
+			clips.first { $0.reference.slug == slug }
+				.flatMap { takesByName[$0.takeName]?.measured.cast }
+		}
+		if project.output.matchReference != nil, referenceCast == nil {
+			throw ResolveError.noReference(project.output.matchReference ?? "")
+		}
+
+		for index in clips.indices {
+			guard let take = takesByName[clips[index].takeName] else { continue }
+
+			if let audio = project.output.audio, let loudness = take.measured.loudness {
+				let peak = take.measured.peak ?? -.infinity
+				clips[index].gain = Loudness(integrated: loudness, peak: peak)
+					.gain(toward: audio.target, ceiling: audio.ceiling)
+			}
+
+			// The take's own look over the profile it names, and then the match.
+			// The match is a `gain` the take may already carry from an analysis
+			// pass; computing it here as well means a project can be re-matched
+			// against a different reference without re-analysing anything.
+			var look = take.look.over(take.look.profile.flatMap { project.profiles[$0] } ?? .none)
+			if let reference = referenceCast, let cast = take.measured.cast {
+				look.gain = Look.match(cast: cast, to: reference)
+			}
+			clips[index].look = look
+		}
 
 		// Anchors come from the takes, with their solved paths read in and put
 		// on the programme's clock. A take that is used twice contributes its

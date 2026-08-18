@@ -20,9 +20,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	private let header = HeaderBar()
 	private let timeline = TimelineView()
 	private let clipTable = ClipTable()
+	private let anchorTable = AnchorTable()
 	private var playerView: PlayerView!
 	private let markers = AnchorMarkerView()
 	private var solveTask: Task<Void, Never>?
+	private var namingTask: Task<Void, Never>?
 
 	private var playhead: Double = 0
 	private var pending: (start: Double, end: Double)?
@@ -95,11 +97,20 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			])
 		}
 
+		// The clips above, the anchors below. Both are lists of things the take
+		// contains and both are referenced by name from a project, so they
+		// belong side by side rather than one being a menu.
+		let lists = NSSplitView()
+		lists.isVertical = false
+		lists.dividerStyle = .thin
+		lists.addArrangedSubview(clipTable)
+		lists.addArrangedSubview(anchorTable)
+
 		let top = NSSplitView()
 		top.isVertical = true
 		top.dividerStyle = .thin
 		top.addArrangedSubview(picture)
-		top.addArrangedSubview(clipTable)
+		top.addArrangedSubview(lists)
 
 		let outer = NSSplitView()
 		outer.isVertical = false
@@ -140,6 +151,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		DispatchQueue.main.async {
 			outer.setPosition(outer.bounds.height * 0.62, ofDividerAt: 0)
 			top.setPosition(top.bounds.width * 0.68, ofDividerAt: 0)
+			lists.setPosition(lists.bounds.height - 150, ofDividerAt: 0)
 			self.timeline.zoomToFit()
 			// The timeline holds the focus to begin with, so the first `space`
 			// rolls the tape rather than doing nothing.
@@ -195,11 +207,34 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		clipTable.onRename = { [weak self] id, name in self?.takeDocument.setName(name, for: id) }
 		clipTable.onSlugChange = { [weak self] id, slug in self?.takeDocument.setSlug(slug, for: id) }
 		clipTable.onNoteChange = { [weak self] id, note in self?.takeDocument.setNote(note, for: id) }
+		clipTable.onTagsChange = { [weak self] id, text in
+			// Split on commas or spaces, and slugged on the way in, so `B Roll`,
+			// `b-roll` and `b roll` are one tag rather than three.
+			let tags = text.split(whereSeparator: { $0 == "," || $0 == " " }).map(String.init)
+			self?.takeDocument.setTags(tags, for: id)
+		}
+		clipTable.onOrderChange = { [weak self] id, text in
+			guard let value = Int(text.trimmingCharacters(in: .whitespaces)) else {
+				self?.refresh()
+				return
+			}
+			self?.takeDocument.setOrder(value, for: id)
+		}
 		clipTable.onActivate = { [weak self] id in self?.reveal(id) }
 		clipTable.onTimeChange = { [weak self] id, isStart, text in
 			self?.setTime(id, isStart: isStart, text: text)
 		}
 		clipTable.contextMenu = { [weak self] id in self?.clipMenu(for: id, at: nil) }
+
+		anchorTable.onRename = { [weak self] old, new in self?.renameAnchor(old, to: new) }
+		anchorTable.onActivate = { [weak self] name in
+			guard let anchor = self?.takeDocument.take.anchors.first(where: { $0.name == name })
+			else { return }
+			self?.move(to: anchor.markedAt)
+			self?.timeline.reveal(from: anchor.from, to: anchor.to)
+		}
+		anchorTable.onSelect = { [weak self] name in self?.selectedAnchor = name }
+		anchorTable.contextMenu = { [weak self] name in self?.anchorMenu(for: name) }
 		timeline.contextMenu = { [weak self] id, time in self?.clipMenu(for: id, at: time) }
 		timeline.onRenameInPlace = { [weak self] id, name in self?.takeDocument.setName(name, for: id) }
 		timeline.onLanePicked = { [weak self] color in
@@ -245,27 +280,45 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			+ "and follows it for the length of the clip under the playhead."
 		menu.addItem(track)
 
-		guard !takeDocument.take.anchors.isEmpty else { return menu }
-		menu.addItem(.separator())
-		for anchor in takeDocument.take.anchors {
-			let item = NSMenuItem(title: "Re-solve “\(anchor.name)”",
-			                      action: #selector(resolveAnchor(_:)), keyEquivalent: "")
-			item.target = self
-			item.representedObject = anchor.name
-			menu.addItem(item)
-		}
-		menu.addItem(.separator())
-		for anchor in takeDocument.take.anchors {
-			let item = NSMenuItem(title: "Remove “\(anchor.name)”",
-			                      action: #selector(removeAnchorAction(_:)), keyEquivalent: "")
-			item.target = self
-			item.representedObject = anchor.name
-			menu.addItem(item)
-		}
+		// What already exists is managed in the list below, where it can be seen
+		// and renamed. Repeating every anchor twice in this menu made it longer
+		// with every face tracked and told you nothing about any of them.
 		return menu
 	}
 
 	private var lastClick: CGPoint?
+	private var selectedAnchor: String?
+
+	/// The anchor list's own menu, and the picture's when it is over one.
+	private func anchorMenu(for name: String?) -> NSMenu? {
+		guard let name else { return nil }
+		let menu = NSMenu()
+		for (title, action) in [("Rename…", #selector(renameAnchorAction(_:))),
+		                        ("Follow Again", #selector(resolveAnchor(_:))),
+		                        ("Remove", #selector(removeAnchorAction(_:)))] {
+			let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+			item.target = self
+			item.representedObject = name
+			menu.addItem(item)
+			if title == "Rename…" { menu.addItem(.separator()) }
+		}
+		return menu
+	}
+
+	@objc private func renameAnchorAction(_ sender: NSMenuItem) {
+		guard let name = sender.representedObject as? String else { return }
+		anchorTable.beginRenaming(name)
+	}
+
+	private func renameAnchor(_ old: String, to new: String) {
+		guard let name = takeDocument.renameAnchor(old, to: new) else { return }
+		// Said out loud, because this rename reaches outside the file: a
+		// project pointing at the old name stops resolving, and finding that out
+		// at render time is finding it out too late.
+		header.setStatus(name == old
+			? "unchanged"
+			: "renamed to \(name) — any project saying `anchor: \(old)` needs updating")
+	}
 
 	@objc private func trackEyeHere(_ sender: Any?) {
 		guard let point = lastClick else { return }
@@ -331,6 +384,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		markers.markers = takeDocument.take.anchors.compactMap { anchor in
 			takeDocument.anchorPaths[anchor.name].map { (anchor.name, $0) }
 		}
+		anchorTable.reload(takeDocument.take.anchors,
+		                   paths: takeDocument.anchorPaths,
+		                   selected: selectedAnchor)
 		markers.videoSize = takeDocument.videoInfo?.naturalSize ?? .zero
 		clipTable.reload(takeDocument.take.clips, selected: selectedClip)
 		header.update(document: takeDocument, playhead: playhead, monitorMode: transport.monitor)
@@ -381,6 +437,46 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 		takeDocument.apply(next, actionName: next.clips.count == takeDocument.take.clips.count + 1 ? "Mark Clip" : "Split Clip")
 		select(clip.id)
+		nameAfterWhoeverIsTalking(clip)
+	}
+
+	/// Names a fresh clip after whoever is speaking in it.
+	///
+	/// After the mark, never during it. Working out who is talking means
+	/// decoding a second or two of video and asking Vision about every frame,
+	/// and the marking loop — play, mark, play, mark — must not stop for
+	/// anything. So the clip appears instantly as `clip-4` and becomes `mia-2`
+	/// a moment later, or stays `clip-4` if nobody was clearly talking.
+	///
+	/// An anchor is a person: rename the tracked face to `mia` and the clips
+	/// she speaks in are named after her. Nothing to define twice.
+	private func nameAfterWhoeverIsTalking(_ clip: Clip) {
+		guard let video = takeDocument.videoURL else { return }
+		let candidates = takeDocument.take.anchors.compactMap { anchor -> SpeakerDetector.Candidate? in
+			guard let path = takeDocument.anchorPaths[anchor.name], path.covers(clip.start) else { return nil }
+			return SpeakerDetector.Candidate(name: anchor.name, path: path)
+		}
+		guard !candidates.isEmpty else { return }
+
+		namingTask?.cancel()
+		let id = clip.id
+		namingTask = Task { [weak self] in
+			guard let finding = try? await SpeakerDetector.speaking(
+				videoURL: video, among: candidates, from: clip.start, to: clip.end)
+			else { return }
+			guard !Task.isCancelled, let self else { return }
+			// Only if nobody has touched it. A slug somebody typed is theirs,
+			// and a guess arriving two seconds later must not overwrite it.
+			guard let current = self.takeDocument.take.clips.first(where: { $0.id == id }),
+			      current.name.isEmpty, current.slug.hasPrefix("clip-")
+			else { return }
+			let name = Slug.numbered(finding.name, taken: self.takeDocument.take.slugs)
+			self.takeDocument.setSlug(name, for: id)
+			self.header.setStatus(String(
+				format: "%@ — %@ was talking (%.0f%% more than anyone else)",
+				name, finding.name,
+				finding.margin.isFinite ? (finding.margin - 1) * 100 : 100))
+		}
 	}
 
 	/// What Return does, which depends on what is in front of you.
@@ -567,6 +663,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		if id != nil {
 			add(to: menu, "Rename", #selector(renameSelected))
 			add(to: menu, "Edit Slug", #selector(editSlugOfSelected))
+
+			let tagItem = NSMenuItem(title: "Tags", action: nil, keyEquivalent: "")
+			tagItem.submenu = tagMenu(for: id)
+			menu.addItem(tagItem)
 			menu.addItem(.separator())
 			// Trimming to the pointer when there is one, to the playhead when
 			// there is not. Both are named for where they will trim *to*, so
@@ -591,6 +691,42 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			add(to: menu, "Zoom to Fit", #selector(zoomFit))
 		}
 		return menu
+	}
+
+	/// The tags already in use in this take, ticked for the clip in hand.
+	///
+	/// Toggling rather than typing, because a tag's whole value is that it is
+	/// the *same* tag on several clips — and the reliable way to get the same
+	/// string twice is not to type it twice. Typing is still there for the
+	/// first one.
+	/// The same menu, for the menu bar, aimed at whatever is selected.
+	public func tagsMenu() -> NSMenu { tagMenu(for: selectedClip) }
+
+	private func tagMenu(for id: Clip.ID?) -> NSMenu {
+		let menu = NSMenu()
+		let current = Set(takeDocument.take.clips.first { $0.id == id }?.tags ?? [])
+		for tag in takeDocument.take.tags {
+			let item = NSMenuItem(title: tag, action: #selector(toggleTag(_:)), keyEquivalent: "")
+			item.target = self
+			item.representedObject = tag
+			item.state = current.contains(tag) ? .on : .off
+			menu.addItem(item)
+		}
+		if !takeDocument.take.tags.isEmpty { menu.addItem(.separator()) }
+		let edit = NSMenuItem(title: takeDocument.take.tags.isEmpty ? "Add Tags…" : "Edit Tags…",
+		                      action: #selector(editTagsOfSelected(_:)), keyEquivalent: "")
+		edit.target = self
+		menu.addItem(edit)
+		return menu
+	}
+
+	@objc private func toggleTag(_ sender: NSMenuItem) {
+		guard let tag = sender.representedObject as? String, let id = actionTarget,
+		      let clip = takeDocument.take.clips.first(where: { $0.id == id })
+		else { return }
+		var tags = clip.tags
+		if let index = tags.firstIndex(of: tag) { tags.remove(at: index) } else { tags.append(tag) }
+		takeDocument.setTags(tags, for: id)
 	}
 
 	/// The palette as a menu, with a swatch drawn into each item.
@@ -673,6 +809,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		guard let id = actionTarget,
 		      let clip = takeDocument.take.clips.first(where: { $0.id == id }) else { return }
 		timeline.beginRenaming(clip)
+	}
+
+	@objc public func editTagsOfSelected(_ sender: Any? = nil) {
+		guard let id = actionTarget else { return }
+		clipTable.beginEditingTags(id)
 	}
 
 	@objc public func editSlugOfSelected(_ sender: Any? = nil) {
@@ -925,7 +1066,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 				? "Redo \(manager.redoActionName)" : "Redo"
 			return manager.canRedo
 		case #selector(deleteAction(_:)), #selector(renameSelected(_:)),
-		     #selector(editSlugOfSelected(_:)), #selector(zoomToClipAction(_:)),
+		     #selector(editSlugOfSelected(_:)), #selector(editTagsOfSelected(_:)),
+		     #selector(zoomToClipAction(_:)),
 		     #selector(trimStartToPoint(_:)), #selector(trimEndToPoint(_:)),
 		     #selector(setInOutFromClip(_:)):
 			return selectedClip != nil
@@ -957,6 +1099,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
 	public func windowWillClose(_ notification: Notification) {
 		solveTask?.cancel()
+		namingTask?.cancel()
 		if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
 		keyMonitor = nil
 		transport.pause()

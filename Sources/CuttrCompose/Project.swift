@@ -22,6 +22,9 @@ public struct Project: Sendable, Equatable {
 	/// Text and spinners laid over the cut.
 	public var overlays: [Overlay]
 
+	/// Named colour looks, referenced by a take's `look: {profile: …}`.
+	public var profiles: [String: Look]
+
 	/// Named text looks. The built-in ones are merged under whatever the file
 	/// defines, so a project can override `lower-third` without redefining the
 	/// two it did not touch.
@@ -35,6 +38,7 @@ public struct Project: Sendable, Equatable {
 		timeline: [TimelineEntry] = [],
 		overlays: [Overlay] = [],
 		styles: [String: TextStyle] = [:],
+		profiles: [String: Look] = [:],
 		unknownKeys: [String: Any] = [:]
 	) {
 		self.takes = takes
@@ -42,6 +46,7 @@ public struct Project: Sendable, Equatable {
 		self.timeline = timeline
 		self.overlays = overlays
 		self.styles = styles
+		self.profiles = profiles
 		self.unknown = UnknownProjectKeys(storage: unknownKeys)
 	}
 
@@ -52,7 +57,7 @@ public struct Project: Sendable, Equatable {
 
 	public static func == (a: Project, b: Project) -> Bool {
 		a.takes == b.takes && a.output == b.output && a.timeline == b.timeline
-			&& a.overlays == b.overlays && a.styles == b.styles
+			&& a.overlays == b.overlays && a.styles == b.styles && a.profiles == b.profiles
 	}
 
 	/// The style a name refers to, falling back through the built-ins.
@@ -76,14 +81,42 @@ public struct Output: Sendable, Equatable {
 	/// arguments at all.
 	public var file: String?
 
-	public init(width: Int = 1920, height: Int = 1080, framesPerSecond: Double = 25, file: String? = nil) {
+	/// What the programme should sound like.
+	public var audio: AudioTarget?
+
+	/// The clip everything else is graded to match. A slug, resolved like any
+	/// other reference.
+	public var matchReference: String?
+
+	public init(
+		width: Int = 1920, height: Int = 1080, framesPerSecond: Double = 25,
+		file: String? = nil, audio: AudioTarget? = nil, matchReference: String? = nil
+	) {
 		self.width = width
 		self.height = height
 		self.framesPerSecond = framesPerSecond
 		self.file = file
+		self.audio = audio
+		self.matchReference = matchReference
 	}
 
 	public var size: CGSize { CGSize(width: width, height: height) }
+}
+
+/// How loud the finished programme should be.
+///
+/// Defaults are the streaming convention rather than the broadcast one: −16 LUFS
+/// with a decibel of headroom is what a video on the web is expected to be, and
+/// −23 is what a television station wants. Neither is a fact; both are stated so
+/// that a project which says nothing still comes out level.
+public struct AudioTarget: Sendable, Equatable {
+	public var target: Double
+	public var ceiling: Double
+
+	public init(target: Double = -16, ceiling: Double = -1) {
+		self.target = target
+		self.ceiling = ceiling
+	}
 }
 
 /// One entry on the programme's timeline.

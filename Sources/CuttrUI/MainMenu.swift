@@ -95,6 +95,10 @@ enum MainMenu {
 		clip.addItem(.separator())
 		clip.addItem(command("Rename…", #selector(MainWindowController.renameSelected(_:)), "r"))
 		clip.addItem(command("Edit Slug…", #selector(MainWindowController.editSlugOfSelected(_:)), "R", [.command, .shift]))
+		clip.addItem(command("Edit Tags…", #selector(MainWindowController.editTagsOfSelected(_:)), "t"))
+		let tagItem = NSMenuItem(title: "Tags", action: nil, keyEquivalent: "")
+		tagItem.identifier = NSUserInterfaceItemIdentifier("clip-tags")
+		clip.addItem(tagItem)
 		clip.addItem(.separator())
 		clip.addItem(command("Trim Start to Playhead", #selector(MainWindowController.trimStartToPoint(_:)), ""))
 		clip.addItem(command("Trim End to Playhead", #selector(MainWindowController.trimEndToPoint(_:)), ""))
@@ -199,15 +203,19 @@ enum MainMenu {
 		static let shared = ColourMenuFiller()
 
 		func menuNeedsUpdate(_ menu: NSMenu) {
-			guard let item = menu.items.first(where: { $0.identifier?.rawValue == "clip-colour" })
-			else { return }
+			let colour = menu.items.first { $0.identifier?.rawValue == "clip-colour" }
+			let tags = menu.items.first { $0.identifier?.rawValue == "clip-tags" }
 			guard let controller = NSApp.keyWindow?.windowController as? MainWindowController else {
-				item.submenu = nil
-				item.isEnabled = false
+				for item in [colour, tags].compactMap({ $0 }) {
+					item.submenu = nil
+					item.isEnabled = false
+				}
 				return
 			}
-			item.isEnabled = true
-			item.submenu = controller.colorMenu(current: controller.selectedClipColor)
+			colour?.isEnabled = true
+			colour?.submenu = controller.colorMenu(current: controller.selectedClipColor)
+			tags?.isEnabled = true
+			tags?.submenu = controller.tagsMenu()
 		}
 	}
 
@@ -226,6 +234,7 @@ enum MainMenu {
 	  ⏎            make a clip from the in/out span —
 	               or, with none, jump to the selected clip's start
 	  N            rename the selected clip (or double-click its bar)
+	  ⌘T           tag it — tags are what a project selects on
 	  1…6          choose the colour lane to cut on next
 	               (recolour an existing clip from its context menu)
 	  ⌫            delete the selected clip

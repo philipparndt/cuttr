@@ -25,7 +25,28 @@ public enum ProjectWriter {
 		out += "  size: \(project.output.width)x\(project.output.height)\n"
 		out += "  fps:  \(trim(project.output.framesPerSecond))\n"
 		if let file = project.output.file { out += "  file: \(scalar(file))\n" }
+		if let audio = project.output.audio {
+			out += "  audio: {target: \(trim(audio.target)), ceiling: \(trim(audio.ceiling))}"
+			out += "   # LUFS, dBFS\n"
+		}
+		if let reference = project.output.matchReference {
+			out += "  match: {reference: \(scalar(reference))}\n"
+		}
 		out += "\n"
+
+		if !project.profiles.isEmpty {
+			out += "profiles:\n"
+			for name in project.profiles.keys.sorted() {
+				let look = project.profiles[name]!
+				out += "  \(scalar(name)):\n"
+				if look.exposure != 0 { out += "    exposure:    \(trim(look.exposure))\n" }
+				if look.temperature != 0 { out += "    temperature: \(trim(look.temperature))\n" }
+				if look.tint != 0 { out += "    tint:        \(trim(look.tint))\n" }
+				if look.saturation != 1 { out += "    saturation:  \(trim(look.saturation))\n" }
+				if look.contrast != 1 { out += "    contrast:    \(trim(look.contrast))\n" }
+			}
+			out += "\n"
+		}
 
 		if !project.styles.isEmpty {
 			out += "styles:\n"

@@ -1,5 +1,7 @@
 @preconcurrency import AVFoundation
 import CoreGraphics
+import CoreImage
+import CuttrKit
 import Foundation
 
 public enum RenderError: LocalizedError {
@@ -37,6 +39,7 @@ public enum Renderer {
 		public let composition: AVMutableComposition
 		public let videoComposition: AVMutableVideoComposition
 		public let overlays: CALayer
+		public let audioMix: AVAudioMix?
 	}
 
 	/// Assembles everything except the encode.
@@ -55,9 +58,12 @@ public enum Renderer {
 			withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
 
 		let scale: Int32 = 600
-		var instructions: [AVMutableVideoCompositionInstruction] = []
 		var cursor = CMTime.zero
 		var sawVideo = false
+		/// What to do to each clip, looked up by time while rendering.
+		var grades: [(start: Double, end: Double, look: Look)] = []
+		/// Volume steps for the audio mix, one per clip.
+		var levels: [(at: CMTime, volume: Float)] = []
 
 		for clip in resolved.clips {
 			let at = CMTime(seconds: clip.start, preferredTimescale: scale)
@@ -65,13 +71,15 @@ public enum Renderer {
 				start: CMTime(seconds: clip.clip.start, preferredTimescale: scale),
 				duration: CMTime(seconds: clip.duration, preferredTimescale: scale))
 
-			var transform = CGAffineTransform.identity
+			grades.append((clip.start, clip.end, clip.look))
+			// Linear amplitude, because that is what a mix takes. Decibels are
+			// what a person reads and what the file says.
+			levels.append((at, Float(pow(10, clip.gain / 20))))
+
 			if let videoURL = clip.videoURL {
 				let asset = AVURLAsset(url: videoURL)
 				if let source = try await asset.loadTracks(withMediaType: .video).first {
 					try? videoTrack.insertTimeRange(range, of: source, at: at)
-					let (natural, preferred) = try await source.load(.naturalSize, .preferredTransform)
-					transform = fit(natural: natural, preferred: preferred, into: size)
 					sawVideo = true
 				}
 				// The camera's own audio, but only when the take has no separate
@@ -104,22 +112,28 @@ public enum Renderer {
 				}
 			}
 
-			let instruction = AVMutableVideoCompositionInstruction()
-			instruction.timeRange = CMTimeRange(start: at, duration: range.duration)
-			let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
-			layer.setTransform(transform, at: at)
-			instruction.layerInstructions = [layer]
-			instructions.append(instruction)
 			cursor = at + range.duration
 		}
 
 		guard sawVideo else { throw RenderError.noVideo }
 
-		let videoComposition = AVMutableVideoComposition()
+		// One rendering path, through Core Image.
+		//
+		// The fit used to be a layer instruction's transform and the grade would
+		// have had to be a second mechanism beside it. Two mechanisms deciding
+		// where a frame lands is how a preview and an export come to disagree,
+		// which this file exists to prevent — so the transform moved in here
+		// beside the grade, and there is one answer.
+		let videoComposition = AVMutableVideoComposition(asset: composition) { request in
+			let time = request.compositionTime.seconds
+			let look = grades.last { time >= $0.start - 1e-6 && time < $0.end + 1e-6 }?.look ?? .none
+			var image = Grading.apply(look, to: request.sourceImage)
+			image = image.transformed(by: Grading.fit(image.extent, into: size))
+			request.finish(with: image, context: nil)
+		}
 		videoComposition.renderSize = size
 		videoComposition.frameDuration = CMTime(
 			value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
-		videoComposition.instructions = instructions
 
 		let overlays = OverlayLayers.build(resolved, size: size, host: host)
 		if host == .export {
@@ -135,8 +149,22 @@ public enum Renderer {
 			videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
 				postProcessingAsVideoLayer: videoLayer, in: parent)
 		}
+		// The mix: one parameter set over the single audio track, stepping the
+		// volume at each cut. A step rather than a ramp because the cut is
+		// already a discontinuity — a crossfade of levels across it would be
+		// audible as a swell on the wrong side of the edit.
+		var audioMix: AVAudioMix?
+		if let audioTrack, levels.contains(where: { $0.volume != 1 }) {
+			let parameters = AVMutableAudioMixInputParameters(track: audioTrack)
+			for level in levels { parameters.setVolume(level.volume, at: level.at) }
+			let mix = AVMutableAudioMix()
+			mix.inputParameters = [parameters]
+			audioMix = mix
+		}
+
 		_ = cursor
-		return Built(composition: composition, videoComposition: videoComposition, overlays: overlays)
+		return Built(composition: composition, videoComposition: videoComposition,
+		             overlays: overlays, audioMix: audioMix)
 	}
 
 	/// Renders to a file.
@@ -153,6 +181,7 @@ public enum Renderer {
 			asset: built.composition, presetName: AVAssetExportPresetHighestQuality)
 		else { throw RenderError.exportFailed("no exporter for this composition") }
 		session.videoComposition = built.videoComposition
+		session.audioMix = built.audioMix
 		session.outputFileType = .mov
 		session.outputURL = url
 		session.shouldOptimizeForNetworkUse = false

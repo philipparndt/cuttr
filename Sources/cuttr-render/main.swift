@@ -22,6 +22,15 @@ func usage() -> Never {
 	            using the sidecars the composing window wrote
 	  --quiet   no progress
 
+	  --analyse measure every take's loudness and colour, and write the numbers
+	            back into the take files. Do this once per recording; every
+	            project that uses it then levels and matches for free.
+
+	  --speaking <take.cuttr> --from s --to s
+	            who, of the take's tracked people, is talking over that span.
+	            An anchor is a person: rename one to `mia` and clips she speaks
+	            in are named after her.
+
 	  --faces   what Vision can see in one frame, and where. Answers "is there
 	            a face here for an anchor to lock on to?" before spending a
 	            minute finding out, and prints the coordinates an anchor's
@@ -37,6 +46,10 @@ var solve = false
 var quiet = false
 var facesOf: String?
 var facesAt = 0.0
+var analyse = false
+var speakingIn: String?
+var spanFrom = 0.0
+var spanTo = 0.0
 var index = 0
 while index < arguments.count {
 	switch arguments[index] {
@@ -48,10 +61,23 @@ while index < arguments.count {
 		index += 1
 		guard index < arguments.count else { usage() }
 		facesOf = arguments[index]
+	case "--speaking":
+		index += 1
+		guard index < arguments.count else { usage() }
+		speakingIn = arguments[index]
+	case "--from":
+		index += 1
+		guard index < arguments.count, let value = Double(arguments[index]) else { usage() }
+		spanFrom = value
+	case "--to":
+		index += 1
+		guard index < arguments.count, let value = Double(arguments[index]) else { usage() }
+		spanTo = value
 	case "--at":
 		index += 1
 		guard index < arguments.count, let value = Double(arguments[index]) else { usage() }
 		facesAt = value
+	case "--analyse", "--analyze": analyse = true
 	case "--solve": solve = true
 	case "--quiet": quiet = true
 	case "-h", "--help": usage()
@@ -64,6 +90,36 @@ while index < arguments.count {
 func fail(_ message: String) -> Never {
 	FileHandle.standardError.write("cuttr-render: \(message)\n".data(using: .utf8)!)
 	exit(1)
+}
+
+if let speakingIn {
+	let takeURL = URL(fileURLWithPath: speakingIn).standardizedFileURL
+	let directory = takeURL.deletingLastPathComponent()
+	do {
+		let take = try TakeReader.read(try String(contentsOf: takeURL, encoding: .utf8))
+		guard let videoPath = take.video else { fail("that take has no video") }
+		let video = URL(fileURLWithPath: videoPath, relativeTo: directory).standardizedFileURL
+		let candidates = take.anchors.compactMap { anchor -> SpeakerDetector.Candidate? in
+			guard let sidecar = anchor.path,
+			      let text = try? String(
+				      contentsOf: URL(fileURLWithPath: sidecar, relativeTo: directory), encoding: .utf8)
+			else { return nil }
+			return SpeakerDetector.Candidate(name: anchor.name, path: AnchorPath.read(text))
+		}
+		guard !candidates.isEmpty else { fail("that take has no solved anchors to tell apart") }
+		let finding = try await SpeakerDetector.speaking(
+			videoURL: video, among: candidates, from: spanFrom, to: spanTo)
+		if let finding {
+			print(String(format: "%@ — mouth moved %.4f per sample, %@ ahead of the next",
+			             finding.name, finding.movement,
+			             finding.margin.isFinite ? String(format: "%.2f\u{d7}", finding.margin) : "alone"))
+		} else {
+			print("nobody clearly talking between \(spanFrom)s and \(spanTo)s")
+		}
+	} catch {
+		fail(error.localizedDescription)
+	}
+	exit(0)
 }
 
 if let facesOf {
@@ -100,6 +156,64 @@ do {
 	project = try ProjectReader.read(try String(contentsOf: projectURL, encoding: .utf8))
 } catch {
 	fail(error.localizedDescription)
+}
+
+// Measuring before resolving, because resolving compares what the takes measured
+// against what the project is aiming at.
+//
+// Per recording, not per clip: how loud a take is and what colour it is are
+// facts about the recording, so one pass serves every programme that uses it —
+// which is why the numbers are written back into the take rather than kept here.
+if analyse {
+	do {
+		for path in project.takes {
+			let takeURL = URL(fileURLWithPath: path, relativeTo: baseURL).standardizedFileURL
+			var take = try TakeReader.read(try String(contentsOf: takeURL, encoding: .utf8))
+			let directory = takeURL.deletingLastPathComponent()
+			if !quiet { print("==> measuring \(takeURL.lastPathComponent)") }
+
+			// The audio somebody will actually hear: the separate recorder when
+			// there is one, because that is the reason it was recorded.
+			let audioURL = take.audio.map { URL(fileURLWithPath: $0.file, relativeTo: directory) }
+				?? take.video.map { URL(fileURLWithPath: $0, relativeTo: directory) }
+			if let audioURL {
+				// Only the spans this take contributes. Clip times are on the
+				// video's clock; a separate recorder has a clock of its own, and
+				// the take's offset is what relates them — the same number the
+				// renderer uses to line the two up.
+				let offset = take.audio.map { _ in take.audio!.offset } ?? 0
+				let ranges = take.clips.map { clip in
+					(clip.start - offset) ... (clip.end - offset)
+				}
+				let loudness = try await LoudnessMeter.measure(
+					url: audioURL.standardizedFileURL, ranges: ranges)
+				take.measured.loudness = loudness.integrated
+				take.measured.peak = loudness.peak
+				if !quiet {
+					let level = loudness.integrated.map { String(format: "%.1f LUFS", $0) } ?? "silent"
+					print(String(format: "    %@, peak %.1f dBFS", level, loudness.peak))
+				}
+			}
+
+			if let videoPath = take.video {
+				let video = URL(fileURLWithPath: videoPath, relativeTo: directory).standardizedFileURL
+				// The same argument as the loudness: sampled across what the
+				// take actually contributes, not across footage nobody will see.
+				let duration = (try? await MediaProbe.probe(video).duration) ?? 0
+				let from = take.clips.map(\.start).min() ?? 0
+				let to = take.clips.map(\.end).max() ?? duration
+				let cast = try await ColourAnalysis.measure(videoURL: video, from: from, to: to)
+				take.measured.cast = cast
+				if !quiet {
+					print("    cast [" + cast.map { String(format: "%.4f", $0) }.joined(separator: ", ") + "]")
+				}
+			}
+
+			try TakeWriter.write(take).write(to: takeURL, atomically: true, encoding: .utf8)
+		}
+	} catch {
+		fail("measuring: \(error.localizedDescription)")
+	}
 }
 
 // Solving before resolving, because resolving reads the sidecars.

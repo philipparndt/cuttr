@@ -223,6 +223,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			guard !Task.isCancelled, let self else { return }
 			self.transport.present(built.composition,
 			                       videoComposition: built.videoComposition,
+			                       audioMix: built.audioMix,
 			                       duration: resolved.duration)
 			// A preview that fails says so. Silently showing black is the worst
 			// outcome: it looks like a project that renders nothing, and the
