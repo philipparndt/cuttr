@@ -1,0 +1,70 @@
+name: cuttr
+
+# The Xcode project is generated from this file and is not checked in. The
+# package is still the source of truth: the app target is the window layer,
+# `Sources/cuttr`, and everything under it comes from the SwiftPM package next
+# door — the same one `swift build` uses, so the two builds cannot drift.
+#
+# The same arrangement as docscanner and abydos, for the same two reasons.
+# Xcode is where a window is debugged and where Instruments attaches; and the
+# development team has to live somewhere a rebuild cannot lose, which a
+# generated project is not.
+options:
+  bundleIdPrefix: de.rnd7
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    CODE_SIGN_STYLE: Automatic
+    # The .xcodeproj is generated and gitignored, so the team lives here:
+    # setting it in Xcode would not survive the next `make xcode`.
+    DEVELOPMENT_TEAM: 643R6YSRER
+
+packages:
+  cuttr:
+    path: .
+
+targets:
+  cuttr:
+    type: application
+    platform: macOS
+    sources:
+      # The window layer is a library of the package, so Xcode and SwiftPM
+      # build the same sources with one dependency graph between them.
+      - path: Sources/cuttr
+      - path: Resources/Icon/cuttr.icns
+        buildPhase: resources
+        optional: true
+    dependencies:
+      - package: cuttr
+        product: CuttrUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.rnd7.cuttr
+        PRODUCT_NAME: cuttr
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/Info.plist
+        SWIFT_STRICT_CONCURRENCY: minimal
+        # Not sandboxed. A cut list names media by relative path and the media
+        # lives wherever somebody keeps recordings; a sandboxed app would hold
+        # a security-scoped bookmark per file and lose the plain-text promise
+        # that a path in the file is a path on the disk.
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: YES
+
+schemes:
+  cuttr:
+    build:
+      targets:
+        cuttr: all
+    run:
+      config: Debug
+    archive:
+      config: Release

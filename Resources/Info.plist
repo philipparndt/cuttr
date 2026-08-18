@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>cuttr</string>
+	<key>CFBundleDisplayName</key>
+	<string>cuttr</string>
+	<key>CFBundleIdentifier</key>
+	<string>de.rnd7.cuttr</string>
+	<key>CFBundleExecutable</key>
+	<string>cuttr</string>
+	<key>CFBundleIconFile</key>
+	<string>cuttr</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.video</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Philipp Arndt</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- Dark by default; the timeline is drawn against a fixed dark palette. -->
+	<key>NSRequiresAquaSystemAppearance</key>
+	<false/>
+	<!-- The cut list. Declared so that a double-click opens it here and so
+	     that the open panel can filter to it; it is UTF-8 YAML, and the
+	     conformance says so rather than pretending it is opaque. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>cuttr project</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>de.rnd7.cuttr.project</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>cuttr take</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>de.rnd7.cuttr.take</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>de.rnd7.cuttr.project</string>
+			<key>UTTypeDescription</key>
+			<string>cuttr project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.utf8-plain-text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>cuttrproj</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>de.rnd7.cuttr.take</string>
+			<key>UTTypeDescription</key>
+			<string>cuttr take</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.utf8-plain-text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>cuttr</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

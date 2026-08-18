@@ -1,0 +1,154 @@
+import CuttrKit
+import Foundation
+import Yams
+
+/// Writing a project back to text.
+///
+/// Hand-written for the same reason ``CuttrKit/TakeWriter`` is: this file is
+/// meant to be opened in an editor and changed, and a general emitter would
+/// reorder keys and reflow lines on every save, so a one-word edit would arrive
+/// as a rewritten file. Fixed order, aligned columns, one blank line between
+/// entries, quoting only where a bare value would be read as something else.
+public enum ProjectWriter {
+
+	public static func write(_ project: Project) -> String {
+		var out = "# cuttr project — the assembly. Clips are referenced by slug.\n"
+		out += "cuttr-project: \(ProjectReader.formatVersion)\n\n"
+
+		if !project.takes.isEmpty {
+			out += "takes:\n"
+			for take in project.takes { out += "  - \(scalar(take))\n" }
+			out += "\n"
+		}
+
+		out += "output:\n"
+		out += "  size: \(project.output.width)x\(project.output.height)\n"
+		out += "  fps:  \(trim(project.output.framesPerSecond))\n"
+		if let file = project.output.file { out += "  file: \(scalar(file))\n" }
+		out += "\n"
+
+		if !project.styles.isEmpty {
+			out += "styles:\n"
+			for name in project.styles.keys.sorted() {
+				let style = project.styles[name]!
+				out += "  \(scalar(name)):\n"
+				out += "    font:     \(scalar(style.font))\n"
+				out += "    size:     \(trim(style.size))\n"
+				out += "    color:    \(scalar(style.color.hex))\n"
+				out += "    background: \(style.background.a == 0 ? "none" : scalar(style.background.hex))\n"
+				out += "    padding:  \(trim(style.padding))\n"
+				out += "    radius:   \(trim(style.cornerRadius))\n"
+				out += "    position: [\(trim(style.position.x)), \(trim(style.position.y))]\n"
+				out += "    align:    \(style.alignment.rawValue)\n"
+			}
+			out += "\n"
+		}
+
+		out += "timeline:\n"
+		if project.timeline.isEmpty {
+			out += "  # nothing yet — add clips by slug:\n"
+			out += "  # - take-01/intro\n"
+		}
+		out += entries(project.timeline, indent: "  ")
+
+		if !project.overlays.isEmpty {
+			out += "\noverlays:\n"
+			for (index, overlay) in project.overlays.enumerated() {
+				if index > 0 { out += "\n" }
+				switch overlay.kind {
+				case .text(let text, let style):
+					out += "  - text:   \(scalar(text))\n"
+					if let style { out += "    style:  \(scalar(style))\n" }
+				case .spinner(let spinner):
+					out += "  - spinner: \(spinner.style.rawValue)\n"
+					if spinner.size != Spinner().size { out += "    size:    \(trim(spinner.size))\n" }
+					if spinner.speed != Spinner().speed { out += "    speed:   \(trim(spinner.speed))\n" }
+					if spinner.color != Spinner().color { out += "    color:   \(scalar(spinner.color.hex))\n" }
+					if let wordStyle = spinner.wordStyle { out += "    word-style: \(scalar(wordStyle))\n" }
+					if !spinner.words.isEmpty {
+						out += "    words:\n"
+						for word in spinner.words {
+							if let duration = word.duration {
+								out += "      - {text: \(scalar(word.text)), for: \(trim(duration))}\n"
+							} else {
+								out += "      - \(scalar(word.text))\n"
+							}
+						}
+					}
+				}
+				switch overlay.span {
+				case .marks(let from, let to):
+					out += "    from:   \(scalar(from.description))\n"
+					if to != from { out += "    to:     \(scalar(to.description))\n" }
+				case .times(let from, let to):
+					out += "    from:   \(Timecode.string(from))\n"
+					out += "    to:     \(Timecode.string(to))\n"
+				}
+				if let anchor = overlay.anchor {
+					out += "    anchor: \(scalar(anchor))\n"
+					out += "    offset: [\(trim(overlay.offset.x)), \(trim(overlay.offset.y))]\n"
+				}
+				out += "    in:     \(transition(overlay.arrival))\n"
+				out += "    out:    \(transition(overlay.departure))\n"
+			}
+		}
+
+		if !project.unknownKeys.isEmpty {
+			out += "\n"
+			for key in project.unknownKeys.keys.sorted() {
+				out += (try? Yams.dump(object: [key: project.unknownKeys[key]!])) ?? ""
+			}
+		}
+		return out
+	}
+
+	/// The timeline, which nests: a group's clips are entries like any other.
+	private static func entries(_ list: [TimelineEntry], indent: String) -> String {
+		var out = ""
+		for entry in list {
+			switch entry.source {
+			case .group(let name, let inner):
+				out += "\(indent)- group: \(scalar(name))\n"
+				out += "\(indent)  clips:\n"
+				out += entries(inner, indent: indent + "    ")
+				if entry.transition != 0 {
+					out += "\(indent)  transition: \(trim(entry.transition))\n"
+				}
+			case .list(let references):
+				out += "\(indent)- clips: [\(references.map(\.description).joined(separator: ", "))]\n"
+				if entry.transition != 0 { out += "\(indent)  transition: \(trim(entry.transition))\n" }
+			case .clip(let reference):
+				out += scalarEntry("clip", reference.description, entry.transition, indent)
+			case .query(_, let source):
+				out += scalarEntry("query", source, entry.transition, indent)
+			}
+		}
+		return out
+	}
+
+	private static func scalarEntry(_ key: String, _ value: String, _ transition: Double, _ indent: String) -> String {
+		// The short form for a straight cut, which is nearly all of them.
+		if transition == 0 { return "\(indent)- \(key): \(scalar(value))\n" }
+		return "\(indent)- \(key):       \(scalar(value))\n"
+			+ "\(indent)  transition: \(trim(transition))\n"
+	}
+
+	private static func transition(_ value: Overlay.Transition) -> String {
+		switch value {
+		case .cut: return "cut"
+		case .fade(let over): return "{fade: true, over: \(trim(over))}"
+		case .slide(let edge, let over): return "{slide: \(edge.rawValue), over: \(trim(over))}"
+		}
+	}
+
+	/// A number without a trailing `.0`, because `fps: 25.0` is not how anybody
+	/// writes twenty-five.
+	private static func trim(_ value: Double) -> String {
+		if value == value.rounded(), abs(value) < 1e9 { return String(Int(value)) }
+		return String(format: "%g", value)
+	}
+
+	private static func trim(_ value: CGFloat) -> String { trim(Double(value)) }
+
+	private static func scalar(_ value: String) -> String { TakeWriter.scalar(value) }
+}

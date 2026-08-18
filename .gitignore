@@ -1,0 +1,25 @@
+# SPM build output
+.build/
+.swiftpm/
+
+# Assembled .app bundle (Scripts/bundle.sh)
+build/
+
+# Xcode
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+
+.DS_Store
+
+# Intermediate for the .icns; the icns itself is committed.
+Resources/Icon/*.iconset/
+
+# Scratch media. Recordings are large and are nobody's to commit; the small
+# generated fixtures under Tests/CuttrKitTests/Fixtures/ are.
+Media/
+*.mov
+*.mp4
+*.wav
+*.aiff
+!Tests/CuttrKitTests/Fixtures/**

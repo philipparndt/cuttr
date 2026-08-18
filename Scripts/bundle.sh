@@ -1,0 +1,77 @@
+#!/bin/bash
+#
+# Builds cuttr.app.
+#
+# The app is built by Xcode, from a project generated out of project.yml. What
+# is left to this script is the part Xcode does not do: generating the project,
+# choosing the configuration, putting the result where the Makefile expects it,
+# and signing it with a stable identity.
+#
+# Usage: Scripts/bundle.sh [debug|release]   (default: release)
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+CONFIG="${1:-release}"
+APP="build/cuttr.app"
+
+XCODE_CONFIG="Release"
+[ "$CONFIG" = "debug" ] && XCODE_CONFIG="Debug"
+DERIVED="build/DerivedData"
+# The log sits beside the derived data, so the directory has to exist before
+# the redirection is set up — a shell opens the file before it runs xcodebuild.
+mkdir -p build
+
+# The project is generated and gitignored, so it may not exist and may be older
+# than the file it comes from. Regenerating is a second and is idempotent.
+command -v xcodegen >/dev/null || {
+	echo "xcodegen not found — brew install xcodegen"
+	exit 1
+}
+if [ ! -d cuttr.xcodeproj ] || [ project.yml -nt cuttr.xcodeproj ]; then
+	echo "==> Generating cuttr.xcodeproj from project.yml"
+	xcodegen generate --quiet
+fi
+
+echo "==> Building ($XCODE_CONFIG)"
+xcodebuild -project cuttr.xcodeproj -scheme cuttr \
+	-destination 'platform=OS X' \
+	-derivedDataPath "$DERIVED" -configuration "$XCODE_CONFIG" \
+	CODE_SIGNING_ALLOWED=NO \
+	build > "$DERIVED.log" 2>&1 || {
+		echo "    build failed — see $DERIVED.log"
+		tail -25 "$DERIVED.log"
+		exit 1
+	}
+
+BUILT="$DERIVED/Build/Products/$XCODE_CONFIG/cuttr.app"
+[ -d "$BUILT" ] || { echo "    no app at $BUILT — see $DERIVED.log"; exit 1; }
+
+echo "==> Assembling $APP"
+rm -rf "$APP"
+mkdir -p build
+cp -R "$BUILT" "$APP"
+
+# Signed with a Developer ID rather than ad-hoc, and not for distribution —
+# this app is never shipped anywhere. TCC remembers "cuttr may read your Movies
+# folder" against the app's identity, and an ad-hoc signature has none: it is
+# the hash of the binary, which changes on every rebuild, so each build is a
+# different app to macOS and silently drops the access the last one was given.
+IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+	| grep "Developer ID Application" | head -1 | awk '{print $2}')"
+
+if [ -n "$IDENTITY" ]; then
+	echo "==> Signing with Developer ID $IDENTITY"
+	codesign --force --deep --options runtime --sign "$IDENTITY" "$APP" || {
+		echo "    warning: signing failed; falling back to ad-hoc"
+		codesign --force --deep --sign - "$APP" 2>/dev/null
+	}
+else
+	echo "==> Signing ad-hoc (no Developer ID in the keychain)"
+	echo "    note: macOS will forget this app's file permissions on every rebuild"
+	codesign --force --deep --sign - "$APP" 2>/dev/null || \
+		echo "    warning: ad-hoc codesign failed; the app may not launch"
+fi
+
+echo "==> Done: $APP"
