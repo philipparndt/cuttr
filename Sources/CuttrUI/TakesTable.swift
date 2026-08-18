@@ -21,6 +21,13 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 
 	private let table = NSTableView()
 	private var rows: [ComposeDocument.TakeEntry] = []
+	/// The take whose name is being typed into, if any.
+	///
+	/// Renaming is asked for; it does not happen because somebody clicked
+	/// twice. A permanently editable name column swallows the double-click —
+	/// which here means "open this take" — and the field starts editing
+	/// instead, so the gesture appears to do nothing.
+	private var renaming: String?
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
@@ -96,13 +103,17 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 
 	@objc private func nameCommitted(_ sender: NSTextField) {
 		let row = table.row(for: sender)
+		renaming = nil
 		guard row >= 0, row < rows.count else { return }
 		onRename?(rows[row].path, sender.stringValue)
 	}
 
 	public func beginRenaming(_ path: String) {
 		guard let row = rows.firstIndex(where: { $0.path == path }) else { return }
+		renaming = path
 		table.selectRowIndexes([row], byExtendingSelection: false)
+		// Reloaded so the cell comes back editable, then handed the cursor.
+		table.reloadData(forRowIndexes: [row], columnIndexes: [0])
 		table.editColumn(0, row: row, with: nil, select: true)
 	}
 
@@ -169,9 +180,9 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 				return field
 			}()
 		field.font = Theme.mono
-		// Only the name is typed into; the rest is what the file turned out to
-		// be.
-		field.isEditable = tableColumn.identifier.rawValue == "take"
+		// Editable only while a rename is actually in progress, so double-click
+		// stays "open".
+		field.isEditable = tableColumn.identifier.rawValue == "take" && entry.path == renaming
 		field.target = self
 		field.action = #selector(nameCommitted(_:))
 

@@ -169,6 +169,48 @@ public final class ComposeDocument {
 		watchedDescriptor = -1
 	}
 
+	// MARK: - What there is to refer to
+
+	/// The names a project can actually use, gathered from its takes.
+	///
+	/// So the editor offers what exists rather than a blank field. Every one of
+	/// these is something a project refers to *by name* — a slug, a tag, an
+	/// anchor, a section — which means every one of them is somewhere a typo
+	/// turns into "no clip called intro" at render time.
+	public struct Vocabulary: Sendable {
+		public var clips: [String] = []
+		public var tags: [String] = []
+		public var anchors: [String] = []
+		public var groups: [String] = []
+	}
+
+	public var vocabulary: Vocabulary {
+		var found = Vocabulary()
+		var clips = Set<String>(), tags = Set<String>(), anchors = Set<String>()
+		// Read from the takes rather than from what resolved, so the lists are
+		// there to fix a project with, not only to admire a working one.
+		for entry in takes {
+			guard let text = try? String(contentsOf: entry.url, encoding: .utf8),
+			      let take = try? TakeReader.read(text) else { continue }
+			for clip in take.clips {
+				clips.insert(clip.slug)
+				tags.formUnion(clip.tags)
+			}
+			anchors.formUnion(take.anchors.map(\.name))
+		}
+		func names(_ entries: [TimelineEntry]) -> [String] {
+			entries.flatMap { entry -> [String] in
+				guard case .group(let name, let inner) = entry.source else { return [] }
+				return [name] + names(inner)
+			}
+		}
+		found.clips = clips.sorted()
+		found.tags = tags.sorted()
+		found.anchors = anchors.sorted()
+		found.groups = Array(Set(names(project.timeline))).sorted()
+		return found
+	}
+
 	// MARK: - Takes
 
 	/// The take files this project draws on, resolved and reported on.

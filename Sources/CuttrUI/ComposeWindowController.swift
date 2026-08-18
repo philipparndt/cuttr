@@ -23,6 +23,12 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private let markers = AnchorMarkerView()
 	private let takesTable = TakesTable()
 	private let inspector = ProjectInspector()
+	private let source = ProjectTextEditor()
+	private let modes = NSTabView()
+
+	/// Which of the three is showing.
+	public enum Mode: Int { case edit, text, preview }
+	private var mode: Mode = .edit
 
 	/// Opening a take is the application's business, not this window's: it may
 	/// already be open in another tab.
@@ -86,6 +92,17 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 		bar.onRender = { [weak self] in self?.render(nil) }
 		bar.onReload = { [weak self] in self?.composeDocument.reload() }
+		bar.onMode = { [weak self] index in self?.show(Mode(rawValue: index) ?? .edit) }
+
+		source.onApply = { [weak self] text in
+			guard let self, let url = self.composeDocument.url else { return }
+			// Written straight out, then re-read: the file is what this program
+			// believes, so applying means putting it there and letting the
+			// document notice, exactly as an external editor would.
+			try? text.write(to: url, atomically: true, encoding: .utf8)
+			self.composeDocument.reload()
+			self.bar.setStatus("applied")
+		}
 
 		problemLabel.font = Theme.monoSmall
 		problemLabel.textColor = NSColor(calibratedRed: 0.95, green: 0.5, blue: 0.5, alpha: 1)
@@ -110,21 +127,52 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// them; a plain constrained sibling of a plain view was not getting
 		// there, and the preview was the window's own grey. Two windows, one
 		// arrangement.
+		// The markers sit over the picture, inside the same pane, so they move
+		// and clip with it — and so they never have to reach across to a view
+		// that is not on screen. A tab view only keeps the *selected* item's
+		// view in the window, so a constraint from here to the player would be
+		// tying together two hierarchies with nothing in common, which AppKit
+		// answers by throwing.
+		let picture = NSView()
+		for view in [playerView, markers] as [NSView] {
+			view.translatesAutoresizingMaskIntoConstraints = false
+			picture.addSubview(view)
+			NSLayoutConstraint.activate([
+				view.topAnchor.constraint(equalTo: picture.topAnchor),
+				view.bottomAnchor.constraint(equalTo: picture.bottomAnchor),
+				view.leadingAnchor.constraint(equalTo: picture.leadingAnchor),
+				view.trailingAnchor.constraint(equalTo: picture.trailingAnchor),
+			])
+		}
+
 		let split = NSSplitView()
 		split.isVertical = false
 		split.dividerStyle = .thin
-		split.addArrangedSubview(playerView)
+		split.addArrangedSubview(picture)
 		split.addArrangedSubview(strip)
 
 		// The takes down the side. A project is a programme made of recordings,
 		// and the recordings are the thing somebody reaches for next — to open
 		// one, to cut another, to find out why one of them stopped resolving.
-		let withTakes = NSSplitView()
-		withTakes.isVertical = true
-		withTakes.dividerStyle = .thin
-		withTakes.addArrangedSubview(takesTable)
-		withTakes.addArrangedSubview(split)
-		withTakes.addArrangedSubview(inspector)
+		// The takes belong with the editor: they are the material the programme
+		// is made of, and choosing one is an editing act rather than something
+		// to look at while the picture plays.
+		let editing = NSSplitView()
+		editing.isVertical = true
+		editing.dividerStyle = .thin
+		editing.addArrangedSubview(takesTable)
+		editing.addArrangedSubview(inspector)
+
+		// A tab view with no tabs of its own: the segmented control in the bar
+		// is the switch, because it sits with the other things this window can
+		// do rather than starting a second row of furniture.
+		modes.tabViewType = .noTabsNoBorder
+		modes.drawsBackground = false
+		for (identifier, view) in [("edit", editing), ("text", source), ("preview", split)] as [(String, NSView)] {
+			let item = NSTabViewItem(identifier: identifier)
+			item.view = view
+			modes.addTabViewItem(item)
+		}
 
 		let content = DropView()
 		content.onDrop = { [weak self] urls in
@@ -134,7 +182,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		content.wantsLayer = true
 		content.layer?.backgroundColor = Theme.background.cgColor
 
-		for view in [bar, problemLabel, withTakes] as [NSView] {
+		for view in [bar, problemLabel, modes] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			content.addSubview(view)
 		}
@@ -149,39 +197,25 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			problemLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
 			problemLabel.heightAnchor.constraint(equalToConstant: 14),
 
-			withTakes.topAnchor.constraint(equalTo: problemLabel.bottomAnchor, constant: 2),
-			withTakes.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-			withTakes.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-			withTakes.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-		])
-		window.contentView = content
-
-		markers.translatesAutoresizingMaskIntoConstraints = false
-		content.addSubview(markers)
-		NSLayoutConstraint.activate([
-			markers.topAnchor.constraint(equalTo: playerView.topAnchor),
-			markers.leadingAnchor.constraint(equalTo: playerView.leadingAnchor),
-			markers.trailingAnchor.constraint(equalTo: playerView.trailingAnchor),
-			markers.bottomAnchor.constraint(equalTo: playerView.bottomAnchor),
+			modes.topAnchor.constraint(equalTo: problemLabel.bottomAnchor, constant: 2),
+			modes.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+			modes.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+			modes.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 		])
 
-		// Constraints rather than divider positions, for the reason the cutting
-		// window's layout carries in full: a position computed from `bounds`
-		// before the first layout pass is computed from zero, and a negative
-		// divider position aborts the process.
 		let preferred = NSLayoutConstraint.Priority(250)
 		let wishes = [
-			takesTable.widthAnchor.constraint(equalToConstant: 230),
-			inspector.widthAnchor.constraint(equalToConstant: 330),
-			strip.heightAnchor.constraint(equalToConstant: 170),
+			takesTable.widthAnchor.constraint(equalToConstant: 250),
+			strip.heightAnchor.constraint(equalToConstant: 200),
 		]
 		for wish in wishes { wish.priority = preferred; wish.isActive = true }
 		NSLayoutConstraint.activate([
-			takesTable.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
-			inspector.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
+			takesTable.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
 			strip.heightAnchor.constraint(greaterThanOrEqualToConstant: 90),
 			playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
 		])
+
+		window.contentView = content
 
 		// No marking here: an anchor is marked on the take, in the cutting
 		// window, where the footage is. This window shows what was found.
@@ -256,7 +290,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		window.title = composeDocument.displayName
 		window.representedURL = composeDocument.url
 		takesTable.reload(composeDocument.takes)
-		inspector.reload(composeDocument.project)
+		inspector.reload(composeDocument.project, vocabulary: composeDocument.vocabulary)
+		if mode == .text { source.show(sourceText) }
 		strip.resolved = composeDocument.resolved
 		markers.markers = (composeDocument.resolved?.anchors ?? []).compactMap { entry in
 			entry.path.map { (entry.anchor.name, $0) }
@@ -337,6 +372,29 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		overlayLayer.transform = CATransform3DMakeScale(scale, scale, 1)
 		_ = size
 		CATransaction.commit()
+	}
+
+	/// Switches which of the three has the window.
+	public func show(_ mode: Mode) {
+		self.mode = mode
+		modes.selectTabViewItem(at: mode.rawValue)
+		bar.setMode(mode.rawValue)
+		if mode == .text { source.show(sourceText) }
+		// Nothing plays behind a view that is not the picture: a project window
+		// left on the editor should not keep decoding.
+		if mode != .preview { transport.pause() }
+	}
+
+	@objc public func showEditor(_ sender: Any?) { show(.edit) }
+	@objc public func showText(_ sender: Any?) { show(.text) }
+	@objc public func showPreview(_ sender: Any?) { show(.preview) }
+
+	/// The file as it stands, for the text view.
+	private var sourceText: String {
+		if let url = composeDocument.url, let text = try? String(contentsOf: url, encoding: .utf8) {
+			return text
+		}
+		return ProjectWriter.write(composeDocument.project)
 	}
 
 	public func windowDidResize(_ notification: Notification) {

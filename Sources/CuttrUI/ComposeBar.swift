@@ -14,9 +14,11 @@ public final class ComposeBar: NSView {
 
 	public var onRender: (() -> Void)?
 	public var onReload: (() -> Void)?
+	public var onMode: ((Int) -> Void)?
 
 	private let renderButton = NSButton()
 	private let reloadButton = NSButton()
+	private let modes = NSSegmentedControl()
 	private let statusLabel = NSTextField(labelWithString: "")
 	private let progress = NSProgressIndicator()
 
@@ -40,7 +42,24 @@ public final class ComposeBar: NSView {
 		statusLabel.textColor = Theme.dimText
 		statusLabel.lineBreakMode = .byTruncatingTail
 
-		let stack = NSStackView(views: [renderButton, reloadButton, progress, statusLabel])
+		// Three views, one at a time, each with the whole window.
+		//
+		// They were three panes side by side and none of them had room: a
+		// timeline, a list of overlays and a picture in a third of a window
+		// each. What they have in common is only that they are about the same
+		// project, which is not a reason to look at them simultaneously.
+		for (index, title) in ["Edit", "Text", "Preview"].enumerated() {
+			modes.segmentCount = max(modes.segmentCount, index + 1)
+			modes.setLabel(title, forSegment: index)
+			modes.setWidth(66, forSegment: index)
+		}
+		modes.trackingMode = .selectOne
+		modes.selectedSegment = 0
+		modes.target = self
+		modes.action = #selector(modeChanged)
+		modes.toolTip = "⌘1 the editor · ⌘2 the file · ⌘3 the picture"
+
+		let stack = NSStackView(views: [modes, renderButton, reloadButton, progress, statusLabel])
 		stack.orientation = .horizontal
 		stack.spacing = 6
 		stack.alignment = .centerY
@@ -68,6 +87,9 @@ public final class ComposeBar: NSView {
 
 	@objc private func render() { onRender?() }
 	@objc private func reload() { onReload?() }
+	@objc private func modeChanged() { onMode?(modes.selectedSegment) }
+
+	public func setMode(_ index: Int) { modes.selectedSegment = index }
 
 	// MARK: - State in
 

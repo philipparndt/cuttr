@@ -22,6 +22,7 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 
 	private var project = Project()
 	private var rows: [Project.Row] = []
+	private var vocabulary = ComposeDocument.Vocabulary()
 
 	private let timelineTable = NSTableView()
 	private let overlayTable = NSTableView()
@@ -32,23 +33,39 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 	private let fps = NSTextField()
 	private let target = NSTextField()
 	private let ceiling = NSTextField()
-	private let reference = NSTextField()
+	private let reference = NSComboBox()
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
 		wantsLayer = true
 		layer?.backgroundColor = Theme.panel.cgColor
 
+		// Laid out for a whole window rather than a strip down the side.
+		//
+		// This lived in a 330-point column beside the picture and the takes, and
+		// three lists in a third of a window is three lists nobody can use. It
+		// gets the window now, and the arrangement follows what the file looks
+		// like: what comes out at the top, the programme and the things drawn
+		// over it side by side underneath, and the text they produce along the
+		// bottom.
+		let lists = NSSplitView()
+		lists.isVertical = true
+		lists.dividerStyle = .thin
+		lists.addArrangedSubview(section("timeline", timeline()))
+		lists.addArrangedSubview(section("overlays", overlays()))
+
 		let stack = NSStackView(views: [
 			section("output", output()),
-			section("timeline", timeline()),
-			section("overlays", overlays()),
+			lists,
 			section("what this writes", writes()),
 		])
 		stack.orientation = .vertical
 		stack.spacing = 10
 		stack.alignment = .leading
 		stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+		// The lists take whatever the window has; the other two are as tall as
+		// their contents.
+		lists.setContentHuggingPriority(.defaultLow, for: .vertical)
 		stack.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(stack)
 		NSLayoutConstraint.activate([
@@ -124,7 +141,14 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 		sound.orientation = .horizontal
 		sound.spacing = 4
 
-		let match = NSStackView(views: [caption("match.reference"), field(reference, 120, "a clip slug")])
+		reference.font = Theme.mono
+		reference.completes = true
+		reference.placeholderString = "a clip slug"
+		reference.target = self
+		reference.action = #selector(outputEdited)
+		reference.translatesAutoresizingMaskIntoConstraints = false
+		reference.widthAnchor.constraint(equalToConstant: 160).isActive = true
+		let match = NSStackView(views: [caption("match.reference"), reference])
 		match.orientation = .horizontal
 		match.spacing = 4
 
@@ -160,21 +184,23 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 	private func timeline() -> NSView {
 		timelineTable.dataSource = self
 		timelineTable.delegate = self
-		timelineTable.headerView = nil
 		timelineTable.rowHeight = 20
 		timelineTable.backgroundColor = Theme.panel
 		timelineTable.gridStyleMask = []
 		timelineTable.usesAlternatingRowBackgroundColors = true
+		timelineTable.headerView = NSTableHeaderView()
 		let entry = NSTableColumn(identifier: .init("entry"))
-		entry.width = 200
+		entry.title = "clip / #query / @section"
+		entry.width = 260
 		timelineTable.addTableColumn(entry)
 		let transition = NSTableColumn(identifier: .init("transition"))
-		transition.width = 52
+		transition.title = "transition"
+		transition.width = 70
 		timelineTable.addTableColumn(transition)
 
 		let scroll = TableScroll.make(timelineTable)
 		scroll.translatesAutoresizingMaskIntoConstraints = false
-		scroll.heightAnchor.constraint(equalToConstant: 150).isActive = true
+		scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
 
 		let buttons = NSStackView(views: [
 			button("+ clip", #selector(addClip), "A clip by slug. Type `#tag` for a query."),
@@ -230,7 +256,7 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 		onChange?(next)
 	}
 
-	@objc private func entryEdited(_ sender: NSTextField) {
+	@objc private func entryEdited(_ sender: NSControl) {
 		let row = timelineTable.row(for: sender)
 		guard row >= 0, row < rows.count else { return }
 		let path = rows[row].path
@@ -269,8 +295,9 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 		overlayTable.backgroundColor = Theme.panel
 		overlayTable.gridStyleMask = []
 		overlayTable.usesAlternatingRowBackgroundColors = true
-		for (identifier, title, width) in [("what", "text / spinner", CGFloat(150)),
-		                                   ("from", "from", 90), ("to", "to", 90)] {
+		for (identifier, title, width) in [("what", "text / spinner words", CGFloat(240)),
+		                                   ("from", "from", 120), ("to", "to", 120),
+		                                   ("anchor", "anchor", 110)] {
 			let column = NSTableColumn(identifier: .init(identifier))
 			column.title = title
 			column.width = width
@@ -279,7 +306,7 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 
 		let scroll = TableScroll.make(overlayTable)
 		scroll.translatesAutoresizingMaskIntoConstraints = false
-		scroll.heightAnchor.constraint(equalToConstant: 120).isActive = true
+		scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
 
 		let buttons = NSStackView(views: [
 			button("+ text", #selector(addText), "A caption. It slides in and out by default."),
@@ -333,7 +360,7 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 		onChange?(next)
 	}
 
-	@objc private func overlayEdited(_ sender: NSTextField) {
+	@objc private func overlayEdited(_ sender: NSControl) {
 		let row = overlayTable.row(for: sender)
 		let column = overlayTable.column(for: sender)
 		guard row >= 0, row < project.overlays.count, column >= 0 else { return }
@@ -354,6 +381,9 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 					.filter { !$0.text.isEmpty }
 				overlay.kind = .spinner(spinner)
 			}
+		case "anchor":
+			let name = sender.stringValue.trimmingCharacters(in: .whitespaces)
+			overlay.anchor = name.isEmpty ? nil : Slug.make(from: name)
 		case "from", "to":
 			let endpoint = Overlay.Span.Endpoint(sender.stringValue.trimmingCharacters(in: .whitespaces))
 			if case .marks(let from, let to) = overlay.span {
@@ -386,7 +416,7 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 		yaml.autoresizingMask = [.width]
 		scroll.documentView = yaml
 		scroll.translatesAutoresizingMaskIntoConstraints = false
-		scroll.heightAnchor.constraint(equalToConstant: 150).isActive = true
+		scroll.heightAnchor.constraint(equalToConstant: 160).isActive = true
 		return scroll
 	}
 
@@ -404,6 +434,11 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 
 	// MARK: - Loading
 
+	public func reload(_ project: Project, vocabulary: ComposeDocument.Vocabulary) {
+		self.vocabulary = vocabulary
+		reload(project)
+	}
+
 	public func reload(_ project: Project) {
 		// Not while something is being typed into: the document changes on every
 		// commit and a reload mid-edit ends it.
@@ -418,6 +453,8 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 		fps.stringValue = TakeWriter.number(project.output.framesPerSecond, places: 3)
 		target.stringValue = project.output.audio.map { TakeWriter.number($0.target, places: 1) } ?? ""
 		ceiling.stringValue = project.output.audio.map { TakeWriter.number($0.ceiling, places: 1) } ?? ""
+		reference.removeAllItems()
+		reference.addItems(withObjectValues: [""] + vocabulary.clips)
 		reference.stringValue = project.output.matchReference ?? ""
 
 		let timelineSelection = timelineTable.selectedRow
@@ -437,6 +474,33 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 
 	public func numberOfRows(in tableView: NSTableView) -> Int {
 		tableView === timelineTable ? rows.count : project.overlays.count
+	}
+
+	/// A field that offers the names that exist, and still takes anything.
+	///
+	/// A combo box rather than a menu, because both halves are needed: `from:`
+	/// wants one of the clips that are actually there, and a query wants
+	/// `#b-roll and not #reject`, which no menu can hold. Picking is for the
+	/// common case and typing is for the rest.
+	private func combo(_ identifier: NSUserInterfaceItemIdentifier, _ values: [String],
+	                   in tableView: NSTableView, action: Selector) -> NSComboBox {
+		let box = (tableView.makeView(withIdentifier: identifier, owner: self) as? NSComboBox)
+			?? {
+				let box = NSComboBox()
+				box.identifier = identifier
+				box.isBordered = false
+				box.drawsBackground = false
+				box.font = Theme.mono
+				box.completes = true
+				box.numberOfVisibleItems = 12
+				box.isButtonBordered = false
+				return box
+			}()
+		box.target = self
+		box.action = action
+		box.removeAllItems()
+		box.addItems(withObjectValues: values)
+		return box
 	}
 
 	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -465,16 +529,23 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 				field.textColor = Theme.dimText
 				return field
 			}
+			// Everything a timeline entry may name: the clips there are, the
+			// tags there are, and the sections this project already has.
+			let box = combo(tableColumn.identifier,
+			                vocabulary.clips
+			                    + vocabulary.tags.map { "#\($0)" }
+			                    + vocabulary.groups.map { "@\($0)" },
+			                in: tableView, action: #selector(entryEdited(_:)))
 			// Indented by depth, so a section and its contents read as a tree
 			// the way they do in the file.
-			field.stringValue = String(repeating: "  ", count: entry.depth)
+			box.stringValue = String(repeating: "  ", count: entry.depth)
 				+ entry.entry.source.description
 			switch entry.entry.source {
-			case .group: field.textColor = Theme.base(.violet)
-			case .query: field.textColor = Theme.base(.amber)
-			default: field.textColor = Theme.clipStroke(.green)
+			case .group: box.textColor = Theme.base(.violet)
+			case .query: box.textColor = Theme.base(.amber)
+			default: box.textColor = Theme.clipStroke(.green)
 			}
-			return field
+			return box
 		}
 
 		guard row < project.overlays.count else { return nil }
@@ -492,13 +563,26 @@ public final class ProjectInspector: NSView, NSTableViewDataSource, NSTableViewD
 				field.textColor = Theme.base(.amber)
 			}
 		case "from", "to":
-			field.textColor = Theme.dimText
+			let box = combo(tableColumn.identifier,
+			                vocabulary.clips + vocabulary.groups.map { "@\($0)" },
+			                in: tableView, action: #selector(overlayEdited(_:)))
+			box.textColor = Theme.dimText
 			switch overlay.span {
 			case .marks(let from, let to):
-				field.stringValue = (tableColumn.identifier.rawValue == "from" ? from : to).description
+				box.stringValue = (tableColumn.identifier.rawValue == "from" ? from : to).description
 			case .times(let from, let to):
-				field.stringValue = Timecode.string(tableColumn.identifier.rawValue == "from" ? from : to)
+				box.stringValue = Timecode.string(tableColumn.identifier.rawValue == "from" ? from : to)
 			}
+			return box
+		case "anchor":
+			// The faces this project's takes have actually tracked. Blank is a
+			// real answer: an overlay with no anchor sits where its style says.
+			let box = combo(tableColumn.identifier, [""] + vocabulary.anchors,
+			                in: tableView, action: #selector(overlayEdited(_:)))
+			box.stringValue = overlay.anchor ?? ""
+			box.placeholderString = "none"
+			box.textColor = Theme.base(.teal)
+			return box
 		default:
 			break
 		}
