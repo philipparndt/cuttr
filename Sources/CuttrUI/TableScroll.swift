@@ -2,21 +2,20 @@ import AppKit
 
 /// Every scroll view in the program, made the same way.
 ///
-/// `NSScroller` decides whether it is horizontal or vertical from the *shape of
-/// its frame* when it is created, and a scroll view built before autolayout has
-/// given it a size creates both against a degenerate frame — so the horizontal
-/// one comes up vertical: a short capsule standing on end in the bottom-right
-/// corner, where a scrollbar should be lying down.
+/// Which is: the way AppKit makes them. Scrollbars are the framework's job —
+/// which way round they go, how wide they are, whether they float over the
+/// content or take room from it, whether they are always visible because
+/// somebody chose that in System Settings. None of that is this program's
+/// business, and every line here that tried to help made it worse: hand-built
+/// `NSScroller`s, a forced `scrollerStyle` overriding what the person using the
+/// machine asked for. All of it is gone.
 ///
-/// Handing it two correctly shaped scrollers is the fix, but only in this order:
-/// `hasHorizontalScroller` has to be true *before* `horizontalScroller` is
-/// assigned, or the assignment is dropped on the floor and AppKit keeps the one
-/// it made itself. That is the bit the previous attempt got wrong, and it is
-/// why the same stub kept coming back.
-///
-/// Overlay scrollers on top of that: they are drawn over the content as a knob
-/// that fades, so nothing is reserved, nothing is tiled, and a table that fits
-/// shows no furniture at all.
+/// Two decisions are genuinely ours and stay. A scroll view is created with a
+/// real frame rather than at zero, because a view sized 0×0 sets its parts up
+/// against a degenerate rectangle before autolayout has said anything — the one
+/// way this does go wrong by itself. And a list of a single column says it never
+/// scrolls sideways, so no horizontal scrollbar is ever asked for: not hidden,
+/// not autohidden, not there.
 @MainActor
 enum TableScroll {
 
@@ -29,12 +28,7 @@ enum TableScroll {
 		return wrap(table)
 	}
 
-	/// A list of one column, which fills the pane.
-	///
-	/// No horizontal scroller at all — not hidden, not autohidden, not there.
-	/// One column that is always exactly as wide as the pane has nothing to
-	/// scroll sideways to, and a scrollbar that cannot be used is a scrollbar
-	/// that can only be drawn wrong.
+	/// A list of one column, which fills the pane and never scrolls sideways.
 	static func fitting(_ table: NSTableView) -> NSScrollView {
 		table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
 		let scroll = wrap(table, horizontal: false)
@@ -42,18 +36,11 @@ enum TableScroll {
 		return scroll
 	}
 
-	/// A scroll view around anything, with both scrollers the right way round.
+	/// A scroll view around anything.
 	static func wrap(_ view: NSView, horizontal: Bool = true) -> NSScrollView {
 		let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 260))
 		scroll.hasVerticalScroller = true
 		scroll.hasHorizontalScroller = horizontal
-		// Wider than tall, and taller than wide. That is the whole trick — and
-		// it only counts after the two lines above.
-		scroll.verticalScroller = NSScroller(frame: NSRect(x: 0, y: 0, width: 15, height: 200))
-		if horizontal {
-			scroll.horizontalScroller = NSScroller(frame: NSRect(x: 0, y: 0, width: 200, height: 15))
-		}
-		scroll.scrollerStyle = .overlay
 		scroll.autohidesScrollers = true
 		scroll.drawsBackground = false
 		scroll.documentView = view
