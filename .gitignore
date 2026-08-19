@@ -23,3 +23,6 @@ Media/
 *.wav
 *.aiff
 !Tests/CuttrKitTests/Fixtures/**
+
+# The harness's worktrees for parallel agents
+.claude/
