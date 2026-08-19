@@ -690,10 +690,13 @@ public enum OverlayLayers {
 					let ramp = CAGradientLayer()
 					ramp.colors = [cgColor(first.color ?? background.from), cgColor(to)]
 					let ends = background.ends(in: CGSize(width: 1, height: 1))
-					// A gradient layer's own coordinates are top-left down, and
-					// everything else in a scene is bottom-left up.
-					ramp.startPoint = CGPoint(x: ends.start.x, y: 1 - ends.start.y)
-					ramp.endPoint = CGPoint(x: ends.end.x, y: 1 - ends.end.y)
+					// A gradient layer's unit space is the layer's own, which on
+					// this platform is bottom-left up — the same way round as
+					// everything else in a scene. Flipping it here, which is
+					// what an iOS habit says to do, put `from` at the top of the
+					// export and at the bottom of the preview.
+					ramp.startPoint = ends.start
+					ramp.endPoint = ends.end
 					layer = ramp
 					ink = (ramp, "colors")
 				} else {

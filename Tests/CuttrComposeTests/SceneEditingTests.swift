@@ -1,5 +1,7 @@
 import CoreGraphics
+import CoreImage
 import Foundation
+import QuartzCore
 import Testing
 @testable import CuttrCompose
 
@@ -117,5 +119,63 @@ import Testing
 		let corner = turned.corner(1, 1)
 		#expect(abs(corner.x - 50) < 0.001)
 		#expect(abs(corner.y - 80) < 0.001)
+	}
+}
+
+/// The two ways a scene reaches the screen have to agree.
+///
+/// They are drawn by different code — Core Animation lays the layers over the
+/// picture, and the painter rasterises the same scene when it has to go
+/// *behind* somebody. The editor's stage is the painter, so a disagreement
+/// between them is a preview that lies about the export, which is the one thing
+/// this program is built not to do.
+@Suite struct SceneRenderAgreementTests {
+
+	private func resolved(_ project: Project) -> ResolvedProject {
+		ResolvedProject(
+			project: project, baseURL: URL(fileURLWithPath: "."), clips: [],
+			overlays: [ResolvedOverlay(
+				overlay: Overlay(kind: .scene("intro", with: [:]), span: .times(from: 0, to: 4),
+				                 arrival: .cut, departure: .cut),
+				source: 0, appearance: 0, start: 0, end: 4, path: nil)],
+			groups: [], anchors: [])
+	}
+
+	private func layers(in layer: CALayer) -> [CALayer] {
+		(layer.sublayers ?? []).flatMap { [$0] + layers(in: $0) }
+	}
+
+	/// The bug this is here for: a gradient layer's unit space is the layer's
+	/// own, bottom-left up, and flipping it — which is what an iOS habit says to
+	/// do — put `from` at the top of the export and at the bottom of the
+	/// preview. Found by rendering a file and looking at it.
+	@Test func aGradientRunsTheSameWayInBothPaths() throws {
+		let project = Project(scenes: ["intro": Scene(parts: [
+			.init(content: .background(Scene.Background(from: .black, to: .white, angle: 90)),
+			      keys: [.init(t: 0, opacity: 1)]),
+		])])
+		let size = CGSize(width: 640, height: 360)
+
+		// The layer path: `from` at the bottom of the frame.
+		let tree = OverlayLayers.build(resolved(project), size: size, host: .export)
+		let ramp = try #require(layers(in: tree).compactMap { $0 as? CAGradientLayer }.first)
+		#expect(abs(ramp.startPoint.y) < 0.001)
+		#expect(abs(ramp.endPoint.y - 1) < 0.001)
+
+		// The painter: the same way up. Black at the bottom, white at the top.
+		let scene = try #require(project.scenes["intro"])
+		let image = try #require(OverlayPainter.sceneImage(
+			scene, with: [:], project: project,
+			baseURL: URL(fileURLWithPath: "."), size: size, at: 0))
+		let context = CIContext(options: [.workingColorSpace: NSNull()])
+		func pixel(_ x: Int, _ y: Int) -> Double {
+			var bytes = [UInt8](repeating: 0, count: 4)
+			context.render(CIImage(cgImage: image), toBitmap: &bytes, rowBytes: 4,
+			               bounds: CGRect(x: x, y: y, width: 1, height: 1),
+			               format: .RGBA8, colorSpace: nil)
+			return Double(bytes[0]) / 255
+		}
+		#expect(pixel(320, 4) < 0.1, "the painter puts `from` at the top")
+		#expect(pixel(320, 355) > 0.9)
 	}
 }

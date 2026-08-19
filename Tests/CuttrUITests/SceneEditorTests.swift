@@ -110,6 +110,59 @@ import Testing
 		#expect(picture.height <= 300)
 	}
 
+	/// A part is dragged on the stage, and the drag arrives as a position in
+	/// fractions of the frame — live all the way, once more on the way up.
+	///
+	/// Driven with real events through a real window, because the arithmetic
+	/// that turns a point on screen into a place in the file is the part that
+	/// goes wrong, and it involves the picture's rectangle inside the view.
+	@Test func draggingAPartOnTheStageMovesIt() throws {
+		_ = NSApplication.shared
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 360),
+		                      styleMask: [.titled], backing: .buffered, defer: false)
+		// A window made here and closed here is released by closing, and then
+		// released again by the local going out of scope. That is a crash in a
+		// test rather than a bug in the program, and it costs one line.
+		window.isReleasedWhenClosed = false
+		let stage = SceneStage()
+		window.contentView = stage
+		stage.frame = NSRect(x: 0, y: 0, width: 640, height: 360)
+		stage.project = project()
+		stage.outputSize = CGSize(width: 1920, height: 1080)
+		stage.scene = Scene(parts: [
+			.init(content: .shape(fill: .white, corner: 0),
+			      keys: [.init(t: 0, x: 0.5, y: 0.5, opacity: 1, width: 0.3, height: 0.3)]),
+		])
+		stage.selected = 0
+		stage.display()
+
+		var moves: [(Double, Double, Bool)] = []
+		stage.onMove = { _, x, y, commit in moves.append((x, y, commit)) }
+
+		func event(_ type: NSEvent.EventType, _ at: NSPoint) throws -> NSEvent {
+			try #require(NSEvent.mouseEvent(
+				with: type, location: at, modifierFlags: [], timestamp: 0,
+				windowNumber: window.windowNumber, context: nil,
+				eventNumber: 0, clickCount: 1, pressure: 1))
+		}
+
+		let picture = stage.picture
+		let middle = NSPoint(x: picture.midX, y: picture.midY)
+		stage.mouseDown(with: try event(.leftMouseDown, middle))
+		// A quarter of the picture's width to the right — well past the snap to
+		// the two-thirds line, which is what a small nudge would land on.
+		let moved = NSPoint(x: picture.midX + picture.width * 0.3, y: picture.midY)
+		stage.mouseDragged(with: try event(.leftMouseDragged, moved))
+		stage.mouseUp(with: try event(.leftMouseUp, moved))
+
+		#expect(moves.count == 2)
+		#expect(moves.first?.2 == false)
+		#expect(moves.last?.2 == true)
+		#expect(abs((moves.last?.0 ?? 0) - 0.8) < 0.01, "moved to \(moves.last?.0 ?? -1)")
+		#expect(abs((moves.last?.1 ?? 0) - 0.5) < 0.01)
+		window.close()
+	}
+
 	// MARK: - The document
 
 	/// A drag writes into the key at the playhead, or makes one there.
