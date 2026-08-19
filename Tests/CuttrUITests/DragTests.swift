@@ -84,3 +84,34 @@ import Testing
 		#expect(numbers(panel).contains(Timecode.string(6)), "the times shown are \(numbers(panel))")
 	}
 }
+
+/// Controls hold the position they were built with, and what they point at can
+/// be gone by the time they are clicked — two taps on the same minus before the
+/// form has come back is enough. Nothing here may go out of bounds.
+@Suite @MainActor struct StaleControlTests {
+
+	private func find<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
+		view.subviews.flatMap { subview -> [T] in
+			((subview as? T).map { [$0] } ?? []) + find(type, in: subview)
+		}
+	}
+
+	@Test func pressingMinusTwiceWithoutAReloadIsHarmless() {
+		_ = NSApplication.shared
+		let panel = PropertiesPanel()
+		var project = Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"))],
+			overlays: [Overlay(kind: .spinner(Spinner(words: [SpinnerWord("one")])),
+			                   spans: [.times(from: 0, to: 4), .times(from: 5, to: 9)])])
+		panel.onChange = { project = $0 }
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(0))
+		panel.layoutSubtreeIfNeeded()
+
+		// Every minus in the form, twice, with no reload in between.
+		for button in find(NSButton.self, in: panel).filter({ $0.title == "−" }) {
+			button.performClick(nil)
+			button.performClick(nil)
+		}
+		#expect(project.overlays[0].spans.count >= 1)
+	}
+}

@@ -52,6 +52,12 @@ public final class SpanStrip: NSView {
 	public var selected = 0 { didSet { needsDisplay = true } }
 
 	public var onSelect: ((Int) -> Void)?
+	/// The selected range, deleted — the key everybody reaches for.
+	public var onDelete: ((Int) -> Void)?
+	/// Where the pointer is while a range is being placed, so the picture above
+	/// can show that moment. Placing a caption against footage nobody can see
+	/// is guesswork with extra steps.
+	public var onScrub: ((Double) -> Void)?
 	/// Where a range was let go, in seconds. Written once, at the end of the
 	/// drag.
 	public var onDrag: ((Int, Double, Double) -> Void)?
@@ -159,9 +165,23 @@ public final class SpanStrip: NSView {
 	/// new value into a form that had been told not to look.
 	public override var acceptsFirstResponder: Bool { true }
 
+	public override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
+	public override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
+
+	public override func keyDown(with event: NSEvent) {
+		// 51 is delete, 117 is forward delete.
+		guard event.keyCode == 51 || event.keyCode == 117,
+		      ranges.indices.contains(selected) else {
+			super.keyDown(with: event)
+			return
+		}
+		onDelete?(selected)
+	}
+
 	public override func mouseDown(with event: NSEvent) {
 		window?.makeFirstResponder(self)
 		let place = convert(event.locationInWindow, from: nil)
+		onScrub?(time(place.x))
 		guard let index = ranges.indices.reversed().first(where: { index in
 			let box = NSRect(x: x(ranges[index].start) - 4, y: 38,
 			                 width: max(3, x(ranges[index].end) - x(ranges[index].start)) + 8, height: 26)
@@ -197,6 +217,9 @@ public final class SpanStrip: NSView {
 			range.end = range.start + length
 		}
 		ranges[dragging.index] = range
+		// The frame under the end being moved, not under the pointer's own
+		// position: an edge is being placed *at* a moment.
+		onScrub?(at)
 	}
 
 	public override func mouseUp(with event: NSEvent) {

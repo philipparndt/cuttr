@@ -32,6 +32,11 @@ public final class ProjectInspector: NSView {
 	public var poster: ((Double, @escaping (NSImage?) -> Void) -> Void)? {
 		didSet { properties.poster = poster }
 	}
+	/// Somebody is placing a range at this moment. The window takes the preview
+	/// there, so what plays and what is being edited are the same moment.
+	public var onScrub: ((Double) -> Void)? {
+		didSet { properties.onScrub = onScrub }
+	}
 
 	private let programme = ProgrammePanel()
 	private let properties = PropertiesPanel()

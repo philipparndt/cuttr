@@ -278,6 +278,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// A frame of the programme at a moment, for placing an overlay on. The
 		// same composition the preview plays, so what is dragged over is what
 		// will be rendered under.
+		inspector.onScrub = { [weak self] time in self?.seek(to: time) }
+
 		inspector.poster = { [weak self] time, done in
 			guard let self, let composition = self.builtComposition else { return done(nil) }
 			let generator = AVAssetImageGenerator(asset: composition)

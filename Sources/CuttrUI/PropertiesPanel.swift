@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import CuttrCompose
 import CuttrKit
 
@@ -30,6 +31,9 @@ public final class PropertiesPanel: NSView {
 	/// A frame of the programme at a time, if one can be had. Asked for
 	/// asynchronously; the window has the composition, not this panel.
 	public var poster: ((Double, @escaping (NSImage?) -> Void) -> Void)?
+	/// Somebody is placing a range at this moment on the programme. The window
+	/// takes the preview there, so the picture and the panel agree.
+	public var onScrub: ((Double) -> Void)?
 
 	private var project = Project()
 	private var vocabulary = ComposeDocument.Vocabulary()
@@ -50,6 +54,9 @@ public final class PropertiesPanel: NSView {
 	/// Bumped on every rebuild, so a frame that arrives late is dropped rather
 	/// than drawn under the wrong overlay.
 	private var generation = 0
+	/// The picture the range strip scrubs, and when it last asked for a frame.
+	private weak var currentPreview: FramePreview?
+	private var lastScrub: CFTimeInterval = 0
 
 	final class Sink: NSObject {
 		let run: (NSControl) -> Void
@@ -76,7 +83,7 @@ public final class PropertiesPanel: NSView {
 		stack.alignment = .leading
 		stack.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 14, right: 14)
 
-		let scroll = TableScroll.wrap(stack, horizontal: false)
+		let scroll = TableScroll.wrap(stack)
 		scroll.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(scroll)
 		NSLayoutConstraint.activate([
@@ -84,8 +91,17 @@ public final class PropertiesPanel: NSView {
 			scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
 			scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
 			scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
-			stack.widthAnchor.constraint(equalTo: scroll.widthAnchor),
 		])
+		// The form fills the pane when it fits, and scrolls when it does not —
+		// but it never *demands* the width it would like.
+		//
+		// This one line is why the window used to rearrange itself: tying the
+		// form's width to the scroll view's with a required constraint hands
+		// every width inside the form to the pane, the pane is one side of a
+		// split view, and selecting an overlay moved the divider.
+		let fills = stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)
+		fills.priority = NSLayoutConstraint.Priority(240)
+		fills.isActive = true
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
@@ -99,7 +115,10 @@ public final class PropertiesPanel: NSView {
 		// ragged-left ruins that — the eye has nowhere to start.
 		grid.column(at: 0).xPlacement = .leading
 		grid.column(at: 0).width = 116
-		grid.column(at: 1).xPlacement = .leading
+		// The control column takes the slack, so a picture or a rule reaches the
+		// far edge. Each row of controls keeps a spacer on its right, which is
+		// what stops the controls themselves being stretched.
+		grid.column(at: 1).xPlacement = .fill
 		grid.setContentHuggingPriority(.defaultHigh, for: .vertical)
 
 		for view in formHolder.subviews { view.removeFromSuperview() }
@@ -123,14 +142,19 @@ public final class PropertiesPanel: NSView {
 		// Not while something is being typed into: every commit writes the file
 		// and the file comes back, and rebuilding the form mid-word would take
 		// the cursor with it.
-		if built == selection, isEditing, !dragged { return }
+		if built == selection, isEditing, !mine { return }
 		rebuild()
 	}
 
-	/// Set by a drag on one of the pictures, so the next reload rebuilds even if
-	/// a field still holds the focus. A drag is an edit somebody can see being
-	/// made; it has to show up in the numbers beside it.
-	private var dragged = false
+	/// Set by every edit this panel makes, so the project coming back is not
+	/// mistaken for somebody else's change and skipped.
+	///
+	/// The panel refuses to reload while one of its fields is being typed into —
+	/// otherwise the file arrives mid-word and takes the cursor with it. But an
+	/// edit *made here* has to show up here: a range added, an offset dragged, a
+	/// size picked from a menu. Anything else looks like a button that does
+	/// nothing.
+	private var mine = false
 
 	private var isEditing: Bool {
 		guard let responder = window?.firstResponder as? NSView else { return false }
@@ -143,7 +167,7 @@ public final class PropertiesPanel: NSView {
 	}
 
 	private func rebuild() {
-		dragged = false
+		mine = false
 		sinks.removeAll()
 		generation += 1
 		grid = NSGridView(numberOfColumns: 2, rows: 0)
@@ -233,10 +257,16 @@ public final class PropertiesPanel: NSView {
 		return button
 	}
 
+	/// Every change this panel makes leaves by this door.
+	private func commit(_ project: Project) {
+		mine = true
+		onChange?(project)
+	}
+
 	private func editOutput(_ change: (inout Output) -> Void) {
 		var next = project
 		change(&next.output)
-		onChange?(next)
+		commit(next)
 	}
 
 	// MARK: - timeline entry
@@ -323,7 +353,7 @@ public final class PropertiesPanel: NSView {
 	private func replace(_ path: [Int], _ entry: TimelineEntry) {
 		var next = project
 		next.replaceEntry(at: path, with: entry)
-		onChange?(next)
+		commit(next)
 	}
 
 	// MARK: - overlay
@@ -386,15 +416,28 @@ public final class PropertiesPanel: NSView {
 				field(position == 0 ? "words" : "", [
 					text(word.text, width: 170, placeholder: "what it says now") {
 						[weak self] value in
-						self?.editSpinner(index) { $0.words[position].text = value }
+						self?.editSpinner(index) {
+							guard position < $0.words.count else { return }
+							$0.words[position].text = value
+						}
 					},
 					text(word.duration.map { TakeWriter.number($0, places: 2) } ?? "",
 					     width: 56, placeholder: "auto") { [weak self] value in
-						self?.editSpinner(index) { $0.words[position].duration = Double(value) }
+						self?.editSpinner(index) {
+							guard position < $0.words.count else { return }
+							$0.words[position].duration = Double(value)
+						}
 					},
 					label("s"),
 					small("−") { [weak self] in
-						self?.editSpinner(index) { $0.words.remove(at: position) }
+						// Bounds checked, always. A control holds the position it
+						// was built with, and the thing it points at can be gone
+						// by the time it is clicked — two taps on the same minus
+						// before the form has come back is enough.
+						self?.editSpinner(index) {
+							guard position < $0.words.count else { return }
+							$0.words.remove(at: position)
+						}
 					},
 				])
 			}
@@ -449,10 +492,15 @@ public final class PropertiesPanel: NSView {
 			}
 			if overlay.spans.count > 1 {
 				controls.append(small("−") { [weak self] in
-					self?.editOverlay(index) { $0.spans.remove(at: position) }
+					self?.editOverlay(index) {
+						guard position < $0.spans.count else { return }
+						$0.spans.remove(at: position)
+					}
 				})
 			}
-			field(position == 0 ? "when" : "", controls,
+			// Each range says which one it is. Two rows of identical controls
+			// with one label between them is a form nobody can point at.
+			field(overlay.spans.count == 1 ? "when" : "when[\(position)]", controls,
 			      note: position == 0
 				? "bound to clips it survives a re-cut; the same mark twice is one clip, or one whole section"
 				: nil)
@@ -539,7 +587,7 @@ public final class PropertiesPanel: NSView {
 		var next = project
 		guard index < next.overlays.count else { return }
 		change(&next.overlays[index])
-		onChange?(next)
+		commit(next)
 	}
 
 	private func editSpinner(_ index: Int, _ change: (inout Spinner) -> Void) {
@@ -570,12 +618,38 @@ public final class PropertiesPanel: NSView {
 			let extent = self.extent(of: span) ?? (0, 0)
 			return SpanStrip.Range(start: extent.0, end: extent.1, movable: movable(span))
 		}
+		strip.onDelete = { [weak self] position in
+			self?.editOverlay(index) { overlay in
+				// The last one is not deleted: an overlay that is on over
+				// nothing is not an overlay, it is a puzzle.
+				guard overlay.spans.count > 1, position < overlay.spans.count else { return }
+				overlay.spans.remove(at: position)
+			}
+		}
+		strip.onScrub = { [weak self] time in self?.scrub(to: time) }
 		strip.onDrag = { [weak self] position, start, end in
 			guard let self, position < overlay.spans.count else { return }
-			self.dragged = true
-			self.setSpan(index, position, self.span(from: overlay.spans[position], start: start, end: end))
+			self.setSpan(index, position,
+			             self.span(from: overlay.spans[position], start: start, end: end))
 		}
 		return strip
+	}
+
+	/// Show the frame at this moment while a range is being placed, and take the
+	/// window's preview there too.
+	///
+	/// Throttled, because a frame is decoded for each one and a drag asks sixty
+	/// times a second.
+	private func scrub(to time: Double) {
+		onScrub?(time)
+		let now = CACurrentMediaTime()
+		guard now - lastScrub > 0.12 else { return }
+		lastScrub = now
+		let generation = self.generation
+		poster?(time) { [weak self] image in
+			guard let self, self.generation == generation, let image else { return }
+			self.currentPreview?.poster = image
+		}
 	}
 
 	/// Where a range lands on the programme's clock.
@@ -635,6 +709,7 @@ public final class PropertiesPanel: NSView {
 	/// The frame the overlay appears on, with the overlay on it, draggable.
 	private func placement(_ index: Int, _ overlay: Overlay) -> NSView {
 		let preview = FramePreview()
+		currentPreview = preview
 		preview.aspect = project.output.size
 
 		let found = resolved?.overlays.first { $0.overlay == overlay }
@@ -657,7 +732,6 @@ public final class PropertiesPanel: NSView {
 		preview.spot = spot(of: overlay, anchor: anchor)
 		preview.explanation = explanation(for: overlay, anchored: anchor != nil)
 		preview.onMove = { [weak self] spot in
-			self?.dragged = true
 			self?.place(index, overlay, at: spot, anchor: anchor)
 		}
 
@@ -717,7 +791,7 @@ public final class PropertiesPanel: NSView {
 			style.position = spot
 			next.styles[name] = style
 			next.overlays[index].kind = .text(content, style: name)
-			onChange?(next)
+			commit(next)
 			return
 		}
 		editOverlay(index) { $0.offset = CGPoint(x: spot.x - 0.5, y: spot.y - 0.5) }
@@ -734,23 +808,40 @@ public final class PropertiesPanel: NSView {
 		let rule = NSBox()
 		rule.boxType = .separator
 
-		let stack = NSStackView(views: [label, rule])
-		stack.orientation = .vertical
-		stack.spacing = 4
-		stack.alignment = .leading
-		stack.edgeInsets = NSEdgeInsets(top: grid.numberOfRows == 0 ? 0 : 10, left: 0, bottom: 0, right: 0)
-		rule.translatesAutoresizingMaskIntoConstraints = false
-		rule.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+		let header = NSStackView(views: [label, rule])
+		header.orientation = .horizontal
+		header.spacing = 8
+		header.alignment = .centerY
+		// The rule reaches the far edge, which is what a section break is for:
+		// it separates the page, not the column of controls.
+		rule.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+		rule.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+		header.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
 
-		full(stack)
+		let row = grid.addRow(with: [header])
+		// Merged, unlike the pictures: a heading asks for no width of its own, so
+		// there is nothing for the two columns to share out and nothing moves.
+		row.mergeCells(in: NSRange(location: 0, length: 2))
+		row.topPadding = grid.numberOfRows == 1 ? 0 : 12
+		row.yPlacement = .center
 	}
 
-	/// Something that takes the whole width — the picture, a heading.
+	/// Something that takes the width of the control column — the picture, the
+	/// range strip.
+	///
+	/// In the column rather than across both, because merging cells hands the
+	/// merged width to *both* columns to share, and AppKit shared it by making
+	/// the column of keys as wide as the picture. Every label was then a
+	/// hundred points from the field it named.
 	private func full(_ view: NSView) {
-		let row = grid.addRow(with: [view])
-		row.mergeCells(in: NSRange(location: 0, length: 2))
+		grid.addRow(with: [NSGridCell.emptyContentView, view])
 		view.translatesAutoresizingMaskIntoConstraints = false
-		view.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
+		// Squeezable. Nothing in this panel may insist on being wider than the
+		// pane it is in: the pane is one side of a split view, and a form that
+		// demands three hundred points pushes the divider — so the whole window
+		// rearranges itself when somebody selects an overlay.
+		view.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+		view.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
 	}
 
 	/// A labelled line. The label is the **key it writes**, not a paraphrase of
@@ -761,10 +852,15 @@ public final class PropertiesPanel: NSView {
 		name.textColor = Theme.text
 		name.alignment = .left
 
-		let row = NSStackView(views: controls)
+		// A spacer on the right: the column stretches so that a picture can fill
+		// it, and without something willing to give, the controls stretch too.
+		let slack = NSView()
+		slack.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+		let row = NSStackView(views: controls + [slack])
 		row.orientation = .horizontal
 		row.spacing = 6
 		row.alignment = .centerY
+		row.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
 
 		grid.addRow(with: [name, row]).yPlacement = .center
 		if let note {
@@ -772,7 +868,9 @@ public final class PropertiesPanel: NSView {
 			caption.font = Theme.monoSmall
 			caption.textColor = Theme.faintText
 			caption.lineBreakMode = .byWordWrapping
-			caption.preferredMaxLayoutWidth = 320
+			caption.preferredMaxLayoutWidth = 260
+			caption.setContentCompressionResistancePriority(
+				NSLayoutConstraint.Priority(1), for: .horizontal)
 			let spacer = NSGridCell.emptyContentView
 			grid.addRow(with: [spacer, caption])
 		}
@@ -798,7 +896,9 @@ public final class PropertiesPanel: NSView {
 		// Both dimensions stated. A grid row takes its height from what is in it,
 		// and a field that only says how wide it is gets whatever is left —
 		// which was two thirds of a line, with the descenders cut off.
-		field.widthAnchor.constraint(equalToConstant: width).isActive = true
+		let wide = field.widthAnchor.constraint(equalToConstant: width)
+		wide.priority = .defaultHigh
+		wide.isActive = true
 		field.heightAnchor.constraint(equalToConstant: 22).isActive = true
 		let sink = Sink { control in onCommit(control.stringValue) }
 		sinks.append(sink)
@@ -837,7 +937,9 @@ public final class PropertiesPanel: NSView {
 		box.addItems(withObjectValues: values)
 		box.stringValue = value
 		box.translatesAutoresizingMaskIntoConstraints = false
-		box.widthAnchor.constraint(equalToConstant: width).isActive = true
+		let wide = box.widthAnchor.constraint(equalToConstant: width)
+		wide.priority = .defaultHigh
+		wide.isActive = true
 		box.heightAnchor.constraint(equalToConstant: 24).isActive = true
 		let sink = Sink { control in onCommit(control.stringValue) }
 		sinks.append(sink)
