@@ -37,7 +37,9 @@ public extension ComposeWindowController {
 			// Downloads next to the project, take files where the project's
 			// other takes go — so a meme is filed the way everything else in
 			// the project is, and the whole folder still copies to another disk.
-			let takes = self.composeDocument.placeForNewTake(named: "x")?
+			// Where a new take goes is the document's decision and there is one
+			// of it, so it is asked rather than guessed at a second time here.
+			let takes = self.composeDocument.placeForNewTake(named: "meme")?
 				.deletingLastPathComponent()
 				?? base.appendingPathComponent("takes", isDirectory: true)
 			let downloaded = try await MemeDownload.fetch(result, project: base, takes: takes)

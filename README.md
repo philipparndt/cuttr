@@ -485,6 +485,66 @@ called `clip-4` is better than one confidently named after the wrong person.
 from a terminal. On real footage, talking spans measured 0.007–0.015 of mouth
 movement a sample and quiet ones fell below the 0.006 threshold.
 
+### Memes as material
+
+**File ▸ Find a Meme…** (⇧⌘M, or the button in the library) searches GIPHY or
+Tenor and downloads the one you pick. Both serve an `.mp4` of everything they
+hold, which is the reason those two: AVFoundation will not open a GIF as a
+movie.
+
+What arrives is a **take**, because that is what a meme is — a short recording
+with one span cut out of it:
+
+    memes/facepalm.mov          the download, next to the project
+    takes/facepalm.cuttr        the take, where the project's takes go
+
+```yaml
+video: ../memes/facepalm.mov
+
+source:
+  provider:    giphy
+  id:          XD4qHZpkyUFfq
+  title:       facepalm GIF
+  page:        https://giphy.com/gifs/facepalm-XD4qHZpkyUFfq
+  attribution: Powered By GIPHY   # the service's terms ask for this to be shown
+
+clips:
+  - slug:  facepalm
+    name:  facepalm GIF
+    start: 00:00.000
+    end:   00:04.840
+```
+
+So nothing downstream had to learn the word: it is in the library under
+**memes**, it drags onto the programme, and it renders. The `source:` block is
+what makes a project publishable — it says where the material came from and
+carries the mark the service requires — and, like every other key in a take
+file, an older build will not throw it away.
+
+A meme is silent, and a silent clip is one AVFoundation's exporter refuses to
+write on its own, so the download gives it a track of its own silence. The
+picture is copied rather than re-encoded.
+
+The project has to be saved first, exactly as it does before a take can be
+added: every path in a project is relative to the project file.
+
+**A key is needed**, and there is none in this repository. Put one in
+`~/.config/cuttr/config.yaml`:
+
+```yaml
+giphy:
+  key: your-key-here
+tenor:
+  key: your-other-key
+```
+
+or press ⌘, and paste it into **Settings**, which writes that same file.
+`GIPHY_API_KEY` and `TENOR_API_KEY` in the environment win where they are set,
+which is what makes `GIPHY_API_KEY=… make dev` a one-off — but an app launched
+from the Dock inherits no shell, so the file is the one that always works. Keys
+are free: [GIPHY](https://developers.giphy.com/dashboard/),
+[Tenor](https://developers.google.com/tenor/guides/quickstart).
+
 ### Exporting a project
 
 **File ▸ Export Project to Folder…** copies the project and everything it
