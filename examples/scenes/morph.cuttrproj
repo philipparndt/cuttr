@@ -1,0 +1,82 @@
+# Shapes that become other shapes, and parts that fill themselves.
+#
+# `kind:` on a shape says what it is — rectangle, ellipse, triangle, diamond,
+# star or hexagon — and `shape:` on a *key* says what it becomes by the time
+# that key arrives. Both outlines are cut into the same number of points around
+# the middle and matched up, so the thing stays closed and convincing the whole
+# way across; the halfway frame is neither end.
+#
+# A bar and a spinner take `progress:` on a key, nought to one. The spinner is
+# the same one that goes over somebody's head in a programme — given a progress
+# it stops going round and fills instead.
+#
+#   cuttr-render examples/scenes/morph.cuttrproj
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: morph.mov
+
+timeline:
+  - card:  00:04.000
+    as:    becoming
+    fill:  ["#141a2b", "#05070d"]
+  - card:  00:03.500
+    as:    filling
+    fill:  ["#101820", "#04070a"]
+
+overlays:
+  - scene: becoming
+    from:  "@becoming"
+    in:    {fade: true, over: 0.4}
+    out:   {fade: true, over: 0.4}
+  - scene: filling
+    from:  "@filling"
+    in:    {fade: true, over: 0.4}
+    out:   {fade: true, over: 0.4}
+
+scenes:
+  # A square that becomes a circle, and a triangle that becomes a star while it
+  # turns. Every key that a morphing part passes through carries the kind it is
+  # to be at that moment.
+  becoming:
+    parts:
+      - shape: "#0a84ff"
+        kind:  rectangle
+        keys:
+          - {t: 0.2, x: 0.32, y: 0.55, width: 0.13, height: 0.23, shape: rectangle}
+          - {t: 2.0, shape: ellipse, ease: inOut}
+          - {t: 3.6, shape: rectangle, ease: inOut}
+      - shape: "#ffd60a"
+        kind:  triangle
+        keys:
+          - {t: 0.4, x: 0.68, y: 0.55, width: 0.13, height: 0.23, rotation: 0, shape: triangle}
+          - {t: 2.2, rotation: 180, shape: star, ease: inOut}
+          - {t: 3.6, rotation: 360, shape: hexagon, ease: inOut}
+      - text:  "one becomes another"
+        style: caption
+        keys:
+          - {t: 1.0, x: 0.5, y: 0.24, opacity: 0}
+          - {t: 1.6, opacity: 1, ease: out}
+
+  # `progress` fills a bar and a spinner alike. The bar's length and thickness
+  # are the key's own width and height, like any other part with a size.
+  filling:
+    parts:
+      - bar:   "#30d158"
+        track: "#1c2530"
+        corner: 0.008
+        keys:
+          - {t: 0.3, x: 0.5, y: 0.44, width: 0.44, height: 0.016, progress: 0}
+          - {t: 2.6, progress: 1, ease: out}
+      - spinner: ring
+        color:   "#0a84ff"
+        keys:
+          - {t: 0.3, x: 0.5, y: 0.62, scale: 1.6, progress: 0}
+          - {t: 2.6, progress: 1, ease: out}
+      - text:  "and it fills"
+        style: caption
+        keys:
+          - {t: 0.8, x: 0.5, y: 0.3, opacity: 0}
+          - {t: 1.4, opacity: 1, ease: out}
