@@ -365,20 +365,63 @@ public final class PropertiesPanel: NSView {
 		}
 
 		section("how it arrives")
-		let dissolves = entry.transition > 0
-		field("transition", [
-			pop(["cut", "dissolve"], selected: dissolves ? 1 : 0) { [weak self] pick in
+		// Every kind but a cut is the same arrangement — the two shots overlap
+		// and the programme is that much shorter — so they are one popup, a
+		// length, and a direction for the ones that travel.
+		let ways = Transition.Kind.allCases
+		let how = entry.transition
+		var arrival: [NSView] = [
+			pop(ways.map { $0.title }, selected: ways.firstIndex(of: how.kind) ?? 0) {
+				[weak self] pick in
+				let kind = ways[pick]
+				self?.replace(path, TimelineEntry(
+					source: entry.source, transition: Transition(
+						kind, seconds: how.seconds > 0 ? how.seconds : 0.5, edge: how.edge),
+					label: entry.label, trim: entry.trim))
+			},
+		]
+		if how.kind != .cut {
+			arrival.append(number(how.seconds > 0 ? how.seconds : 0.5, width: 68) {
+				[weak self] value in
 				self?.replace(path, TimelineEntry(
 					source: entry.source,
-					transition: pick == 0 ? 0 : max(0.4, entry.transition)))
-			},
-			number(dissolves ? entry.transition : 0.4, width: 72) { [weak self] value in
-				self?.replace(path, TimelineEntry(source: entry.source, transition: max(0, value)))
-			},
-			label("seconds"),
-		], note: entry.transition > 0
-			? "the shot before it stays up while this one comes in, and the programme is that much shorter"
-			: "a dissolve overlaps the entry before this one — a section dissolves on its first clip")
+					transition: Transition(how.kind, seconds: max(0, value), edge: how.edge),
+					label: entry.label, trim: entry.trim))
+			})
+			arrival.append(label("seconds"))
+		}
+		if how.kind.directional {
+			let edges = Transition.Edge.allCases
+			arrival.append(pop(edges.map { $0.rawValue },
+			                   selected: edges.firstIndex(of: how.edge) ?? 0) { [weak self] pick in
+				self?.replace(path, TimelineEntry(
+					source: entry.source,
+					transition: Transition(how.kind, seconds: how.seconds, edge: edges[pick]),
+					label: entry.label, trim: entry.trim))
+			})
+			arrival.append(label("from"))
+		}
+		field("transition", arrival, note: advice(how))
+	}
+
+	/// What each kind is for, said once, where it is chosen.
+	private func advice(_ how: Transition) -> String {
+		switch how.kind {
+		case .cut:
+			return "an overlap of any kind takes the entry before this one with it — "
+				+ "a section overlaps on its first clip"
+		case .dissolve:
+			return "the shot before stays up while this one comes in, "
+				+ "and the programme is that much shorter"
+		case .dipToBlack: return "out through black and back — black between two shots reads as time passing"
+		case .dipToWhite: return "the same through white, which reads as a jump rather than a rest"
+		case .wipe: return "a hard edge crossing the frame, this shot behind it"
+		case .push: return "both shots move, as though the frame slid along to this one"
+		case .slide: return "this shot slides in over the one before, which stays where it is"
+		case .blur: return "both go soft, mix while they are soft, and come back sharp"
+		case .flash: return "a dissolve with the frame blown out in the middle of it"
+		case .iris: return "a circle opening from the middle — the oldest one there is"
+		}
 	}
 
 	private func changeKind(_ path: [Int], _ entry: TimelineEntry, to index: Int) {

@@ -167,12 +167,14 @@ public enum ProjectWriter {
 				out += "\(indent)- group: \(scalar(name))\n"
 				out += "\(indent)  clips:\n"
 				out += entries(inner, indent: indent + "    ")
-				if entry.transition != 0 {
-					out += "\(indent)  transition: \(trim(entry.transition))\n"
+				if entry.transition.duration > 0 {
+					out += "\(indent)  transition: \(transition(entry.transition))\n"
 				}
 			case .list(let references):
 				out += "\(indent)- clips: [\(references.map(\.description).joined(separator: ", "))]\n"
-				if entry.transition != 0 { out += "\(indent)  transition: \(trim(entry.transition))\n" }
+				if entry.transition.duration > 0 {
+					out += "\(indent)  transition: \(transition(entry.transition))\n"
+				}
 			case .clip(let reference):
 				out += scalarEntry("clip", reference.description, entry.transition, indent,
 				                   label: entry.label, ends: entry.trim)
@@ -184,15 +186,15 @@ public enum ProjectWriter {
 	}
 
 	private static func scalarEntry(
-		_ key: String, _ value: String, _ transition: Double, _ indent: String,
+		_ key: String, _ value: String, _ how: Transition, _ indent: String,
 		label: String? = nil, ends: (head: Double, tail: Double) = (0, 0)
 	) -> String {
 		// The short form for a straight cut of the whole clip, which is nearly
 		// all of them.
-		if transition == 0, label == nil, ends == (0, 0) {
+		if how.duration == 0, label == nil, ends == (0, 0) {
 			return "\(indent)- \(key): \(scalar(value))\n"
 		}
-		if transition == 0 {
+		if how.duration == 0 {
 			var out = "\(indent)- \(key): \(scalar(value))\n"
 			if let label { out += "\(indent)  as:   \(scalar(label))\n" }
 			if ends != (0, 0) {
@@ -206,8 +208,24 @@ public enum ProjectWriter {
 			out += "\(indent)  trim:       "
 				+ "[\(Timecode.string(ends.head)), \(Timecode.string(ends.tail))]\n"
 		}
-		out += "\(indent)  transition: \(trim(transition))\n"
+		out += "\(indent)  transition: \(transition(how))\n"
 		return out
+	}
+
+	/// A dissolve is still a bare number.
+	///
+	/// It is what the format has always written and what most transitions are,
+	/// so a project full of dissolves comes out of a newer version of this
+	/// program byte for byte as it went into an older one. Everything else says
+	/// which kind it is, and the directional ones say which way.
+	private static func transition(_ value: Transition) -> String {
+		switch value.kind {
+		case .cut: return "0"
+		case .dissolve: return trim(value.seconds)
+		default:
+			let what = value.kind.directional ? value.edge.rawValue : "true"
+			return "{\(value.kind.written): \(what), over: \(trim(value.seconds))}"
+		}
 	}
 
 	/// What a spinner says at one appearance, in the flow form the `when:` list

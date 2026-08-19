@@ -378,3 +378,78 @@ import Testing
     }
 
 }
+/// How one shot becomes the next, in the file.
+///
+/// The oldest spelling has to keep working and keep *writing* the same, or
+/// every project in existence churns the first time it is opened by a version
+/// that knows about wipes.
+@Suite struct TransitionFileTests {
+
+	@Test func aBareNumberIsStillADissolveAndStillWritesAsOne() throws {
+		let text = """
+		cuttr-project: 1
+		timeline:
+		  - clip: intro
+		  - clip: demo
+		    transition: 0.5
+		"""
+		let project = try ProjectReader.read(text)
+		#expect(project.timeline[1].transition == .dissolve(over: 0.5))
+		// Written back as the number it was: no churn in anybody's diff.
+		let written = ProjectWriter.write(project)
+		#expect(written.contains("transition: 0.5"))
+		#expect(!written.contains("dissolve"))
+	}
+
+	@Test func everyKindSurvivesTheFile() throws {
+		var project = Project(timeline: [TimelineEntry(clip: ClipReference("first"))])
+		for kind in Transition.Kind.allCases where kind != .cut {
+			project.timeline.append(TimelineEntry(
+				clip: ClipReference("next-\(kind.rawValue)"),
+				transition: Transition(kind, seconds: 0.6, edge: .down)))
+		}
+		let text = ProjectWriter.write(project)
+		let back = try ProjectReader.read(text)
+		#expect(back.timeline.count == project.timeline.count)
+		for (mine, theirs) in zip(project.timeline, back.timeline) {
+			#expect(mine.transition.kind == theirs.transition.kind)
+			#expect(abs(mine.transition.duration - theirs.transition.duration) < 0.001)
+			// The direction is only kept where it means something.
+			if mine.transition.kind.directional {
+				#expect(mine.transition.edge == theirs.transition.edge)
+			}
+		}
+		// And saving what was read changes nothing.
+		#expect(ProjectWriter.write(back) == text)
+	}
+
+	@Test func aKindCanBeNamedOnItsOwn() throws {
+		let text = """
+		cuttr-project: 1
+		timeline:
+		  - clip: intro
+		  - clip: demo
+		    transition: dip-to-black
+		  - clip: outro
+		    transition: {wipe: right, over: 0.8}
+		"""
+		let project = try ProjectReader.read(text)
+		#expect(project.timeline[1].transition.kind == .dipToBlack)
+		// A kind named alone gets a length that suits it: a dip has to sit on
+		// the black for a moment to read as one.
+		#expect(project.timeline[1].transition.duration == 1)
+		#expect(project.timeline[2].transition == Transition(.wipe, seconds: 0.8, edge: .right))
+	}
+
+	/// A kind nobody knows is a mistake worth stopping on, not a silent cut.
+	@Test func anUnknownKindIsRefused() {
+		let text = """
+		cuttr-project: 1
+		timeline:
+		  - clip: intro
+		  - clip: demo
+		    transition: starwipe
+		"""
+		#expect(throws: (any Error).self) { try ProjectReader.read(text) }
+	}
+}

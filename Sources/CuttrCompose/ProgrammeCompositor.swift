@@ -130,10 +130,8 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 		case (let going?, let coming?):
 			let span = max(instruction.timeRange.duration.seconds, 0.0001)
 			let progress = min(1, max(0, (time - instruction.timeRange.start.seconds) / span))
-			image = going.applyingFilter("CIDissolveTransition", parameters: [
-				kCIInputTargetImageKey: coming,
-				kCIInputTimeKey: progress,
-			])
+			image = Transitions.blend(instruction.blend, going: going, coming: coming,
+			                          progress: progress, size: size)
 		case (nil, let coming?):
 			image = coming
 		case (let going?, nil):
@@ -170,22 +168,26 @@ final class ProgrammeInstruction: NSObject, AVVideoCompositionInstructionProtoco
 	let requiredSourceTrackIDs: [NSValue]?
 	let passthroughTrackID = kCMPersistentTrackID_Invalid
 
-	/// The shot going out, if this stretch is a dissolve.
+	/// The shot going out, if two shots overlap here.
 	let outgoing: CMPersistentTrackID?
 	let incoming: CMPersistentTrackID?
 	let outgoingLook: Look
 	let incomingLook: Look
+	/// What to draw while they overlap.
+	let blend: Transition
 	let session: UUID
 
 	init(
 		timeRange: CMTimeRange, outgoing: CMPersistentTrackID?, incoming: CMPersistentTrackID?,
-		outgoingLook: Look = .none, incomingLook: Look = .none, session: UUID
+		outgoingLook: Look = .none, incomingLook: Look = .none,
+		blend: Transition = .cut, session: UUID
 	) {
 		self.timeRange = timeRange
 		self.outgoing = outgoing
 		self.incoming = incoming
 		self.outgoingLook = outgoingLook
 		self.incomingLook = incomingLook
+		self.blend = blend
 		self.session = session
 		self.containsTweening = outgoing != nil && incoming != nil
 		self.requiredSourceTrackIDs = [outgoing, incoming].compactMap { $0 }.map { NSNumber(value: $0) }

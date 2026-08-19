@@ -125,9 +125,9 @@ public enum ProjectReader {
 			var out: [TimelineEntry] = []
 			for entry in list(value) {
 				if let text = entry as? String {
-					out.append(try entryFromText(text, transition: 0))
+					out.append(try entryFromText(text, transition: .cut))
 				} else if let m = mapping(entry) {
-					let transition = try time(m["transition"], key: "transition") ?? 0
+					let transition = try cutTransition(m["transition"])
 					// A name for this placement, and how much of the clip to
 					// leave off at each end — both about *this* use of it.
 					let label = (m["as"] as? String).flatMap(nonEmpty).map(Slug.make(from:))
@@ -302,7 +302,57 @@ public enum ProjectReader {
 	}
 
 	/// One rule for "what does this string mean", shared with the panel.
-	private static func entryFromText(_ text: String, transition: Double) throws -> TimelineEntry {
+	/// How one entry arrives from the one before.
+	///
+	/// Three spellings, and the oldest still means what it always meant: a bare
+	/// number is a dissolve of that many seconds. A bare name is that kind over
+	/// its own sensible length. A mapping names the kind, its direction if it
+	/// has one, and how long — `{wipe: left, over: 0.6}`, the same shape the
+	/// overlays use for theirs.
+	private static func cutTransition(_ value: Any?) throws -> Transition {
+		guard let value else { return .cut }
+		// A number, or a timecode: the oldest spelling, and a dissolve.
+		if let seconds = (try? time(value, key: "transition")) ?? nil {
+			return seconds > 0 ? .dissolve(over: seconds) : .cut
+		}
+		if let text = value as? String {
+			guard let kind = Transition.Kind(written: text) else {
+				throw ProjectError.badValue(key: "transition", value: text)
+			}
+			return Transition(kind, seconds: defaultLength(kind))
+		}
+		guard let m = mapping(value) else {
+			throw ProjectError.badValue(key: "transition", value: "\(value)")
+		}
+		for kind in Transition.Kind.allCases where kind != .cut {
+			guard let said = m[kind.written] ?? m[kind.rawValue] else { continue }
+			let edge = (said as? String).flatMap(Transition.Edge.init(rawValue:))
+			let over = try time(m["over"], key: "transition") ?? defaultLength(kind)
+			return Transition(kind, seconds: over, edge: edge ?? .left)
+		}
+		// `{over: 0.5}` with no kind named is the kind everybody means.
+		if let over = try time(m["over"], key: "transition") {
+			return .dissolve(over: over)
+		}
+		return .cut
+	}
+
+	/// How long one of these runs when nobody says.
+	///
+	/// Different per kind because they are not the same length of thing: a dip
+	/// through black has to sit on the black for a moment to read as one, and a
+	/// flash that lasts half a second is not a flash.
+	private static func defaultLength(_ kind: Transition.Kind) -> Double {
+		switch kind {
+		case .cut: return 0
+		case .flash: return 0.25
+		case .dipToBlack, .dipToWhite: return 1
+		case .iris, .wipe, .push, .slide: return 0.6
+		default: return 0.5
+		}
+	}
+
+	private static func entryFromText(_ text: String, transition: Transition) throws -> TimelineEntry {
 		try TimelineEntry(text: text, transition: transition)
 	}
 

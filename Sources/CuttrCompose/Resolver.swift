@@ -76,10 +76,13 @@ public struct ResolvedClip: Sendable {
 	/// a clip from another when the same clip is used twice.
 	public var entry: [Int] = []
 	public let start: Double
-	/// How long this clip overlaps the one before it — a dissolve, in seconds,
-	/// nought for a cut. The programme's clock already has it: the clip starts
-	/// this much earlier than the one before it ended.
+	/// How long this clip overlaps the one before it — in seconds, nought for a
+	/// cut. The programme's clock already has it: the clip starts this much
+	/// earlier than the one before it ended.
 	public var transition: Double = 0
+	/// What is drawn while the two shots overlap, with `seconds` already cut
+	/// down to the overlap that fitted.
+	public var blend: Transition = .cut
 	public var end: Double { start + clip.duration }
 	public var duration: Double { clip.duration }
 
@@ -241,12 +244,12 @@ public enum Resolver {
 		/// Carried rather than applied at once, because the entry that asks for
 		/// it may be a section or a query: what dissolves is the first clip that
 		/// comes out of it, whatever that turns out to be.
-		var pending = 0.0
+		var pending = Transition.cut
 
 		func lay(out entries: [TimelineEntry], depth: Int = 0, at prefix: [Int] = []) throws {
 			for (position, entry) in entries.enumerated() {
 				let path = prefix + [position]
-				if entry.transition > 0 { pending = entry.transition }
+				if entry.transition.duration > 0 { pending = entry.transition }
 				if case .group(let name, let inner) = entry.source {
 					let start = cursor
 					try lay(out: inner, depth: depth + 1, at: path)
@@ -296,11 +299,13 @@ public enum Resolver {
 					// or a three-second dissolve between two-second shots would
 					// run past both.
 					var overlap = 0.0
-					if pending > 0, let last = clips.last {
-						overlap = min(pending, last.duration / 2, clip.duration / 2)
+					var blend = Transition.cut
+					if pending.duration > 0, let last = clips.last {
+						overlap = min(pending.duration, last.duration / 2, clip.duration / 2)
+						blend = Transition(pending.kind, seconds: overlap, edge: pending.edge)
 						cursor -= overlap
 					}
-					pending = 0
+					pending = .cut
 					let placedAt = cursor
 					let video = entry.take.video.map {
 						URL(fileURLWithPath: $0, relativeTo: entry.directory).standardizedFileURL
@@ -320,7 +325,8 @@ public enum Resolver {
 						audioOffset: entry.take.audio?.offset ?? 0,
 						entry: path,
 						start: cursor,
-						transition: overlap))
+						transition: overlap,
+						blend: blend))
 					cursor += clip.duration
 					// `as:` names this placement, and a named placement is a
 					// section of one clip — the same thing an overlay hangs on,

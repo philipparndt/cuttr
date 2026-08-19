@@ -572,8 +572,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			if case .group = entry.source {
 				_ = note("\(count) entr\(count == 1 ? "y" : "ies")", at: x)
 			}
-			if entry.transition > 0 {
-				let text = "⤫ \(TakeWriter.number(entry.transition, places: 2))s"
+			if entry.transition.duration > 0 {
+				let text = "⤫ \(entry.transition.kind.title) "
+					+ "\(TakeWriter.number(entry.transition.seconds, places: 2))s"
 				let size = (text as NSString).size(withAttributes: [.font: Theme.monoSmall])
 				_ = note(text, at: bounds.width - size.width - 10)
 			}

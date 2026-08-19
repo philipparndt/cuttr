@@ -86,7 +86,7 @@ public enum Renderer {
 		/// One stretch of programme: which track it plays from, and what it
 		/// looks like.
 		var segments: [(range: CMTimeRange, track: CMPersistentTrackID,
-		                look: Look, transition: Double)] = []
+		                look: Look, transition: Double, blend: Transition)] = []
 		/// What size each clip's picture arrives at, and when — for the pass
 		/// that fits without filtering.
 		var pictures: [(at: CMTime, size: CGSize)] = []
@@ -107,7 +107,7 @@ public enum Renderer {
 			grades.append((clip.start, clip.end, clip.look))
 			segments.append((
 				CMTimeRange(start: at, duration: CMTime(seconds: clip.duration, preferredTimescale: scale)),
-				videoTrack.trackID, clip.look, clip.transition))
+				videoTrack.trackID, clip.look, clip.transition, clip.blend))
 			// Linear amplitude, because that is what a mix takes. Decibels are
 			// what a person reads and what the file says.
 			levels.append((lane, at, Float(pow(10, clip.gain / 20))))
@@ -269,7 +269,7 @@ public enum Renderer {
 					timeRange: CMTimeRange(start: start, duration: over),
 					outgoing: previous.track, incoming: segment.track,
 					outgoingLook: previous.look, incomingLook: segment.look,
-					session: session))
+					blend: segment.blend, session: session))
 			}
 			// Alone from the end of its dissolve until the next one begins.
 			let soloStart = start + CMTime(seconds: segment.transition, preferredTimescale: scale)

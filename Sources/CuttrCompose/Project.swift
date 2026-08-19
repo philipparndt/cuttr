@@ -162,8 +162,9 @@ public struct TimelineEntry: Sendable, Equatable {
 	}
 
 	public var source: Source
-	/// Seconds to cross-fade into this entry from the one before, 0 for a cut.
-	public var transition: Double
+	/// How this entry arrives from the one before it: a cut unless it says
+	/// otherwise, and an overlap of some kind when it does.
+	public var transition: Transition
 
 	/// A name for *this placement* of the clip.
 	///
@@ -188,7 +189,7 @@ public struct TimelineEntry: Sendable, Equatable {
 	}
 
 	public init(
-		source: Source, transition: Double = 0,
+		source: Source, transition: Transition = .cut,
 		label: String? = nil, trim: (head: Double, tail: Double) = (0, 0)
 	) {
 		self.source = source
@@ -198,24 +199,24 @@ public struct TimelineEntry: Sendable, Equatable {
 	}
 
 	public init(
-		clip: ClipReference, transition: Double = 0,
+		clip: ClipReference, transition: Transition = .cut,
 		label: String? = nil, trim: (head: Double, tail: Double) = (0, 0)
 	) {
 		self.init(source: .clip(clip), transition: transition, label: label, trim: trim)
 	}
 
-	public init(list: [ClipReference], transition: Double = 0) {
+	public init(list: [ClipReference], transition: Transition = .cut) {
 		self.init(source: .list(list), transition: transition)
 	}
 
 	/// A query written as text, which is how it arrives from the file and how
 	/// it is written back — keeping the source means a hand-written query comes
 	/// out the way it went in rather than re-printed from the parse tree.
-	public init(query: String, transition: Double = 0) throws {
+	public init(query: String, transition: Transition = .cut) throws {
 		self.init(source: .query(try QueryParser.parse(query), source: query), transition: transition)
 	}
 
-	public init(group: String, entries: [TimelineEntry], transition: Double = 0) {
+	public init(group: String, entries: [TimelineEntry], transition: Transition = .cut) {
 		self.init(source: .group(group, entries), transition: transition)
 	}
 
@@ -225,7 +226,7 @@ public struct TimelineEntry: Sendable, Equatable {
 	/// is a section. One rule, used by the reader and by the panel, so that what
 	/// somebody types in a field and what they type in the file mean the same
 	/// thing — which is most of what the panel is for.
-	public init(text: String, transition: Double = 0) throws {
+	public init(text: String, transition: Transition = .cut) throws {
 		let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 		if trimmed.hasPrefix("@") {
 			self.init(group: Slug.make(from: String(trimmed.dropFirst())), entries: [], transition: transition)
