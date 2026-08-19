@@ -53,6 +53,21 @@ xcode: ## Generate the Xcode project and open it (needs xcodegen)
 	@xcodegen generate
 	@open cuttr.xcodeproj
 
+.PHONY: release
+release: ## Build, sign and notarise a disk image (needs a Developer ID)
+	@$(MAKE) --no-print-directory build CONFIG=release
+	@Scripts/release.sh
+
+.PHONY: release-publish
+release-publish: ## Cut a release: make release-publish VERSION=0.2.0
+	@test -n "$(VERSION)" || { echo "usage: make release-publish VERSION=0.2.0"; exit 1; }
+	@Scripts/publish-release.sh $(VERSION)
+
+.PHONY: tap
+tap: ## Point the Homebrew tap at a release: make tap VERSION=0.2.0
+	@test -n "$(VERSION)" || { echo "usage: make tap VERSION=0.2.0"; exit 1; }
+	@Scripts/update-tap.sh $(VERSION)
+
 .PHONY: install
 install: build ## Copy the app into /Applications
 	@rm -rf /Applications/cuttr.app
