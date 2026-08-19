@@ -441,7 +441,44 @@ public enum ProjectReader {
 			guard let fill = (shape as? String).flatMap(RGBA.init(hex:)) else {
 				throw ProjectError.badValue(key: "shape", value: describe(shape))
 			}
-			content = .shape(fill: fill, corner: number(fields["corner"]) ?? 0)
+			var kind = Scene.ShapeKind.rectangle
+			if let named = fields["kind"] {
+				guard let read = (named as? String).flatMap(Scene.ShapeKind.init(rawValue:)) else {
+					throw ProjectError.badValue(key: "kind", value: describe(named))
+				}
+				kind = read
+			}
+			content = .shape(fill: fill, corner: number(fields["corner"]) ?? 0, kind: kind)
+		} else if let value = fields["bar"] {
+			guard let fill = (value as? String).flatMap(RGBA.init(hex:)) else {
+				throw ProjectError.badValue(key: "bar", value: describe(value))
+			}
+			var direction = Scene.Bar.Direction.right
+			if let named = fields["direction"] {
+				guard let read = (named as? String)
+					.flatMap(Scene.Bar.Direction.init(rawValue:)) else {
+					throw ProjectError.badValue(key: "direction", value: describe(named))
+				}
+				direction = read
+			}
+			var track = RGBA(r: 1, g: 1, b: 1, a: 0.2)
+			if let named = fields["track"] as? String {
+				// `none` for a bar with no groove behind it, the same word the
+				// styles use for a caption with no plate.
+				track = named == "none" ? RGBA(r: 0, g: 0, b: 0, a: 0) : (RGBA(hex: named) ?? track)
+			}
+			content = .bar(Scene.Bar(fill: fill, track: track,
+			                         corner: number(fields["corner"]) ?? 0,
+			                         direction: direction))
+		} else if let value = fields["spinner"] {
+			guard let style = (value as? String).flatMap(Spinner.Style.init(rawValue:)) else {
+				throw ProjectError.badValue(key: "spinner", value: describe(value))
+			}
+			content = .spinner(Spinner(
+				style: style,
+				size: number(fields["size"]) ?? 0.09,
+				speed: number(fields["speed"]) ?? 1,
+				color: (fields["color"] as? String).flatMap(RGBA.init(hex:)) ?? .white))
 		} else if let image = fields["image"] {
 			guard let file = (image as? String).flatMap(nonEmpty) else {
 				throw ProjectError.badValue(key: "image", value: describe(image))
@@ -465,6 +502,8 @@ public enum ProjectReader {
 				opacity: number(key["opacity"]), scale: number(key["scale"]),
 				rotation: number(key["rotation"]),
 				width: number(key["width"]), height: number(key["height"]),
+				progress: number(key["progress"]),
+				shape: (key["shape"] as? String).flatMap(Scene.ShapeKind.init(rawValue:)),
 				color: (key["color"] as? String).flatMap(RGBA.init(hex:)),
 				ease: (key["ease"] as? String).flatMap(Scene.Ease.init(rawValue:)) ?? .inOut)
 		}

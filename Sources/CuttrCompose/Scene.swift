@@ -46,7 +46,26 @@ public struct Scene: Sendable, Equatable {
 			case text(String, style: String?, tracking: Double = 0)
 			/// A rectangle, which with a small height is a rule and with equal
 			/// sides is a block. Rounded by `corner`.
-			case shape(fill: RGBA, corner: Double)
+			///
+			/// `kind` is what it is the shape *of*, and it can be said again on
+			/// a key: a key naming a different one morphs between them over
+			/// that interval rather than cutting. It defaults to a rectangle,
+			/// which is what every shape part was before there were kinds, so a
+			/// project written then still says exactly what it always said.
+			case shape(fill: RGBA, corner: Double, kind: ShapeKind = .rectangle)
+			/// A progress bar. How full it is is `progress` on a key.
+			case bar(Bar)
+			/// The spinner this program already has, standing in a scene: the
+			/// same styles and the same drawing as one over a shot, because a
+			/// second implementation of a spinner is a spinner that eventually
+			/// disagrees with itself.
+			///
+			/// With `progress` on a key it stops going round and fills up
+			/// instead — a ring that reaches that fraction. The styles are for
+			/// the case where there is nothing to show but that it is still
+			/// going, and a spinner that knows how far it has got has something
+			/// better to say.
+			case spinner(Spinner)
 			/// A file beside the project — a logo, a badge, a texture.
 			case image(String)
 			/// The whole frame, filled. What an intro screen stands on.
@@ -113,6 +132,19 @@ public struct Scene: Sendable, Equatable {
 		/// For shapes and images: fractions of the frame's width and height.
 		public var width: Double?
 		public var height: Double?
+		/// What a bar, or a determinate spinner, has got to: nought to one.
+		///
+		/// On the key rather than on the part for the same reason `x` is — it
+		/// is the thing that moves. A bar that fills over three seconds is
+		/// `progress: 0` at one key and `progress: 1` at another, and the
+		/// easing between them is the easing that key already carries.
+		public var progress: Double?
+		/// What a shape part is the shape of, when it is not what it was.
+		///
+		/// Naming a different kind here morphs into it across the interval
+		/// ending at this key. Left out, it is whatever it already was, which
+		/// is why a shape that never changes says its kind once or not at all.
+		public var shape: ShapeKind?
 		/// The part's colour here, if it is not the one the part was declared
 		/// with: a text part's ink, a shape's fill, a background's first stop.
 		///
@@ -127,9 +159,12 @@ public struct Scene: Sendable, Equatable {
 		public init(
 			t: Double, x: Double? = nil, y: Double? = nil, opacity: Double? = nil,
 			scale: Double? = nil, rotation: Double? = nil,
-			width: Double? = nil, height: Double? = nil, color: RGBA? = nil,
+			width: Double? = nil, height: Double? = nil,
+			progress: Double? = nil, shape: ShapeKind? = nil, color: RGBA? = nil,
 			ease: Ease = .inOut
 		) {
+			self.progress = progress
+			self.shape = shape
 			self.t = t
 			self.x = x
 			self.y = y
@@ -173,8 +208,16 @@ public struct Scene: Sendable, Equatable {
 			filled.height = key.height ?? last.height
 			// No default of its own, unlike the others: a part with no colour
 			// anywhere is a part drawn in the colour it was declared with, and
-			// filling in a colour here would quietly override that.
+			// filling in a colour here would quietly override that. The kind of
+			// a shape is the same — it belongs to the part until a key says
+			// otherwise.
 			filled.color = key.color ?? last.color
+			filled.shape = key.shape ?? last.shape
+			// Carried forward and not defaulted, like the colour and the kind.
+			// A part with no `progress` at any key has never been told how far
+			// it has got, which is not the same as being told nought: it is how
+			// a spinner says it does not know.
+			filled.progress = key.progress ?? last.progress
 			out.append(filled)
 			last = filled
 		}
@@ -210,6 +253,10 @@ public struct Scene: Sendable, Equatable {
 			rotation: between(before.rotation, after.rotation),
 			width: between(before.width, after.width),
 			height: between(before.height, after.height),
+			progress: between(before.progress, after.progress),
+			// The kind is the one it is coming *from*: what it is turning into
+			// is a separate question, and `morph(of:at:)` is where it is asked.
+			shape: before.shape ?? after.shape,
 			color: RGBA.between(before.color, after.color, fraction),
 			ease: after.ease)
 	}
