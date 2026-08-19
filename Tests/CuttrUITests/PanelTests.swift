@@ -319,3 +319,56 @@ import Testing
 		                   clickCount: 1, pressure: 1)!
 	}
 }
+
+/// Delete, in the four lists that have a minus button.
+@Suite @MainActor struct DeleteKeyTests {
+
+	private func press(_ character: Character) -> NSEvent {
+		NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+		                 windowNumber: 0, context: nil, characters: String(character),
+		                 charactersIgnoringModifiers: String(character),
+		                 isARepeat: false, keyCode: 51)!
+	}
+
+	@Test func bothDeletesCountAndNothingElseDoes() {
+		_ = NSApplication.shared
+		#expect(isDelete(press(Character(UnicodeScalar(NSDeleteCharacter)!))))
+		#expect(isDelete(press(Character(UnicodeScalar(NSBackspaceCharacter)!))))
+		#expect(isDelete(press(Character(UnicodeScalar(NSDeleteFunctionKey)!))))
+		#expect(isDelete(press("x")) == false)
+		#expect(isDelete(press(" ")) == false)
+	}
+
+	/// The programme: delete takes the selected entry off it.
+	@Test func deleteTakesAnEntryOffTheProgramme() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+		panel.reload(Project(timeline: [
+			TimelineEntry(clip: ClipReference("one")),
+			TimelineEntry(clip: ClipReference("two")),
+		]), vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		var written: Project?
+		panel.onChange = { written = $0 }
+
+		// Selecting the first row the way a click would.
+		panel.selectRow(0)
+		panel.deleteSelected()
+		#expect(written?.timeline.count == 1)
+		#expect(written?.timeline.first?.source.description == "two")
+	}
+
+	/// And nothing happens when nothing is selected, rather than the first row
+	/// quietly disappearing.
+	@Test func deleteWithNothingSelectedDoesNothing() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+		panel.reload(Project(timeline: [TimelineEntry(clip: ClipReference("one"))]),
+		             vocabulary: ComposeDocument.Vocabulary())
+		var written: Project?
+		panel.onChange = { written = $0 }
+		panel.selectOutput()
+		panel.deleteSelected()
+		#expect(written == nil)
+	}
+}

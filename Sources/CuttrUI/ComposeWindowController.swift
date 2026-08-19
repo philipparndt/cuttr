@@ -347,6 +347,20 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		}
 		takesTable.onNew = { [weak self] in self?.newTake(nil) }
 
+		// A scene is material this project is made of, so it is worked on from
+		// the list of what the project is made of. `nil` is a new one.
+		takesTable.onScene = { [weak self] name in
+			guard let self else { return }
+			self.onEditScene?(self.composeDocument, name)
+		}
+		takesTable.onAddScene = { [weak self] in self?.addScene() }
+		takesTable.onRemoveScene = { [weak self] name in
+			guard let self else { return }
+			var next = self.composeDocument.project
+			next.scenes.removeValue(forKey: name)
+			self.composeDocument.apply(next)
+		}
+
 		// A frame of the programme at a moment, for placing an overlay on. The
 		// same composition the preview plays, so what is dragged over is what
 		// will be rendered under.
@@ -417,7 +431,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard let window else { return }
 		window.title = composeDocument.displayName
 		window.representedURL = composeDocument.url
-		takesTable.reload(composeDocument.takes)
+		takesTable.reload(composeDocument.takes, scenes: composeDocument.project.scenes)
 		inspector.resolved = composeDocument.resolved
 		let vocabulary = composeDocument.vocabulary
 		library.reload(vocabulary)
@@ -626,6 +640,58 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	// MARK: - Takes
 
 	/// Puts an existing take into the project.
+	/// Brings a scene in from another project.
+	///
+	/// Scenes live inside a project file rather than in files of their own, so
+	/// "add one" means copying a definition out of somebody else's — which is
+	/// exactly what a template is for: an intro built once and used in every
+	/// episode. The name is kept unless this project already has one, because
+	/// the name is what an overlay points at.
+	private func addScene() {
+		let panel = NSOpenPanel()
+		panel.allowedContentTypes = [UTType(filenameExtension: "cuttrproj") ?? .plainText]
+		panel.message = "Choose the project to take a scene from"
+		guard panel.runModal() == .OK, let url = panel.url,
+		      let text = try? String(contentsOf: url, encoding: .utf8),
+		      let other = try? ProjectReader.read(text)
+		else { return }
+		guard !other.scenes.isEmpty else {
+			let alert = NSAlert()
+			alert.messageText = "No scenes in \(url.lastPathComponent)"
+			alert.informativeText = "A scene lives under `scenes:` in a project file."
+			alert.runModal()
+			return
+		}
+
+		// One is taken without asking; several are a question, and a popup in
+		// an alert is the smallest thing that asks it.
+		var chosen = other.scenes.keys.sorted().first ?? ""
+		if other.scenes.count > 1 {
+			let alert = NSAlert()
+			alert.messageText = "Which scene?"
+			alert.informativeText = "\(url.lastPathComponent) has \(other.scenes.count) of them."
+			let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+			popup.addItems(withTitles: other.scenes.keys.sorted())
+			alert.accessoryView = popup
+			alert.addButton(withTitle: "Add")
+			alert.addButton(withTitle: "Cancel")
+			guard alert.runModal() == .alertFirstButtonReturn else { return }
+			chosen = popup.titleOfSelectedItem ?? chosen
+		}
+		guard let scene = other.scenes[chosen] else { return }
+
+		var next = composeDocument.project
+		var name = chosen
+		var suffix = 2
+		while next.scenes[name] != nil {
+			name = "\(chosen)-\(suffix)"
+			suffix += 1
+		}
+		next.scenes[name] = scene
+		composeDocument.apply(next)
+		onEditScene?(composeDocument, name)
+	}
+
 	@objc public func addTake(_ sender: Any?) {
 		guard ensureSaved() else { return }
 		let panel = NSOpenPanel()

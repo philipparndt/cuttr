@@ -40,8 +40,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	private var collapsed: Set<String> = []
 
 	private let outline = MenuOutline()
-	private let overlayTable = NSTableView()
-	private let soundTable = NSTableView()
+	private let overlayTable = KeyTable()
+	private let soundTable = KeyTable()
 	/// What to do when there is nothing there yet. An empty list that says
 	/// nothing looks like a list that is broken.
 	private let programmeHint = ProgrammePanel.hint(
@@ -191,6 +191,14 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		outline.dataSource = self
 		outline.delegate = self
 		outline.onMenu = { [weak self] event in self?.outlineMenu(for: event) }
+		// Delete takes the selected entry off the programme, which is what the
+		// minus button beside it does. A list somebody can select a row in and
+		// not delete from is a list that has to be explained.
+		outline.onKey = { [weak self] event in
+			guard isDelete(event), self?.selectedPath != nil else { return false }
+			self?.removeEntry()
+			return true
+		}
 		outline.rowHeight = 26
 		outline.backgroundColor = Theme.panel
 		outline.gridStyleMask = []
@@ -232,6 +240,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		])
 	}
 
+	/// For the tests: click a row without a mouse.
+	func selectRow(_ row: Int) {
+		guard row >= 0, row < outline.numberOfRows else { return }
+		outline.selectRowIndexes([row], byExtendingSelection: false)
+	}
+
 	private var selectedPath: [Int]? {
 		(outline.item(atRow: outline.selectedRow) as? Node)?.path
 	}
@@ -265,6 +279,16 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		onChange?(next)
 	}
 
+	/// What Delete does, wherever the keyboard happens to be in this panel.
+	///
+	/// Exposed because a key press is not the only way to ask: a menu item will
+	/// want the same thing, and the tests want it without a window.
+	public func deleteSelected() {
+		if selectedPath != nil { removeEntry() }
+		else if overlayTable.selectedRow >= 0 { removeOverlay() }
+		else if soundTable.selectedRow >= 0 { removeSound() }
+	}
+
 	@objc private func removeEntry() {
 		guard let path = selectedPath else { return }
 		var next = project
@@ -292,6 +316,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	private func buildOverlays() -> NSView {
 		overlayTable.dataSource = self
 		overlayTable.delegate = self
+		overlayTable.onKey = { [weak self] event in
+			guard let self, isDelete(event), self.overlayTable.selectedRow >= 0 else { return false }
+			self.removeOverlay()
+			return true
+		}
 		overlayTable.rowHeight = 34
 		overlayTable.backgroundColor = Theme.panel
 		overlayTable.gridStyleMask = []
@@ -318,6 +347,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	private func buildSounds() -> NSView {
 		soundTable.dataSource = self
 		soundTable.delegate = self
+		soundTable.onKey = { [weak self] event in
+			guard let self, isDelete(event), self.soundTable.selectedRow >= 0 else { return false }
+			self.removeSound()
+			return true
+		}
 		soundTable.rowHeight = 34
 		soundTable.backgroundColor = Theme.panel
 		soundTable.gridStyleMask = []

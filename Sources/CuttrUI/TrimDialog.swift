@@ -207,6 +207,26 @@ public final class TrimDialog: NSViewController {
 			cancel.trailingAnchor.constraint(equalTo: done.leadingAnchor, constant: -8),
 			cancel.bottomAnchor.constraint(equalTo: done.bottomAnchor),
 		])
+		// The size the sheet opens at, said in constraints as well as in the
+		// window's frame.
+		//
+		// A window whose `contentViewController` is set takes its size from the
+		// view's own fitting size, and a view laid out entirely with edge
+		// constraints has none worth having: the meme panel came up as a column
+		// one search field wide, with the grid and the buttons squeezed into a
+		// sliver. The preferred size is what it wants, the minimums are what it
+		// will not go below, and both are needed.
+		preferredContentSize = NSSize(width: 860, height: 620)
+		let wide = root.widthAnchor.constraint(equalToConstant: 860)
+		let tall = root.heightAnchor.constraint(equalToConstant: 620)
+		for wish in [wide, tall] {
+			wish.priority = NSLayoutConstraint.Priority(250)
+			wish.isActive = true
+		}
+		NSLayoutConstraint.activate([
+			root.widthAnchor.constraint(greaterThanOrEqualToConstant: 560),
+			root.heightAnchor.constraint(greaterThanOrEqualToConstant: 420),
+		])
 		view = root
 
 		// While it plays, the playhead follows the picture; while it does not,

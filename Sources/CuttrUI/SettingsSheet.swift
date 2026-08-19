@@ -134,6 +134,26 @@ public final class SettingsSheet: NSViewController {
 		for row in stack.arrangedSubviews where row is NSStackView {
 			row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 		}
+		// The size the sheet opens at, said in constraints as well as in the
+		// window's frame.
+		//
+		// A window whose `contentViewController` is set takes its size from the
+		// view's own fitting size, and a view laid out entirely with edge
+		// constraints has none worth having: the meme panel came up as a column
+		// one search field wide, with the grid and the buttons squeezed into a
+		// sliver. The preferred size is what it wants, the minimums are what it
+		// will not go below, and both are needed.
+		preferredContentSize = NSSize(width: 520, height: 260)
+		let wide = root.widthAnchor.constraint(equalToConstant: 520)
+		let tall = root.heightAnchor.constraint(equalToConstant: 260)
+		for wish in [wide, tall] {
+			wish.priority = NSLayoutConstraint.Priority(250)
+			wish.isActive = true
+		}
+		NSLayoutConstraint.activate([
+			root.widthAnchor.constraint(greaterThanOrEqualToConstant: 420),
+			root.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
+		])
 		view = root
 	}
 

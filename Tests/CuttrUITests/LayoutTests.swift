@@ -368,3 +368,35 @@ import Testing
 		#expect(told == [true], "a click in the content should not fold it")
 	}
 }
+
+/// Every sheet opens at a size somebody can work in.
+///
+/// A window whose `contentViewController` is set takes its size from the view's
+/// fitting size, and a view laid out with edge constraints alone has none worth
+/// having — the meme panel came up as a column one search field wide.
+@Suite @MainActor struct SheetSizeTests {
+
+	@Test func theSheetsAreNotSlivers() {
+		_ = NSApplication.shared
+		let controllers: [(String, NSViewController)] = [
+			("meme", MemePanel(download: { _ in "" }, onAdded: { _ in })),
+			("settings", SettingsSheet()),
+			("endpoint", EndpointPicker(catalogue: EndpointCatalogue(entries: []),
+			                            current: "", onChoose: { _ in })),
+			("trim", TrimDialog(clip: "clip", source: .media(video: nil, audio: nil, offset: 0),
+			                    span: (start: 0, end: 4), trim: (0, 0), step: 1.0 / 25,
+			                    onDone: { _ in })),
+		]
+		for (name, controller) in controllers {
+			controller.loadView()
+			let wanted = controller.preferredContentSize
+			#expect(wanted.width >= 400, "\(name) wants to be \(wanted.width) wide")
+			#expect(wanted.height >= 200, "\(name) wants to be \(wanted.height) tall")
+			// And the view can actually reach that size, rather than being held
+			// narrow by something inside it.
+			let fitting = controller.view.fittingSize
+			#expect(fitting.width <= wanted.width + 1,
+			        "\(name) will not fit in the size it asks for: \(fitting)")
+		}
+	}
+}

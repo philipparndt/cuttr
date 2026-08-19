@@ -30,8 +30,28 @@ final class KeyTable: NSTableView {
 @MainActor
 final class MenuOutline: NSOutlineView {
 	var onMenu: ((NSEvent) -> NSMenu?)?
+	var onKey: ((NSEvent) -> Bool)?
 
 	override func menu(for event: NSEvent) -> NSMenu? {
 		onMenu?(event) ?? super.menu(for: event)
 	}
+
+	override func keyDown(with event: NSEvent) {
+		if onKey?(event) == true { return }
+		super.keyDown(with: event)
+	}
+}
+
+/// Whether a key press is one of the two deletes.
+///
+/// Both, because a full keyboard has a forward delete and somebody who reaches
+/// for it means the same thing. `NSEvent`'s character constants rather than key
+/// codes: a key code is a position on a keyboard, and these two are not in the
+/// same position on every one.
+@MainActor
+func isDelete(_ event: NSEvent) -> Bool {
+	guard let key = event.charactersIgnoringModifiers?.unicodeScalars.first else { return false }
+	return key == Unicode.Scalar(NSDeleteCharacter)
+		|| key == Unicode.Scalar(NSBackspaceCharacter)
+		|| key == Unicode.Scalar(NSDeleteFunctionKey)!
 }

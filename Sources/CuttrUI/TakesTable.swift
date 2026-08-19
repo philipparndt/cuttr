@@ -19,8 +19,27 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 	public var onRename: ((String, String) -> Void)?
 	public var onNew: (() -> Void)?
 
-	private let table = NSTableView()
-	private var rows: [ComposeDocument.TakeEntry] = []
+	/// Somebody wants to work on a scene: the one named, or a new one when the
+	/// name is `nil`.
+	public var onScene: ((String?) -> Void)?
+	/// Bring a scene in from another project.
+	public var onAddScene: (() -> Void)?
+	public var onRemoveScene: ((String) -> Void)?
+
+	/// What a project is made of.
+	///
+	/// Takes and scenes in one list because they are the same kind of thing to
+	/// somebody assembling a programme: material it draws on. A scene is not a
+	/// file of its own — it lives in the project — but that is a fact about
+	/// where it is stored, and putting it in a different corner of the window
+	/// for that reason would be filing by implementation.
+	private enum Row {
+		case take(ComposeDocument.TakeEntry)
+		case scene(String, parts: Int)
+	}
+
+	private let table = KeyTable()
+	private var rows: [Row] = []
 	/// The take whose name is being typed into, if any.
 	///
 	/// Renaming is asked for; it does not happen because somebody clicked
@@ -44,6 +63,14 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		table.gridStyleMask = []
 		table.target = self
 		table.doubleAction = #selector(doubleClicked)
+		// Delete takes the selected row out of the *project* — the take file
+		// itself is left alone, which is what the menu item beside it says and
+		// why this is not a frightening key to press here.
+		table.onKey = { [weak self] event in
+			guard let self, isDelete(event), self.table.selectedRow >= 0 else { return false }
+			self.removeSelected()
+			return true
+		}
 
 		for (identifier, title, width) in [("take", "Take", CGFloat(150)),
 		                                   ("clips", "Clips", 52),
@@ -57,10 +84,18 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 
 		let scroll = TableScroll.make(table)
 
-		let add = button("Add Take…", #selector(addTapped))
-		add.toolTip = "Put an existing .cuttr take into this project"
-		let new = button("New Take…", #selector(newTapped))
-		new.toolTip = "Cut a new take from a video or audio file, and add it"
+		// Two verbs, two kinds of material, four items — rather than four
+		// buttons, which is what it would have been by the time a project could
+		// hold anything else. *Add* brings something that already exists into
+		// this project; *New* makes one that does not exist yet.
+		let add = menuButton("Add", [
+			("Take…", #selector(addTapped), "Put an existing .cuttr take into this project"),
+			("Scene…", #selector(addSceneTapped), "Copy a scene out of another project"),
+		])
+		let new = menuButton("New", [
+			("Take…", #selector(newTapped), "Cut a new take from a video or audio file"),
+			("Scene…", #selector(newSceneTapped), "Build an intro screen or a title card"),
+		])
 
 		let buttons = NSStackView(views: [add, new])
 		buttons.orientation = .horizontal
@@ -82,6 +117,27 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
 
+	/// A button that is a menu: the verb on the face of it, the kinds inside.
+	///
+	/// A pull-down rather than a pop-up, so the title stays the verb instead of
+	/// becoming whatever was chosen last — nothing is being *selected* here,
+	/// something is being done.
+	private func menuButton(_ title: String, _ items: [(String, Selector, String)]) -> NSPopUpButton {
+		let button = NSPopUpButton(frame: .zero, pullsDown: true)
+		button.bezelStyle = .rounded
+		button.controlSize = .small
+		button.font = NSFont.systemFont(ofSize: 11)
+		// The first item of a pull-down is its title and is never chosen.
+		button.menu?.addItem(NSMenuItem(title: title, action: nil, keyEquivalent: ""))
+		for (name, action, hint) in items {
+			let item = NSMenuItem(title: name, action: action, keyEquivalent: "")
+			item.target = self
+			item.toolTip = hint
+			button.menu?.addItem(item)
+		}
+		return button
+	}
+
 	private func button(_ title: String, _ action: Selector) -> NSButton {
 		let button = NSButton()
 		button.title = title
@@ -93,23 +149,40 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		return button
 	}
 
-	public func reload(_ takes: [ComposeDocument.TakeEntry]) {
-		rows = takes
+	public func reload(_ takes: [ComposeDocument.TakeEntry], scenes: [String: Scene] = [:]) {
+		rows = takes.map(Row.take)
+			+ scenes.keys.sorted().map { Row.scene($0, parts: scenes[$0]?.parts.count ?? 0) }
 		table.reloadData()
+	}
+
+	/// The take on a row, when that is what it is.
+	private func take(_ row: Int) -> ComposeDocument.TakeEntry? {
+		guard row >= 0, row < rows.count, case .take(let entry) = rows[row] else { return nil }
+		return entry
+	}
+
+	private func sceneName(_ row: Int) -> String? {
+		guard row >= 0, row < rows.count, case .scene(let name, _) = rows[row] else { return nil }
+		return name
 	}
 
 	@objc private func addTapped() { onAdd?() }
 	@objc private func newTapped() { onNew?() }
+	@objc private func addSceneTapped() { onAddScene?() }
+	@objc private func newSceneTapped() { onScene?(nil) }
 
 	@objc private func nameCommitted(_ sender: NSTextField) {
 		let row = table.row(for: sender)
 		renaming = nil
 		guard row >= 0, row < rows.count else { return }
-		onRename?(rows[row].path, sender.stringValue)
+		guard let entry = take(row) else { return }
+		onRename?(entry.path, sender.stringValue)
 	}
 
 	public func beginRenaming(_ path: String) {
-		guard let row = rows.firstIndex(where: { $0.path == path }) else { return }
+		guard let row = rows.firstIndex(where: {
+			if case .take(let entry) = $0 { return entry.path == path } else { return false }
+		}) else { return }
 		renaming = path
 		table.selectRowIndexes([row], byExtendingSelection: false)
 		// Reloaded so the cell comes back editable, then handed the cursor.
@@ -118,15 +191,29 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 	}
 
 	@objc private func doubleClicked() {
-		guard table.clickedRow >= 0, table.clickedRow < rows.count else { return }
-		onOpen?(rows[table.clickedRow].url)
+		if let entry = take(table.clickedRow) { onOpen?(entry.url) }
+		else if let name = sceneName(table.clickedRow) { onScene?(name) }
 	}
 
 	public override func menu(for event: NSEvent) -> NSMenu? {
 		let row = table.row(at: table.convert(event.locationInWindow, from: nil))
 		guard row >= 0, row < rows.count else { return nil }
 		table.selectRowIndexes([row], byExtendingSelection: false)
-		let entry = rows[row]
+
+		// A scene is not a file, so most of what can be done to a take makes no
+		// sense for one: there is nothing to reveal in the Finder and nothing to
+		// rename on disk.
+		if sceneName(row) != nil {
+			let menu = NSMenu()
+			for (title, action) in [("Edit Scene…", #selector(openSelected)),
+			                        ("Remove from Project", #selector(removeSelected))] {
+				let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+				item.target = self
+				menu.addItem(item)
+			}
+			return menu
+		}
+
 		let menu = NSMenu()
 		for (title, action) in [("Open in a Tab", #selector(openSelected)),
 		                        ("Rename…", #selector(renameSelected)),
@@ -137,30 +224,33 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 			menu.addItem(item)
 			if title == "Reveal in Finder" { menu.addItem(.separator()) }
 		}
-		_ = entry
 		return menu
 	}
 
 	@objc private func openSelected() {
-		guard table.selectedRow >= 0, table.selectedRow < rows.count else { return }
-		onOpen?(rows[table.selectedRow].url)
+		if let entry = take(table.selectedRow) { onOpen?(entry.url) }
+		else if let name = sceneName(table.selectedRow) { onScene?(name) }
 	}
 
 	@objc private func renameSelected() {
-		guard table.selectedRow >= 0, table.selectedRow < rows.count else { return }
-		beginRenaming(rows[table.selectedRow].path)
+		guard let entry = take(table.selectedRow) else { return }
+		beginRenaming(entry.path)
 	}
 
 	@objc private func revealSelected() {
-		guard table.selectedRow >= 0, table.selectedRow < rows.count else { return }
-		NSWorkspace.shared.activateFileViewerSelecting([rows[table.selectedRow].url])
+		guard let entry = take(table.selectedRow) else { return }
+		NSWorkspace.shared.activateFileViewerSelecting([entry.url])
 	}
 
 	@objc private func removeSelected() {
-		guard table.selectedRow >= 0, table.selectedRow < rows.count else { return }
-		// The file is not deleted, only the reference: a take belongs to
-		// whoever recorded it, not to this project.
-		onRemove?(rows[table.selectedRow].path)
+		if let entry = take(table.selectedRow) {
+			// The file is not deleted, only the reference: a take belongs to
+			// whoever recorded it, not to this project.
+			onRemove?(entry.path)
+		} else if let name = sceneName(table.selectedRow) {
+			// A scene *is* the project, so this one really does remove it.
+			onRemoveScene?(name)
+		}
 	}
 
 	// MARK: - Data source
@@ -169,7 +259,6 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 
 	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
 		guard let tableColumn, row < rows.count else { return nil }
-		let entry = rows[row]
 		let field = (tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? NSTextField)
 			?? {
 				let field = NSTextField()
@@ -180,22 +269,39 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 				return field
 			}()
 		field.font = Theme.mono
-		// Editable only while a rename is actually in progress, so double-click
-		// stays "open".
-		field.isEditable = tableColumn.identifier.rawValue == "take" && entry.path == renaming
 		field.target = self
 		field.action = #selector(nameCommitted(_:))
 
-		switch tableColumn.identifier.rawValue {
-		case "take":
-			field.stringValue = entry.name
-			field.textColor = entry.problem == nil ? Theme.clipStroke(.green) : Theme.playhead
-		case "clips":
-			field.stringValue = entry.problem == nil ? String(entry.clips) : "—"
-			field.textColor = Theme.dimText
-		default:
-			field.stringValue = entry.problem ?? entry.path
-			field.textColor = entry.problem == nil ? Theme.dimText : Theme.playhead
+		switch rows[row] {
+		case .take(let entry):
+			// Editable only while a rename is actually in progress, so
+			// double-click stays "open".
+			field.isEditable = tableColumn.identifier.rawValue == "take" && entry.path == renaming
+			switch tableColumn.identifier.rawValue {
+			case "take":
+				field.stringValue = entry.name
+				field.textColor = entry.problem == nil ? Theme.clipStroke(.green) : Theme.playhead
+			case "clips":
+				field.stringValue = entry.problem == nil ? String(entry.clips) : "—"
+				field.textColor = Theme.dimText
+			default:
+				field.stringValue = entry.problem ?? entry.path
+				field.textColor = entry.problem == nil ? Theme.dimText : Theme.playhead
+			}
+		case .scene(let name, let parts):
+			field.isEditable = false
+			switch tableColumn.identifier.rawValue {
+			case "take":
+				field.stringValue = name
+				field.textColor = Theme.color(.scene)
+			case "clips":
+				field.stringValue = String(parts)
+				field.textColor = Theme.dimText
+			default:
+				// Where it lives, which for a scene is the answer "here".
+				field.stringValue = parts == 1 ? "scene · 1 part" : "scene · \(parts) parts"
+				field.textColor = Theme.dimText
+			}
 		}
 		return field
 	}
