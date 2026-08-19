@@ -186,4 +186,23 @@ import Testing
 		let both = TimelineEntry(clip: ClipReference("clip-4"), trim: (1.5, 0.4))
 		#expect(ProgrammePanel.EntryRow.trimmed(both) == "head −00:01.500  tail −00:00.400")
 	}
+
+	/// How it arrives, for everything that is not a cut — and a list of forty
+	/// cuts saying `cut` forty times says nothing.
+	@Test func howItArrivesIsOnTheRow() {
+		let cut = TimelineEntry(clip: ClipReference("clip-4"))
+		#expect(ProgrammePanel.EntryRow.arrival(cut) == nil)
+
+		let dissolve = TimelineEntry(clip: ClipReference("clip-4"), transition: 0.5)
+		#expect(ProgrammePanel.EntryRow.arrival(dissolve) == "⤫ dissolve 0.5s")
+
+		let dip = TimelineEntry(clip: ClipReference("clip-4"),
+		                        transition: Transition(.dipToBlack, seconds: 1))
+		#expect(ProgrammePanel.EntryRow.arrival(dip) == "⤫ dip to black 1s")
+
+		// A cut written with a length beside it is still a cut.
+		let odd = TimelineEntry(clip: ClipReference("clip-4"),
+		                        transition: Transition(.cut, seconds: 2))
+		#expect(ProgrammePanel.EntryRow.arrival(odd) == nil)
+	}
 }

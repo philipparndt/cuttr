@@ -117,7 +117,7 @@ public final class ProjectInspector: NSView {
 		// is rows of a key and its controls, which is what actually runs out of
 		// width: a `when:` row is a mode, two addresses and their labels, and at
 		// 320 points it wrapped or truncated every one of them.
-		let wide = programme.widthAnchor.constraint(equalToConstant: 360)
+		let wide = programme.widthAnchor.constraint(equalToConstant: 440)
 		wide.priority = NSLayoutConstraint.Priority(250)
 		wide.isActive = true
 		NSLayoutConstraint.activate([

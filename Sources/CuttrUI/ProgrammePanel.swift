@@ -189,7 +189,15 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		outline.intercellSpacing = NSSize(width: 0, height: 2)
 		outline.selectionHighlightStyle = .regular
 		let column = NSTableColumn(identifier: .init("entry"))
+		// The column is the width of the view, not a number picked once.
+		//
+		// It was 420 and fixed, so anything a row drew against its right edge —
+		// which is where the transition badge was — sat outside the part of the
+		// column anybody could see, and the only way to find it was to scroll
+		// sideways in a list that has nothing to scroll sideways for.
 		column.width = 420
+		column.resizingMask = .autoresizingMask
+		outline.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
 		outline.addTableColumn(column)
 		outline.outlineTableColumn = column
 
@@ -577,14 +585,22 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			// different lengths of it. Said here so the list is the truth about
 			// what is on the programme rather than about what was referenced.
 			if let trimmed = Self.trimmed(entry) {
-				_ = note(trimmed, at: x)
+				x = note(trimmed, at: x) + 10
 			}
-			if entry.transition.duration > 0 {
-				let text = "⤫ \(entry.transition.kind.title) "
-					+ "\(TakeWriter.number(entry.transition.seconds, places: 2))s"
-				let size = (text as NSString).size(withAttributes: [.font: Theme.monoSmall])
-				_ = note(text, at: bounds.width - size.width - 10)
+			// How it arrives, in the accent the transition controls use, so a
+			// programme with three dissolves in it can be found by eye.
+			if let arrival = Self.arrival(entry) {
+				_ = note(arrival, at: x, colour: Theme.color(.section))
 			}
+		}
+
+		/// How this entry arrives from the one before, or nothing for a cut —
+		/// which is what most of them are, and a list that says `cut` forty
+		/// times says nothing at all.
+		static func arrival(_ entry: TimelineEntry) -> String? {
+			guard entry.transition.duration > 0 else { return nil }
+			return "⤫ \(entry.transition.kind.title) "
+				+ "\(TakeWriter.number(entry.transition.seconds, places: 2))s"
 		}
 
 		/// What is taken off this placement, or nothing when it is whole. Only
@@ -598,9 +614,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		}
 
 		@discardableResult
-		private func note(_ text: String, at x: CGFloat) -> CGFloat {
+		private func note(_ text: String, at x: CGFloat,
+		                  colour: NSColor = Theme.dimText) -> CGFloat {
 			let attributes: [NSAttributedString.Key: Any] = [
-				.font: Theme.monoSmall, .foregroundColor: Theme.dimText,
+				.font: Theme.monoSmall, .foregroundColor: colour,
 			]
 			(text as NSString).draw(at: NSPoint(x: x, y: bounds.height / 2 - 6), withAttributes: attributes)
 			return x + (text as NSString).size(withAttributes: attributes).width
