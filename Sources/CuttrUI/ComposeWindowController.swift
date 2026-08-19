@@ -51,6 +51,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private var overlayLayer: CALayer?
 	/// What the preview was last built from, kept so a still can be pulled out
 	/// of it for the properties panel.
+	private var builtSession: UUID?
 	private var builtComposition: AVComposition?
 	private var builtVideoComposition: AVVideoComposition?
 	private var itemStatus: NSKeyValueObservation?
@@ -395,6 +396,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 				return
 			}
 			guard !Task.isCancelled, let self else { return }
+			// The compositor holds what it was told for as long as something is
+			// playing it; the build before this one is finished with.
+			Renderer.forget(self.builtSession)
+			self.builtSession = built.session
 			self.builtComposition = built.composition
 			self.builtVideoComposition = built.videoComposition
 			self.transport.present(built.composition,

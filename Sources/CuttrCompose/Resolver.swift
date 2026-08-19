@@ -70,6 +70,10 @@ public struct ResolvedClip: Sendable {
 	public let audioOffset: Double
 	/// Where this clip sits in the finished programme.
 	public let start: Double
+	/// How long this clip overlaps the one before it — a dissolve, in seconds,
+	/// nought for a cut. The programme's clock already has it: the clip starts
+	/// this much earlier than the one before it ended.
+	public var transition: Double = 0
 	public var end: Double { start + clip.duration }
 	public var duration: Double { clip.duration }
 
@@ -99,6 +103,10 @@ public struct ResolvedOverlay: Sendable {
 	/// these, and a drag on the second bar moves the second one.
 	public let appearance: Int
 	public let start: Double
+	/// How long this clip overlaps the one before it — a dissolve, in seconds,
+	/// nought for a cut. The programme's clock already has it: the clip starts
+	/// this much earlier than the one before it ended.
+	public var transition: Double = 0
 	public let end: Double
 	/// The anchor's path, already mapped onto the programme's clock. `nil` for
 	/// an overlay that does not follow anything.
@@ -111,6 +119,10 @@ public struct ResolvedOverlay: Sendable {
 public struct ResolvedGroup: Sendable, Equatable {
 	public let name: String
 	public let start: Double
+	/// How long this clip overlaps the one before it — a dissolve, in seconds,
+	/// nought for a cut. The programme's clock already has it: the clip starts
+	/// this much earlier than the one before it ended.
+	public var transition: Double = 0
 	public let end: Double
 	public var duration: Double { end - start }
 	/// How deeply nested, so the strip can draw sections inside sections.
@@ -206,8 +218,16 @@ public enum Resolver {
 		var groups: [String: (start: Double, end: Double)] = [:]
 		var groupDepth: [String: Int] = [:]
 
+		/// A dissolve waiting to be applied to the next clip laid down.
+		///
+		/// Carried rather than applied at once, because the entry that asks for
+		/// it may be a section or a query: what dissolves is the first clip that
+		/// comes out of it, whatever that turns out to be.
+		var pending = 0.0
+
 		func lay(out entries: [TimelineEntry], depth: Int = 0) throws {
 			for entry in entries {
+				if entry.transition > 0 { pending = entry.transition }
 				if case .group(let name, let inner) = entry.source {
 					let start = cursor
 					try lay(out: inner, depth: depth + 1)
@@ -241,6 +261,17 @@ public enum Resolver {
 
 				for entry in found {
 					guard entry.clip.duration > 0 else { continue }
+					// A dissolve is an overlap: the incoming clip starts before
+					// the outgoing one ends, and the programme is shorter by
+					// exactly that much. Never longer than half of either clip,
+					// or a three-second dissolve between two-second shots would
+					// run past both.
+					var overlap = 0.0
+					if pending > 0, let last = clips.last {
+						overlap = min(pending, last.duration / 2, entry.clip.duration / 2)
+						cursor -= overlap
+					}
+					pending = 0
 					let video = entry.take.video.map {
 						URL(fileURLWithPath: $0, relativeTo: entry.directory).standardizedFileURL
 					}
@@ -257,7 +288,8 @@ public enum Resolver {
 						videoURL: video,
 						audioURL: audio,
 						audioOffset: entry.take.audio?.offset ?? 0,
-						start: cursor))
+						start: cursor,
+						transition: overlap))
 					cursor += entry.clip.duration
 				}
 			}

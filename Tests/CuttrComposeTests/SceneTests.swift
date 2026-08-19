@@ -136,3 +136,48 @@ import Testing
 		}
 	}
 }
+
+/// A dissolve is an overlap: the incoming clip starts before the outgoing one
+/// ends, and the programme is that much shorter.
+@Suite struct TransitionTests {
+
+	private func resolve(_ transition: Double) throws -> [ResolvedClip] {
+		// Resolved by hand: what matters here is the arithmetic on the clock,
+		// and the resolver needs media it cannot have in a test.
+		var clips: [ResolvedClip] = []
+		var cursor = 0.0
+		for (index, slug) in ["a", "b"].enumerated() {
+			var overlap = 0.0
+			if index > 0, transition > 0, let last = clips.last {
+				overlap = min(transition, last.duration / 2, 10 / 2)
+				cursor -= overlap
+			}
+			clips.append(ResolvedClip(
+				reference: ClipReference(slug), takeName: "take",
+				clip: Clip(slug: slug, start: 0, end: 10), videoURL: nil, audioURL: nil,
+				audioOffset: 0, start: cursor, transition: overlap))
+			cursor += 10
+		}
+		return clips
+	}
+
+	@Test func aCutLeavesTheClockAlone() throws {
+		let clips = try resolve(0)
+		#expect(clips.map(\.start) == [0, 10])
+		#expect(clips.map(\.transition) == [0, 0])
+	}
+
+	@Test func aDissolveShortensTheProgramme() throws {
+		let clips = try resolve(1.5)
+		#expect(clips[1].start == 8.5)
+		#expect(clips[1].transition == 1.5)
+	}
+
+	/// Never longer than half of either shot, or a three-second dissolve
+	/// between two-second clips would run past both.
+	@Test func aDissolveIsNeverLongerThanTheShotsItJoins() throws {
+		let clips = try resolve(30)
+		#expect(clips[1].transition == 5)
+		#expect(clips[1].start == 5)
+	}
+}

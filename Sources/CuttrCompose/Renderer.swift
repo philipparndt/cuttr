@@ -38,6 +38,9 @@ public enum Renderer {
 	public struct Built {
 		public let composition: AVMutableComposition
 		public let videoComposition: AVMutableVideoComposition
+		/// What the compositor was told, if this render needs one. Handed back
+		/// so whoever finishes with it can say so.
+		public var session: UUID?
 		public let overlays: CALayer
 		public let audioMix: AVAudioMix?
 	}
@@ -51,33 +54,63 @@ public enum Renderer {
 		let output = resolved.project.output
 		let size = output.size
 		let composition = AVMutableComposition()
-		guard let videoTrack = composition.addMutableTrack(
-			withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
-		else { throw RenderError.noVideo }
-		let audioTrack = composition.addMutableTrack(
-			withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+		// Two picture tracks, used in turn.
+		//
+		// A cut needs one; a dissolve needs the outgoing shot and the incoming
+		// one at the same moment, which means they cannot be on the same track.
+		// Alternating always — rather than only where a dissolve asks — keeps
+		// the arithmetic that decides which track a clip is on to one line.
+		// The second lane exists only where a dissolve needs it. An empty extra
+		// video track is not free: a Core Image filter composition over an asset
+		// with two video tracks fails to export at all, which is a programme of
+		// straight cuts refusing to render because of a track nothing is on.
+		let lanes = resolved.clips.contains { $0.transition > 0 } ? 2 : 1
+		guard let videoTracks = try? (0..<lanes).map({ _ -> AVMutableCompositionTrack in
+			guard let track = composition.addMutableTrack(
+				withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+			else { throw RenderError.noVideo }
+			return track
+		}) else { throw RenderError.noVideo }
+		let audioTracks = (0..<lanes).compactMap { _ in
+			composition.addMutableTrack(
+				withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+		}
 
 		let scale: Int32 = 600
 		var cursor = CMTime.zero
 		var sawVideo = false
 		/// What to do to each clip, looked up by time while rendering.
 		var grades: [(start: Double, end: Double, look: Look)] = []
-		/// Volume steps for the audio mix, one per clip.
-		var levels: [(at: CMTime, volume: Float)] = []
+		/// Volume steps for the audio mix, one per clip and track.
+		var levels: [(track: Int, at: CMTime, volume: Float)] = []
+		/// One stretch of programme: which track it plays from, and what it
+		/// looks like.
+		var segments: [(range: CMTimeRange, track: CMPersistentTrackID,
+		                look: Look, transition: Double)] = []
 		/// What size each clip's picture arrives at, and when — for the pass
 		/// that fits without filtering.
 		var pictures: [(at: CMTime, size: CGSize)] = []
 
+		var lane = 0
 		for clip in resolved.clips {
+			// The lane only changes where a dissolve needs it to. A programme of
+			// straight cuts stays on one track, which is what keeps the simple
+			// case simple — and exact.
+			if clip.transition > 0 { lane = (lane + 1) % videoTracks.count }
+			let videoTrack = videoTracks[lane]
+			let audioTrack = audioTracks.indices.contains(lane) ? audioTracks[lane] : nil
 			let at = CMTime(seconds: clip.start, preferredTimescale: scale)
 			let range = CMTimeRange(
 				start: CMTime(seconds: clip.clip.start, preferredTimescale: scale),
 				duration: CMTime(seconds: clip.duration, preferredTimescale: scale))
 
 			grades.append((clip.start, clip.end, clip.look))
+			segments.append((
+				CMTimeRange(start: at, duration: CMTime(seconds: clip.duration, preferredTimescale: scale)),
+				videoTrack.trackID, clip.look, clip.transition))
 			// Linear amplitude, because that is what a mix takes. Decibels are
 			// what a person reads and what the file says.
-			levels.append((at, Float(pow(10, clip.gain / 20))))
+			levels.append((lane, at, Float(pow(10, clip.gain / 20))))
 
 			if let videoURL = clip.videoURL {
 				let asset = AVURLAsset(url: videoURL)
@@ -138,16 +171,6 @@ public enum Renderer {
 		// Asked for only when something wants to go behind somebody.
 		let people = resolved.overlays.contains { $0.overlay.behind == .people } ? PersonMask() : nil
 
-		// Colour management off.
-		//
-		// Core Image's own working space is linear with sRGB primaries, and
-		// converting Rec. 709 video into it and back does not come home: the
-		// picture came out six or seven levels lifted across the whole frame,
-		// which reads as washed out beside the same footage in the player. With
-		// management off the values pass through untouched, and the grade — a
-		// gain, an exposure, a saturation — works on them as it finds them.
-		let plain = CIContext(options: [.workingColorSpace: NSNull()])
-
 		// Nothing to filter? Then do not filter.
 		//
 		// Core Image's pass costs colour: measured against the same frame of the
@@ -158,10 +181,12 @@ public enum Renderer {
 		// identical to what went in. A fit, when one is needed, is a transform
 		// on a layer instruction, which is exact.
 		let graded = grades.contains { $0.look != .none }
+		let dissolves = resolved.clips.contains { $0.transition > 0 }
+		let unmanaged = CIContext(options: [.workingColorSpace: NSNull()])
 		// Anything that goes behind somebody is painted into the frame, which
 		// is the filter pass's job — so there *is* something for it to do.
 		let painted = resolved.overlays.contains { $0.overlay.behind == .people }
-		if !graded, effects.isEmpty, !painted {
+		if !graded, effects.isEmpty, !painted, !dissolves {
 			let plainComposition = AVMutableVideoComposition(propertiesOf: composition)
 			plainComposition.renderSize = size
 			plainComposition.frameDuration = CMTime(
@@ -170,7 +195,7 @@ public enum Renderer {
 			// The fit, per clip, as a step at the moment that clip starts.
 			let instruction = AVMutableVideoCompositionInstruction()
 			instruction.timeRange = CMTimeRange(start: .zero, duration: cursor)
-			let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+			let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTracks[0])
 			for picture in pictures {
 				let fit = Grading.fit(CGRect(origin: .zero, size: picture.size), into: size)
 				layer.setTransform(fit, at: picture.at)
@@ -179,104 +204,147 @@ public enum Renderer {
 			plainComposition.instructions = [instruction]
 
 			return Built(composition: composition, videoComposition: plainComposition,
-			             overlays: overlays, audioMix: audioMix(audioTrack, levels: levels))
+			             overlays: overlays,
+			             audioMix: audioMix(audioTracks, levels: levels, clips: resolved.clips))
 		}
 
-		let videoComposition = AVMutableVideoComposition(asset: composition) { request in
-			let time = request.compositionTime.seconds
-			let look = grades.last { time >= $0.start - 1e-6 && time < $0.end + 1e-6 }?.look ?? .none
-			var image = Grading.apply(look, to: request.sourceImage)
-			image = image.transformed(by: Grading.fit(image.extent, into: size))
-
-			// The frame as the programme has it — graded, fitted, nothing over it
-			// yet. Both the mask and the person it cuts out come from this, so
-			// they are in the same coordinates as everything being composited.
-			// Taking the mask from `request.sourceImage` instead put it in the
-			// footage's coordinates, which for any output that is not the size
-			// of the footage is the wrong place by exactly the scale factor.
-			let frame = image
-
-			// Anything that goes behind somebody is painted here rather than laid
-			// over the finished frame, and the person goes over it.
-			for shown in resolved.overlays
-			where shown.overlay.behind == .people && time >= shown.start && time <= shown.end {
-				guard let painted = OverlayPainter.image(
-					      for: shown, project: resolved.project, baseURL: resolved.baseURL,
-					      size: size, at: time),
-				      let mask = people?.mask(for: frame, at: time) else { continue }
-				image = painted.composited(over: image)
-				image = frame.applyingFilter("CIBlendWithRedMask", parameters: [
-					"inputBackgroundImage": image,
-					"inputMaskImage": mask,
-				])
+		// A dissolve needs two frames at once, and only the compositor can hold
+		// two. Everything else goes through Core Image, which is where it has
+		// always gone — and, measured against the footage, comes out with the
+		// numbers it went in with. The compositor's own frames arrive about
+		// three per cent lifted, which is worth it for a dissolve and is not
+		// worth it for a programme of straight cuts.
+		guard dissolves else {
+			let filtered = AVMutableVideoComposition(asset: composition) { request in
+				let time = request.compositionTime.seconds
+				let look = grades.last { time >= $0.start - 1e-6 && time < $0.end + 1e-6 }?.look ?? .none
+				var image = Grading.apply(look, to: request.sourceImage)
+				image = image.transformed(by: Grading.fit(image.extent, into: size))
+				image = Frame.overlays(over: image, at: time, size: size,
+				                       work: ProgrammeCompositor.Work(
+					                       size: size, project: resolved.project,
+					                       baseURL: resolved.baseURL, overlays: resolved.overlays,
+					                       effects: effects.map { ($0.overlay, $0.renderer) },
+					                       people: people))
+				// Colour management off: converting Rec. 709 video into Core
+				// Image's linear space and back does not come home, and the
+				// picture arrives seven or eight levels lifted.
+				request.finish(with: image, context: unmanaged)
 			}
-
-			for (shown, effect, renderer) in effects where time >= shown.start && time <= shown.end {
-				// A fall-out stops letting pieces go before the end, so what is
-				// already in the air has time to leave the frame.
-				var spawningUntil = Double.infinity
-				if case .fall(let over) = shown.overlay.departure {
-					spawningUntil = max(0, shown.duration - over)
-				}
-				let opacity = fade(shown, at: time)
-				guard opacity > 0.001 else { continue }
-
-				func plate(_ half: EffectRenderer.Half) -> CIImage? {
-					guard let drawn = renderer.image(at: time - shown.start,
-					                                 spawningUntil: spawningUntil, only: half)
-					else { return nil }
-					guard opacity < 0.999 else { return drawn }
-					return drawn.applyingFilter("CIColorMatrix", parameters: [
-						"inputAVector": CIVector(x: 0, y: 0, z: 0, w: opacity),
-					])
-				}
-
-				// Behind whoever is in the frame, then them, then the near half
-				// over the top. The mask is the only thing that knows where
-				// they are; everything else is arithmetic on depth.
-				if shown.overlay.behind == .people,
-				   let mask = people?.mask(for: frame, at: time) {
-					if let back = plate(.back) {
-						image = back.composited(over: image)
-						image = frame.applyingFilter("CIBlendWithRedMask", parameters: [
-							"inputBackgroundImage": image,
-							"inputMaskImage": mask,
-						])
-					}
-					if let front = plate(.front) { image = front.composited(over: image) }
-					continue
-				}
-
-				if let all = plate(.all) { image = all.composited(over: image) }
-			}
-			request.finish(with: image, context: plain)
+			filtered.renderSize = size
+			filtered.frameDuration = CMTime(
+				value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
+			return Built(composition: composition, videoComposition: filtered,
+			             overlays: overlays,
+			             audioMix: audioMix(audioTracks, levels: levels, clips: resolved.clips))
 		}
+
+		let session = ProgrammeCompositor.register(ProgrammeCompositor.Work(
+			size: size, project: resolved.project, baseURL: resolved.baseURL,
+			overlays: resolved.overlays,
+			effects: effects.map { ($0.overlay, $0.renderer) }, people: people))
+
+		let videoComposition = AVMutableVideoComposition()
+		videoComposition.customVideoCompositorClass = ProgrammeCompositor.self
+		// Named for the compositor's own frames, which this program made and
+		// should say the colour of. Without it they come back forty levels
+		// dark; with it, about eight light. Neither is nothing, and the second
+		// is the one to have.
+		videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+		videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+		videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
 		videoComposition.renderSize = size
 		videoComposition.frameDuration = CMTime(
 			value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
-		// A phone shoots HLG, and a file whose pixels are HLG but whose tags say
-		// nothing is shown as sRGB — flat, milky, the blacks lifted and the sky
-		// gone. Naming the colour makes AVFoundation convert into it instead of
-		// hoping.
+
+		// One instruction per stretch: a dissolve while two shots overlap, the
+		// shot on its own for the rest.
+		var instructions: [AVVideoCompositionInstructionProtocol] = []
+		for (index, segment) in segments.enumerated() {
+			let previous = index > 0 ? segments[index - 1] : nil
+			let start = segment.range.start
+			if segment.transition > 0, let previous {
+				let over = CMTime(seconds: segment.transition, preferredTimescale: scale)
+				instructions.append(ProgrammeInstruction(
+					timeRange: CMTimeRange(start: start, duration: over),
+					outgoing: previous.track, incoming: segment.track,
+					outgoingLook: previous.look, incomingLook: segment.look,
+					session: session))
+			}
+			// Alone from the end of its dissolve until the next one begins.
+			let soloStart = start + CMTime(seconds: segment.transition, preferredTimescale: scale)
+			let soloEnd = index + 1 < segments.count
+				? segments[index + 1].range.start
+				: segment.range.end
+			if soloEnd > soloStart {
+				instructions.append(ProgrammeInstruction(
+					timeRange: CMTimeRange(start: soloStart, end: soloEnd),
+					outgoing: nil, incoming: segment.track,
+					incomingLook: segment.look, session: session))
+			}
+		}
+		videoComposition.instructions = instructions
 
 		return Built(composition: composition, videoComposition: videoComposition,
-		             overlays: overlays, audioMix: audioMix(audioTrack, levels: levels))
+		             session: session, overlays: overlays,
+		             audioMix: audioMix(audioTracks, levels: levels, clips: resolved.clips))
 	}
 
-	/// The mix: one parameter set over the single audio track, stepping the
-	/// volume at each cut.
+	/// The mix: one parameter set per audio track, stepping the volume at each
+	/// cut and ramping it across a dissolve.
 	///
-	/// A step rather than a ramp because the cut is already a discontinuity — a
-	/// crossfade of levels across it would be audible as a swell on the wrong
-	/// side of the edit.
+	/// A step at a cut because the cut is already a discontinuity — a crossfade
+	/// of levels across it would be audible as a swell on the wrong side of the
+	/// edit. A ramp across a dissolve because there the picture is mixing too,
+	/// and a hard audio cut in the middle of one is the thing everybody hears.
 	private static func audioMix(
-		_ track: AVMutableCompositionTrack?, levels: [(at: CMTime, volume: Float)]
+		_ tracks: [AVMutableCompositionTrack],
+		levels: [(track: Int, at: CMTime, volume: Float)],
+		clips: [ResolvedClip]
 	) -> AVAudioMix? {
-		guard let track, levels.contains(where: { $0.volume != 1 }) else { return nil }
-		let parameters = AVMutableAudioMixInputParameters(track: track)
-		for level in levels { parameters.setVolume(level.volume, at: level.at) }
+		guard !tracks.isEmpty else { return nil }
+		let scale: CMTimeScale = 600
+		var parameters: [AVMutableAudioMixInputParameters] = []
+		var wanted = false
+
+		for (lane, track) in tracks.enumerated() {
+			let mine = levels.filter { $0.track == lane }
+			guard !mine.isEmpty else { continue }
+			let input = AVMutableAudioMixInputParameters(track: track)
+			// Silent to begin with: a track only carries the clips laid on it,
+			// and what is between them must not be heard.
+			input.setVolume(0, at: .zero)
+			for level in mine {
+				input.setVolume(level.volume, at: level.at)
+				if level.volume != 1 { wanted = true }
+			}
+			parameters.append(input)
+		}
+
+		// The dissolves: the outgoing lane down, the incoming lane up, over
+		// exactly the overlap.
+		for (index, clip) in clips.enumerated() where clip.transition > 0 && index > 0 {
+			wanted = true
+			let range = CMTimeRange(
+				start: CMTime(seconds: clip.start, preferredTimescale: scale),
+				duration: CMTime(seconds: clip.transition, preferredTimescale: scale))
+			let outgoing = clips[index - 1]
+			let up = Float(pow(10, clip.gain / 20)), down = Float(pow(10, outgoing.gain / 20))
+			for (lane, input) in parameters.enumerated() {
+				// Lanes alternate at a dissolve, so one of the two is going out
+				// and the other is coming in; which is which follows from where
+				// the clip was laid.
+				if lane == index % 2 {
+					input.setVolumeRamp(fromStartVolume: 0, toEndVolume: up, timeRange: range)
+				} else {
+					input.setVolumeRamp(fromStartVolume: down, toEndVolume: 0, timeRange: range)
+				}
+			}
+		}
+
+		guard wanted, !parameters.isEmpty else { return nil }
 		let mix = AVMutableAudioMix()
-		mix.inputParameters = [parameters]
+		mix.inputParameters = parameters
 		return mix
 	}
 
@@ -352,6 +420,12 @@ public enum Renderer {
 			opacity = min(opacity, (shown.end - time) / depart)
 		}
 		return max(0, min(1, opacity))
+	}
+
+	/// Done with a build: the compositor can forget what it was told.
+	public static func forget(_ session: UUID?) {
+		guard let session else { return }
+		ProgrammeCompositor.forget(session)
 	}
 
 	/// Renders to a file.

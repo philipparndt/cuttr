@@ -330,12 +330,20 @@ public final class PropertiesPanel: NSView {
 		}
 
 		section("how it arrives")
+		let dissolves = entry.transition > 0
 		field("transition", [
-			number(entry.transition, width: 72) { [weak self] value in
+			pop(["cut", "dissolve"], selected: dissolves ? 1 : 0) { [weak self] pick in
+				self?.replace(path, TimelineEntry(
+					source: entry.source,
+					transition: pick == 0 ? 0 : max(0.4, entry.transition)))
+			},
+			number(dissolves ? entry.transition : 0.4, width: 72) { [weak self] value in
 				self?.replace(path, TimelineEntry(source: entry.source, transition: max(0, value)))
 			},
 			label("seconds"),
-		], note: "0 cuts; anything else dissolves in from the entry before")
+		], note: entry.transition > 0
+			? "the shot before it stays up while this one comes in, and the programme is that much shorter"
+			: "a dissolve overlaps the entry before this one — a section dissolves on its first clip")
 	}
 
 	private func changeKind(_ path: [Int], _ entry: TimelineEntry, to index: Int) {
