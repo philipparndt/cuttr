@@ -140,6 +140,34 @@ import Testing
 		#expect(project.unknownKeys["music"] as? String == "bed.wav")
 		#expect(ProjectWriter.write(project).contains("music: bed.wav"))
 	}
+
+	/// An overlay that comes back: three ranges, written as a list, read as a
+	/// list, and unchanged by the round trip.
+	@Test func severalRangesSurviveTheFile() throws {
+		let overlay = Overlay(kind: .text("Still going", style: nil), spans: [
+			.clips(from: ClipReference("intro"), to: ClipReference("demo-install")),
+			.times(from: 12, to: 20.5),
+			.marks(from: .group("outro"), to: .group("outro")),
+		])
+		let project = Project(
+			takes: ["takes/take-01.cuttr"],
+			timeline: [TimelineEntry(clip: ClipReference("intro"))],
+			overlays: [overlay])
+
+		let text = ProjectWriter.write(project)
+		let back = try ProjectReader.read(text)
+		#expect(back.overlays.first?.spans.count == 3)
+		#expect(back.overlays == project.overlays)
+		#expect(ProjectWriter.write(back) == text)
+	}
+
+	/// One range still writes the way it always did — a project nobody has
+	/// touched must not come out rewritten.
+	@Test func oneRangeIsStillWrittenInLine() {
+		let text = ProjectWriter.write(sample())
+		#expect(text.contains("    from:   intro\n"))
+		#expect(!text.contains("when:"))
+	}
 }
 
 /// A spinner that says things, which is the terminal idiom: the glyph turning
@@ -258,4 +286,5 @@ import Testing
             #expect(whole.contains(line), "\(line)")
         }
     }
+
 }

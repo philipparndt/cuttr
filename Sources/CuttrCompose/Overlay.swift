@@ -20,7 +20,20 @@ public struct Overlay: Sendable, Equatable {
 	public var kind: Kind
 
 	/// When it is on screen, expressed against the programme.
-	public var span: Span
+	///
+	/// A list, because one caption is often wanted in three places — a spinner
+	/// that comes back every time the same thing is happening, a title that
+	/// returns for the reprise. Written as a list only when there is more than
+	/// one of them, so the ordinary overlay stays the four lines it always was.
+	public var spans: [Span]
+
+	/// The first range, which for most overlays is the only one.
+	public var span: Span {
+		get { spans.first ?? .times(from: 0, to: 0) }
+		set {
+			if spans.isEmpty { spans = [newValue] } else { spans[0] = newValue }
+		}
+	}
 
 	/// How it arrives and how it leaves.
 	public var arrival: Transition
@@ -36,18 +49,31 @@ public struct Overlay: Sendable, Equatable {
 
 	public init(
 		kind: Kind,
-		span: Span,
+		spans: [Span],
 		arrival: Transition = .slide(.left, over: 0.4),
 		departure: Transition = .slide(.right, over: 0.4),
 		anchor: String? = nil,
 		offset: CGPoint = .zero
 	) {
 		self.kind = kind
-		self.span = span
+		self.spans = spans
 		self.arrival = arrival
 		self.departure = departure
 		self.anchor = anchor
 		self.offset = offset
+	}
+
+	/// The overlay most projects write: on over one range.
+	public init(
+		kind: Kind,
+		span: Span,
+		arrival: Transition = .slide(.left, over: 0.4),
+		departure: Transition = .slide(.right, over: 0.4),
+		anchor: String? = nil,
+		offset: CGPoint = .zero
+	) {
+		self.init(kind: kind, spans: [span], arrival: arrival, departure: departure,
+		          anchor: anchor, offset: offset)
 	}
 
 	/// Where an overlay lives on the programme's clock.

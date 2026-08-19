@@ -181,31 +181,45 @@ public enum ProjectReader {
 				continue
 			}
 
-			let span: Overlay.Span
-			// `group: introduction` is the same as `from: @introduction`, and is
-			// worth its own key because hanging a caption on a whole section is
-			// the commonest thing anybody wants to do with one.
-			if let group = (m["group"] as? String).flatMap(nonEmpty) {
-				let endpoint = Overlay.Span.Endpoint.group(Slug.make(from: group))
-				span = .marks(from: endpoint, to: endpoint)
-			} else if let from = m["from"] as? String, let to = (m["to"] as? String) ?? (m["from"] as? String) {
-				// A time written where a clip goes is a time. `00:05.000` is
-				// not a slug and a slug is not a timecode, so there is nothing
-				// to disambiguate.
-				if let a = Timecode.parse(from), let b = Timecode.parse(to), from.contains(":") {
-					span = .times(from: a, to: b)
-				} else {
-					span = .marks(from: .init(from), to: .init(to))
+			// One range, or several under `when:`. The plural is a list of the
+			// singular — the same three keys, in a list — so learning the one
+			// teaches the other.
+			func range(_ fields: [String: Any]) -> Overlay.Span? {
+				// `group: introduction` is the same as `from: @introduction`,
+				// and is worth its own key because hanging a caption on a whole
+				// section is the commonest thing anybody wants to do with one.
+				if let group = (fields["group"] as? String).flatMap(nonEmpty) {
+					let endpoint = Overlay.Span.Endpoint.group(Slug.make(from: group))
+					return .marks(from: endpoint, to: endpoint)
 				}
-			} else if let a = try time(m["from"], key: "from"), let b = try time(m["to"], key: "to") {
-				span = .times(from: a, to: b)
-			} else {
-				continue
+				if let from = fields["from"] as? String,
+				   let to = (fields["to"] as? String) ?? (fields["from"] as? String) {
+					// A time written where a clip goes is a time. `00:05.000` is
+					// not a slug and a slug is not a timecode, so there is
+					// nothing to disambiguate.
+					if let a = Timecode.parse(from), let b = Timecode.parse(to), from.contains(":") {
+						return .times(from: a, to: b)
+					}
+					return .marks(from: .init(from), to: .init(to))
+				}
+				if let a = (try? time(fields["from"], key: "from")) ?? nil,
+				   let b = (try? time(fields["to"], key: "to")) ?? nil {
+					return .times(from: a, to: b)
+				}
+				return nil
 			}
+
+			var spans: [Overlay.Span] = []
+			if let list = m["when"] as? [Any] {
+				spans = list.compactMap { mapping($0).flatMap(range) }
+			} else if let span = range(m) {
+				spans = [span]
+			}
+			guard !spans.isEmpty else { continue }
 
 			overlays.append(Overlay(
 				kind: kind,
-				span: span,
+				spans: spans,
 				arrival: try transition(m["in"], key: "in") ?? .slide(.left, over: 0.4),
 				departure: try transition(m["out"], key: "out") ?? .slide(.right, over: 0.4),
 				anchor: (m["anchor"] as? String).flatMap(nonEmpty),

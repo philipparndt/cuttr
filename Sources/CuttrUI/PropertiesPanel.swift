@@ -9,6 +9,11 @@ import CuttrKit
 /// word stays — all of it is in the format, so all of it is here, labelled with
 /// the key it writes. Nothing is only reachable by typing YAML.
 ///
+/// Laid out as a grid rather than as stacked rows: one column of keys, right
+/// aligned, and one column of controls that all start at the same place. A form
+/// where every row sets its own margins reads as a pile, and this one has forty
+/// rows in it.
+///
 /// Rebuilt on each change of selection rather than shown and hidden. A form
 /// whose rows are all present and mostly invisible is a form that eventually
 /// shows the wrong ones, and this way what is on screen is exactly what the
@@ -18,15 +23,33 @@ public final class PropertiesPanel: NSView {
 
 	public var onChange: ((Project) -> Void)?
 
+	/// The programme as it resolved, for the things that can only be known
+	/// after resolving: where an anchor actually is at the moment an overlay
+	/// appears, and when that moment is.
+	public var resolved: ResolvedProject?
+	/// A frame of the programme at a time, if one can be had. Asked for
+	/// asynchronously; the window has the composition, not this panel.
+	public var poster: ((Double, @escaping (NSImage?) -> Void) -> Void)?
+
 	private var project = Project()
 	private var vocabulary = ComposeDocument.Vocabulary()
 	private var selection: ProjectSelection = .output
 	private var built: ProjectSelection?
 
-	private let form = NSStackView()
+	/// Made afresh for every selection rather than emptied.
+	///
+	/// `NSGridView` refuses to remove a row whose cells were merged — and the
+	/// picture and the headings are merged rows — so emptying one means walking
+	/// into an assertion. A grid is cheap; a crash on selecting an overlay is
+	/// not.
+	private var grid = NSGridView(numberOfColumns: 2, rows: 0)
+	private let formHolder = NSView()
 	private let title = NSTextField(labelWithString: "")
 	/// The closures the controls call. Held because a target is unowned.
 	private var sinks: [Sink] = []
+	/// Bumped on every rebuild, so a frame that arrives late is dropped rather
+	/// than drawn under the wrong overlay.
+	private var generation = 0
 
 	final class Sink: NSObject {
 		let run: (NSControl) -> Void
@@ -42,16 +65,13 @@ public final class PropertiesPanel: NSView {
 		title.font = Theme.heading
 		title.textColor = Theme.faintText
 
-		form.orientation = .vertical
-		form.spacing = 8
-		form.alignment = .leading
-		form.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 8, right: 0)
+		install(grid)
 
-		let stack = NSStackView(views: [title, form])
+		let stack = NSStackView(views: [title, formHolder])
 		stack.orientation = .vertical
-		stack.spacing = 8
+		stack.spacing = 10
 		stack.alignment = .leading
-		stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+		stack.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 14, right: 14)
 
 		let scroll = TableScroll.wrap(stack, horizontal: false)
 		scroll.translatesAutoresizingMaskIntoConstraints = false
@@ -66,6 +86,26 @@ public final class PropertiesPanel: NSView {
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
+
+	/// Puts a fresh grid in the form's place, set up the same way every time.
+	private func install(_ grid: NSGridView) {
+		grid.columnSpacing = 10
+		grid.rowSpacing = 7
+		grid.column(at: 0).xPlacement = .trailing
+		grid.column(at: 0).width = 104
+		grid.column(at: 1).xPlacement = .leading
+		grid.setContentHuggingPriority(.defaultHigh, for: .vertical)
+
+		for view in formHolder.subviews { view.removeFromSuperview() }
+		grid.translatesAutoresizingMaskIntoConstraints = false
+		formHolder.addSubview(grid)
+		NSLayoutConstraint.activate([
+			grid.topAnchor.constraint(equalTo: formHolder.topAnchor),
+			grid.bottomAnchor.constraint(equalTo: formHolder.bottomAnchor),
+			grid.leadingAnchor.constraint(equalTo: formHolder.leadingAnchor),
+			grid.trailingAnchor.constraint(lessThanOrEqualTo: formHolder.trailingAnchor),
+		])
+	}
 
 	// MARK: - Loading
 
@@ -93,9 +133,11 @@ public final class PropertiesPanel: NSView {
 
 	private func rebuild() {
 		sinks.removeAll()
-		for view in form.arrangedSubviews { form.removeArrangedSubview(view); view.removeFromSuperview() }
-		built = selection
+		generation += 1
+		grid = NSGridView(numberOfColumns: 2, rows: 0)
+		install(grid)
 
+		built = selection
 		switch selection {
 		case .output:
 			title.stringValue = "OUTPUT"
@@ -120,49 +162,53 @@ public final class PropertiesPanel: NSView {
 	// MARK: - output
 
 	private func outputForm() {
-		let width = number(project.output.width, width: 70) { [weak self] value in
-			self?.editOutput { $0.width = max(2, Int(value)) }
-		}
-		let height = number(project.output.height, width: 70) { [weak self] value in
-			self?.editOutput { $0.height = max(2, Int(value)) }
-		}
-		add(row("size", [width, label("×"), height, presets()]),
-		    note: "the frame everything is fitted into")
-		add(row("fps", [number(project.output.framesPerSecond, width: 70) { [weak self] value in
+		section("size and rate")
+		field("size", [
+			number(project.output.width, width: 72) { [weak self] value in
+				self?.editOutput { $0.width = max(2, Int(value)) }
+			},
+			label("×"),
+			number(project.output.height, width: 72) { [weak self] value in
+				self?.editOutput { $0.height = max(2, Int(value)) }
+			},
+			presets(),
+		], note: "the frame everything is fitted into")
+		field("fps", [number(project.output.framesPerSecond, width: 72) { [weak self] value in
 			self?.editOutput { $0.framesPerSecond = max(1, value) }
-		}]))
-		add(row("file", [text(project.output.file ?? "", width: 220, placeholder: "programme.mov") {
+		}])
+		field("file", [text(project.output.file ?? "", width: 210, placeholder: "programme.mov") {
 			[weak self] value in
 			self?.editOutput { $0.file = value.isEmpty ? nil : value }
-		}]), note: "where a render goes, beside the project")
+		}], note: "where a render goes, beside the project")
 
-		add(heading("audio"))
-		let levelled = check("level the programme", on: project.output.audio != nil) {
-			[weak self] on in
+		section("audio")
+		field("", [check("level the programme", on: project.output.audio != nil) { [weak self] on in
 			self?.editOutput { $0.audio = on ? AudioTarget() : nil }
-		}
-		add(row("", [levelled]))
+		}])
 		if let audio = project.output.audio {
-			add(row("audio.target", [
-				number(audio.target, width: 70) { [weak self] value in
+			field("audio.target", [
+				number(audio.target, width: 72) { [weak self] value in
 					self?.editOutput { $0.audio?.target = value }
-				}, label("LUFS"),
-				label("ceiling"),
-				number(audio.ceiling, width: 70) { [weak self] value in
+				},
+				label("LUFS"),
+			], note: "−16 is the web's convention, −23 the broadcaster's")
+			field("audio.ceiling", [
+				number(audio.ceiling, width: 72) { [weak self] value in
 					self?.editOutput { $0.audio?.ceiling = value }
-				}, label("dBTP"),
-			]), note: "−16 is the web's convention, −23 the broadcaster's")
+				},
+				label("dBTP"),
+			])
 		}
 
-		add(heading("grade"))
-		add(row("match.reference", [combo(project.output.matchReference ?? "",
-		                                  values: [""] + vocabulary.clips, width: 200) {
+		section("grade")
+		field("match.reference", [combo(project.output.matchReference ?? "",
+		                                values: [""] + vocabulary.clips, width: 210) {
 			[weak self] value in
 			self?.editOutput { $0.matchReference = value.isEmpty ? nil : Slug.make(from: value) }
-		}]), note: "every other clip is graded to look like this one")
+		}], note: "every other clip is graded to look like this one")
 	}
 
-	/// The three sizes almost every project is, without typing four digits.
+	/// The sizes almost every project is, without typing four digits.
 	private func presets() -> NSPopUpButton {
 		let sizes = [("1080p", 1920, 1080), ("4K", 3840, 2160), ("720p", 1280, 720),
 		             ("vertical", 1080, 1920), ("square", 1080, 1080)]
@@ -192,32 +238,33 @@ public final class PropertiesPanel: NSView {
 		case .query: current = 2
 		case .group: current = 3
 		}
-		add(row("kind", [pop(kinds, selected: current) { [weak self] index in
+		section("what plays")
+		field("kind", [pop(kinds, selected: current) { [weak self] index in
 			self?.changeKind(path, entry, to: index)
-		}]))
+		}])
 
 		switch entry.source {
 		case .clip(let reference):
-			add(row("clip", [combo(reference.description,
-			                       values: vocabulary.items.map(\.reference), width: 220) {
+			field("clip", [combo(reference.description,
+			                     values: vocabulary.items.map(\.reference), width: 210) {
 				[weak self] value in
 				self?.replace(path, TimelineEntry(clip: ClipReference(value),
 				                                  transition: entry.transition))
-			}]), note: "a slug, or take/slug when two takes share one")
+			}], note: "a slug, or take/slug when two takes share one")
 
 		case .list(let references):
-			add(row("list", [text(references.map(\.description).joined(separator: ", "),
-			                      width: 260, placeholder: "intro, demo, outro") {
+			field("list", [text(references.map(\.description).joined(separator: ", "),
+			                    width: 260, placeholder: "intro, demo, outro") {
 				[weak self] value in
 				let parts = value.split(separator: ",")
 					.map { ClipReference($0.trimmingCharacters(in: .whitespaces)) }
 					.filter { !$0.slug.isEmpty }
 				self?.replace(path, TimelineEntry(list: parts, transition: entry.transition))
-			}]), note: "in the order written")
+			}], note: "in the order written")
 
 		case .query(_, let source):
-			let field = combo(source, values: vocabulary.tags.map { "#\($0)" } + ["*"], width: 260) {
-				[weak self] value in
+			field("query", [combo(source, values: vocabulary.tags.map { "#\($0)" } + ["*"],
+			                      width: 260) { [weak self] value in
 				guard let self else { return }
 				guard let replacement = try? TimelineEntry(query: value, transition: entry.transition)
 				else {
@@ -225,31 +272,24 @@ public final class PropertiesPanel: NSView {
 					return
 				}
 				self.replace(path, replacement)
-			}
-			add(row("query", [field]),
-			    note: "#tag, take/#tag, take/*, and `and` `or` `not` between them")
-			let count = (try? QueryParser.parse(source)).map { _ in
-				vocabulary.items.filter { item in
-					source.split(separator: " ").contains { part in
-						part.hasPrefix("#") && item.tags.contains(String(part.dropFirst()))
-					}
-				}.count
-			}
-			if let count, count > 0 { add(caption("\(count) clip\(count == 1 ? "" : "s") carry those tags")) }
+			}], note: "#tag, take/#tag, take/*, with and / or / not between them")
 
 		case .group(let name, let inner):
-			add(row("section", [text(name, width: 220, placeholder: "introduction") {
+			field("section", [text(name, width: 210, placeholder: "introduction") {
 				[weak self] value in
 				self?.replace(path, TimelineEntry(group: Slug.make(from: value), entries: inner,
 				                                  transition: entry.transition))
-			}]), note: "overlays can be hung on @\(name.isEmpty ? "name" : name)")
-			add(caption("\(inner.count) entr\(inner.count == 1 ? "y" : "ies") inside"))
+			}], note: "overlays can be hung on @\(name.isEmpty ? "name" : name)"
+				+ " — \(inner.count) entr\(inner.count == 1 ? "y" : "ies") inside")
 		}
 
-		add(heading("transition"))
-		add(row("transition", [number(entry.transition, width: 70) { [weak self] value in
-			self?.replace(path, TimelineEntry(source: entry.source, transition: max(0, value)))
-		}, label("seconds")]), note: "0 cuts; anything else dissolves in from the entry before")
+		section("how it arrives")
+		field("transition", [
+			number(entry.transition, width: 72) { [weak self] value in
+				self?.replace(path, TimelineEntry(source: entry.source, transition: max(0, value)))
+			},
+			label("seconds"),
+		], note: "0 cuts; anything else dissolves in from the entry before")
 	}
 
 	private func changeKind(_ path: [Int], _ entry: TimelineEntry, to index: Int) {
@@ -259,8 +299,7 @@ public final class PropertiesPanel: NSView {
 		case 0: replacement = TimelineEntry(clip: ClipReference(name), transition: entry.transition)
 		case 1: replacement = TimelineEntry(list: [ClipReference(name)], transition: entry.transition)
 		case 2: replacement = (try? TimelineEntry(query: "#\(Slug.make(from: name))",
-		                                          transition: entry.transition))
-			?? entry
+		                                          transition: entry.transition)) ?? entry
 		default:
 			if case .group = entry.source { return }
 			replacement = TimelineEntry(group: Slug.make(from: name), entries: [],
@@ -278,9 +317,12 @@ public final class PropertiesPanel: NSView {
 	// MARK: - overlay
 
 	private func overlayForm(_ index: Int, _ overlay: Overlay) {
+		full(placement(index, overlay))
+
+		section("what it is")
 		let isText: Bool
 		if case .text = overlay.kind { isText = true } else { isText = false }
-		add(row("kind", [pop(["text", "spinner"], selected: isText ? 0 : 1) { [weak self] pick in
+		field("kind", [pop(["text", "spinner"], selected: isText ? 0 : 1) { [weak self] pick in
 			self?.editOverlay(index) { overlay in
 				switch (pick, overlay.kind) {
 				case (0, .spinner(let spinner)):
@@ -290,128 +332,164 @@ public final class PropertiesPanel: NSView {
 				default: break
 				}
 			}
-		}]))
+		}])
 
 		switch overlay.kind {
 		case .text(let content, let style):
-			add(row("text", [text(content, width: 260, placeholder: "what it says") {
+			field("text", [text(content, width: 260, placeholder: "what it says") {
 				[weak self] value in
 				self?.editOverlay(index) { $0.kind = .text(value, style: style) }
-			}]))
-			add(row("style", [pop(styleNames, selected: styleNames.firstIndex(of: style ?? "lower-third") ?? 0) {
+			}])
+			field("style", [pop(styleNames,
+			                    selected: styleNames.firstIndex(of: style ?? "lower-third") ?? 0) {
 				[weak self] pick in
 				guard let self else { return }
 				self.editOverlay(index) { $0.kind = .text(content, style: self.styleNames[pick]) }
-			}]), note: "defined under `styles:`, or one of the built-in four")
+			}], note: "defined under `styles:`, or one of the built-in four")
 
 		case .spinner(let spinner):
-			add(row("style", [pop(Spinner.Style.allCases.map(\.rawValue),
-			                      selected: Spinner.Style.allCases.firstIndex(of: spinner.style) ?? 0) {
+			field("style", [pop(Spinner.Style.allCases.map(\.rawValue),
+			                    selected: Spinner.Style.allCases.firstIndex(of: spinner.style) ?? 0) {
 				[weak self] pick in
 				self?.editSpinner(index) { $0.style = Spinner.Style.allCases[pick] }
-			}]))
-			add(row("size", [number(spinner.size, width: 70) { [weak self] value in
-				self?.editSpinner(index) { $0.size = max(0.01, value) }
-			}, label("of frame height"),
-			label("speed"),
-			number(spinner.speed, width: 70) { [weak self] value in
-				self?.editSpinner(index) { $0.speed = value }
-			}, label("turns/s")]))
-			add(row("color", [colour(spinner.color) { [weak self] rgba in
+			}])
+			field("size", [
+				number(spinner.size, width: 72) { [weak self] value in
+					self?.editSpinner(index) { $0.size = max(0.01, value) }
+				},
+				label("of frame height"),
+			])
+			field("speed", [
+				number(spinner.speed, width: 72) { [weak self] value in
+					self?.editSpinner(index) { $0.speed = value }
+				},
+				label("turns a second"),
+			])
+			field("color", [colour(spinner.color) { [weak self] rgba in
 				self?.editSpinner(index) { $0.color = rgba }
-			}]))
+			}])
 
-			add(heading("words"))
+			section("words")
 			for (position, word) in spinner.words.enumerated() {
-				add(row("", [
-					text(word.text, width: 180, placeholder: "what it says now") { [weak self] value in
+				field(position == 0 ? "words" : "", [
+					text(word.text, width: 170, placeholder: "what it says now") {
+						[weak self] value in
 						self?.editSpinner(index) { $0.words[position].text = value }
 					},
 					text(word.duration.map { TakeWriter.number($0, places: 2) } ?? "",
-					     width: 60, placeholder: "auto") { [weak self] value in
+					     width: 56, placeholder: "auto") { [weak self] value in
 						self?.editSpinner(index) { $0.words[position].duration = Double(value) }
 					},
 					label("s"),
 					small("−") { [weak self] in
 						self?.editSpinner(index) { $0.words.remove(at: position) }
 					},
-				]))
+				])
 			}
-			add(row("", [small("+ word") { [weak self] in
+			field("", [small("+ word") { [weak self] in
 				self?.editSpinner(index) { $0.words.append(SpinnerWord("")) }
-			}]), note: "they cycle for as long as the overlay is on screen")
+			}], note: spinner.words.isEmpty
+				? "a spinner with no words only turns"
+				: "they cycle for as long as the overlay is on screen")
 		}
 
-		add(heading("when"))
-		let byMarks: Bool
-		if case .marks = overlay.span { byMarks = true } else { byMarks = false }
-		add(row("span", [pop(["clips and sections", "times"], selected: byMarks ? 0 : 1) {
-			[weak self] pick in
-			self?.editOverlay(index) { overlay in
-				switch (pick, overlay.span) {
+		section("when it is on")
+		full(strip(index, overlay))
+		let endpoints = vocabulary.items.map(\.reference) + vocabulary.groups.map { "@\($0)" }
+		for (position, span) in overlay.spans.enumerated() {
+			let byMarks: Bool
+			if case .marks = span { byMarks = true } else { byMarks = false }
+			var controls: [NSView] = [pop(["clips", "times"], selected: byMarks ? 0 : 1) {
+				[weak self] pick in
+				guard let self else { return }
+				switch (pick, span) {
 				case (0, .times):
-					overlay.span = .clips(from: ClipReference("clip"), to: ClipReference("clip"))
+					self.setSpan(index, position,
+					             .clips(from: ClipReference("clip"), to: ClipReference("clip")))
 				case (1, .marks):
-					overlay.span = .times(from: 0, to: 5)
+					let extent = self.extent(of: span) ?? (0, 5)
+					self.setSpan(index, position, .times(from: extent.0, to: extent.1))
 				default: break
 				}
+			}]
+
+			switch span {
+			case .marks(let from, let to):
+				controls.append(combo(from.description, values: endpoints, width: 150) {
+					[weak self] value in
+					self?.setSpan(index, position, .marks(from: .init(value), to: to))
+				})
+				controls.append(combo(to.description, values: endpoints, width: 150) {
+					[weak self] value in
+					self?.setSpan(index, position, .marks(from: from, to: .init(value)))
+				})
+			case .times(let from, let to):
+				controls.append(text(Timecode.string(from), width: 96, placeholder: "00:00.000") {
+					[weak self] value in
+					guard let seconds = Timecode.parse(value) else { return }
+					self?.setSpan(index, position, .times(from: seconds, to: to))
+				})
+				controls.append(text(Timecode.string(to), width: 96, placeholder: "00:05.000") {
+					[weak self] value in
+					guard let seconds = Timecode.parse(value) else { return }
+					self?.setSpan(index, position, .times(from: from, to: seconds))
+				})
 			}
-		}]), note: "bound to clips it survives a re-cut; bound to times it does not")
-
-		switch overlay.span {
-		case .marks(let from, let to):
-			let endpoints = vocabulary.items.map(\.reference) + vocabulary.groups.map { "@\($0)" }
-			add(row("from", [combo(from.description, values: endpoints, width: 220) {
-				[weak self] value in
-				self?.editOverlay(index) { $0.span = .marks(from: .init(value), to: to) }
-			}]))
-			add(row("to", [combo(to.description, values: endpoints, width: 220) {
-				[weak self] value in
-				self?.editOverlay(index) { $0.span = .marks(from: from, to: .init(value)) }
-			}]), note: "the same mark twice is one clip, or one whole section")
-		case .times(let from, let to):
-			add(row("from", [text(Timecode.string(from), width: 110, placeholder: "00:00.000") {
-				[weak self] value in
-				guard let seconds = Timecode.parse(value) else { return }
-				self?.editOverlay(index) { $0.span = .times(from: seconds, to: to) }
-			}]))
-			add(row("to", [text(Timecode.string(to), width: 110, placeholder: "00:05.000") {
-				[weak self] value in
-				guard let seconds = Timecode.parse(value) else { return }
-				self?.editOverlay(index) { $0.span = .times(from: from, to: seconds) }
-			}]))
+			if overlay.spans.count > 1 {
+				controls.append(small("−") { [weak self] in
+					self?.editOverlay(index) { $0.spans.remove(at: position) }
+				})
+			}
+			field(position == 0 ? "when" : "", controls,
+			      note: position == 0
+				? "bound to clips it survives a re-cut; the same mark twice is one clip, or one whole section"
+				: nil)
 		}
+		field("", [small("+ range") { [weak self] in
+			self?.editOverlay(index) { overlay in
+				// On again later: the last range repeated, moved along by its
+				// own length when it is a time, ready to be pointed somewhere
+				// else when it is a mark.
+				guard let last = overlay.spans.last else { return }
+				switch last {
+				case .times(let from, let to):
+					overlay.spans.append(.times(from: to, to: to + (to - from)))
+				case .marks:
+					overlay.spans.append(last)
+				}
+			}
+		}], note: "the same overlay, on over another stretch of the programme")
 
-		add(heading("how it arrives and leaves"))
-		transitionRows("arrival", overlay.arrival) { [weak self] transition in
+		section("how it arrives and leaves")
+		transitionRow("arrival", overlay.arrival) { [weak self] transition in
 			self?.editOverlay(index) { $0.arrival = transition }
 		}
-		transitionRows("departure", overlay.departure) { [weak self] transition in
+		transitionRow("departure", overlay.departure) { [weak self] transition in
 			self?.editOverlay(index) { $0.departure = transition }
 		}
 
-		add(heading("where it sits"))
-		add(row("anchor", [combo(overlay.anchor ?? "", values: [""] + vocabulary.anchors, width: 200) {
+		section("where it sits")
+		field("anchor", [combo(overlay.anchor ?? "", values: [""] + vocabulary.anchors, width: 210) {
 			[weak self] value in
 			let name = value.trimmingCharacters(in: .whitespaces)
 			self?.editOverlay(index) { $0.anchor = name.isEmpty ? nil : Slug.make(from: name) }
-		}]), note: "a tracked face: the overlay follows it, and the style's position is ignored")
-		add(row("offset", [
-			number(overlay.offset.x, width: 70) { [weak self] value in
+		}], note: "a tracked face: the overlay follows it, and the style's position is ignored")
+		field("offset", [
+			number(overlay.offset.x, width: 72) { [weak self] value in
 				self?.editOverlay(index) { $0.offset.x = value }
 			},
-			number(overlay.offset.y, width: 70) { [weak self] value in
+			number(overlay.offset.y, width: 72) { [weak self] value in
 				self?.editOverlay(index) { $0.offset.y = value }
 			},
-		]), note: "x and y from the anchor, both in fractions of the frame height")
+		], note: "x and y from the anchor, both in fractions of the frame height")
 	}
 
 	private var styleNames: [String] {
 		Array(Set(project.styles.keys).union(TextStyle.builtIn.keys)).sorted()
 	}
 
-	private func transitionRows(_ name: String, _ transition: Overlay.Transition,
-	                            _ set: @escaping (Overlay.Transition) -> Void) {
+	private func transitionRow(_ name: String, _ transition: Overlay.Transition,
+	                           _ set: @escaping (Overlay.Transition) -> Void) {
 		let kinds = ["cut", "fade", "slide"]
 		let current: Int
 		switch transition {
@@ -432,7 +510,7 @@ public final class PropertiesPanel: NSView {
 				pick in set(.slide(Overlay.Transition.Edge.allCases[pick], over: over))
 			})
 		}
-		if transition.duration > 0 || current != 0 {
+		if current != 0 {
 			controls.append(number(transition.duration, width: 60) { value in
 				switch transition {
 				case .fade: set(.fade(over: max(0, value)))
@@ -442,7 +520,7 @@ public final class PropertiesPanel: NSView {
 			})
 			controls.append(label("seconds"))
 		}
-		add(row(name, controls))
+		field(name, controls)
 	}
 
 	private func editOverlay(_ index: Int, _ change: (inout Overlay) -> Void) {
@@ -460,49 +538,230 @@ public final class PropertiesPanel: NSView {
 		}
 	}
 
-	// MARK: - Controls
-
-	private func add(_ view: NSView, note: String? = nil) {
-		form.addArrangedSubview(view)
-		if let note { form.addArrangedSubview(caption(note)) }
+	private func setSpan(_ index: Int, _ position: Int, _ span: Overlay.Span) {
+		editOverlay(index) { overlay in
+			guard position < overlay.spans.count else { return }
+			overlay.spans[position] = span
+		}
 	}
 
-	private func heading(_ text: String) -> NSView {
-		let label = NSTextField(labelWithString: text.uppercased())
+	// MARK: - When it is on
+
+	/// The programme with this overlay's ranges lying over it, draggable.
+	private func strip(_ index: Int, _ overlay: Overlay) -> NSView {
+		let strip = SpanStrip()
+		strip.duration = resolved?.duration ?? 0
+		strip.blocks = (resolved?.clips ?? []).map {
+			SpanStrip.Block(start: $0.start, end: $0.end, name: $0.clip.slug)
+		}
+		strip.ranges = overlay.spans.map { span in
+			let extent = self.extent(of: span) ?? (0, 0)
+			return SpanStrip.Range(start: extent.0, end: extent.1, movable: movable(span))
+		}
+		strip.onDrag = { [weak self] position, start, end in
+			guard let self, position < overlay.spans.count else { return }
+			self.setSpan(index, position, self.span(from: overlay.spans[position], start: start, end: end))
+		}
+		return strip
+	}
+
+	/// Where a range lands on the programme's clock.
+	private func extent(of span: Overlay.Span) -> (Double, Double)? {
+		switch span {
+		case .times(let from, let to):
+			return (from, to)
+		case .marks(let from, let to):
+			func edges(_ endpoint: Overlay.Span.Endpoint) -> (Double, Double)? {
+				switch endpoint {
+				case .clip(let reference):
+					let matching = (resolved?.clips ?? []).filter { $0.reference.slug == reference.slug }
+					guard let first = matching.first, let last = matching.last else { return nil }
+					return (first.start, last.end)
+				case .group(let name):
+					guard let group = resolved?.groups.first(where: { $0.name == name }) else { return nil }
+					return (group.start, group.end)
+				}
+			}
+			guard let a = edges(from), let b = edges(to) else { return nil }
+			return (a.0, max(b.1, a.1))
+		}
+	}
+
+	/// A section decides its own length on the programme, so a range hung on
+	/// one is shown and not dragged.
+	private func movable(_ span: Overlay.Span) -> Bool {
+		switch span {
+		case .times: return true
+		case .marks(let from, let to):
+			if case .group = from { return false }
+			if case .group = to { return false }
+			return true
+		}
+	}
+
+	/// A drag, written back the way the range was written.
+	///
+	/// Times move in seconds. Clips **snap**: the range takes the name of the
+	/// clip under each end, because a caption that belonged to `intro` should
+	/// still belong to a clip afterwards rather than to 4.28 seconds.
+	private func span(from existing: Overlay.Span, start: Double, end: Double) -> Overlay.Span {
+		switch existing {
+		case .times:
+			return .times(from: start, to: end)
+		case .marks:
+			let clips = resolved?.clips ?? []
+			let first = clips.last { $0.start <= start + 0.001 } ?? clips.first
+			let last = clips.last { $0.start < end - 0.001 } ?? first
+			guard let first, let last else { return existing }
+			return .marks(from: .clip(first.reference), to: .clip(last.reference))
+		}
+	}
+
+	// MARK: - Placing it on the picture
+
+	/// The frame the overlay appears on, with the overlay on it, draggable.
+	private func placement(_ index: Int, _ overlay: Overlay) -> NSView {
+		let preview = FramePreview()
+		preview.aspect = project.output.size
+
+		let found = resolved?.overlays.first { $0.overlay == overlay }
+		let anchor = found?.path?.point(at: found?.start ?? 0)
+		preview.anchorPoint = anchor
+		preview.anchorName = overlay.anchor
+
+		switch overlay.kind {
+		case .text(let content, _):
+			preview.label = content
+			preview.kind = .text
+		case .spinner(let spinner):
+			preview.label = spinner.words.first?.text ?? "spinner"
+			preview.kind = .spinner
+		}
+
+		preview.spot = spot(of: overlay, anchor: anchor)
+		preview.explanation = explanation(for: overlay, anchored: anchor != nil)
+		preview.onMove = { [weak self] spot in
+			self?.place(index, overlay, at: spot, anchor: anchor)
+		}
+
+		// The frame at the moment it appears — asked for now, drawn whenever it
+		// arrives, and dropped if the selection has moved on by then.
+		if let poster, let start = found?.start {
+			let generation = self.generation
+			poster(start) { [weak self, weak preview] image in
+				guard let self, self.generation == generation else { return }
+				preview?.poster = image
+			}
+		}
+		return preview
+	}
+
+	/// Where the overlay sits, in unit coordinates of the frame.
+	///
+	/// Three rules, because the format has three: an anchored overlay is the
+	/// anchor plus its offset; a spinner with no anchor is the middle plus its
+	/// offset; a caption with no anchor is wherever its style says.
+	private func spot(of overlay: Overlay, anchor: CGPoint?) -> CGPoint {
+		let ratio = project.output.size.height / max(1, project.output.size.width)
+		if let anchor {
+			return CGPoint(x: anchor.x + overlay.offset.x * ratio, y: anchor.y + overlay.offset.y)
+		}
+		if case .text(_, let style) = overlay.kind {
+			return project.style(named: style).position
+		}
+		return CGPoint(x: 0.5 + overlay.offset.x, y: 0.5 + overlay.offset.y)
+	}
+
+	private func explanation(for overlay: Overlay, anchored: Bool) -> String {
+		if anchored { return "drag: offset from the anchor" }
+		if case .text(_, let style) = overlay.kind {
+			return "drag: position of style `\(style ?? "lower-third")` — every caption drawn in it"
+		}
+		return "drag: offset from the middle of the frame"
+	}
+
+	/// The drag, written back as the file would say it.
+	private func place(_ index: Int, _ overlay: Overlay, at spot: CGPoint, anchor: CGPoint?) {
+		let ratio = project.output.size.width / max(1, project.output.size.height)
+		if let anchor {
+			editOverlay(index) {
+				$0.offset = CGPoint(x: (spot.x - anchor.x) * ratio, y: spot.y - anchor.y)
+			}
+			return
+		}
+		if case .text(let content, let styleName) = overlay.kind {
+			// A caption with no anchor sits where its *style* says, so that is
+			// what a drag changes — and it says so under the picture. A built-in
+			// style is written into the project on the way, because a project
+			// cannot move something it never mentioned.
+			let name = styleName ?? "lower-third"
+			var next = project
+			var style = next.styles[name] ?? TextStyle.builtIn[name] ?? .lowerThird
+			style.position = spot
+			next.styles[name] = style
+			next.overlays[index].kind = .text(content, style: name)
+			onChange?(next)
+			return
+		}
+		editOverlay(index) { $0.offset = CGPoint(x: spot.x - 0.5, y: spot.y - 0.5) }
+	}
+
+	// MARK: - Rows
+
+	/// A heading, across both columns, with a hairline under it.
+	private func section(_ name: String) {
+		let label = NSTextField(labelWithString: name.uppercased())
 		label.font = Theme.heading
 		label.textColor = Theme.faintText
-		let stack = NSStackView(views: [label])
+
+		let rule = NSBox()
+		rule.boxType = .separator
+
+		let stack = NSStackView(views: [label, rule])
 		stack.orientation = .vertical
-		stack.edgeInsets = NSEdgeInsets(top: 10, left: 0, bottom: 0, right: 0)
-		return stack
+		stack.spacing = 4
+		stack.alignment = .leading
+		stack.edgeInsets = NSEdgeInsets(top: grid.numberOfRows == 0 ? 0 : 10, left: 0, bottom: 0, right: 0)
+		rule.translatesAutoresizingMaskIntoConstraints = false
+		rule.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
+		full(stack)
+	}
+
+	/// Something that takes the whole width — the picture, a heading.
+	private func full(_ view: NSView) {
+		let row = grid.addRow(with: [view])
+		row.mergeCells(in: NSRange(location: 0, length: 2))
+		view.translatesAutoresizingMaskIntoConstraints = false
+		view.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
 	}
 
 	/// A labelled line. The label is the **key it writes**, not a paraphrase of
 	/// it, so somebody who reads the file afterwards recognises what they set.
-	private func row(_ key: String, _ controls: [NSView]) -> NSView {
+	private func field(_ key: String, _ controls: [NSView], note: String? = nil) {
 		let name = NSTextField(labelWithString: key)
 		name.font = Theme.mono
-		name.textColor = key.isEmpty ? Theme.dimText : Theme.text
+		name.textColor = Theme.text
 		name.alignment = .right
-		name.translatesAutoresizingMaskIntoConstraints = false
-		name.widthAnchor.constraint(equalToConstant: 96).isActive = true
-		name.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-		let stack = NSStackView(views: [name] + controls)
-		stack.orientation = .horizontal
-		stack.spacing = 6
-		stack.alignment = .firstBaseline
-		return stack
+		let row = NSStackView(views: controls)
+		row.orientation = .horizontal
+		row.spacing = 6
+		row.alignment = .centerY
+
+		grid.addRow(with: [name, row]).yPlacement = .center
+		if let note {
+			let caption = NSTextField(labelWithString: note)
+			caption.font = Theme.monoSmall
+			caption.textColor = Theme.faintText
+			caption.lineBreakMode = .byWordWrapping
+			caption.preferredMaxLayoutWidth = 320
+			let spacer = NSGridCell.emptyContentView
+			grid.addRow(with: [spacer, caption])
+		}
 	}
 
-	private func caption(_ message: String) -> NSTextField {
-		let label = NSTextField(labelWithString: message)
-		label.font = Theme.monoSmall
-		label.textColor = Theme.faintText
-		label.lineBreakMode = .byWordWrapping
-		label.preferredMaxLayoutWidth = 320
-		return label
-	}
+	// MARK: - Controls
 
 	private func label(_ text: String) -> NSTextField {
 		let label = NSTextField(labelWithString: text)
@@ -516,8 +775,14 @@ public final class PropertiesPanel: NSView {
 		let field = NSTextField(string: value)
 		field.font = Theme.mono
 		field.placeholderString = placeholder
+		field.usesSingleLineMode = true
+		field.lineBreakMode = .byClipping
 		field.translatesAutoresizingMaskIntoConstraints = false
+		// Both dimensions stated. A grid row takes its height from what is in it,
+		// and a field that only says how wide it is gets whatever is left —
+		// which was two thirds of a line, with the descenders cut off.
 		field.widthAnchor.constraint(equalToConstant: width).isActive = true
+		field.heightAnchor.constraint(equalToConstant: 22).isActive = true
 		let sink = Sink { control in onCommit(control.stringValue) }
 		sinks.append(sink)
 		field.target = sink
@@ -556,6 +821,7 @@ public final class PropertiesPanel: NSView {
 		box.stringValue = value
 		box.translatesAutoresizingMaskIntoConstraints = false
 		box.widthAnchor.constraint(equalToConstant: width).isActive = true
+		box.heightAnchor.constraint(equalToConstant: 24).isActive = true
 		let sink = Sink { control in onCommit(control.stringValue) }
 		sinks.append(sink)
 		box.target = sink

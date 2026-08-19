@@ -84,6 +84,33 @@ public enum Theme {
 		}
 	}
 
+	/// The picture that goes with the hue.
+	///
+	/// A symbol and a colour together are what makes a list of forty names
+	/// scannable: the eye finds the scissors before it reads the slug. Drawn
+	/// from the system set so they are the symbols somebody already knows from
+	/// everything else on the machine.
+	public static func symbol(_ kind: Kind, size: CGFloat = 12,
+	                          colour: NSColor? = nil) -> NSImage? {
+		let name: String
+		switch kind {
+		case .clip: name = "scissors"
+		case .take: name = "film"
+		case .tag, .query: name = "tag"
+		case .list: name = "list.bullet"
+		case .section: name = "folder"
+		case .text: name = "textformat"
+		case .spinner: name = "circle.dotted"
+		case .anchor: name = "scope"
+		}
+		guard let image = NSImage(systemSymbolName: name, accessibilityDescription: name) else {
+			return nil
+		}
+		let configuration = NSImage.SymbolConfiguration(pointSize: size, weight: .medium)
+			.applying(NSImage.SymbolConfiguration(paletteColors: [colour ?? color(kind)]))
+		return image.withSymbolConfiguration(configuration)
+	}
+
 	public static let mono = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 	public static let monoSmall = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
 	public static let label = NSFont.systemFont(ofSize: 11, weight: .medium)

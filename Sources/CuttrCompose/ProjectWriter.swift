@@ -147,6 +147,19 @@ public enum ProjectWriter {
 			+ "\(indent)  transition: \(trim(transition))\n"
 	}
 
+	/// When an overlay is on, as the file says it.
+	private static func range(_ span: Overlay.Span, indent: String) -> String {
+		switch span {
+		case .marks(let from, let to):
+			var out = "\(indent)from:   \(scalar(from.description))\n"
+			if to != from { out += "\(indent)to:     \(scalar(to.description))\n" }
+			return out
+		case .times(let from, let to):
+			return "\(indent)from:   \(Timecode.string(from))\n"
+				+ "\(indent)to:     \(Timecode.string(to))\n"
+		}
+	}
+
 	private static func overlays(_ list: [Overlay]) -> String {
 		var out = ""
 		for (index, overlay) in list.enumerated() {
@@ -172,13 +185,17 @@ public enum ProjectWriter {
 						}
 					}
 				}
-				switch overlay.span {
-				case .marks(let from, let to):
-					out += "    from:   \(scalar(from.description))\n"
-					if to != from { out += "    to:     \(scalar(to.description))\n" }
-				case .times(let from, let to):
-					out += "    from:   \(Timecode.string(from))\n"
-					out += "    to:     \(Timecode.string(to))\n"
+				// One range keeps the shape every project already has; several
+				// go under `when:`, which is the same keys in a list.
+				if overlay.spans.count == 1 {
+					out += range(overlay.spans[0], indent: "    ")
+				} else {
+					out += "    when:\n"
+					for span in overlay.spans {
+						let lines = range(span, indent: "").split(separator: "\n")
+							.map { $0.trimmingCharacters(in: .whitespaces) }
+						out += "      - {" + lines.joined(separator: ", ") + "}\n"
+					}
 				}
 				if let anchor = overlay.anchor {
 					out += "    anchor: \(scalar(anchor))\n"

@@ -85,6 +85,17 @@ let package = Package(
 			dependencies: ["CuttrUI"],
 			swiftSettings: [.swiftLanguageMode(.v5)]
 		),
+		// The panels, built and reloaded without a window.
+		//
+		// Two crashes on launch came from AppKit refusing something a view did
+		// while it was being assembled — a constraint across two hierarchies, a
+		// grid row that could not be removed. None of that needs a person at the
+		// keyboard to find, and none of it was found without one.
+		.testTarget(
+			name: "CuttrUITests",
+			dependencies: ["CuttrUI"],
+			swiftSettings: [.swiftLanguageMode(.v5)]
+		),
 		.testTarget(
 			name: "CuttrKitTests",
 			dependencies: ["CuttrKit"],

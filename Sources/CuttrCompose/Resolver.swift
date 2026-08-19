@@ -336,39 +336,45 @@ public enum Resolver {
 
 		var overlays: [ResolvedOverlay] = []
 		for overlay in project.overlays {
-			let start: Double
-			let end: Double
-			switch overlay.span {
-			case .times(let a, let b):
-				start = a
-				end = b
-			case .marks(let from, let to):
-				// Mark-bound, which is the point: the caption belongs to a
-				// section of the programme, so re-cutting the takes moves it.
-				func extent(_ endpoint: Overlay.Span.Endpoint) throws -> (start: Double, end: Double) {
-					switch endpoint {
-					case .clip(let reference):
-						guard let first = clips.first(where: { $0.reference.slug == reference.slug }),
-						      let last = clips.last(where: { $0.reference.slug == reference.slug })
-						else { throw ResolveError.unknownClip(reference) }
-						return (first.start, last.end)
-					case .group(let name):
-						guard let range = groups[name] else { throw ResolveError.unknownGroup(name) }
-						return range
-					}
-				}
-				let a = try extent(from)
-				let b = try extent(to)
-				start = a.start
-				end = max(b.end, a.end)
-			}
-			guard end > start else { continue }
 			if let name = overlay.anchor, anchorsByName[name] == nil {
 				throw ResolveError.unknownAnchor(name)
 			}
-			overlays.append(ResolvedOverlay(
-				overlay: overlay, start: start, end: end,
-				path: overlay.anchor.flatMap { paths[$0] }))
+			// One resolved overlay per range. Everything downstream — the layer
+			// tree, the transitions, the anchor following — is about a thing
+			// that is on from one moment to another, so an overlay that is on
+			// three times is three of those and nothing else changes.
+			for span in overlay.spans {
+				let start: Double
+				let end: Double
+				switch span {
+				case .times(let a, let b):
+					start = a
+					end = b
+				case .marks(let from, let to):
+					// Mark-bound, which is the point: the caption belongs to a
+					// section of the programme, so re-cutting the takes moves it.
+					func extent(_ endpoint: Overlay.Span.Endpoint) throws -> (start: Double, end: Double) {
+						switch endpoint {
+						case .clip(let reference):
+							guard let first = clips.first(where: { $0.reference.slug == reference.slug }),
+							      let last = clips.last(where: { $0.reference.slug == reference.slug })
+							else { throw ResolveError.unknownClip(reference) }
+							return (first.start, last.end)
+						case .group(let name):
+							guard let range = groups[name] else { throw ResolveError.unknownGroup(name) }
+							return range
+						}
+					}
+					let a = try extent(from)
+					let b = try extent(to)
+					start = a.start
+					end = max(b.end, a.end)
+				}
+				guard end > start else { continue }
+				overlays.append(ResolvedOverlay(
+					overlay: overlay, start: start, end: end,
+					path: overlay.anchor.flatMap { paths[$0] }))
+			}
 		}
 
 		// Spelled out rather than chained: the type checker gives up on the

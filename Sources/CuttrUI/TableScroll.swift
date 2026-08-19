@@ -20,12 +20,26 @@ import AppKit
 @MainActor
 enum TableScroll {
 
+	/// A table with several columns worth reading: they keep the widths they
+	/// were given and the pane scrolls sideways to reach them, because letting
+	/// AppKit squeeze them to fit makes the ones on the right — which is where
+	/// tags and paths live — unreadable slivers.
 	static func make(_ table: NSTableView) -> NSScrollView {
-		// Columns keep the widths they were given; the pane scrolls to reach
-		// them. Letting AppKit squeeze them to fit makes the ones on the right —
-		// which is where tags and paths live — unreadable slivers.
 		table.columnAutoresizingStyle = .noColumnAutoresizing
 		return wrap(table)
+	}
+
+	/// A list of one column, which fills the pane.
+	///
+	/// No horizontal scroller at all — not hidden, not autohidden, not there.
+	/// One column that is always exactly as wide as the pane has nothing to
+	/// scroll sideways to, and a scrollbar that cannot be used is a scrollbar
+	/// that can only be drawn wrong.
+	static func fitting(_ table: NSTableView) -> NSScrollView {
+		table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+		let scroll = wrap(table, horizontal: false)
+		table.autoresizingMask = [.width]
+		return scroll
 	}
 
 	/// A scroll view around anything, with both scrollers the right way round.

@@ -23,6 +23,16 @@ public final class ProjectInspector: NSView {
 	/// A whole project, edited. The window applies and saves it.
 	public var onChange: ((Project) -> Void)?
 
+	/// The programme as it resolved, and a way to get a frame out of it. Both
+	/// belong to the window — this panel only passes them to the properties,
+	/// which is where a picture of the overlay is worth having.
+	public var resolved: ResolvedProject? {
+		didSet { properties.resolved = resolved }
+	}
+	public var poster: ((Double, @escaping (NSImage?) -> Void) -> Void)? {
+		didSet { properties.poster = poster }
+	}
+
 	private let programme = ProgrammePanel()
 	private let properties = PropertiesPanel()
 	private let yaml = NSTextView()

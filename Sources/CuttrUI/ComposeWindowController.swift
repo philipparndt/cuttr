@@ -48,6 +48,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// it run at `speed = 1` instead would drift against the player within
 	/// seconds, because they are two clocks.
 	private var overlayLayer: CALayer?
+	/// What the preview was last built from, kept so a still can be pulled out
+	/// of it for the properties panel.
+	private var builtComposition: AVComposition?
+	private var builtVideoComposition: AVVideoComposition?
 	private var itemStatus: NSKeyValueObservation?
 	private var buildTask: Task<Void, Never>?
 
@@ -270,6 +274,23 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			}
 		}
 		takesTable.onNew = { [weak self] in self?.newTake(nil) }
+
+		// A frame of the programme at a moment, for placing an overlay on. The
+		// same composition the preview plays, so what is dragged over is what
+		// will be rendered under.
+		inspector.poster = { [weak self] time, done in
+			guard let self, let composition = self.builtComposition else { return done(nil) }
+			let generator = AVAssetImageGenerator(asset: composition)
+			generator.videoComposition = self.builtVideoComposition
+			generator.requestedTimeToleranceBefore = CMTime(seconds: 0.25, preferredTimescale: 600)
+			generator.requestedTimeToleranceAfter = CMTime(seconds: 0.25, preferredTimescale: 600)
+			generator.generateCGImageAsynchronously(
+				for: CMTime(seconds: max(0, time), preferredTimescale: 600)
+			) { image, _, _ in
+				let picture = image.map { NSImage(cgImage: $0, size: .zero) }
+				Task { @MainActor in done(picture) }
+			}
+		}
 		library.onInsert = { [weak self] reference in self?.inspector.insert(reference: reference) }
 
 		// The same arrangement as the cutting window, for the same reason: the
@@ -306,6 +327,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		window.title = composeDocument.displayName
 		window.representedURL = composeDocument.url
 		takesTable.reload(composeDocument.takes)
+		inspector.resolved = composeDocument.resolved
 		let vocabulary = composeDocument.vocabulary
 		library.reload(vocabulary)
 		inspector.reload(composeDocument.project, vocabulary: vocabulary)
@@ -338,6 +360,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 				return
 			}
 			guard !Task.isCancelled, let self else { return }
+			self.builtComposition = built.composition
+			self.builtVideoComposition = built.videoComposition
 			self.transport.present(built.composition,
 			                       videoComposition: built.videoComposition,
 			                       audioMix: built.audioMix,

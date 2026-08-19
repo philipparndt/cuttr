@@ -183,7 +183,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		outline.registerForDraggedTypes([.string, Self.entryType])
 		outline.setDraggingSourceOperationMask(.move, forLocal: true)
 
-		let scroll = TableScroll.make(outline)
+		let scroll = TableScroll.fitting(outline)
 		over(scroll, programmeHint)
 		return pane("programme", scroll, [
 			button("+ Clip", #selector(addClip), "A clip by slug, or a #tag query"),
@@ -259,7 +259,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		column.width = 420
 		overlayTable.addTableColumn(column)
 
-		let scroll = TableScroll.make(overlayTable)
+		let scroll = TableScroll.fitting(overlayTable)
 		over(scroll, overlayHint)
 		return pane("overlays", scroll, [
 			button("+ Text", #selector(addText), "A caption, bound to what is selected"),
@@ -448,24 +448,17 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 		if let moved = board.string(forType: Self.entryType) {
 			let from = moved.split(separator: ".").compactMap { Int($0) }
-			guard let entry = project.entry(at: from) else { return false }
-			// Refused rather than losing the entry: a section cannot be dropped
-			// inside itself, and neither can anything it contains.
-			if parent.count >= from.count, Array(parent.prefix(from.count)) == from { return false }
-			next.removeEntry(at: from)
-			// Removing above the destination shifts it up by one.
-			var at = index < 0 ? Int.max : index
-			if from.count == parent.count + 1, Array(from.dropLast()) == parent, (from.last ?? 0) < at {
-				at -= 1
-			}
-			pending = .entry(insert(entry, into: parent, at: at, of: &next))
+			// The arithmetic lives with the timeline, where it is tested. A drop
+			// is a parent and an index; everything that shifts underneath it is
+			// that method's business.
+			pending = .entry(next.moveEntry(at: from, toParent: parent, index: index))
 			onChange?(next)
 			return true
 		}
 
 		guard let text = board.string(forType: .string),
 		      let entry = try? TimelineEntry(text: text) else { return false }
-		pending = .entry(insert(entry, into: parent, at: index < 0 ? Int.max : index, of: &next))
+		pending = .entry(next.insertEntry(entry, into: parent, at: index < 0 ? Int.max : index))
 		onChange?(next)
 		return true
 	}
@@ -482,35 +475,6 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		return found
 	}
 
-	/// Puts `entry` at a position given as parent-and-index, which is what a
-	/// drop lands as, and answers with the path it ended up at.
-	private func insert(_ entry: TimelineEntry, into parent: [Int], at index: Int,
-	                    of project: inout Project) -> [Int] {
-		let siblings: [TimelineEntry]
-		if parent.isEmpty {
-			siblings = project.timeline
-		} else if case .group(_, let inner)? = project.entry(at: parent)?.source {
-			siblings = inner
-		} else {
-			siblings = []
-		}
-		let at = min(max(0, index), siblings.count)
-		if at == 0 {
-			// `insertEntry` puts things *after* a path, so the first position is
-			// the one case it cannot express: before the first sibling.
-			if parent.isEmpty {
-				project.timeline.insert(entry, at: 0)
-			} else if case .group(let name, var inner)? = project.entry(at: parent)?.source {
-				inner.insert(entry, at: 0)
-				project.replaceEntry(at: parent, with: TimelineEntry(
-					group: name, entries: inner,
-					transition: project.entry(at: parent)?.transition ?? 0))
-			}
-			return parent + [0]
-		}
-		project.insertEntry(entry, after: parent + [at - 1])
-		return parent + [at]
-	}
 
 	// MARK: - Overlay list
 
@@ -560,15 +524,18 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		var count = 0
 
 		override func draw(_ dirtyRect: NSRect) {
-			let kind: (String, Theme.Kind)
+			let kind: Theme.Kind
 			switch entry.source {
-			case .clip: kind = ("CLIP", .clip)
-			case .list: kind = ("LIST", .list)
-			case .query: kind = ("QUERY", .query)
-			case .group: kind = ("SECTION", .section)
+			case .clip: kind = .clip
+			case .list: kind = .list
+			case .query: kind = .query
+			case .group: kind = .section
 			}
-			let colour = Theme.color(kind.1)
-			var x = badge(kind.0, colour: colour, at: 4)
+			var x: CGFloat = 4
+			if let image = Theme.symbol(kind, size: 13) {
+				image.draw(in: NSRect(x: x, y: bounds.height / 2 - 8, width: 17, height: 16))
+			}
+			x += 22
 
 			(entry.source.description as NSString).draw(
 				at: NSPoint(x: x, y: bounds.height / 2 - 7),
@@ -586,18 +553,6 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			}
 		}
 
-		private func badge(_ text: String, colour: NSColor, at x: CGFloat) -> CGFloat {
-			let attributes: [NSAttributedString.Key: Any] = [
-				.font: Theme.heading, .foregroundColor: colour,
-			]
-			let size = (text as NSString).size(withAttributes: attributes)
-			let box = NSRect(x: x, y: bounds.height / 2 - 8, width: size.width + 10, height: 16)
-			colour.withAlphaComponent(0.16).setFill()
-			NSBezierPath(roundedRect: box, xRadius: 3, yRadius: 3).fill()
-			(text as NSString).draw(at: NSPoint(x: x + 5, y: box.minY + 3), withAttributes: attributes)
-			return box.maxX + 8
-		}
-
 		@discardableResult
 		private func note(_ text: String, at x: CGFloat) -> CGFloat {
 			let attributes: [NSAttributedString.Key: Any] = [
@@ -613,24 +568,25 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		var overlay = Overlay(kind: .text("", style: nil), span: .times(from: 0, to: 0))
 
 		override func draw(_ dirtyRect: NSRect) {
-			let colour: NSColor
+			let kind: Theme.Kind
 			let title: String
 			switch overlay.kind {
 			case .text(let text, _):
-				colour = Theme.color(.text)
+				kind = .text
 				title = "“\(text)”"
 			case .spinner(let spinner):
-				colour = Theme.color(.spinner)
+				kind = .spinner
 				title = spinner.words.isEmpty
 					? "spinner (\(spinner.style.rawValue))"
 					: spinner.words.map(\.text).joined(separator: " · ")
 			}
 
-			colour.setFill()
-			NSBezierPath(ovalIn: NSRect(x: 8, y: bounds.height / 2 - 3, width: 6, height: 6)).fill()
+			if let image = Theme.symbol(kind, size: 13) {
+				image.draw(in: NSRect(x: 5, y: bounds.height / 2 - 8, width: 17, height: 16))
+			}
 
 			(title as NSString).draw(
-				at: NSPoint(x: 22, y: bounds.height - 20),
+				at: NSPoint(x: 26, y: bounds.height - 20),
 				withAttributes: [.font: Theme.bodyStrong, .foregroundColor: Theme.text])
 
 			var where_ = ""
@@ -643,7 +599,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			}
 			if let anchor = overlay.anchor { where_ += "   ⌖ \(anchor)" }
 			(where_ as NSString).draw(
-				at: NSPoint(x: 22, y: 5),
+				at: NSPoint(x: 26, y: 5),
 				withAttributes: [.font: Theme.monoSmall, .foregroundColor: Theme.dimText])
 		}
 	}

@@ -17,7 +17,7 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 	public var onInsert: ((String) -> Void)?
 
 	fileprivate enum Row {
-		case header(String)
+		case header(String, Theme.Kind?)
 		case clip(ComposeDocument.Vocabulary.Item)
 		case tag(String, Int)
 		case anchor(String, String)
@@ -68,7 +68,7 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 		// project window.
 		table.setDraggingSourceOperationMask(.copy, forLocal: true)
 
-		let scroll = TableScroll.make(table)
+		let scroll = TableScroll.fitting(table)
 		let stack = NSStackView(views: [search, scroll])
 		stack.orientation = .vertical
 		stack.spacing = 6
@@ -109,13 +109,13 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 				$0.take == take && matches($0.slug, $0.name, $0.tags.joined(separator: " "), take)
 			}
 			guard !clips.isEmpty else { continue }
-			out.append(.header(take))
+			out.append(.header(take, .take))
 			out.append(contentsOf: clips.map { Row.clip($0) })
 		}
 
 		let tags = vocabulary.tags.filter { matches($0) }
 		if !tags.isEmpty {
-			out.append(.header("tags"))
+			out.append(.header("tags", nil))
 			out += tags.map { tag in
 				.tag(tag, vocabulary.items.filter { $0.tags.contains(tag) }.count)
 			}
@@ -123,7 +123,7 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 
 		let anchors = vocabulary.anchors.filter { matches($0) }
 		if !anchors.isEmpty {
-			out.append(.header("anchors"))
+			out.append(.header("anchors", nil))
 			out += anchors.map { .anchor($0, vocabulary.anchorTakes[$0] ?? "") }
 		}
 
@@ -174,25 +174,30 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 	/// called, and its tags — and stacked text fields would spend most of the
 	/// width on the gaps between them.
 	fileprivate final class LibraryRow: NSTableCellView {
-		var row: Row = .header("")
+		var row: Row = .header("", nil)
 
 		override func draw(_ dirtyRect: NSRect) {
 			let bounds = self.bounds
 			switch row {
-			case .header(let title):
+			case .header(let title, let kind):
 				let attributes: [NSAttributedString.Key: Any] = [
 					.font: Theme.heading, .foregroundColor: Theme.faintText,
 				]
+				var x: CGFloat = 4
+				if let kind, let image = Theme.symbol(kind, size: 10, colour: Theme.faintText) {
+					image.draw(in: NSRect(x: x, y: bounds.height - 16, width: 13, height: 12))
+					x += 17
+				}
 				let text = title.uppercased() as NSString
-				text.draw(at: NSPoint(x: 4, y: bounds.height - 15), withAttributes: attributes)
+				text.draw(at: NSPoint(x: x, y: bounds.height - 15), withAttributes: attributes)
 				Theme.rule.setFill()
 				NSRect(x: 4, y: 3, width: bounds.width - 8, height: 1).fill()
 
 			case .clip(let item):
-				dot(Theme.color(.clip), at: 8)
-				primary(item.reference, x: 20, y: bounds.height - 16)
+				mark(.clip)
+				primary(item.reference, x: 24, y: bounds.height - 16)
 				var offset = secondary(
-					item.length > 0 ? Timecode.string(item.length) : "", x: 20,
+					item.length > 0 ? Timecode.string(item.length) : "", x: 24,
 					y: bounds.height - 28, colour: Theme.dimText)
 				offset += 20
 				for tag in item.tags.prefix(3) {
@@ -201,21 +206,21 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 				}
 
 			case .tag(let name, let count):
-				dot(Theme.color(.tag), at: 8)
-				primary("#\(name)", x: 20, y: bounds.height - 16)
-				_ = secondary("\(count) clip\(count == 1 ? "" : "s")", x: 20,
+				mark(.tag)
+				primary("#\(name)", x: 24, y: bounds.height - 16)
+				_ = secondary("\(count) clip\(count == 1 ? "" : "s")", x: 24,
 				              y: bounds.height - 28, colour: Theme.dimText)
 
 			case .anchor(let name, let take):
-				dot(Theme.color(.anchor), at: 8)
-				primary(name, x: 20, y: bounds.height - 16)
-				_ = secondary(take, x: 20, y: bounds.height - 28, colour: Theme.dimText)
+				mark(.anchor)
+				primary(name, x: 24, y: bounds.height - 16)
+				_ = secondary(take, x: 24, y: bounds.height - 28, colour: Theme.dimText)
 			}
 		}
 
-		private func dot(_ colour: NSColor, at x: CGFloat) {
-			colour.setFill()
-			NSBezierPath(ovalIn: NSRect(x: x, y: bounds.height / 2 - 3, width: 6, height: 6)).fill()
+		private func mark(_ kind: Theme.Kind) {
+			guard let image = Theme.symbol(kind) else { return }
+			image.draw(in: NSRect(x: 5, y: bounds.height / 2 - 7, width: 15, height: 14))
 		}
 
 		private func primary(_ text: String, x: CGFloat, y: CGFloat) {

@@ -70,6 +70,52 @@ import Testing
 		#expect(p.rows.map(\.entry.source.description) == ["one", "@middle", "two", "three", "four"])
 	}
 
+	/// The one that deleted somebody's clip: dragging into a section that comes
+	/// *after* it. Taking the clip out moves the section up a place, and writing
+	/// into where the section used to be writes into nothing.
+	@Test func draggingIntoASectionBelowItKeepsTheClip() {
+		var project = self.project()
+		let landed = project.moveEntry(at: [0], toParent: [1], index: -1)
+		#expect(landed == [0, 2])
+		#expect(project.rows.map(\.entry.source.description)
+			== ["@middle", "two", "three", "one", "four"])
+	}
+
+	@Test func draggingOutOfASectionKeepsIt() {
+		var project = self.project()
+		let landed = project.moveEntry(at: [1, 0], toParent: [], index: 0)
+		#expect(landed == [0])
+		#expect(project.rows.map(\.entry.source.description)
+			== ["two", "one", "@middle", "three", "four"])
+	}
+
+	@Test func draggingWithinOneParentCountsTheGapItLeaves() {
+		var project = self.project()
+		#expect(project.moveEntry(at: [0], toParent: [], index: 2) == [1])
+		#expect(project.rows.map(\.entry.source.description)
+			== ["@middle", "two", "three", "one", "four"])
+	}
+
+	@Test func aSectionCannotBeDroppedInsideItself() {
+		var project = self.project()
+		#expect(project.moveEntry(at: [1], toParent: [1], index: 0) == [1])
+		#expect(project.rows.count == 5)
+	}
+
+	@Test func droppingAtTheTopOfASectionGoesFirst() {
+		var project = self.project()
+		let landed = project.insertEntry(TimelineEntry(clip: ClipReference("new")), into: [1], at: 0)
+		#expect(landed == [1, 0])
+		#expect(project.rows.map(\.entry.source.description)
+			== ["one", "@middle", "new", "two", "three", "four"])
+	}
+
+	@Test func droppingPastTheEndAppends() {
+		var project = self.project()
+		#expect(project.insertEntry(TimelineEntry(clip: ClipReference("new")), into: [], at: 99) == [3])
+		#expect(project.entry(at: [3])?.source.description == "new")
+	}
+
 	@Test func replacingKeepsTheShapeAroundIt() {
 		var p = project()
 		p.replaceEntry(at: [1, 0], with: TimelineEntry(clip: ClipReference("swapped")))

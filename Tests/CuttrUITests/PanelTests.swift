@@ -1,0 +1,95 @@
+import AppKit
+import CuttrCompose
+import CuttrKit
+import Testing
+@testable import CuttrUI
+
+/// The panels, assembled and reloaded.
+///
+/// Nothing here checks what anything looks like. What it checks is that putting
+/// a project into each panel does not make AppKit throw — which is the way both
+/// of this program's launch crashes announced themselves, and neither was found
+/// without somebody sitting in front of it.
+@Suite @MainActor struct PanelTests {
+
+	private func project() -> Project {
+		Project(
+			takes: ["take-01.cuttr"],
+			output: Output(width: 1920, height: 1080, framesPerSecond: 25,
+			               file: "out.mov", audio: AudioTarget(), matchReference: "intro"),
+			timeline: [
+				TimelineEntry(clip: ClipReference("intro")),
+				TimelineEntry(group: "middle", entries: [
+					TimelineEntry(clip: ClipReference("demo")),
+					try! TimelineEntry(query: "#b-roll"),
+				]),
+				TimelineEntry(list: [ClipReference("a"), ClipReference("b")], transition: 0.5),
+			],
+			overlays: [
+				Overlay(kind: .text("Installing", style: "lower-third"),
+				        span: .clips(from: ClipReference("intro"), to: ClipReference("demo"))),
+				Overlay(kind: .spinner(Spinner(words: [SpinnerWord("one"), SpinnerWord("two", duration: 2)])),
+				        spans: [.times(from: 1, to: 4), .marks(from: .group("middle"), to: .group("middle"))],
+				        anchor: "mia-eye", offset: CGPoint(x: 0.02, y: -0.18)),
+			])
+	}
+
+	private func vocabulary() -> ComposeDocument.Vocabulary {
+		var found = ComposeDocument.Vocabulary()
+		found.clips = ["intro", "demo"]
+		found.tags = ["b-roll"]
+		found.anchors = ["mia-eye"]
+		found.groups = ["middle"]
+		found.takeNames = ["take-01"]
+		found.items = [
+			.init(take: "take-01", slug: "intro", name: "Intro", tags: ["b-roll"],
+			      length: 4, reference: "intro"),
+			.init(take: "take-01", slug: "demo", name: "Demo", tags: [],
+			      length: 9, reference: "demo"),
+		]
+		return found
+	}
+
+	/// Every selection the panel can be asked to show, one after another — the
+	/// grid is thrown away and remade each time, and that is where it broke.
+	@Test func propertiesShowEverySelection() {
+		_ = NSApplication.shared
+		let panel = PropertiesPanel()
+		let project = self.project()
+		let selections: [ProjectSelection] = [
+			.output, .entry([0]), .entry([1]), .entry([1, 0]), .entry([1, 1]), .entry([2]),
+			.overlay(0), .overlay(1), .output,
+			// Gone: a selection that outlived the thing it named.
+			.entry([9]), .overlay(9),
+		]
+		for selection in selections {
+			panel.reload(project, vocabulary: vocabulary(), selection: selection)
+		}
+		panel.layoutSubtreeIfNeeded()
+	}
+
+	@Test func programmeShowsTheTree() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel()
+		panel.reload(project(), vocabulary: vocabulary())
+		panel.reload(Project(), vocabulary: ComposeDocument.Vocabulary())
+		panel.reload(project(), vocabulary: vocabulary())
+		panel.layoutSubtreeIfNeeded()
+	}
+
+	@Test func libraryListsTheMaterial() {
+		_ = NSApplication.shared
+		let library = LibraryView()
+		library.reload(vocabulary())
+		library.reload(ComposeDocument.Vocabulary())
+		library.layoutSubtreeIfNeeded()
+	}
+
+	@Test func theInspectorPutsThemTogether() {
+		_ = NSApplication.shared
+		let inspector = ProjectInspector()
+		inspector.reload(project(), vocabulary: vocabulary())
+		inspector.insert(reference: "#b-roll")
+		inspector.layoutSubtreeIfNeeded()
+	}
+}

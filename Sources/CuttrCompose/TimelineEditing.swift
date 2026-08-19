@@ -75,6 +75,73 @@ extension Project {
 		modify(at: path) { list, index in list.insert(entry, at: index + 1) }
 	}
 
+	/// Puts an entry at a position given as parent-and-index, which is what a
+	/// drop lands as, and answers with the path it ended up at.
+	///
+	/// An index past the end appends, which is what dropping *on* a section
+	/// means: nowhere in particular inside it.
+	@discardableResult
+	public mutating func insertEntry(_ entry: TimelineEntry, into parent: [Int], at index: Int) -> [Int] {
+		let count = children(of: parent)?.count ?? 0
+		let at = min(max(0, index), count)
+		if at == 0 {
+			// `insertEntry(_:after:)` puts things after a path, so the first
+			// position is the one case it cannot express.
+			if parent.isEmpty {
+				timeline.insert(entry, at: 0)
+			} else if case .group(let name, var inner)? = self.entry(at: parent)?.source {
+				inner.insert(entry, at: 0)
+				replaceEntry(at: parent, with: TimelineEntry(
+					group: name, entries: inner, transition: self.entry(at: parent)?.transition ?? 0))
+			}
+			return parent + [0]
+		}
+		insertEntry(entry, after: parent + [at - 1])
+		return parent + [at]
+	}
+
+	/// Moves an entry to a parent and an index — a drag, in other words.
+	///
+	/// Both ends move as the tree changes underneath them, and that is the whole
+	/// difficulty. Taking the entry out shifts everything after it up by one:
+	/// the destination *inside* a shared parent, and the destination's own path
+	/// when the entry came from above it. Getting the second wrong writes into a
+	/// path that no longer exists, and the entry is simply gone — a move that
+	/// deletes.
+	///
+	/// A section cannot be dropped into itself or into anything it contains;
+	/// that is refused rather than half-done.
+	@discardableResult
+	public mutating func moveEntry(at from: [Int], toParent parent: [Int], index: Int) -> [Int] {
+		guard let entry = self.entry(at: from) else { return from }
+		if parent.count >= from.count, Array(parent.prefix(from.count)) == from { return from }
+
+		var at = index < 0 ? Int.max : index
+		if from.count == parent.count + 1, Array(from.dropLast()) == parent, (from.last ?? 0) < at {
+			at -= 1
+		}
+		removeEntry(at: from)
+		return insertEntry(entry, into: shifting(parent, removing: from), at: at)
+	}
+
+	/// The children an path holds, or the top level for the empty path.
+	private func children(of parent: [Int]) -> [TimelineEntry]? {
+		if parent.isEmpty { return timeline }
+		if case .group(_, let inner)? = entry(at: parent)?.source { return inner }
+		return nil
+	}
+
+	/// Where a path ends up once `removed` has been taken out from beside it.
+	private func shifting(_ path: [Int], removing removed: [Int]) -> [Int] {
+		let level = removed.count - 1
+		guard level >= 0, path.count > level,
+		      Array(path.prefix(level)) == Array(removed.prefix(level)),
+		      path[level] > removed[level] else { return path }
+		var out = path
+		out[level] -= 1
+		return out
+	}
+
 	/// Moves an entry within its own parent. Returns where it ended up.
 	@discardableResult
 	public mutating func moveEntry(at path: [Int], by offset: Int) -> [Int] {
