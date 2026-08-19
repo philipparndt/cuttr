@@ -12,6 +12,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// is fine, and is why the array is pruned on close rather than never.
 	private var controllers: [MainWindowController] = []
 	private var composers: [ComposeWindowController] = []
+	/// Scene editors, and what each is listening to. A scene window shows one
+	/// scene of one project, so it has to hear when that project changes —
+	/// reloaded from disk, or edited in its own window.
+	private var scenes: [SceneWindowController] = []
+	private var sceneObservers: [ObjectIdentifier: NSObjectProtocol] = [:]
+	/// Which project each scene window belongs to. By identity rather than by
+	/// file, because two untitled projects have the same URL — none — and would
+	/// otherwise share one scene window between them.
+	private var sceneOwners: [ObjectIdentifier: ObjectIdentifier] = [:]
 
 	func applicationDidFinishLaunching(_ notification: Notification) {
 		NSApp.mainMenu = MainMenu.build()
@@ -22,6 +31,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				guard let window = note.object as? NSWindow else { return }
 				self?.controllers.removeAll { $0.window === window }
 				self?.composers.removeAll { $0.window === window }
+				for scene in self?.scenes.filter({ $0.window === window }) ?? [] {
+					if let observer = self?.sceneObservers
+						.removeValue(forKey: ObjectIdentifier(scene)) {
+						NotificationCenter.default.removeObserver(observer)
+					}
+					self?.sceneOwners.removeValue(forKey: ObjectIdentifier(scene))
+				}
+				self?.scenes.removeAll { $0.window === window }
 			}
 		}
 		// A window with nothing in it, and a prompt in the timeline saying what
@@ -137,6 +154,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		showComposer(document)
 	}
 
+	// MARK: - Scenes
+
+	/// Opens the scene editor on a project, and on a scene of it.
+	///
+	/// One window per project rather than one per scene: a scene window has a
+	/// picker in its bar, so a second window for a second scene would be two
+	/// windows showing the same list. Asking for a scene that is already open
+	/// switches the window to it.
+	func showScene(for document: ComposeDocument, named name: String?) {
+		let chosen = name ?? document.project.scenes.keys.sorted().first
+		if let existing = scenes.first(where: {
+			sceneOwners[ObjectIdentifier($0)] == ObjectIdentifier(document)
+		}) {
+			if let chosen { existing.sceneDocument.show(chosen) }
+			existing.window?.makeKeyAndOrderFront(nil)
+			return
+		}
+		// A project with no scenes yet opens on one this program made, under a
+		// name somebody can change — an editor that opens on nothing gives a
+		// blank stage and no idea where to start.
+		var project = document.project
+		let editing = chosen ?? "intro"
+		if project.scenes[editing] == nil {
+			project.scenes[editing] = SceneDocument.starter
+			document.apply(project)
+			try? document.write()
+		}
+		let longest = document.resolved?.overlays.reduce(into: Double?.none) { longest, overlay in
+			guard case .scene(let used, _) = overlay.overlay.kind, used == editing else { return }
+			longest = max(longest ?? 0, overlay.duration)
+		} ?? nil
+		let scene = SceneDocument(project: document.project, baseURL: document.baseURL,
+		                          name: editing, playedFor: longest)
+		// The project keeps the file. Everything the scene window changes comes
+		// back here to be written, exactly as a take window writes its take.
+		scene.onWrite = { [weak document] project in
+			guard let document else { return }
+			document.apply(project)
+			try? document.write()
+		}
+		let controller = SceneWindowController(document: scene, projectURL: document.url)
+		sceneOwners[ObjectIdentifier(controller)] = ObjectIdentifier(document)
+		sceneObservers[ObjectIdentifier(controller)] = NotificationCenter.default.addObserver(
+			forName: .cuttrProjectChanged, object: document, queue: .main
+		) { [weak controller, weak document] _ in
+			MainActor.assumeIsolated {
+				guard let controller, let document else { return }
+				controller.refresh(document.project)
+			}
+		}
+		scenes.append(controller)
+		present(controller.window)
+	}
+
+	/// File ▸ New Scene, with no project window in front: there is nothing for
+	/// a scene to belong to, so the project comes first.
+	@objc func newScene(_ sender: Any?) {
+		guard let composer = composers.first(where: { $0.window?.isKeyWindow == true })
+			?? composers.last else {
+			let alert = NSAlert()
+			alert.messageText = "A scene belongs to a project"
+			alert.informativeText = "Open or make a project first — a scene lives in its "
+				+ "`scenes:` block, and is used by an overlay on its timeline."
+			alert.runModal()
+			return
+		}
+		showScene(for: composer.composeDocument, named: nil)
+	}
+
 	private func showComposer(_ document: ComposeDocument) {
 		let controller = ComposeWindowController(document: document)
 		// The project opens its takes, and they arrive as tabs beside it.
@@ -144,6 +230,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		controller.onOpenTakeAt = { [weak self] url, time in self?.open(url, at: time) }
 		controller.isTakeOpen = { [weak self] url in
 			self?.controllers.contains { $0.takeDocument.url?.standardizedFileURL == url } ?? false
+		}
+		controller.onEditScene = { [weak self] document, name in
+			self?.showScene(for: document, named: name)
 		}
 		composers.append(controller)
 		present(controller.window)

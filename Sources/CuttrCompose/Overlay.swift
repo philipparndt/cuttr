@@ -433,6 +433,22 @@ public struct RGBA: Sendable, Equatable {
 	public static let white = RGBA(r: 1, g: 1, b: 1)
 	public static let black = RGBA(r: 0, g: 0, b: 0)
 
+	/// Part of the way from one colour to another, straight through sRGB.
+	///
+	/// Not through a perceptual space, and that is deliberate: Core Animation
+	/// interpolates `backgroundColor` component-wise in the layer's own space,
+	/// and the export goes through Core Animation. A cleverer ramp here would
+	/// be a preview that disagrees with the file it renders.
+	///
+	/// Either end missing means there is nothing to ramp between — the one that
+	/// exists is the answer, which is what makes a colour stated at only one
+	/// key hold from there on.
+	public static func between(_ a: RGBA?, _ b: RGBA?, _ fraction: Double) -> RGBA? {
+		guard let a, let b else { return b ?? a }
+		func mix(_ x: Double, _ y: Double) -> Double { x + (y - x) * fraction }
+		return RGBA(r: mix(a.r, b.r), g: mix(a.g, b.g), b: mix(a.b, b.b), a: mix(a.a, b.a))
+	}
+
 	public init?(hex: String) {
 		var text = hex.trimmingCharacters(in: .whitespaces)
 		if text.hasPrefix("#") { text.removeFirst() }

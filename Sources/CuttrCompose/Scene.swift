@@ -37,12 +37,64 @@ public struct Scene: Sendable, Equatable {
 
 		public enum Content: Sendable, Equatable {
 			/// Words, in a named style. `{{name}}` is filled in from `with:`.
-			case text(String, style: String?)
+			///
+			/// `tracking` is the space between the letters, as a fraction of
+			/// the type size — the one typographic setting a title card wants
+			/// that a caption never does, so it lives on the part rather than
+			/// on the style. Positive opens it up, which is what a word set in
+			/// capitals across a title needs; negative closes it.
+			case text(String, style: String?, tracking: Double = 0)
 			/// A rectangle, which with a small height is a rule and with equal
 			/// sides is a block. Rounded by `corner`.
 			case shape(fill: RGBA, corner: Double)
 			/// A file beside the project — a logo, a badge, a texture.
 			case image(String)
+			/// The whole frame, filled. What an intro screen stands on.
+			///
+			/// Not a shape at `width: 1, height: 1`: that is what somebody had
+			/// to write before, and it goes wrong the moment the output is a
+			/// different shape from the one it was written at — a 4:3 render of
+			/// a scene written at 16:9 left the corners showing. A background
+			/// is defined as "the frame", so there is nothing to get wrong.
+			case background(Background)
+		}
+	}
+
+	/// What a background is filled with: one colour, or two with a ramp
+	/// between them.
+	///
+	/// Two stops rather than a list, because two is what a title card uses and
+	/// a list of five is a gradient editor — a thing this program would then
+	/// have to draw. A file that wants more can say so later; nothing here
+	/// stops it.
+	public struct Background: Sendable, Equatable {
+		public var from: RGBA
+		/// `nil` for a flat colour.
+		public var to: RGBA?
+		/// Degrees anticlockwise from left-to-right, so `90` runs up the frame
+		/// and `0` runs across it. The same convention as ``Key/rotation``.
+		public var angle: Double
+
+		public init(from: RGBA, to: RGBA? = nil, angle: Double = 90) {
+			self.from = from
+			self.to = to
+			self.angle = angle
+		}
+
+		/// Where the ramp starts and ends, in unit coordinates of the frame.
+		///
+		/// Measured across the frame's diagonal rather than its width, so a
+		/// gradient at 45° reaches both corners instead of stopping short of
+		/// them.
+		public func ends(in size: CGSize) -> (start: CGPoint, end: CGPoint) {
+			let radians = angle * .pi / 180
+			let centre = CGPoint(x: size.width / 2, y: size.height / 2)
+			// Half the projection of the frame onto the gradient's direction:
+			// the distance from the middle to the edge, along that line.
+			let reach = (abs(cos(radians)) * size.width + abs(sin(radians)) * size.height) / 2
+			let dx = cos(radians) * reach, dy = sin(radians) * reach
+			return (CGPoint(x: centre.x - dx, y: centre.y - dy),
+			        CGPoint(x: centre.x + dx, y: centre.y + dy))
 		}
 	}
 
@@ -61,13 +113,22 @@ public struct Scene: Sendable, Equatable {
 		/// For shapes and images: fractions of the frame's width and height.
 		public var width: Double?
 		public var height: Double?
+		/// The part's colour here, if it is not the one the part was declared
+		/// with: a text part's ink, a shape's fill, a background's first stop.
+		///
+		/// On the key rather than on the part because that is the whole point —
+		/// a title that arrives white and settles into the house colour is two
+		/// keys and one extra field, where before it was two text parts crossed
+		/// over each other.
+		public var color: RGBA?
 		/// How it gets here from the key before.
 		public var ease: Ease
 
 		public init(
 			t: Double, x: Double? = nil, y: Double? = nil, opacity: Double? = nil,
 			scale: Double? = nil, rotation: Double? = nil,
-			width: Double? = nil, height: Double? = nil, ease: Ease = .inOut
+			width: Double? = nil, height: Double? = nil, color: RGBA? = nil,
+			ease: Ease = .inOut
 		) {
 			self.t = t
 			self.x = x
@@ -77,6 +138,7 @@ public struct Scene: Sendable, Equatable {
 			self.rotation = rotation
 			self.width = width
 			self.height = height
+			self.color = color
 			self.ease = ease
 		}
 	}
@@ -109,10 +171,67 @@ public struct Scene: Sendable, Equatable {
 			filled.rotation = key.rotation ?? last.rotation
 			filled.width = key.width ?? last.width
 			filled.height = key.height ?? last.height
+			// No default of its own, unlike the others: a part with no colour
+			// anywhere is a part drawn in the colour it was declared with, and
+			// filling in a colour here would quietly override that.
+			filled.color = key.color ?? last.color
 			out.append(filled)
 			last = filled
 		}
 		return out
+	}
+
+	/// The part's values at a moment: the two keys either side of it, eased
+	/// between.
+	///
+	/// Before the first key it is the first, after the last it is the last —
+	/// which is what `fillMode: .both` does for the layer version. The two
+	/// render paths and the editor's stage all ask this, so there is one answer
+	/// to "where is it now" rather than three that agree until somebody
+	/// changes one of them.
+	public static func state(of keys: [Key], at time: Double) -> Key? {
+		guard let first = keys.first, let last = keys.last else { return nil }
+		if time <= first.t { return first }
+		if time >= last.t { return last }
+		guard let next = keys.firstIndex(where: { $0.t > time }), next > 0 else { return last }
+		let before = keys[next - 1], after = keys[next]
+		let span = max(after.t - before.t, 0.0001)
+		let fraction = eased(after.ease, (time - before.t) / span)
+
+		func between(_ a: Double?, _ b: Double?) -> Double? {
+			guard let a, let b else { return b ?? a }
+			return a + (b - a) * fraction
+		}
+		return Key(
+			t: time,
+			x: between(before.x, after.x), y: between(before.y, after.y),
+			opacity: between(before.opacity, after.opacity),
+			scale: between(before.scale, after.scale),
+			rotation: between(before.rotation, after.rotation),
+			width: between(before.width, after.width),
+			height: between(before.height, after.height),
+			color: RGBA.between(before.color, after.color, fraction),
+			ease: after.ease)
+	}
+
+	public static func eased(_ ease: Ease, _ t: Double) -> Double {
+		let t = max(0, min(1, t))
+		switch ease {
+		case .linear: return t
+		case .in: return t * t
+		case .out: return 1 - pow(1 - t, 2)
+		case .inOut: return t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+		}
+	}
+
+	/// The last moment anything in the scene does something.
+	///
+	/// Not how long the scene *is* — a scene has no length of its own, it plays
+	/// for as long as the overlay that uses it is on screen. This is only the
+	/// point after which nothing more happens, which is what an editor with
+	/// nothing else to go on has to guess from.
+	public var lastKeyTime: Double {
+		parts.flatMap(\.keys).map(\.t).max() ?? 0
 	}
 
 	/// The text of a part, with `{{name}}` replaced from the overlay's `with:`.

@@ -15,12 +15,17 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 
 	/// Put this reference on the programme — double-clicked, or the + button.
 	public var onInsert: ((String) -> Void)?
+	/// Open a scene in the scene editor. A scene is the one thing in this list
+	/// that is not material to be placed but a thing to be made, so double
+	/// clicking it opens it rather than putting it on the programme.
+	public var onEditScene: ((String) -> Void)?
 
 	fileprivate enum Row {
 		case header(String, Theme.Kind?, collapsed: Bool)
 		case clip(ComposeDocument.Vocabulary.Item)
 		case tag(String, Int)
 		case anchor(String, String)
+		case scene(String)
 
 		/// What a project writes to mean it.
 		/// The section this row belongs to, for the keyboard: left arrow on an
@@ -36,6 +41,7 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 			case .clip(let item): return item.reference
 			case .tag(let name, _): return "#\(name)"
 			case .anchor(let name, _): return name
+			case .scene(let name): return name
 			}
 		}
 	}
@@ -197,6 +203,7 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 		section("anchors", nil, vocabulary.anchors.filter { matches($0) }.map {
 			.anchor($0, vocabulary.anchorTakes[$0] ?? "")
 		})
+		section("scenes", nil, vocabulary.scenes.filter { matches($0) }.map { Row.scene($0) })
 
 		rows = out
 		table.reloadData()
@@ -206,6 +213,7 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 		let row = table.selectedRow
 		guard row >= 0, row < rows.count else { return }
 		if case .header(let title, _, _) = rows[row] { return toggle(title) }
+		if case .scene(let name) = rows[row] { onEditScene?(name); return }
 		guard let reference = rows[row].reference else { return }
 		onInsert?(reference)
 	}
@@ -288,6 +296,9 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 	/// project writes. The same string works dropped into the timeline, into
 	/// the text editor, or into somebody's notes.
 	public func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+		// A scene is not a reference to material, so there is nothing to drop
+		// on the programme: it goes on one by being an overlay's `scene:`.
+		if case .scene = rows[row] { return nil }
 		guard row < rows.count, let reference = rows[row].reference else { return nil }
 		let item = NSPasteboardItem()
 		item.setString(reference, forType: .string)
@@ -364,6 +375,12 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 				mark(.anchor)
 				primary(name, x: 24, y: bounds.height - 16)
 				_ = secondary(take, x: 24, y: bounds.height - 28, colour: Theme.dimText)
+
+			case .scene(let name):
+				mark(.scene)
+				primary(name, x: 24, y: bounds.height - 16)
+				_ = secondary("double-click to edit", x: 24, y: bounds.height - 28,
+				              colour: Theme.dimText)
 			}
 		}
 

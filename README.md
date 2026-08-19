@@ -305,6 +305,44 @@ animations are taken from inside the span, so two overlays whose spans meet
 cross at the boundary — the first slides out to the right exactly as the second
 slides in from the left, with nothing to keep in step by hand.
 
+### Scenes — intro screens and title cards
+
+A **scene** is a thing made of parts and keyframes that an overlay puts on the
+programme: an intro screen, a title card, an end plate. It lives under
+`scenes:` in the project file, so it diffs, it is reviewed, it is copied
+between projects, and it is edited by anything that edits text. `{{title}}` in
+a part's words is filled in by the overlay that uses it, which is what makes
+one scene serve every episode.
+
+Four kinds of part:
+
+| written | what it is |
+| --- | --- |
+| `- text: "{{title}}"` | words, in a named `style:`, optionally `tracking:` |
+| `- shape: "#ffffff"` | a rectangle, `corner:` to round it |
+| `- image: logo.png` | a file beside the project, fitted in its box |
+| `- background: "#101418"` | the whole frame — or `{from:, to:, angle:}` for a ramp |
+
+Each part has `keys:`, one to a line, and **a key states only what changes**:
+everything else is what it was at the key before, which is why a part that only
+moves says its position twice and its opacity once. A key can say `t`, `x`,
+`y`, `opacity`, `scale`, `rotation`, `width`, `height`, `color` and `ease`.
+`color:` on a key overrides whatever the part was declared with, so a title
+arriving white and settling into the house colour is two keys and one field.
+
+There is a **window for making one**: the scenes are listed in the library
+beside the programme, and double-clicking one opens it — or Compose ▸ Edit
+Scenes…, or File ▸ New Scene…. It has the scene drawn at the output's size,
+playing, with the parts dragged on it directly: a corner handle scales, the
+handle above turns, and a drag writes into the key at the playhead or makes one
+there. The panel beside it shows every key, with the inherited values dim and
+in brackets and a button to claim them.
+
+A scene has no length of its own, and the editor's "runs for" box is not
+written to the file. A scene plays for as long as the overlay using it is on
+screen — which is what lets one intro run four seconds in this episode and six
+in the next.
+
 ### Anchors — things pinned to a face
 
 **Anchors live in the take, not the project.** Where somebody's eye is in a

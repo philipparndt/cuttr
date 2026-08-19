@@ -324,16 +324,32 @@ public enum OverlayLayers {
 	/// CoreText into a bitmap has no such pass: the image is `contents` before
 	/// anybody renders anything, and the preview and the export show the same
 	/// pixels because they are the same pixels.
-	static func textLayer(_ text: String, style: TextStyle, size: CGSize) -> (CALayer, CGSize) {
+	/// `tracking` opens the letters out, as a fraction of the type size, and
+	/// `ink` overrides the style's colour for the moment being drawn. Both are
+	/// what a scene's parts ask for and no caption ever does, so both default
+	/// to "as the style says".
+	static func textLayer(
+		_ text: String, style: TextStyle, size: CGSize,
+		tracking: Double = 0, ink: RGBA? = nil
+	) -> (CALayer, CGSize) {
 		// Twice the output resolution. Type is the thing people notice, and a
 		// caption drawn at 1× and scaled is soft in a way a plate is not.
 		let scale: CGFloat = 2
 		let pointSize = style.size * size.height * scale
 		let font = CTFontCreateWithName(style.font as CFString, pointSize, nil)
-		let attributed = NSAttributedString(string: text, attributes: [
+		var attributes: [NSAttributedString.Key: Any] = [
 			kCTFontAttributeName as NSAttributedString.Key: font,
-			kCTForegroundColorAttributeName as NSAttributedString.Key: cgColor(style.color),
-		])
+			kCTForegroundColorAttributeName as NSAttributedString.Key: cgColor(ink ?? style.color),
+		]
+		// CoreText adds the tracking after the last glyph as well, so a tracked
+		// line measures one space wider than it looks. Left in rather than
+		// trimmed: the line is then centred on its own middle, and taking it
+		// off shifts a centred title half a letter to the left of where the
+		// same words untracked would sit.
+		if tracking != 0 {
+			attributes[kCTKernAttributeName as NSAttributedString.Key] = tracking * pointSize
+		}
+		let attributed = NSAttributedString(string: text, attributes: attributes)
 		let line = CTLineCreateWithAttributedString(attributed)
 		var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
 		let textWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
@@ -627,22 +643,38 @@ public enum OverlayLayers {
 		for part in scene.parts {
 			let keys = Scene.filled(part.keys)
 			guard let first = keys.first else { continue }
+			// A colour stated at any key means the colour moves, and a moving
+			// colour is built differently from a fixed one — text especially,
+			// whose ink is otherwise baked into a bitmap.
+			let coloured = keys.contains { $0.color != nil }
 
 			let layer: CALayer
+			/// Where a colour animation goes, and under which key path.
+			var ink: (layer: CALayer, path: String)?
 			var natural = CGSize(
 				width: (first.width ?? 0.2) * size.width,
 				height: (first.height ?? 0.02) * size.height)
 			switch part.content {
-			case .text(let text, let styleName):
+			case .text(let text, let styleName, let tracking):
 				let style = project.style(named: styleName)
-				let built = textLayer(Scene.fill(text, with: parameters), style: style, size: size)
-				layer = built.0
-				natural = built.1
+				let words = Scene.fill(text, with: parameters)
+				if coloured {
+					let built = tintable(words, style: style, size: size, tracking: tracking,
+					                     ink: first.color ?? style.color)
+					layer = built.layer
+					natural = built.size
+					ink = (built.ink, "backgroundColor")
+				} else {
+					let built = textLayer(words, style: style, size: size, tracking: tracking)
+					layer = built.0
+					natural = built.1
+				}
 			case .shape(let fill, let corner):
 				let shape = CALayer()
-				shape.backgroundColor = cgColor(fill)
+				shape.backgroundColor = cgColor(first.color ?? fill)
 				shape.cornerRadius = corner * size.height
 				layer = shape
+				ink = (shape, "backgroundColor")
 			case .image(let file):
 				let picture = CALayer()
 				let url = URL(fileURLWithPath: file, relativeTo: baseURL)
@@ -652,6 +684,27 @@ public enum OverlayLayers {
 					picture.contentsGravity = .resizeAspect
 				}
 				layer = picture
+			case .background(let background):
+				natural = size
+				if let to = background.to {
+					let ramp = CAGradientLayer()
+					ramp.colors = [cgColor(first.color ?? background.from), cgColor(to)]
+					let ends = background.ends(in: CGSize(width: 1, height: 1))
+					// A gradient layer's unit space is the layer's own, which on
+					// this platform is bottom-left up — the same way round as
+					// everything else in a scene. Flipping it here, which is
+					// what an iOS habit says to do, put `from` at the top of the
+					// export and at the bottom of the preview.
+					ramp.startPoint = ends.start
+					ramp.endPoint = ends.end
+					layer = ramp
+					ink = (ramp, "colors")
+				} else {
+					let flat = CALayer()
+					flat.backgroundColor = cgColor(first.color ?? background.from)
+					layer = flat
+					ink = (flat, "backgroundColor")
+				}
 			}
 
 			layer.frame = CGRect(origin: .zero, size: natural)
@@ -661,7 +714,7 @@ public enum OverlayLayers {
 			layer.opacity = Float(first.opacity ?? 1)
 
 			let span = max(resolved.duration, 0.0001)
-			func animate(_ path: String, _ values: [Any]) {
+			func animate(_ path: String, _ values: [Any], on target: CALayer = layer) {
 				let animation = CAKeyframeAnimation(keyPath: path)
 				animation.values = values
 				animation.keyTimes = keys.map { NSNumber(value: min(1, max(0, $0.t / span))) }
@@ -670,13 +723,33 @@ public enum OverlayLayers {
 				animation.duration = span
 				animation.fillMode = .both
 				animation.isRemovedOnCompletion = false
-				layer.add(animation, forKey: path)
+				target.add(animation, forKey: path)
 			}
+			animate("opacity", keys.map { $0.opacity ?? 1 })
+
+			// A background is the frame. Moving it, scaling it or turning it
+			// would show what is behind it at the edges, which is the one thing
+			// a background must never do — so it is placed and left alone.
+			if case .background(let background) = part.content {
+				layer.position = CGPoint(x: size.width / 2, y: size.height / 2)
+				if coloured, let ink {
+					if let to = background.to {
+						animate(ink.path, keys.map {
+							[cgColor($0.color ?? background.from), cgColor(to)]
+						}, on: ink.layer)
+					} else {
+						animate(ink.path, keys.map { cgColor($0.color ?? background.from) },
+						        on: ink.layer)
+					}
+				}
+				root.addSublayer(layer)
+				continue
+			}
+
 			animate("position", keys.map {
 				NSValue(point: NSPoint(x: ($0.x ?? 0.5) * size.width,
 				                       y: ($0.y ?? 0.5) * size.height))
 			})
-			animate("opacity", keys.map { $0.opacity ?? 1 })
 			animate("transform.scale", keys.map { $0.scale ?? 1 })
 			animate("transform.rotation.z", keys.map { ($0.rotation ?? 0) * .pi / 180 })
 			// A shape's size is its own, and animating bounds is how a rule
@@ -687,9 +760,56 @@ public enum OverlayLayers {
 					                     height: ($0.height ?? 0.02) * size.height))
 				})
 			}
+			if coloured, let ink {
+				let fallback: RGBA
+				switch part.content {
+				case .text(_, let styleName, _): fallback = project.style(named: styleName).color
+				case .shape(let fill, _): fallback = fill
+				default: fallback = .white
+				}
+				animate(ink.path, keys.map { cgColor($0.color ?? fallback) }, on: ink.layer)
+			}
 			root.addSublayer(layer)
 		}
 		return root
+	}
+
+	/// Text whose colour can move: the glyphs as a mask, over a plain layer
+	/// whose `backgroundColor` is the ink.
+	///
+	/// The ordinary text layer bakes the colour into a bitmap, which is right —
+	/// it is the reason captions export at all — but a baked colour cannot be
+	/// animated. Cutting the same bitmap into a mask keeps the glyphs identical
+	/// to the ones the painter draws, and moves the colour out where Core
+	/// Animation can get at it.
+	private static func tintable(
+		_ text: String, style: TextStyle, size: CGSize, tracking: Double, ink: RGBA
+	) -> (layer: CALayer, size: CGSize, ink: CALayer) {
+		// Drawn white on nothing: the mask uses the alpha channel, so the plate
+		// behind the words would mask the whole rectangle in if it were left in
+		// the same bitmap. It goes into a layer of its own instead, and the
+		// metrics are unchanged because the padding still applies.
+		var plain = style
+		plain.background = RGBA(r: 0, g: 0, b: 0, a: 0)
+		let (glyphs, plate) = textLayer(text, style: plain, size: size,
+		                                tracking: tracking, ink: .white)
+
+		let container = CALayer()
+		container.frame = CGRect(origin: .zero, size: plate)
+		if style.background.a > 0 {
+			let behind = CALayer()
+			behind.frame = container.bounds
+			behind.backgroundColor = cgColor(style.background)
+			behind.cornerRadius = min(style.cornerRadius * size.height, plate.height / 2)
+			container.addSublayer(behind)
+		}
+		let tint = CALayer()
+		tint.frame = container.bounds
+		tint.backgroundColor = cgColor(ink)
+		glyphs.frame = container.bounds
+		tint.mask = glyphs
+		container.addSublayer(tint)
+		return (container, plate, tint)
 	}
 
 	private static func timing(_ ease: Scene.Ease) -> CAMediaTimingFunction {

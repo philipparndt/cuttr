@@ -61,6 +61,130 @@ import Testing
 		])])
 		#expect(Scene.filled(scene.parts[0].keys).map(\.t) == [0, 1, 2])
 	}
+
+	/// The stage and both render paths ask one function where a part is.
+	@Test func aPartIsWhereTheKeysSayItIs() {
+		let keys = Scene.filled([
+			Scene.Key(t: 0, x: 0.2, opacity: 0, ease: .linear),
+			Scene.Key(t: 1, x: 0.8, opacity: 1, ease: .linear),
+		])
+		let middle = Scene.state(of: keys, at: 0.5)
+		#expect(middle?.x == 0.5)
+		#expect(middle?.opacity == 0.5)
+		// Held at both ends, which is what `fillMode: .both` does.
+		#expect(Scene.state(of: keys, at: -3)?.x == 0.2)
+		#expect(Scene.state(of: keys, at: 99)?.x == 0.8)
+	}
+}
+
+/// What an intro screen needs that a lower third never did: a ground to stand
+/// on, a colour that moves, and letters set apart.
+@Suite struct SceneTitleCardTests {
+
+	private func card() -> Scene {
+		Scene(parts: [
+			.init(content: .background(Scene.Background(
+				from: RGBA(hex: "#0b1220")!, to: RGBA(hex: "#1d3557")!, angle: 90)), keys: [
+					.init(t: 0, opacity: 0),
+					.init(t: 0.4, opacity: 1, ease: .out),
+				]),
+			.init(content: .text("{{title}}", style: "title", tracking: 0.14), keys: [
+				.init(t: 0.3, x: 0.5, y: 0.5, opacity: 0, color: RGBA.white),
+				.init(t: 1.2, opacity: 1, color: RGBA(hex: "#f4a261")!, ease: .out),
+			]),
+		])
+	}
+
+	@Test func aTitleCardSurvivesTheFile() throws {
+		let project = Project(scenes: ["intro": card()])
+		let text = ProjectWriter.write(project)
+		#expect(text.contains("background: {from: \"#0b1220\", to: \"#1d3557\", angle: 90}"))
+		#expect(text.contains("tracking: 0.14"))
+		#expect(text.contains("color: \"#f4a261\""))
+		let back = try ProjectReader.read(text)
+		#expect(back.scenes == project.scenes)
+		// And written again it is the same bytes, which is the whole rule.
+		#expect(ProjectWriter.write(back) == text)
+	}
+
+	/// A flat background stays the one word somebody wrote.
+	@Test func aFlatBackgroundIsOneWord() throws {
+		let project = Project(scenes: ["plate": Scene(parts: [
+			.init(content: .background(Scene.Background(from: RGBA(hex: "#101418")!)),
+			      keys: [.init(t: 0, opacity: 1)]),
+		])])
+		let text = ProjectWriter.write(project)
+		#expect(text.contains("- background: \"#101418\""))
+		#expect(try ProjectReader.read(text).scenes == project.scenes)
+	}
+
+	/// A file from before any of this still reads, and still writes back the
+	/// way it came in.
+	@Test func anOlderSceneIsUnchanged() throws {
+		let text = """
+		# cuttr project — the assembly. Clips are referenced by slug.
+		cuttr-project: 1
+
+		output:
+		  size: 1920x1080
+		  fps:  25
+
+		timeline:
+		  - clip: intro
+
+		scenes:
+		  rule:
+		    parts:
+		      - shape: "#ffffff"
+		        keys:
+		          - {t: 0, x: 0.5, y: 0.2, width: 0, height: 0.004}
+		          - {t: 0.6, width: 0.5, ease: out}
+
+		"""
+		let project = try ProjectReader.read(text)
+		#expect(project.scenes["rule"]?.parts.count == 1)
+		#expect(project.scenes["rule"]?.parts[0].keys.allSatisfy { $0.color == nil } == true)
+		#expect(ProjectWriter.write(project) == text)
+	}
+
+	/// A colour stated at one key and again at another ramps between them; one
+	/// stated only once holds from there.
+	@Test func colourMovesBetweenTheKeysThatStateIt() {
+		let keys = Scene.filled(card().parts[1].keys)
+		let middle = Scene.state(of: keys, at: 0.75)!
+		let white = RGBA.white, warm = RGBA(hex: "#f4a261")!
+		// Half way in eased time, so not the arithmetic middle — but between.
+		#expect(middle.color!.g < white.g && middle.color!.g > warm.g)
+		#expect(Scene.state(of: keys, at: 0)?.color == white)
+		#expect(Scene.state(of: keys, at: 5)?.color == warm)
+
+		// A part with no colour anywhere keeps none, so it is drawn in the
+		// colour it was declared with rather than in an invented default.
+		let plain = Scene.filled([Scene.Key(t: 0, x: 0), Scene.Key(t: 1, x: 1)])
+		#expect(Scene.state(of: plain, at: 0.5)?.color == nil)
+	}
+
+	/// The ramp reaches the whole frame, whichever way it runs.
+	@Test func aGradientReachesBothEdges() {
+		let size = CGSize(width: 1920, height: 1080)
+		let up = Scene.Background(from: .black, to: .white, angle: 90).ends(in: size)
+		#expect(abs(up.start.y) < 0.001)
+		#expect(abs(up.end.y - 1080) < 0.001)
+		#expect(abs(up.start.x - 960) < 0.001)
+		let across = Scene.Background(from: .black, to: .white, angle: 0).ends(in: size)
+		#expect(abs(across.start.x) < 0.001)
+		#expect(abs(across.end.x - 1920) < 0.001)
+	}
+
+	/// Letters set apart make a wider line — which is the whole of what
+	/// tracking does, and the only part of it worth asserting.
+	@Test func trackingWidensTheLine() {
+		let size = CGSize(width: 640, height: 360)
+		let plain = OverlayLayers.textLayer("CUTTR", style: .title, size: size)
+		let spaced = OverlayLayers.textLayer("CUTTR", style: .title, size: size, tracking: 0.3)
+		#expect(spaced.1.width > plain.1.width)
+		#expect(abs(spaced.1.height - plain.1.height) < 0.001)
+	}
 }
 
 /// Dragging a bar on the timeline writes back the way the range was written.
