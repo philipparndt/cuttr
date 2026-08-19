@@ -123,3 +123,38 @@ import Testing
 		}
 	}
 }
+/// The toolbar has three places, and things stay in theirs.
+@Suite @MainActor struct ComposeBarTests {
+
+	@Test func whereYouAreIsLeftWhatYouCanDoIsRight() {
+		_ = NSApplication.shared
+		let bar = ComposeBar()
+		bar.setStatus("00:12.345")
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 38),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = bar
+		bar.frame = NSRect(x: 0, y: 0, width: 1200, height: 38)
+		bar.layoutSubtreeIfNeeded()
+
+		func find<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
+			view.subviews.flatMap { subview -> [T] in
+				((subview as? T).map { [$0] } ?? []) + find(type, in: subview)
+			}
+		}
+		let render = find(NSButton.self, in: bar).first { $0.title == "Render…" }
+		let modes = find(NSSegmentedControl.self, in: bar).first
+		let clock = find(NSTextField.self, in: bar).first { $0.stringValue == "00:12.345" }
+
+		let renderFrame = try! #require(render).convert(render!.bounds, to: bar)
+		let modesFrame = try! #require(modes).convert(modes!.bounds, to: bar)
+		let clockFrame = try! #require(clock).convert(clock!.bounds, to: bar)
+
+		#expect(modesFrame.minX < 20, "the modes are not on the left: \(modesFrame)")
+		#expect(renderFrame.maxX > bar.bounds.width - 120,
+		        "render is not on the right: \(renderFrame)")
+		#expect(abs(clockFrame.midX - bar.bounds.midX) < 12,
+		        "the clock is not centred: \(clockFrame.midX) against \(bar.bounds.midX)")
+		#expect(clockFrame.minX > modesFrame.maxX)
+		#expect(clockFrame.maxX < renderFrame.minX)
+	}
+}

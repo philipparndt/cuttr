@@ -59,22 +59,52 @@ public final class ComposeBar: NSView {
 		modes.action = #selector(modeChanged)
 		modes.toolTip = "⌘1 the editor · ⌘2 the file · ⌘3 the picture"
 
-		let stack = NSStackView(views: [modes, renderButton, reloadButton, progress, statusLabel])
-		stack.orientation = .horizontal
-		stack.spacing = 6
-		stack.alignment = .centerY
-		stack.translatesAutoresizingMaskIntoConstraints = false
-		addSubview(stack)
+		// Three groups, in the three places a toolbar has: where you *are* on
+		// the left, what is *happening* in the middle, what you can *do* on the
+		// right. Render sitting next to the mode buttons made it look like a
+		// fourth place to go.
+		statusLabel.alignment = .center
+
+		let navigation = row([modes])
+		let middle = row([progress, statusLabel])
+		let actions = row([renderButton, reloadButton])
+		for stack in [navigation, middle, actions] { addSubview(stack) }
+
+		// The middle group is centred on the window rather than on what is left
+		// over, so the clock does not shuffle sideways as the buttons beside it
+		// change width.
+		let centred = middle.centerXAnchor.constraint(equalTo: centerXAnchor)
+		centred.priority = .defaultHigh
+		centred.isActive = true
+
 		NSLayoutConstraint.activate([
-			stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-			stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
-			stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+			navigation.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+			navigation.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+			middle.centerYAnchor.constraint(equalTo: centerYAnchor),
+			middle.leadingAnchor.constraint(
+				greaterThanOrEqualTo: navigation.trailingAnchor, constant: 10),
+			middle.trailingAnchor.constraint(
+				lessThanOrEqualTo: actions.leadingAnchor, constant: -10),
+
+			actions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+			actions.centerYAnchor.constraint(equalTo: centerYAnchor),
+
 			progress.widthAnchor.constraint(equalToConstant: 150),
 		])
 		statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
+
+	private func row(_ views: [NSView]) -> NSStackView {
+		let stack = NSStackView(views: views)
+		stack.orientation = .horizontal
+		stack.spacing = 6
+		stack.alignment = .centerY
+		stack.translatesAutoresizingMaskIntoConstraints = false
+		return stack
+	}
 
 	private func configure(_ button: NSButton, _ title: String, _ action: Selector) {
 		button.title = title
