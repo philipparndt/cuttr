@@ -250,3 +250,49 @@ import Testing
 		}
 	}
 }
+
+/// How long an effect takes to appear.
+///
+/// The renderer's own comment says a piece starts above the frame "so the first
+/// of them arrive within a moment and the rest follow". That was measured and
+/// it was true only of the fast styles: head-room and spread were fixed
+/// *distances*, so snow — which falls at a fifth of confetti's speed — had
+/// nothing on screen until four seconds and did not fill until eight. On a
+/// three-second card it rendered nothing at all.
+@Suite(.serialized) struct EffectArrivalTests {
+
+	private let context = CIContext(options: [.workingColorSpace: NSNull()])
+
+	/// How much of the plate is covered at a moment, in pixels.
+	private func ink(_ effect: Effect, at time: Double) -> Int {
+		let size = CGSize(width: 480, height: 270)
+		guard let renderer = EffectRenderer(effect, size: size),
+		      let image = renderer.image(at: time, spawningUntil: .infinity, only: .all)
+		else { return -1 }
+		var bytes = [UInt8](repeating: 0, count: 480 * 270 * 4)
+		context.render(image, toBitmap: &bytes, rowBytes: 480 * 4,
+		               bounds: CGRect(origin: .zero, size: size),
+		               format: .RGBA8, colorSpace: nil)
+		return stride(from: 3, to: bytes.count, by: 4).filter { bytes[$0] > 8 }.count
+	}
+
+    @Test func everyStyleIsOnScreenWithinHalfASecond() {
+		for style in Effect.Style.allCases {
+			// A sparkle is thrown up from below and is a burst rather than a
+			// fall, but it too has to be visible early.
+			let effect = Effect(style: style)
+			#expect(ink(effect, at: 0.5) > 0, "\(style) has nothing on screen at half a second")
+		}
+	}
+
+	/// And a slow style fills as promptly as a fast one, which is the fault
+	/// this pins: three seconds of snow must look like snow.
+	@Test func aSlowStyleFillsInTheSameTimeAsAFastOne() {
+		let snow = ink(Effect(style: .snow), at: 2)
+		let confetti = ink(Effect(style: .confetti), at: 2)
+		#expect(snow > 0 && confetti > 0)
+		// Not the same number of pixels — the pieces are different sizes — but
+		// the same order of thing, rather than one of them being empty.
+		#expect(Double(snow) > Double(confetti) / 8, "snow \(snow) against confetti \(confetti)")
+	}
+}

@@ -13,7 +13,7 @@ effects, no footage — so every one of them renders on any machine:
 | `scenes/morph.cuttrproj` | a square becoming a circle, a triangle becoming a star, and parts that fill themselves |
 | `effects/celebrate.cuttrproj` | metallic confetti over a title card, then snow |
 | `effects/weather.cuttrproj` | rain, snow and sparks — the same machinery with different numbers |
-| `effects/looks.cuttrproj` | film mode, the tape and chromatic aberration — **needs a take of your own** |
+| `effects/looks.cuttrproj` | film mode, the tape and chromatic aberration, working on confetti and rain |
 
 Two things these are meant to teach, both of which cost a render to learn:
 

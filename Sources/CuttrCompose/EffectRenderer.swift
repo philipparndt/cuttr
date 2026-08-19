@@ -358,9 +358,7 @@ final class EffectRenderer: @unchecked Sendable {
 
 		let t = Float(max(0, time)) * Float(max(0.05, effect.speed))
 		let world = Self.worldHeight
-		let ceiling = world / 2 + 1.5
 		let floor = -world / 2 - 1.5
-		let height = ceiling - floor
 		// How far sideways a piece goes for every unit it falls, and how wide
 		// the cloud is spread — which is what it wraps around.
 		let lean = Float(max(-4, min(4, effect.wind))) * 0.25
@@ -378,9 +376,25 @@ final class EffectRenderer: @unchecked Sendable {
 				// the first of them arrive within a moment and the rest follow.
 				// Starting the frame full and fading it up is the thing that
 				// looks like a screensaver.
-				let entry = piece.phase / (2 * .pi) * height * 1.6
+				// Head-room and spread are measured in *time*, not in units.
+				//
+				// Both used to be fixed distances, and the comment above — the
+				// first of them arrive within a moment — was true only for the
+				// fast styles. Measured: rain was in shot at 0.4 s, confetti at
+				// about 1.5, and snow, which falls at a fifth of confetti's
+				// speed, had nothing on screen until four seconds and did not
+				// fill until eight. On a three-second card that is an effect
+				// that renders nothing at all, which is exactly what somebody
+				// reported.
+				//
+				// So a piece starts a quarter of a second above the frame and
+				// the cloud is spread over a second and a half of falling,
+				// whatever "falling" means for that style.
+				let headroom = min(1.5, max(0.15, piece.fall * 0.25))
+				let ceiling = world / 2 + headroom
+				let entry = piece.phase / (2 * .pi) * piece.fall * 1.6
 				let fallen = piece.fall * t - entry
-				let lap = height + entry
+				let lap = (ceiling - floor) + entry
 				let wrapped = fallen.truncatingRemainder(dividingBy: lap)
 				y = ceiling - (fallen < 0 ? fallen : wrapped)
 

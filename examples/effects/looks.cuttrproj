@@ -1,12 +1,12 @@
 # The look family: film mode, the tape, and chromatic aberration.
 #
-# **This one needs footage of your own.** The three effects here work on the
-# picture — bars closing in, a stock, grain, a tracking wobble, red and blue
-# pulled apart from green — and over a flat card there is almost nothing for
-# them to do. Point `takes:` at a take you have cut and it renders:
+# These three work on the *picture*, and a flat card gives them nothing to work
+# on — so the picture here is made of effects. Confetti and rain are drawn into
+# the frame, in the same pass, which means the film, the tape and the aberration
+# all take hold of them. Over your own footage it is exactly the same three
+# overlays; point `takes:` at a take and put a clip on the timeline instead.
 #
-#   takes:
-#     - ../../takes/my-take.cuttr
+#   cuttr-render examples/effects/looks.cuttrproj
 #
 # The order of `overlays:` is the order they are drawn, and that is the whole
 # control over what sits on top of what. An aberration written *before* the film
@@ -14,19 +14,34 @@
 # bars are bent along with everything else. Move a row in the panel to change it.
 cuttr-project: 1
 
-takes:
-  - my-take.cuttr
-
 output:
   size: 1920x1080
   fps:  25
   file: looks.mov
 
 timeline:
-  - clip: clip-1
-    as:   shot
+  - card:  00:05.000
+    as:    shot
+    fill:  ["#243447", "#080c12"]
 
 overlays:
+  # The picture: something for the three of them to get hold of. Written first,
+  # so everything after it is working on top of it.
+  - effect:  confetti
+    density: 1.4
+    size:    1.2
+    seed:    4
+    from:    "@shot"
+    in:      {fade: true, over: 0.3}
+    out:     {fade: true, over: 0.5}
+  - effect:  rain
+    density: 1.2
+    speed:   1.2
+    wind:    0.4
+    from:    "@shot"
+    in:      {fade: true, over: 0.3}
+    out:     {fade: true, over: 0.5}
+
   # Under the film: the fringing is on the picture, and the bars that close over
   # it are untouched.
   - aberration: radial
