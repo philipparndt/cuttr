@@ -296,3 +296,50 @@ import Testing
 		#expect(Double(snow) > Double(confetti) / 8, "snow \(snow) against confetti \(confetti)")
 	}
 }
+
+/// When an effect stops letting pieces go.
+///
+/// `out: {fall: …}` means the shower runs out rather than being switched off,
+/// so the renderer stops releasing pieces a moment before the end and lets what
+/// is in the air leave on its own. That moment is on the programme's clock —
+/// and everything inside the renderer runs on the effect's own, which is the
+/// real time multiplied by `speed`.
+@Suite(.serialized) struct EffectSpawningTests {
+
+	private let context = CIContext(options: [.workingColorSpace: NSNull()])
+
+	private func ink(_ effect: Effect, at time: Double, spawningUntil: Double) -> Int {
+		let size = CGSize(width: 320, height: 180)
+		guard let renderer = EffectRenderer(effect, size: size),
+		      let image = renderer.image(at: time, spawningUntil: spawningUntil, only: .all)
+		else { return -1 }
+		var bytes = [UInt8](repeating: 0, count: 320 * 180 * 4)
+		context.render(image, toBitmap: &bytes, rowBytes: 320 * 4,
+		               bounds: CGRect(origin: .zero, size: size),
+		               format: .RGBA8, colorSpace: nil)
+		return stride(from: 3, to: bytes.count, by: 4).filter { bytes[$0] > 8 }.count
+	}
+
+	/// Reported: rain asked for from 7.1 to 33.1 seconds stopped at about
+	/// fifteen. The release time was worked out in the effect's scaled clock
+	/// and compared against a moment in the programme's, so a `speed: 4` effect
+	/// dried up a quarter of the way in — and the faster it fell, the sooner.
+	@Test func speedDoesNotCutAnEffectShort() {
+		let fast = Effect(style: .rain, density: 100, speed: 4, size: 0.8)
+		// Twenty-six seconds of rain, stopping 0.8 s before the end.
+		for moment in [7.0, 12.0, 18.0, 25.0] {
+			#expect(ink(fast, at: moment, spawningUntil: 25.2) > 0,
+			        "nothing at \(moment) seconds in")
+		}
+	}
+
+	/// And it does stop when it is asked to: what is in the air falls out, and
+	/// then there is nothing.
+	@Test func itStopsWhenItIsToldTo() {
+		let effect = Effect(style: .rain, density: 20, speed: 4)
+		let during = ink(effect, at: 5, spawningUntil: 6)
+		let after = ink(effect, at: 9, spawningUntil: 6)
+		#expect(during > 0)
+		#expect(after < during / 4, "still raining after it ran out: \(after) against \(during)")
+	}
+}

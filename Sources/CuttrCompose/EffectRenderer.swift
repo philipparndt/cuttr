@@ -356,7 +356,8 @@ final class EffectRenderer: @unchecked Sendable {
 		SCNTransaction.disableActions = true
 		defer { SCNTransaction.commit() }
 
-		let t = Float(max(0, time)) * Float(max(0.05, effect.speed))
+		let speed = max(0.05, effect.speed)
+		let t = Float(max(0, time)) * Float(speed)
 		let world = Self.worldHeight
 		let floor = -world / 2 - 1.5
 		// How far sideways a piece goes for every unit it falls, and how wide
@@ -402,8 +403,17 @@ final class EffectRenderer: @unchecked Sendable {
 				// not let go again, so the cloud empties from the top down.
 				if fallen > 0 {
 					let laps = (fallen / lap).rounded(.down)
-					let released = (laps * lap + entry) / piece.fall
-					piece.node.isHidden = Double(released) > spawningUntil
+					// Back to the programme's clock before comparing.
+					//
+					// Everything in here runs on the effect's own scaled time —
+					// `t` is the real time multiplied by `speed` — while
+					// `spawningUntil` is a moment in the programme, in seconds.
+					// Comparing the two directly meant an effect with `speed: 4`
+					// stopped letting pieces go a quarter of the way in: rain
+					// asked for from 7.1 to 33.1 seconds stopped at fifteen, and
+					// the faster it was told to fall the sooner it dried up.
+					let released = Double(laps * lap + entry) / Double(piece.fall) / speed
+					piece.node.isHidden = released > spawningUntil
 				} else {
 					piece.node.isHidden = false
 				}
