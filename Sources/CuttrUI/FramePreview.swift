@@ -49,14 +49,16 @@ public final class FramePreview: NSView {
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
 
 	public override var intrinsicContentSize: NSSize {
-		NSSize(width: NSView.noIntrinsicMetric, height: 190)
+		NSSize(width: NSView.noIntrinsicMetric, height: 206)
 	}
 
 	// MARK: - Geometry
 
 	/// The frame's rectangle inside this view, letterboxed like the render.
 	private var picture: NSRect {
-		let box = bounds.insetBy(dx: 8, dy: 8)
+		// The line underneath gets its own strip; the picture keeps off it.
+		let box = NSRect(x: 8, y: 20, width: max(0, bounds.width - 16),
+		                 height: max(0, bounds.height - 30))
 		guard aspect.width > 0, aspect.height > 0, box.width > 0, box.height > 0 else { return box }
 		let scale = min(box.width / aspect.width, box.height / aspect.height)
 		let size = NSSize(width: aspect.width * scale, height: aspect.height * scale)
@@ -148,7 +150,7 @@ public final class FramePreview: NSView {
 
 		if !explanation.isEmpty {
 			(explanation as NSString).draw(
-				at: NSPoint(x: 8, y: 2),
+				at: NSPoint(x: 8, y: 4),
 				withAttributes: [.font: Theme.monoSmall, .foregroundColor: Theme.faintText])
 		}
 	}

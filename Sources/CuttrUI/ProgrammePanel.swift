@@ -585,8 +585,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				image.draw(in: NSRect(x: 5, y: bounds.height / 2 - 8, width: 17, height: 16))
 			}
 
+			// Measured from the middle outwards, so the two lines keep clear of
+			// each other whatever the row height turns out to be.
 			(title as NSString).draw(
-				at: NSPoint(x: 26, y: bounds.height - 20),
+				at: NSPoint(x: 26, y: bounds.midY + 1),
 				withAttributes: [.font: Theme.bodyStrong, .foregroundColor: Theme.text])
 
 			var where_ = ""
@@ -599,7 +601,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			}
 			if let anchor = overlay.anchor { where_ += "   ⌖ \(anchor)" }
 			(where_ as NSString).draw(
-				at: NSPoint(x: 26, y: 5),
+				at: NSPoint(x: 26, y: bounds.midY - 14),
 				withAttributes: [.font: Theme.monoSmall, .foregroundColor: Theme.dimText])
 		}
 	}

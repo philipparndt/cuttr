@@ -60,7 +60,10 @@ public final class PropertiesPanel: NSView {
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
 		wantsLayer = true
-		layer?.backgroundColor = Theme.panel.cgColor
+		// A ground of its own, a shade up from the lists beside it. The panel is
+		// a different kind of thing — one selection, examined — and looking like
+		// a different kind of thing is most of how anybody knows that.
+		layer?.backgroundColor = Theme.card.cgColor
 
 		title.font = Theme.heading
 		title.textColor = Theme.faintText
@@ -91,8 +94,11 @@ public final class PropertiesPanel: NSView {
 	private func install(_ grid: NSGridView) {
 		grid.columnSpacing = 10
 		grid.rowSpacing = 7
-		grid.column(at: 0).xPlacement = .trailing
-		grid.column(at: 0).width = 104
+		// Keys along the left edge, not pushed up against their fields. Reading
+		// down a column of names is how somebody finds the one they want, and
+		// ragged-left ruins that — the eye has nowhere to start.
+		grid.column(at: 0).xPlacement = .leading
+		grid.column(at: 0).width = 116
 		grid.column(at: 1).xPlacement = .leading
 		grid.setContentHuggingPriority(.defaultHigh, for: .vertical)
 
@@ -742,7 +748,7 @@ public final class PropertiesPanel: NSView {
 		let name = NSTextField(labelWithString: key)
 		name.font = Theme.mono
 		name.textColor = Theme.text
-		name.alignment = .right
+		name.alignment = .left
 
 		let row = NSStackView(views: controls)
 		row.orientation = .horizontal

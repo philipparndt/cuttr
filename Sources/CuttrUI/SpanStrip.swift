@@ -69,7 +69,7 @@ public final class SpanStrip: NSView {
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
 
 	public override var intrinsicContentSize: NSSize {
-		NSSize(width: NSView.noIntrinsicMetric, height: 62)
+		NSSize(width: NSView.noIntrinsicMetric, height: 68)
 	}
 
 	// MARK: - Geometry
@@ -97,8 +97,9 @@ public final class SpanStrip: NSView {
 		}
 
 		// The programme underneath: the clips, in order, so a range can be read
-		// against them.
-		let clipRow = NSRect(x: track.minX, y: 8, width: track.width, height: 16)
+		// against them. Three bands, stacked and not touching: the clock along the bottom, the
+		// programme's clips above it, the overlay's ranges over those.
+		let clipRow = NSRect(x: track.minX, y: 16, width: track.width, height: 18)
 		for (index, block) in blocks.enumerated() {
 			let box = NSRect(x: x(block.start), y: clipRow.minY,
 			                 width: max(1, x(block.end) - x(block.start)), height: clipRow.height)
@@ -117,7 +118,7 @@ public final class SpanStrip: NSView {
 
 		// The ranges over it.
 		for (index, range) in ranges.enumerated() {
-			let box = NSRect(x: x(range.start), y: 30,
+			let box = NSRect(x: x(range.start), y: 40,
 			                 width: max(3, x(range.end) - x(range.start)), height: 22)
 			let colour = range.movable ? Theme.accent : Theme.color(.section)
 			colour.withAlphaComponent(index == selected ? 0.85 : 0.4).setFill()
@@ -142,9 +143,9 @@ public final class SpanStrip: NSView {
 		let attributes: [NSAttributedString.Key: Any] = [
 			.font: Theme.monoSmall, .foregroundColor: Theme.faintText,
 		]
-		("0:00" as NSString).draw(at: NSPoint(x: track.minX, y: 0), withAttributes: attributes)
+		("0:00" as NSString).draw(at: NSPoint(x: track.minX, y: 2), withAttributes: attributes)
 		let end = Timecode.string(duration) as NSString
-		end.draw(at: NSPoint(x: track.maxX - end.size(withAttributes: attributes).width, y: 0),
+		end.draw(at: NSPoint(x: track.maxX - end.size(withAttributes: attributes).width, y: 2),
 		         withAttributes: attributes)
 	}
 
@@ -153,7 +154,7 @@ public final class SpanStrip: NSView {
 	public override func mouseDown(with event: NSEvent) {
 		let place = convert(event.locationInWindow, from: nil)
 		guard let index = ranges.indices.reversed().first(where: { index in
-			let box = NSRect(x: x(ranges[index].start) - 4, y: 28,
+			let box = NSRect(x: x(ranges[index].start) - 4, y: 38,
 			                 width: max(3, x(ranges[index].end) - x(ranges[index].start)) + 8, height: 26)
 			return box.contains(place)
 		}) else { return }

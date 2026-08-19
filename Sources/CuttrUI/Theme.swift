@@ -94,7 +94,10 @@ public enum Theme {
 	                          colour: NSColor? = nil) -> NSImage? {
 		let name: String
 		switch kind {
-		case .clip: name = "scissors"
+		// A span with a mark at each end, which is what a clip is: two marks on
+		// a take's clock. Scissors were the act of cutting rather than the
+		// thing cut, and the thing cut is what a list of them holds.
+		case .clip: name = "timeline.selection"
 		case .take: name = "film"
 		case .tag, .query: name = "tag"
 		case .list: name = "list.bullet"
