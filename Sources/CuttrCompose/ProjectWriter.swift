@@ -183,6 +183,7 @@ public enum ProjectWriter {
 					if let style { out += "    style:  \(scalar(style))\n" }
 				case .effect(let effect):
 					out += "  - effect:  \(effect.style.rawValue)\n"
+					if effect.finish != .matte { out += "    finish:  \(effect.finish.rawValue)\n" }
 					if effect.density != 1 { out += "    density: \(trim(effect.density))\n" }
 					if effect.speed != 1 { out += "    speed:   \(trim(effect.speed))\n" }
 					if effect.size != 1 { out += "    size:    \(trim(effect.size))\n" }
@@ -246,6 +247,7 @@ public enum ProjectWriter {
 		switch value {
 		case .cut: return "cut"
 		case .fade(let over): return "{fade: true, over: \(trim(over))}"
+		case .fall(let over): return "{fall: true, over: \(trim(over))}"
 		case .slide(let edge, let over): return "{slide: \(edge.rawValue), over: \(trim(over))}"
 		}
 	}

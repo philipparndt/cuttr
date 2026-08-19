@@ -179,6 +179,9 @@ public enum ProjectReader {
 				kind = .spinner(spinner)
 			} else if let named = (m["effect"] as? String).flatMap(nonEmpty) {
 				var effect = Effect(style: Effect.Style(rawValue: named.lowercased()) ?? .confetti)
+				if let finish = (m["finish"] as? String).flatMap({ Effect.Finish(rawValue: $0) }) {
+					effect.finish = finish
+				}
 				if let density = number(m["density"]) { effect.density = density }
 				if let speed = number(m["speed"]) { effect.speed = speed }
 				if let size = number(m["size"]) { effect.size = size }
@@ -303,6 +306,7 @@ public enum ProjectReader {
 			switch text.lowercased() {
 			case "cut", "none": return .cut
 			case "fade": return .fade(over: 0.4)
+			case "fall": return .fall(over: 1.5)
 			case "left", "right", "up", "down":
 				return .slide(Overlay.Transition.Edge(rawValue: text.lowercased()) ?? .left, over: 0.4)
 			default: throw ProjectError.badValue(key: key, value: text)
@@ -314,6 +318,8 @@ public enum ProjectReader {
 			return .slide(edge, over: over)
 		}
 		if m["fade"] != nil { return .fade(over: over) }
+		// A shower that runs out rather than one somebody switched off.
+		if m["fall"] != nil { return .fall(over: number(m["over"]) ?? 1.5) }
 		return .cut
 	}
 

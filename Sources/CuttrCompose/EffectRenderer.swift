@@ -2,6 +2,7 @@ import CoreImage
 import CoreVideo
 import Foundation
 import Metal
+import AppKit
 import SceneKit
 
 /// An effect, as pixels, at a moment.
@@ -95,8 +96,16 @@ final class EffectRenderer: @unchecked Sendable {
 		let ambient = SCNNode()
 		ambient.light = SCNLight()
 		ambient.light?.type = .ambient
-		ambient.light?.intensity = 380
+		ambient.light?.intensity = effect.finish == .matte ? 380 : 220
 		scene.rootNode.addChildNode(ambient)
+
+		if effect.finish != .matte {
+			// A sky to be a mirror of: bright above, dark below, so a piece
+			// turning through the light goes from a flare to nothing the way
+			// foil does.
+			scene.lightingEnvironment.contents = Self.sky()
+			scene.lightingEnvironment.intensity = effect.finish == .glitter ? 2.6 : 1.8
+		}
 
 		var random = Seeded(effect.seed)
 		let colours = effect.colours
@@ -155,11 +164,14 @@ final class EffectRenderer: @unchecked Sendable {
 
 	private static func node(for effect: Effect, colour: RGBA, random: inout Seeded) -> SCNNode {
 		let geometry: SCNGeometry
+		let small: CGFloat = effect.finish == .glitter ? 0.45 : 1
 		switch effect.style {
 		case .confetti:
 			// A slip of card: wider than it is tall, and thin enough to vanish
-			// edge-on, which is what makes the tumble read.
-			geometry = SCNBox(width: 0.34, height: 0.5, length: 0.012, chamferRadius: 0.006)
+			// edge-on, which is what makes the tumble read. Glitter is the same
+			// slip cut small, and there is more of it.
+			geometry = SCNBox(width: 0.34 * small, height: 0.5 * small,
+			                  length: 0.012 * small, chamferRadius: 0.006 * small)
 		case .snow:
 			geometry = SCNSphere(radius: 0.075)
 		case .sparkle:
@@ -170,8 +182,22 @@ final class EffectRenderer: @unchecked Sendable {
 		material.lightingModel = .physicallyBased
 		material.diffuse.contents = CGColor(
 			srgbRed: colour.r, green: colour.g, blue: colour.b, alpha: 1)
-		material.metalness.contents = effect.style == .snow ? 0.0 : 0.45
-		material.roughness.contents = effect.style == .snow ? 0.9 : Double(random.value(0.15...0.4))
+		// Foil is a coloured mirror, so it needs something to reflect: without
+		// a lighting environment a metal is simply black, which is the usual
+		// way a first attempt at metallic confetti goes wrong.
+		switch effect.finish {
+		case .matte:
+			material.metalness.contents = effect.style == .snow ? 0.0 : 0.15
+			material.roughness.contents = effect.style == .snow ? 0.9 : Double(random.value(0.5...0.8))
+		case .metallic:
+			material.metalness.contents = 1.0
+			material.roughness.contents = Double(random.value(0.12...0.28))
+		case .glitter:
+			// Every piece polished differently: the catches come and go one at
+			// a time rather than the whole cloud flashing together.
+			material.metalness.contents = 1.0
+			material.roughness.contents = Double(random.value(0.02...0.18))
+		}
 		material.isDoubleSided = true
 		geometry.materials = [material]
 		return SCNNode(geometry: geometry)
@@ -179,6 +205,10 @@ final class EffectRenderer: @unchecked Sendable {
 
 	/// Where every piece is, as the scene stands. For tests: an effect that
 	/// cannot be repeated is one nobody can approve.
+	/// How many pieces are in the air, for the test that says a fall-out empties
+	/// the frame.
+	var showing: Int { pieces.filter { !$0.node.isHidden }.count }
+
 	var positions: [Double] {
 		pieces.flatMap { piece in
 			[Double(piece.node.position.x), Double(piece.node.position.y),
@@ -186,15 +216,34 @@ final class EffectRenderer: @unchecked Sendable {
 		}
 	}
 
+	/// A gradient for the foil to reflect. Made rather than shipped: it is four
+	/// stops of grey, and a file on disk is a file to lose.
+	private static func sky() -> NSImage {
+		let size = NSSize(width: 64, height: 64)
+		let image = NSImage(size: size)
+		image.lockFocus()
+		NSGradient(colors: [
+			NSColor(calibratedWhite: 1.0, alpha: 1),
+			NSColor(calibratedWhite: 0.85, alpha: 1),
+			NSColor(calibratedWhite: 0.45, alpha: 1),
+			NSColor(calibratedWhite: 0.12, alpha: 1),
+		])?.draw(in: NSRect(origin: .zero, size: size), angle: -90)
+		image.unlockFocus()
+		return image
+	}
+
 	// MARK: - A frame
 
 	/// Where every piece is at `time` seconds into the effect, and the picture
 	/// of it.
-	func image(at time: Double) -> CIImage? {
+	/// `spawningUntil` is when the last piece may be let go: after that the
+	/// cloud thins out as what is already falling leaves the frame, which is
+	/// what "fall out" means and what a fade cannot do.
+	func image(at time: Double, spawningUntil: Double = .infinity) -> CIImage? {
 		lock.lock()
 		defer { lock.unlock() }
 
-		place(at: time)
+		place(at: time, spawningUntil: spawningUntil)
 
 		guard let buffer = makeBuffer(), let texture = makeTexture(for: buffer) else { return nil }
 		let pass = MTLRenderPassDescriptor()
@@ -224,7 +273,7 @@ final class EffectRenderer: @unchecked Sendable {
 	/// to run that animation on, so every piece stayed where it was first put:
 	/// all of them at the origin, which renders as one rectangle that never
 	/// moves.
-	private func place(at time: Double) {
+	private func place(at time: Double, spawningUntil: Double = .infinity) {
 		SCNTransaction.begin()
 		SCNTransaction.animationDuration = 0
 		SCNTransaction.disableActions = true
@@ -250,11 +299,23 @@ final class EffectRenderer: @unchecked Sendable {
 				// looks like a screensaver.
 				let entry = piece.phase / (2 * .pi) * height * 1.6
 				let fallen = piece.fall * t - entry
-				let wrapped = fallen.truncatingRemainder(dividingBy: height + entry)
+				let lap = height + entry
+				let wrapped = fallen.truncatingRemainder(dividingBy: lap)
 				y = ceiling - (fallen < 0 ? fallen : wrapped)
+
+				// Which time this piece was last let go. Past the cut-off it is
+				// not let go again, so the cloud empties from the top down.
+				if fallen > 0 {
+					let laps = (fallen / lap).rounded(.down)
+					let released = (laps * lap + entry) / piece.fall
+					piece.node.isHidden = Double(released) > spawningUntil
+				} else {
+					piece.node.isHidden = false
+				}
 			}
 			let sway: Float = piece.sway * sin(piece.swayRate * t + piece.phase)
 			let x: Float = piece.x + sway
+			if effect.style == .sparkle { piece.node.isHidden = false }
 			piece.node.position = SCNVector3(x, y, piece.z)
 			let pitch: Float = piece.spinX * t + piece.phase
 			let yaw: Float = piece.spinY * t + piece.phase

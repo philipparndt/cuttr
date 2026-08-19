@@ -389,7 +389,7 @@ public final class PropertiesPanel: NSView {
 					overlay.kind = .effect(Effect())
 					// It arrives by falling into the frame, not by fading up.
 					overlay.arrival = .cut
-					overlay.departure = .fade(over: 0.8)
+					overlay.departure = .fall(over: 1.5)
 				default: break
 				}
 			}
@@ -402,6 +402,11 @@ public final class PropertiesPanel: NSView {
 				[weak self] pick in
 				self?.editEffect(index) { $0.style = Effect.Style.allCases[pick] }
 			}], note: "thrown over the whole frame; it has no position and says nothing")
+			field("finish", [pop(Effect.Finish.allCases.map(\.rawValue),
+			                     selected: Effect.Finish.allCases.firstIndex(of: effect.finish) ?? 0) {
+				[weak self] pick in
+				self?.editEffect(index) { $0.finish = Effect.Finish.allCases[pick] }
+			}], note: "matte is printed card; metallic is foil; glitter is foil cut small")
 			field("density", [number(effect.density, width: 72) { [weak self] value in
 				self?.editEffect(index) { $0.density = max(0.05, value) }
 			}, label("× \(effect.count) pieces")])
@@ -647,12 +652,14 @@ public final class PropertiesPanel: NSView {
 		}
 
 		section("how it arrives and leaves")
-		transitionRow("arrival", overlay.arrival) { [weak self] transition in
+		let isEffect: Bool
+		if case .effect = overlay.kind { isEffect = true } else { isEffect = false }
+		transitionRow("arrival", overlay.arrival, { [weak self] transition in
 			self?.editOverlay(index) { $0.arrival = transition }
-		}
-		transitionRow("departure", overlay.departure) { [weak self] transition in
+		}, canFall: false)
+		transitionRow("departure", overlay.departure, { [weak self] transition in
 			self?.editOverlay(index) { $0.departure = transition }
-		}
+		}, canFall: isEffect)
 
 		section("where it sits")
 		field("anchor", [combo(overlay.anchor ?? "", values: [""] + vocabulary.anchors, width: 210) {
@@ -675,19 +682,24 @@ public final class PropertiesPanel: NSView {
 	}
 
 	private func transitionRow(_ name: String, _ transition: Overlay.Transition,
-	                           _ set: @escaping (Overlay.Transition) -> Void) {
-		let kinds = ["cut", "fade", "slide"]
+	                           _ set: @escaping (Overlay.Transition) -> Void,
+	                           canFall: Bool = false) {
+		// "Fall" is offered for effects only: a caption cannot run out, and a
+		// spinner has nothing to run out of.
+		let kinds = canFall ? ["cut", "fade", "slide", "fall"] : ["cut", "fade", "slide"]
 		let current: Int
 		switch transition {
 		case .cut: current = 0
 		case .fade: current = 1
 		case .slide: current = 2
+		case .fall: current = 3
 		}
-		var controls: [NSView] = [pop(kinds, selected: current) { pick in
+		var controls: [NSView] = [pop(kinds, selected: min(current, kinds.count - 1)) { pick in
 			switch pick {
 			case 0: set(.cut)
 			case 1: set(.fade(over: max(0.1, transition.duration)))
-			default: set(.slide(.left, over: max(0.1, transition.duration)))
+			case 2: set(.slide(.left, over: max(0.1, transition.duration)))
+			default: set(.fall(over: max(0.4, transition.duration)))
 			}
 		}]
 		if case .slide(let edge, let over) = transition {
@@ -701,10 +713,12 @@ public final class PropertiesPanel: NSView {
 				switch transition {
 				case .fade: set(.fade(over: max(0, value)))
 				case .slide(let edge, _): set(.slide(edge, over: max(0, value)))
+				case .fall: set(.fall(over: max(0, value)))
 				case .cut: break
 				}
 			})
-			controls.append(label("seconds"))
+			controls.append(label(
+				{ if case .fall = transition { return "seconds to empty" } else { return "seconds" } }()))
 		}
 		field(name, controls)
 	}

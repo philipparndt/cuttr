@@ -59,3 +59,24 @@ import Testing
 		#expect(cloud(seed: 4, at: 1.5) != cloud(seed: 4, at: 2.5))
 	}
 }
+
+/// A shower that runs out rather than one somebody switched off.
+@Suite struct FallOutTests {
+
+	@Test func afterTheCutOffTheCloudEmpties() throws {
+		let renderer = try #require(EffectRenderer(
+			Effect(style: .confetti, density: 1, seed: 3), size: CGSize(width: 320, height: 180)))
+
+		func showing(at time: Double, spawningUntil: Double) -> Int {
+			_ = renderer.image(at: time, spawningUntil: spawningUntil)
+			return renderer.showing
+		}
+
+		// Left alone it keeps going; cut off at three seconds it thins out.
+		let keptGoing = showing(at: 8, spawningUntil: .infinity)
+		let ranOut = showing(at: 8, spawningUntil: 3)
+		#expect(keptGoing > ranOut, "the cloud did not empty: \(keptGoing) then \(ranOut)")
+		#expect(showing(at: 2, spawningUntil: 3) == showing(at: 2, spawningUntil: .infinity),
+		        "it emptied before the cut-off")
+	}
+}

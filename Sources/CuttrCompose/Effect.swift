@@ -25,6 +25,19 @@ public struct Effect: Sendable, Equatable {
 	}
 
 	public var style: Style
+	/// What the pieces are made of, which is most of how expensive they look.
+	public var finish: Finish
+
+	public enum Finish: String, Sendable, CaseIterable {
+		/// Printed card: the colour it is, lit and shaded, no shine.
+		case matte
+		/// Foil: a mirror with a colour, so a piece flares white as it turns
+		/// through the light and goes dark as it turns away.
+		case metallic
+		/// Foil cut small, with every piece polished differently, so the
+		/// catches are scattered and quick rather than broad — glitter.
+		case glitter
+	}
 	/// How much of it, against the style's own idea of enough. Two is twice as
 	/// much card in the air, not bigger pieces.
 	public var density: Double
@@ -43,6 +56,7 @@ public struct Effect: Sendable, Equatable {
 
 	public init(
 		style: Style = .confetti,
+		finish: Finish = .matte,
 		density: Double = 1,
 		speed: Double = 1,
 		size: Double = 1,
@@ -50,6 +64,7 @@ public struct Effect: Sendable, Equatable {
 		seed: Int = 1
 	) {
 		self.style = style
+		self.finish = finish
 		self.density = density
 		self.speed = speed
 		self.size = size
@@ -75,7 +90,7 @@ public struct Effect: Sendable, Equatable {
 	public var count: Int {
 		let base: Int
 		switch style {
-		case .confetti: base = 160
+		case .confetti: base = finish == .glitter ? 320 : 160
 		case .snow: base = 220
 		case .sparkle: base = 120
 		}

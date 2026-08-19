@@ -184,7 +184,14 @@ public enum Renderer {
 			image = image.transformed(by: Grading.fit(image.extent, into: size))
 
 			for (shown, renderer) in effects where time >= shown.start && time <= shown.end {
-				guard let plate = renderer.image(at: time - shown.start) else { continue }
+				// A fall-out stops letting pieces go before the end, so what is
+				// already in the air has time to leave the frame.
+				var spawningUntil = Double.infinity
+				if case .fall(let over) = shown.overlay.departure {
+					spawningUntil = max(0, shown.duration - over)
+				}
+				guard let plate = renderer.image(at: time - shown.start,
+				                                 spawningUntil: spawningUntil) else { continue }
 				let opacity = fade(shown, at: time)
 				guard opacity > 0.001 else { continue }
 				let faded = opacity >= 0.999 ? plate : plate.applyingFilter("CIColorMatrix", parameters: [

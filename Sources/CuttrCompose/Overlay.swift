@@ -200,6 +200,10 @@ public struct Overlay: Sendable, Equatable {
 		case cut
 		case fade(over: Double)
 		case slide(Edge, over: Double)
+		/// For an effect: stop letting pieces go, and let what is in the air
+		/// leave the frame on its own. A shower of confetti that fades out is a
+		/// shower somebody switched off; one that falls out is one that ran out.
+		case fall(over: Double)
 
 		public enum Edge: String, Sendable, CaseIterable {
 			case left, right, up, down
@@ -210,6 +214,7 @@ public struct Overlay: Sendable, Equatable {
 			case .cut: return 0
 			case .fade(let over): return over
 			case .slide(_, let over): return over
+			case .fall(let over): return over
 			}
 		}
 	}
