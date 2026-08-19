@@ -395,11 +395,14 @@ public enum ProjectReader {
 		guard let fields = mapping(value) else { return nil }
 		let content: Scene.Part.Content
 		if let text = fields["text"] as? String {
-			content = .text(text, style: (fields["style"] as? String).flatMap(nonEmpty))
+			content = .text(text, style: (fields["style"] as? String).flatMap(nonEmpty),
+			                tracking: number(fields["tracking"]) ?? 0)
 		} else if let fill = (fields["shape"] as? String).flatMap(RGBA.init(hex:)) {
 			content = .shape(fill: fill, corner: number(fields["corner"]) ?? 0)
 		} else if let file = (fields["image"] as? String).flatMap(nonEmpty) {
 			content = .image(file)
+		} else if let background = fields["background"], let read = readBackground(background) {
+			content = .background(read)
 		} else {
 			return nil
 		}
@@ -412,10 +415,30 @@ public enum ProjectReader {
 				opacity: number(key["opacity"]), scale: number(key["scale"]),
 				rotation: number(key["rotation"]),
 				width: number(key["width"]), height: number(key["height"]),
+				color: (key["color"] as? String).flatMap(RGBA.init(hex:)),
 				ease: (key["ease"] as? String).flatMap(Scene.Ease.init(rawValue:)) ?? .inOut)
 		}
 		guard !keys.isEmpty else { return nil }
 		return Scene.Part(content: content, keys: keys)
+	}
+
+	/// `background: "#101418"`, or `background: {from: …, to: …, angle: 90}`.
+	///
+	/// One colour is the common case and stays one word. A file that says
+	/// neither — a `to` with no `from`, say — is read as far as it makes sense
+	/// rather than refused, because a background is decoration and losing the
+	/// whole scene over it helps nobody.
+	private static func readBackground(_ value: Any) -> Scene.Background? {
+		if let hex = (value as? String).flatMap(RGBA.init(hex:)) {
+			return Scene.Background(from: hex)
+		}
+		guard let fields = mapping(value),
+		      let from = (fields["from"] as? String).flatMap(RGBA.init(hex:))
+		else { return nil }
+		return Scene.Background(
+			from: from,
+			to: (fields["to"] as? String).flatMap(RGBA.init(hex:)),
+			angle: number(fields["angle"]) ?? 90)
 	}
 
 	private static func transition(_ value: Any?, key: String) throws -> Overlay.Transition? {

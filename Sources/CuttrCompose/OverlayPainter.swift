@@ -16,7 +16,7 @@ import QuartzCore
 /// same anchor path — and composited under the person. What it costs is a
 /// rasterisation per frame; what it buys is a caption that goes round the back
 /// of the person talking.
-enum OverlayPainter {
+public enum OverlayPainter {
 
 	/// The overlay as it looks at `time`, in the frame's coordinates, or `nil`
 	/// if there is nothing to draw.
@@ -49,8 +49,8 @@ enum OverlayPainter {
 		case .scene(let name, let parameters):
 			guard let scene = project.scenes[name],
 			      let drawn = sceneImage(scene, with: parameters, project: project,
-			                             baseURL: baseURL, resolved: resolved,
-			                             size: size, at: time) else { return nil }
+			                             baseURL: baseURL, size: size,
+			                             at: time - resolved.start) else { return nil }
 			// A scene carries its own positions, so it is already frame-sized.
 			return faded(CIImage(cgImage: drawn), by: opacity)
 
@@ -78,9 +78,11 @@ enum OverlayPainter {
 
 	/// The plate for a caption, as an image and the size it is drawn at.
 	private static func plate(
-		_ text: String, style: TextStyle, size: CGSize
+		_ text: String, style: TextStyle, size: CGSize,
+		tracking: Double = 0, ink: RGBA? = nil
 	) -> (image: CGImage, size: CGSize)? {
-		let (layer, plate) = OverlayLayers.textLayer(text, style: style, size: size)
+		let (layer, plate) = OverlayLayers.textLayer(text, style: style, size: size,
+		                                             tracking: tracking, ink: ink)
 		guard let contents = layer.contents, CFGetTypeID(contents as CFTypeRef) == CGImage.typeID
 		else { return nil }
 		// swiftlint:disable:next force_cast
@@ -267,35 +269,50 @@ enum OverlayPainter {
 	// MARK: - A scene
 
 	/// Every part of a scene, at the values its keys give for this moment.
-	private static func sceneImage(
+	///
+	/// Public, and timed from the start of the scene rather than from the
+	/// overlay that uses it, because the scene editor draws its stage with
+	/// this. That is the point of exposing it: the editor is not allowed a
+	/// third way of drawing a scene, and now there is nowhere for one to
+	/// appear.
+	public static func sceneImage(
 		_ scene: Scene, with parameters: [String: String], project: Project, baseURL: URL,
-		resolved: ResolvedOverlay, size: CGSize, at time: Double
+		size: CGSize, at elapsed: Double
 	) -> CGImage? {
-		guard let context = CGContext(
+		guard size.width >= 1, size.height >= 1, let context = CGContext(
 			data: nil, width: Int(size.width), height: Int(size.height),
 			bitsPerComponent: 8, bytesPerRow: 0,
 			space: CGColorSpace(name: CGColorSpace.sRGB)!,
 			bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
 		else { return nil }
 
-		let elapsed = time - resolved.start
 		for part in scene.parts {
 			let keys = Scene.filled(part.keys)
-			guard let key = value(of: keys, at: elapsed) else { continue }
+			guard let key = Scene.state(of: keys, at: elapsed) else { continue }
 			let opacity = key.opacity ?? 1
 			guard opacity > 0.001 else { continue }
 
 			context.saveGState()
 			context.setAlpha(CGFloat(opacity))
+
+			// A background is the frame, so it is not moved, scaled or turned:
+			// its keys say when it is there and how solid, and nothing else.
+			if case .background(let background) = part.content {
+				paint(background, tinted: key.color, in: context, size: size)
+				context.restoreGState()
+				continue
+			}
+
 			let centre = CGPoint(x: (key.x ?? 0.5) * size.width, y: (key.y ?? 0.5) * size.height)
 			context.translateBy(x: centre.x, y: centre.y)
 			context.rotate(by: CGFloat((key.rotation ?? 0) * .pi / 180))
 			context.scaleBy(x: CGFloat(key.scale ?? 1), y: CGFloat(key.scale ?? 1))
 
 			switch part.content {
-			case .text(let text, let styleName):
+			case .text(let text, let styleName, let tracking):
 				let style = project.style(named: styleName)
-				if let plate = plate(Scene.fill(text, with: parameters), style: style, size: size) {
+				if let plate = plate(Scene.fill(text, with: parameters), style: style, size: size,
+				                     tracking: tracking, ink: key.color) {
 					context.draw(plate.image, in: CGRect(
 						x: -plate.size.width / 2, y: -plate.size.height / 2,
 						width: plate.size.width, height: plate.size.height))
@@ -306,7 +323,8 @@ enum OverlayPainter {
 					y: -(key.height ?? 0.02) * size.height / 2,
 					width: (key.width ?? 0.2) * size.width,
 					height: (key.height ?? 0.02) * size.height)
-				context.setFillColor(CGColor(srgbRed: fill.r, green: fill.g, blue: fill.b, alpha: fill.a))
+				let ink = key.color ?? fill
+				context.setFillColor(CGColor(srgbRed: ink.r, green: ink.g, blue: ink.b, alpha: ink.a))
 				context.addPath(CGPath(
 					roundedRect: box, cornerWidth: corner * size.height,
 					cornerHeight: corner * size.height, transform: nil))
@@ -320,47 +338,36 @@ enum OverlayPainter {
 					context.draw(picture, in: CGRect(
 						x: -width / 2, y: -height / 2, width: width, height: height))
 				}
+			case .background:
+				break   // dealt with above, before the transform
 			}
 			context.restoreGState()
 		}
 		return context.makeImage()
 	}
 
-	/// The part's values at a moment: the two keys either side of it, eased
-	/// between. Before the first key it is the first, after the last it is the
-	/// last — which is what `fillMode: .both` does for the layer version.
-	private static func value(of keys: [Scene.Key], at time: Double) -> Scene.Key? {
-		guard let first = keys.first, let last = keys.last else { return nil }
-		if time <= first.t { return first }
-		if time >= last.t { return last }
-		guard let next = keys.firstIndex(where: { $0.t > time }), next > 0 else { return last }
-		let before = keys[next - 1], after = keys[next]
-		let span = max(after.t - before.t, 0.0001)
-		let fraction = eased(after.ease, (time - before.t) / span)
-
-		func between(_ a: Double?, _ b: Double?) -> Double? {
-			guard let a, let b else { return b ?? a }
-			return a + (b - a) * fraction
+	/// A background across the whole frame: one colour, or a ramp between two.
+	private static func paint(
+		_ background: Scene.Background, tinted: RGBA?, in context: CGContext, size: CGSize
+	) {
+		let from = tinted ?? background.from
+		guard let to = background.to else {
+			context.setFillColor(CGColor(srgbRed: from.r, green: from.g, blue: from.b, alpha: from.a))
+			context.fill(CGRect(origin: .zero, size: size))
+			return
 		}
-		return Scene.Key(
-			t: time,
-			x: between(before.x, after.x), y: between(before.y, after.y),
-			opacity: between(before.opacity, after.opacity),
-			scale: between(before.scale, after.scale),
-			rotation: between(before.rotation, after.rotation),
-			width: between(before.width, after.width),
-			height: between(before.height, after.height),
-			ease: after.ease)
-	}
-
-	private static func eased(_ ease: Scene.Ease, _ t: Double) -> Double {
-		let t = max(0, min(1, t))
-		switch ease {
-		case .linear: return t
-		case .in: return t * t
-		case .out: return 1 - pow(1 - t, 2)
-		case .inOut: return t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
-		}
+		let colors = [
+			CGColor(srgbRed: from.r, green: from.g, blue: from.b, alpha: from.a),
+			CGColor(srgbRed: to.r, green: to.g, blue: to.b, alpha: to.a),
+		] as CFArray
+		guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+		      let gradient = CGGradient(colorsSpace: space, colors: colors, locations: [0, 1])
+		else { return }
+		let ends = background.ends(in: size)
+		// Clamped at both ends, so the corners a diagonal ramp does not reach
+		// are the nearest stop rather than nothing at all.
+		context.drawLinearGradient(gradient, start: ends.start, end: ends.end,
+		                           options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
 	}
 
 	/// In and out, as the keyframes would have it — a fade fades, and anything

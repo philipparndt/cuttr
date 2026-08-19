@@ -24,14 +24,24 @@ public enum ProjectWriter {
 			out += "    parts:\n"
 			for part in scene.parts {
 				switch part.content {
-				case .text(let text, let style):
+				case .text(let text, let style, let tracking):
 					out += "      - text:  \(scalar(text))\n"
 					if let style { out += "        style: \(scalar(style))\n" }
+					if tracking != 0 { out += "        tracking: \(trim(tracking))\n" }
 				case .shape(let fill, let corner):
 					out += "      - shape: \(scalar(fill.hex))\n"
 					if corner != 0 { out += "        corner: \(trim(corner))\n" }
 				case .image(let file):
 					out += "      - image: \(scalar(file))\n"
+				case .background(let background):
+					// A flat colour stays the one word it was written as; the
+					// ramp says all three things or none of them.
+					if let to = background.to {
+						out += "      - background: {from: \(scalar(background.from.hex))"
+							+ ", to: \(scalar(to.hex)), angle: \(trim(background.angle))}\n"
+					} else {
+						out += "      - background: \(scalar(background.from.hex))\n"
+					}
 				}
 				out += "        keys:\n"
 				for key in part.keys {
@@ -43,6 +53,7 @@ public enum ProjectWriter {
 					if let rotation = key.rotation { fields.append("rotation: \(trim(rotation))") }
 					if let width = key.width { fields.append("width: \(trim(width))") }
 					if let height = key.height { fields.append("height: \(trim(height))") }
+					if let color = key.color { fields.append("color: \(scalar(color.hex))") }
 					if key.ease != .inOut { fields.append("ease: \(key.ease.rawValue)") }
 					out += "          - {" + fields.joined(separator: ", ") + "}\n"
 				}
