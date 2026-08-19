@@ -152,6 +152,12 @@ final class EffectRenderer: @unchecked Sendable {
 		renderer.scene = scene
 		renderer.pointOfView = camera
 		renderer.autoenablesDefaultLighting = false
+		// Warming this up waits on work SceneKit puts on a queue of its own, so
+		// it needs a thread to be free. Built from several tasks at once — which
+		// is what a parallel test run is — every one of them can end up waiting
+		// inside `C3DWarmupSceneVRAMResourcesForEngineContext` for a queue that
+		// has nothing left to run it on. Nothing in the program builds two at
+		// once, and the tests that do say so.
 		renderer.prepare(scene, shouldAbortBlock: nil)
 	}
 
@@ -162,6 +168,9 @@ final class EffectRenderer: @unchecked Sendable {
 		case .confetti: return 1.4...3.2
 		case .snow: return 0.5...1.2
 		case .sparkle: return 2.2...4.5
+		// Fast, and not all at the same speed — rain that falls at one rate is
+		// a curtain of beads.
+		case .rain: return 6...11
 		}
 	}
 
@@ -170,6 +179,9 @@ final class EffectRenderer: @unchecked Sendable {
 		case .confetti: return 0.3...1.1
 		case .snow: return 0.15...0.5
 		case .sparkle: return 0.05...0.3
+		// A drop has too little air under it to wander. What moves rain
+		// sideways is the wind, and that is not a wobble.
+		case .rain: return 0...0
 		}
 	}
 
@@ -177,7 +189,7 @@ final class EffectRenderer: @unchecked Sendable {
 	/// things that fall, a good shove for a burst.
 	private static func lift(_ effect: Effect) -> ClosedRange<Double> {
 		switch effect.style {
-		case .confetti, .snow: return 0...0
+		case .confetti, .snow, .rain: return 0...0
 		case .sparkle: return 3...7
 		}
 	}
@@ -198,6 +210,12 @@ final class EffectRenderer: @unchecked Sendable {
 			geometry = SCNSphere(radius: 0.075)
 		case .sparkle:
 			geometry = SCNBox(width: 0.12, height: 0.34, length: 0.012, chamferRadius: 0.05)
+		case .rain:
+			// A streak rather than a drop. A drop photographs as a line because
+			// the shutter is open while it falls, and a sphere at this speed is
+			// a hailstone — the length is the exposure, and it is what makes
+			// rain read as rain.
+			geometry = SCNBox(width: 0.028, height: 0.85, length: 0.028, chamferRadius: 0.014)
 		}
 
 		let material = geometry.firstMaterial ?? SCNMaterial()
@@ -210,6 +228,15 @@ final class EffectRenderer: @unchecked Sendable {
 		// Foil is a coloured mirror, so it needs something to reflect: without
 		// a lighting environment a metal is simply black, which is the usual
 		// way a first attempt at metallic confetti goes wrong.
+		if effect.style == .rain {
+			// Water is mostly what is behind it. Left opaque, a streak is a
+			// white scratch; at about half it picks up the light along its
+			// length and lets the shot through, which is what a drop does.
+			material.transparency = 0.55
+			material.emission.contents = CGColor(
+				srgbRed: colour.r * shade * 0.3, green: colour.g * shade * 0.3,
+				blue: colour.b * shade * 0.3, alpha: 1)
+		}
 		switch effect.finish {
 		case .matte:
 			material.metalness.contents = effect.style == .snow ? 0.0 : 0.15
@@ -334,6 +361,10 @@ final class EffectRenderer: @unchecked Sendable {
 		let ceiling = world / 2 + 1.5
 		let floor = -world / 2 - 1.5
 		let height = ceiling - floor
+		// How far sideways a piece goes for every unit it falls, and how wide
+		// the cloud is spread — which is what it wraps around.
+		let lean = Float(max(-4, min(4, effect.wind))) * 0.25
+		let span = world * Float(size.width / size.height) * 1.1
 
 		for piece in pieces {
 			let y: Float
@@ -364,13 +395,28 @@ final class EffectRenderer: @unchecked Sendable {
 				}
 			}
 			let sway: Float = piece.sway * sin(piece.swayRate * t + piece.phase)
-			let x: Float = piece.x + sway
+			// Carried sideways by the wind, at the speed it is falling: a drop
+			// that is going twice as fast covers twice the ground while it does
+			// it, which is what keeps every streak on the same slant.
+			var x: Float = piece.x + sway + piece.fall * lean * t
+			if lean != 0, span > 0 {
+				// Wrapped, or a minute of wind empties the frame from one side.
+				x = (x + span / 2).truncatingRemainder(dividingBy: span)
+				if x < 0 { x += span }
+				x -= span / 2
+			}
 			if effect.style == .sparkle { piece.node.isHidden = false }
 			piece.node.position = SCNVector3(x, y, piece.z)
-			let pitch: Float = piece.spinX * t + piece.phase
-			let yaw: Float = piece.spinY * t + piece.phase
-			let roll: Float = piece.spinZ * t
-			piece.node.eulerAngles = SCNVector3(pitch, yaw, roll)
+			if effect.style == .rain {
+				// A streak does not tumble. It leans, all of them the same way,
+				// and the lean is the slant of the path it is travelling.
+				piece.node.eulerAngles = SCNVector3(0, 0, -atan(lean))
+			} else {
+				let pitch: Float = piece.spinX * t + piece.phase
+				let yaw: Float = piece.spinY * t + piece.phase
+				let roll: Float = piece.spinZ * t
+				piece.node.eulerAngles = SCNVector3(pitch, yaw, roll)
+			}
 			let scale = piece.size * Float(max(0.05, effect.size))
 			piece.node.scale = SCNVector3(scale, scale, scale)
 		}

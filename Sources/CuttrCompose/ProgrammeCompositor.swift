@@ -41,10 +41,10 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 			return overlays.contains { shown in
 				guard time >= shown.start, time <= shown.end else { return false }
 				if shown.overlay.behind == .people { return true }
-				// Film mode changes the frame itself, so a frame it is on is a
-				// frame that cannot be handed back as it came.
-				if case .film = shown.overlay.kind { return true }
-				return false
+				// Film mode, the aberration and the tape change the frame
+				// itself, so a frame any of them is on is a frame that cannot
+				// be handed back as it came.
+				return shown.overlay.kind.changesTheFrame
 			}
 		}
 	}

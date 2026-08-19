@@ -54,9 +54,9 @@ public enum OverlayPainter {
 			// A scene carries its own positions, so it is already frame-sized.
 			return faded(CIImage(cgImage: drawn), by: opacity)
 
-		case .effect, .film:
-			// Both are the frame itself rather than something over it, and
-			// neither is drawn here.
+		case .effect, .film, .aberration, .tape:
+			// All of them are the frame itself rather than something over it,
+			// and none of them is drawn here.
 			return nil
 		}
 	}

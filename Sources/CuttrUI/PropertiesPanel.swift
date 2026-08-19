@@ -648,12 +648,12 @@ public final class PropertiesPanel: NSView {
 		// An effect and a scene have no position of their own, so there is
 		// nothing to drag them to: their parts carry their own.
 		switch overlay.kind {
-		case .effect, .scene, .film: break
+		case .effect, .scene, .film, .aberration, .tape: break
 		default: full(placement(index, overlay))
 		}
 
 		section("what it is")
-		let kinds = ["text", "spinner", "effect", "scene", "film"]
+		let kinds = ["text", "spinner", "effect", "scene", "film", "aberration", "tape"]
 		let current: Int
 		switch overlay.kind {
 		case .text: current = 0
@@ -661,6 +661,8 @@ public final class PropertiesPanel: NSView {
 		case .effect: current = 2
 		case .scene: current = 3
 		case .film: current = 4
+		case .aberration: current = 5
+		case .tape: current = 6
 		}
 		let firstScene = project.scenes.keys.sorted().first ?? "intro"
 		// The shape a new film overlay closes to.
@@ -700,6 +702,14 @@ public final class PropertiesPanel: NSView {
 					// end and is the whole point of the effect.
 					overlay.arrival = .fade(over: 1)
 					overlay.departure = .fade(over: 1)
+				case (5, _):
+					overlay.kind = .aberration(Aberration())
+					overlay.arrival = .fade(over: 0.5)
+					overlay.departure = .fade(over: 0.5)
+				case (6, _):
+					overlay.kind = .tape(Tape())
+					overlay.arrival = .fade(over: 0.5)
+					overlay.departure = .fade(over: 0.5)
 				default: break
 				}
 			}
@@ -739,6 +749,65 @@ public final class PropertiesPanel: NSView {
 			field("vignette", [number(film.vignette, width: 72) { value in
 				change { $0.vignette = max(0, min(1, value)) }
 			}], note: "how far the corners go down")
+
+		case .aberration(let aberration):
+			func change(_ edit: @escaping (inout Aberration) -> Void) {
+				self.editOverlay(index) { overlay in
+					guard case .aberration(var aberration) = overlay.kind else { return }
+					edit(&aberration)
+					overlay.kind = .aberration(aberration)
+				}
+			}
+			field("aberration", [pop(Aberration.Kind.allCases.map(\.rawValue),
+			                         selected: Aberration.Kind.allCases.firstIndex(of: aberration.kind) ?? 0) {
+				pick in change { $0.kind = Aberration.Kind.allCases[pick] }
+			}], note: aberration.kind == .radial
+				? "out from the middle, growing towards the edges — what a lens does"
+				: "the same offset everywhere, along `angle`")
+			field("amount", [number(aberration.amount, width: 72) { value in
+				change { $0.amount = max(0, value) }
+			}], note: "1 is about one per cent of the frame between red and blue, "
+				+ "which is a great deal; a tenth of that reads as glass")
+			if aberration.kind == .linear {
+				field("angle", [number(aberration.angle, width: 72) { value in
+					change { $0.angle = value }
+				}, label("degrees")], note: "0 pulls red to the right and blue to the left")
+			}
+
+		case .tape(let tape):
+			func change(_ edit: @escaping (inout Tape) -> Void) {
+				self.editOverlay(index) { overlay in
+					guard case .tape(var tape) = overlay.kind else { return }
+					edit(&tape)
+					overlay.kind = .tape(tape)
+				}
+			}
+			field("tape", [pop(Tape.Condition.allCases.map(\.rawValue),
+			                   selected: Tape.Condition.allCases.firstIndex(of: tape.condition) ?? 0) {
+				pick in
+				// The condition fills all five knobs in, which is what makes it
+				// a choice rather than a label: picking `chewed` after nudging
+				// the jitter gives what chewed means, not what was left over.
+				change { $0 = Tape(Tape.Condition.allCases[pick], seed: $0.seed) }
+			}], note: "how the tape has been treated — it sets the five below")
+			field("jitter", [number(tape.jitter, width: 72) { value in
+				change { $0.jitter = max(0, min(1, value)) }
+			}], note: "the tracking wobble: rows pushed sideways, by different amounts")
+			field("band", [number(tape.band, width: 72) { value in
+				change { $0.band = max(0, min(1, value)) }
+			}], note: "the band of brighter noise crawling up the frame")
+			field("chroma", [number(tape.chroma, width: 72) { value in
+				change { $0.chroma = max(0, min(1, value)) }
+			}], note: "colour arriving late, and so running off the edges sideways")
+			field("scanlines", [number(tape.scanlines, width: 72) { value in
+				change { $0.scanlines = max(0, min(1, value)) }
+			}], note: "every other line, into shadow")
+			field("dropouts", [number(tape.dropouts, width: 72) { value in
+				change { $0.dropouts = max(0, min(1, value)) }
+			}], note: "white streaks where the tape has lost its coating, a field at a time")
+			field("seed", [number(Double(tape.seed), width: 72) { value in
+				change { $0.seed = Int(value) }
+			}], note: "the same number gives the same wobble, every render")
 
 		case .scene(let name, let parameters):
 			let names = project.scenes.keys.sorted()
@@ -792,6 +861,13 @@ public final class PropertiesPanel: NSView {
 			field("size", [number(effect.size, width: 72) { [weak self] value in
 				self?.editEffect(index) { $0.size = max(0.05, value) }
 			}], note: "the size of each piece, not how many there are")
+			if effect.style == .rain || effect.style == .snow {
+				field("wind", [number(effect.wind, width: 72) { [weak self] value in
+					self?.editEffect(index) { $0.wind = max(-4, min(4, value)) }
+				}], note: effect.style == .rain
+					? "positive blows to the right, and the streaks lean into it"
+					: "positive blows to the right; 1 is a good wind rather than a gale")
+			}
 			field("seed", [number(Double(effect.seed), width: 72) { [weak self] value in
 				self?.editEffect(index) { $0.seed = Int(value) }
 			}], note: "the same number gives the same cloud, every render")
@@ -987,6 +1063,10 @@ public final class PropertiesPanel: NSView {
 				saysControls.append(label("an effect says nothing"))
 			case .film:
 				saysControls.append(label("film mode says nothing"))
+			case .aberration:
+				saysControls.append(label("an aberration says nothing"))
+			case .tape:
+				saysControls.append(label("a tape says nothing"))
 			case .scene:
 				saysControls.append(label("a scene says what its parameters say"))
 			case .text(let content, _):
@@ -1388,7 +1468,7 @@ public final class PropertiesPanel: NSView {
 		preview.anchorName = overlay.anchor
 
 		switch overlay.kind {
-		case .effect, .scene, .film:
+		case .effect, .scene, .film, .aberration, .tape:
 			// Never reached: none of them has a placement picture at all.
 			preview.content = .caption("", TextStyle.caption)
 		case .text(let content, let style):

@@ -333,11 +333,10 @@ public enum Renderer {
 		// Anything that goes behind somebody is painted into the frame, which
 		// is the filter pass's job — so there *is* something for it to do.
 		let painted = resolved.overlays.contains { $0.overlay.behind == .people }
-		// Film mode is the picture, changed. Without this the programme would
-		// take the exact path — which is the one that does nothing at all.
-		let filmed = resolved.overlays.contains {
-			if case .film = $0.overlay.kind { return true } else { return false }
-		}
+		// Film mode, the aberration and the tape are the picture, changed.
+		// Without this the programme would take the exact path — which is the
+		// one that does nothing at all.
+		let filmed = resolved.overlays.contains { $0.overlay.kind.changesTheFrame }
 		// A card has no source frame, so there is nothing for either of the
 		// two cheap paths to hand back or to filter: only the compositor can
 		// make a frame out of nothing. A project with no cards pays nothing for

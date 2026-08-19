@@ -222,6 +222,35 @@ public enum ProjectReader {
 				if let grain = number(m["grain"]) { film.grain = grain }
 				if let vignette = number(m["vignette"]) { film.vignette = vignette }
 				kind = .film(film)
+			} else if let value = m["aberration"] {
+				// `aberration: radial`, and `aberration: 0.6` for somebody who
+				// means the amount and does not care which kind — which is the
+				// commoner of the two things to mean.
+				var aberration = Aberration()
+				if let named = (value as? String).flatMap(nonEmpty) {
+					if let kind = Aberration.Kind(rawValue: named.lowercased()) {
+						aberration.kind = kind
+					} else if let amount = Double(named) {
+						aberration.amount = amount
+					}
+				} else if let amount = number(value) {
+					aberration.amount = amount
+				}
+				if let amount = number(m["amount"]) { aberration.amount = amount }
+				if let angle = number(m["angle"]) { aberration.angle = angle }
+				kind = .aberration(aberration)
+			} else if let condition = (m["tape"] as? String).flatMap(nonEmpty) {
+				// `tape: worn`, and then only the knobs that are not what worn
+				// means. The condition fills all five in, so a file that names
+				// one is a file that has changed its mind about one.
+				var tape = Tape(Tape.Condition(rawValue: condition.lowercased()) ?? .worn)
+				if let jitter = number(m["jitter"]) { tape.jitter = jitter }
+				if let band = number(m["band"]) { tape.band = band }
+				if let chroma = number(m["chroma"]) { tape.chroma = chroma }
+				if let scanlines = number(m["scanlines"]) { tape.scanlines = scanlines }
+				if let dropouts = number(m["dropouts"]) { tape.dropouts = dropouts }
+				if let seed = m["seed"] as? Int { tape.seed = seed }
+				kind = .tape(tape)
 			} else if let named = (m["effect"] as? String).flatMap(nonEmpty) {
 				var effect = Effect(style: Effect.Style(rawValue: named.lowercased()) ?? .confetti)
 				if let finish = (m["finish"] as? String).flatMap({ Effect.Finish(rawValue: $0) }) {
@@ -230,6 +259,7 @@ public enum ProjectReader {
 				if let density = number(m["density"]) { effect.density = density }
 				if let speed = number(m["speed"]) { effect.speed = speed }
 				if let size = number(m["size"]) { effect.size = size }
+				if let wind = number(m["wind"]) { effect.wind = wind }
 				if let seed = m["seed"] as? Int { effect.seed = seed }
 				if let palette = m["palette"] as? [Any] {
 					effect.palette = palette.compactMap { ($0 as? String).flatMap(RGBA.init(hex:)) }

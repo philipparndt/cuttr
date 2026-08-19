@@ -307,8 +307,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			button("textformat", #selector(addText), "Add a caption, bound to what is selected"),
 			button("circle.dotted", #selector(addSpinner),
 			       "Add a spinner; give it an anchor to pin it to a face"),
-			button("sparkles", #selector(addEffect), "Add confetti, sparks or snow"),
+			button("sparkles", #selector(addEffect), "Add confetti, sparks, snow or rain"),
 			button("plus.square.on.square", #selector(duplicateOverlay), "Another one just like it"),
+			button("arrow.up", #selector(moveOverlayUp), "Draw it earlier — under the one above"),
+			button("arrow.down", #selector(moveOverlayDown), "Draw it later — over the one below"),
 			button("minus", #selector(removeOverlay), "Take it off"),
 		])
 	}
@@ -361,6 +363,26 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		var next = project
 		next.sounds.remove(at: row)
 		pending = .output
+		onChange?(next)
+	}
+
+	/// Up and down the list, which is up and down the stack.
+	///
+	/// The order of `overlays:` is the order they are drawn in, so moving a row
+	/// is the only control there is over what is on top of what: an aberration
+	/// above a film overlay bends the bars, the same one below it leaves them
+	/// clean. Captions are the exception, and the row says so.
+	@objc private func moveOverlayUp() { moveOverlay(by: -1) }
+	@objc private func moveOverlayDown() { moveOverlay(by: 1) }
+
+	private func moveOverlay(by offset: Int) {
+		let row = overlayTable.selectedRow
+		let landing = row + offset
+		guard row >= 0, row < project.overlays.count,
+		      landing >= 0, landing < project.overlays.count else { return }
+		var next = project
+		next.overlays.swapAt(row, landing)
+		pending = .overlay(landing)
 		onChange?(next)
 	}
 
@@ -608,6 +630,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		let view = (tableView.makeView(withIdentifier: .init("overlay"), owner: self) as? OverlayRow)
 			?? { let view = OverlayRow(); view.identifier = .init("overlay"); return view }()
 		view.overlay = project.overlays[row]
+		view.stack = OverlayRow.standsOn(row, in: project.overlays)
 		view.needsDisplay = true
 		return view
 	}
@@ -804,9 +827,45 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		}
 	}
 
-	/// One overlay, drawn: what it says, when it is on, and what it follows.
+	/// One overlay, drawn: what it says, when it is on, what it follows, and
+	/// what it is drawn on top of.
 	fileprivate final class OverlayRow: NSTableCellView {
 		var overlay = Overlay(kind: .text("", style: nil), span: .times(from: 0, to: 0))
+		/// Where this one comes in the stack, in words. Worked out by the panel,
+		/// which is the only thing that can see the rest of the list.
+		var stack = ""
+
+		/// What an overlay is drawn on top of.
+		///
+		/// The order of `overlays:` is the order they are drawn in, so the row
+		/// above is what a row sits on. With one exception, and it is worth
+		/// saying rather than hiding: a caption, a spinner and a scene are not
+		/// drawn into the frame at all — the export lays them over the finished
+		/// picture in a second Core Animation pass, which cannot interleave with
+		/// pixels. So one of those is over every film mode and every effect in
+		/// the project however the list is arranged, and moving it only decides
+		/// which caption is over which.
+		static func standsOn(_ index: Int, in overlays: [Overlay]) -> String {
+			guard index < overlays.count else { return "" }
+			let layered = OverlayLayers.isLayered(overlays[index])
+			let below = overlays[..<index].lastIndex { OverlayLayers.isLayered($0) == layered }
+			let over = below.map { "over \(name(overlays[$0]))" }
+			if layered { return over.map { "layer · \($0)" } ?? "layer · over all of it" }
+			return over ?? "on the picture"
+		}
+
+		/// The shortest true name for one, for the row above's benefit.
+		static func name(_ overlay: Overlay) -> String {
+			switch overlay.kind {
+			case .effect(let effect): return effect.style.rawValue
+			case .film: return "film"
+			case .aberration: return "aberration"
+			case .tape: return "tape"
+			case .scene(let scene, _): return scene
+			case .text(let text, _): return "“\(text)”"
+			case .spinner: return "spinner"
+			}
+		}
 
 		override func draw(_ dirtyRect: NSRect) {
 			let kind: Theme.Kind
@@ -818,6 +877,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			case .film(let film):
 				kind = .film
 				title = "\(film.tint.rawValue) · \(film.ratio.written)"
+			case .aberration(let aberration):
+				kind = .aberration
+				title = "\(aberration.kind.rawValue) · \(TakeWriter.number(aberration.amount, places: 2))"
+			case .tape(let tape):
+				kind = .tape
+				title = "tape · \(tape.condition.rawValue)"
 			case .scene(let name, let parameters):
 				kind = .scene
 				title = parameters.isEmpty ? name
@@ -853,6 +918,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				where_ = "\(Timecode.string(from)) → \(Timecode.string(to))"
 			}
 			if let anchor = overlay.anchor { where_ += "   ⌖ \(anchor)" }
+			// What it is drawn on top of, which is the one thing about an
+			// overlay that cannot be seen from the overlay itself.
+			if !stack.isEmpty { where_ += "   ↑ \(stack)" }
 			(where_ as NSString).draw(
 				at: NSPoint(x: 26, y: bounds.midY - 14),
 				withAttributes: [.font: Theme.monoSmall, .foregroundColor: Theme.dimText])
