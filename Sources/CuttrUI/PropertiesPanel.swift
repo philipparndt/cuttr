@@ -88,6 +88,13 @@ public final class PropertiesPanel: NSView {
 		// One direction of travel, and none of that can happen: the pane sizes
 		// the scroll view, the scroll view sizes the form, the form stacks rows,
 		// and every control inside a row will shrink rather than argue.
+		// Off, or the frame it happens to have becomes a pair of constraints —
+		// `height == 0` among them — and they win over the ones written here.
+		// The form then has no height, the panel's fitting size is a couple of
+		// dozen points, and the window shrinks to it and will not be dragged
+		// back out.
+		form.translatesAutoresizingMaskIntoConstraints = false
+
 		let scroll = TableScroll.wrap(form, horizontal: false)
 		scroll.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(scroll)
@@ -823,7 +830,10 @@ public final class PropertiesPanel: NSView {
 		name.alignment = .left
 		name.lineBreakMode = .byTruncatingTail
 		name.translatesAutoresizingMaskIntoConstraints = false
-		name.widthAnchor.constraint(equalToConstant: Self.keyWidth).isActive = true
+		let wide = name.widthAnchor.constraint(equalToConstant: Self.keyWidth)
+		wide.priority = NSLayoutConstraint.Priority(900)
+		wide.isActive = true
+		_ = squeezable(name)
 
 		// A spacer that gives before any control does, so a narrow pane takes
 		// the empty space away rather than the fields.
@@ -873,11 +883,24 @@ public final class PropertiesPanel: NSView {
 
 	// MARK: - Controls
 
+	/// Every control in this panel gives up width before the pane does.
+	///
+	/// One rule, applied to all of them, because a single control that resists
+	/// being squeezed makes its whole row wider than the pane — and then the
+	/// form needs a horizontal scrollbar, which takes height, which moves
+	/// everything else. Truncated is fine; overflowing is not.
+	private func squeezable<T: NSView>(_ view: T) -> T {
+		view.setContentCompressionResistancePriority(
+			NSLayoutConstraint.Priority(1), for: .horizontal)
+		return view
+	}
+
 	private func label(_ text: String) -> NSTextField {
 		let label = NSTextField(labelWithString: text)
 		label.font = Theme.monoSmall
 		label.textColor = Theme.dimText
-		return label
+		label.lineBreakMode = .byTruncatingTail
+		return squeezable(label)
 	}
 
 	private func text(_ value: String, width: CGFloat, placeholder: String,
@@ -968,7 +991,8 @@ public final class PropertiesPanel: NSView {
 		sinks.append(sink)
 		button.target = sink
 		button.action = #selector(Sink.fire(_:))
-		return button
+		button.lineBreakMode = .byTruncatingTail
+		return squeezable(button)
 	}
 
 	private func check(_ title: String, on: Bool,
@@ -980,7 +1004,8 @@ public final class PropertiesPanel: NSView {
 		sinks.append(sink)
 		button.target = sink
 		button.action = #selector(Sink.fire(_:))
-		return button
+		button.lineBreakMode = .byTruncatingTail
+		return squeezable(button)
 	}
 
 	private func small(_ title: String, onTap: @escaping () -> Void) -> NSButton {
@@ -993,7 +1018,7 @@ public final class PropertiesPanel: NSView {
 		sinks.append(sink)
 		button.target = sink
 		button.action = #selector(Sink.fire(_:))
-		return button
+		return squeezable(button)
 	}
 
 	/// A colour well, because a hex code is a thing to look up and a colour is a
@@ -1013,6 +1038,6 @@ public final class PropertiesPanel: NSView {
 		sinks.append(sink)
 		well.target = sink
 		well.action = #selector(Sink.fire(_:))
-		return well
+		return squeezable(well)
 	}
 }

@@ -108,6 +108,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		let row = NSStackView(views: [heading] + buttons)
 		row.orientation = .horizontal
 		row.spacing = 6
+		row.setContentCompressionResistancePriority(
+			NSLayoutConstraint.Priority(1), for: .horizontal)
 		row.setHuggingPriority(.defaultHigh, for: .horizontal)
 
 		let stack = NSStackView(views: [row, list])
@@ -157,6 +159,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		button.target = self
 		button.action = action
 		button.toolTip = tip
+		// A row of six buttons must not decide how narrow the pane may be: they
+		// give up their titles' width before the pane gives up any of its own.
+		button.setContentCompressionResistancePriority(
+			NSLayoutConstraint.Priority(1), for: .horizontal)
+		button.lineBreakMode = .byTruncatingTail
 		return button
 	}
 
