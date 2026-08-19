@@ -27,6 +27,15 @@ Or take the disk image from [the releases page][releases], open it, and drag
 cuttr to Applications. Either way it is the same build: signed with a Developer
 ID and notarised, so it opens without a detour through System Settings.
 
+To update, later:
+
+    brew update && brew upgrade --cask cuttr
+
+`brew update` refreshes the tap — the cask is a file in a repository, and brew
+reads the copy it already has until it is told to fetch a new one, which is why
+`upgrade` on its own can cheerfully report that the version from last month is
+the newest one there is.
+
 Needs macOS 14 or newer. To build it yourself instead, see [Building](#building).
 
 [releases]: https://github.com/philipparndt/cuttr/releases
