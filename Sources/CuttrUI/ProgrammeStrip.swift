@@ -122,6 +122,7 @@ public final class ProgrammeStrip: NSView {
 			switch overlay.overlay.kind {
 			case .text(let text, _): label = text
 			case .spinner(let spinner): label = spinner.words.first?.text ?? "spinner"
+			case .effect(let effect): label = effect.style.rawValue
 			}
 			let attributes: [NSAttributedString.Key: Any] = [.font: Theme.monoSmall, .foregroundColor: Theme.text]
 			if (label as NSString).size(withAttributes: attributes).width < rect.width - 6 {

@@ -177,6 +177,15 @@ public enum ProjectReader {
 					}
 				}
 				kind = .spinner(spinner)
+			} else if let named = (m["effect"] as? String).flatMap(nonEmpty) {
+				var effect = Effect(style: Effect.Style(rawValue: named.lowercased()) ?? .confetti)
+				if let density = number(m["density"]) { effect.density = density }
+				if let speed = number(m["speed"]) { effect.speed = speed }
+				if let seed = m["seed"] as? Int { effect.seed = seed }
+				if let palette = m["palette"] as? [Any] {
+					effect.palette = palette.compactMap { ($0 as? String).flatMap(RGBA.init(hex:)) }
+				}
+				kind = .effect(effect)
 			} else {
 				continue
 			}

@@ -126,11 +126,31 @@ public enum Renderer {
 		// beside the grade, and there is one answer.
 		let overlays = OverlayLayers.build(resolved, size: size, host: host)
 
+		// The effects are drawn into the frame here, in the same pass as the
+		// grade — they are pixels, not layers, and a layer tree cannot hold
+		// three hundred lit slips of card tumbling in depth.
+		let effects: [(overlay: ResolvedOverlay, renderer: EffectRenderer)] =
+			resolved.overlays.compactMap { shown in
+				guard case .effect(let effect) = shown.overlay.kind,
+				      let renderer = EffectRenderer(effect, size: size) else { return nil }
+				return (shown, renderer)
+			}
+
 		let videoComposition = AVMutableVideoComposition(asset: composition) { request in
 			let time = request.compositionTime.seconds
 			let look = grades.last { time >= $0.start - 1e-6 && time < $0.end + 1e-6 }?.look ?? .none
 			var image = Grading.apply(look, to: request.sourceImage)
 			image = image.transformed(by: Grading.fit(image.extent, into: size))
+
+			for (shown, renderer) in effects where time >= shown.start && time <= shown.end {
+				guard let plate = renderer.image(at: time - shown.start) else { continue }
+				let opacity = fade(shown, at: time)
+				guard opacity > 0.001 else { continue }
+				let faded = opacity >= 0.999 ? plate : plate.applyingFilter("CIColorMatrix", parameters: [
+					"inputAVector": CIVector(x: 0, y: 0, z: 0, w: opacity),
+				])
+				image = faded.composited(over: image)
+			}
 			request.finish(with: image, context: nil)
 		}
 		videoComposition.renderSize = size
@@ -192,6 +212,26 @@ public enum Renderer {
 
 		try await write(asset, videoComposition: videoComposition, audioMix: nil,
 		                to: url, progress: progress)
+	}
+
+	/// How far in or out an overlay is at a moment: one at the middle, nothing
+	/// at either edge if it fades.
+	///
+	/// The same in and out an overlay's layers use, in arithmetic rather than
+	/// keyframes, because an effect is composited by hand and there is nothing
+	/// for Core Animation to interpolate.
+	private static func fade(_ shown: ResolvedOverlay, at time: Double) -> Double {
+		let span = max(shown.duration, 0.0001)
+		let arrive = min(shown.overlay.arrival.duration, span / 2)
+		let depart = min(shown.overlay.departure.duration, span / 2)
+		var opacity = 1.0
+		if arrive > 0, time < shown.start + arrive {
+			opacity = min(opacity, (time - shown.start) / arrive)
+		}
+		if depart > 0, time > shown.end - depart {
+			opacity = min(opacity, (shown.end - time) / depart)
+		}
+		return max(0, min(1, opacity))
 	}
 
 	/// Renders to a file.

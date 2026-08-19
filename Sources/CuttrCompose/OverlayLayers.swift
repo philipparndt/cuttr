@@ -39,6 +39,15 @@ public enum OverlayLayers {
 	}
 
 	/// The whole tree, sized to the output frame.
+	/// Whether this overlay is one of the ones drawn as layers.
+	///
+	/// Effects are not: they are geometry with light on it, rendered into the
+	/// frame itself, and a layer tree has nothing to say about them.
+	static func isLayered(_ overlay: Overlay) -> Bool {
+		if case .effect = overlay.kind { return false }
+		return true
+	}
+
 	public static func build(_ resolved: ResolvedProject, size: CGSize, host: Host) -> CALayer {
 		let root = CALayer()
 		root.frame = CGRect(origin: .zero, size: size)
@@ -81,6 +90,9 @@ public enum OverlayLayers {
 		case .text(let text, let styleName):
 			let style = project.style(named: styleName)
 			(content, contentSize) = textLayer(text, style: style, size: size)
+		case .effect:
+			// Drawn into the frame, not over it. Nothing here.
+			return placer
 		case .spinner(let spinner):
 			let built = spinnerLayer(
 				spinner, style: project.style(named: spinner.wordStyle ?? "caption"),

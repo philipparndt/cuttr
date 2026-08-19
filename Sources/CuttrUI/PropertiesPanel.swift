@@ -363,24 +363,70 @@ public final class PropertiesPanel: NSView {
 	// MARK: - overlay
 
 	private func overlayForm(_ index: Int, _ overlay: Overlay) {
-		full(placement(index, overlay))
+		// An effect has no position, so there is nothing to drag it to.
+		if case .effect = overlay.kind {} else { full(placement(index, overlay)) }
 
 		section("what it is")
-		let isText: Bool
-		if case .text = overlay.kind { isText = true } else { isText = false }
-		field("kind", [pop(["text", "spinner"], selected: isText ? 0 : 1) { [weak self] pick in
+		let kinds = ["text", "spinner", "effect"]
+		let current: Int
+		switch overlay.kind {
+		case .text: current = 0
+		case .spinner: current = 1
+		case .effect: current = 2
+		}
+		field("kind", [pop(kinds, selected: current) { [weak self] pick in
 			self?.editOverlay(index) { overlay in
 				switch (pick, overlay.kind) {
 				case (0, .spinner(let spinner)):
 					overlay.kind = .text(spinner.words.first?.text ?? "Caption", style: nil)
+				case (0, .effect):
+					overlay.kind = .text("Caption", style: nil)
 				case (1, .text(let text, _)):
 					overlay.kind = .spinner(Spinner(words: text.isEmpty ? [] : [SpinnerWord(text)]))
+				case (1, .effect):
+					overlay.kind = .spinner(Spinner())
+				case (2, .text), (2, .spinner):
+					overlay.kind = .effect(Effect())
 				default: break
 				}
 			}
 		}])
 
 		switch overlay.kind {
+		case .effect(let effect):
+			field("effect", [pop(Effect.Style.allCases.map(\.rawValue),
+			                     selected: Effect.Style.allCases.firstIndex(of: effect.style) ?? 0) {
+				[weak self] pick in
+				self?.editEffect(index) { $0.style = Effect.Style.allCases[pick] }
+			}], note: "thrown over the whole frame; it has no position and says nothing")
+			field("density", [number(effect.density, width: 72) { [weak self] value in
+				self?.editEffect(index) { $0.density = max(0.05, value) }
+			}, label("× \(effect.count) pieces")])
+			field("speed", [number(effect.speed, width: 72) { [weak self] value in
+				self?.editEffect(index) { $0.speed = max(0.05, value) }
+			}])
+			field("seed", [number(Double(effect.seed), width: 72) { [weak self] value in
+				self?.editEffect(index) { $0.seed = Int(value) }
+			}], note: "the same number gives the same cloud, every render")
+			var swatches: [NSView] = effect.palette.enumerated().map { position, colour in
+				self.colour(colour) { [weak self] picked in
+					self?.editEffect(index) {
+						guard position < $0.palette.count else { return }
+						$0.palette[position] = picked
+					}
+				}
+			}
+			swatches.append(small("+") { [weak self] in
+				self?.editEffect(index) { $0.palette = $0.colours + [.white] }
+			})
+			if !effect.palette.isEmpty {
+				swatches.append(small("−") { [weak self] in
+					self?.editEffect(index) { if !$0.palette.isEmpty { $0.palette.removeLast() } }
+				})
+			}
+			field("palette", swatches,
+			      note: effect.palette.isEmpty ? "the style's own colours" : nil)
+
 		case .text(let content, let style):
 			field("text", [text(content, width: 260, placeholder: "what it says") {
 				[weak self] value in
@@ -509,6 +555,8 @@ public final class PropertiesPanel: NSView {
 
 			var saysControls: [NSView] = []
 			switch overlay.kind {
+			case .effect:
+				saysControls.append(label("an effect says nothing"))
 			case .text(let content, _):
 				saysControls.append(text(appearance.text ?? "", width: 220,
 				                         placeholder: content.isEmpty ? "text" : content) {
@@ -637,6 +685,14 @@ public final class PropertiesPanel: NSView {
 		guard index < next.overlays.count else { return }
 		change(&next.overlays[index])
 		commit(next)
+	}
+
+	private func editEffect(_ index: Int, _ change: (inout Effect) -> Void) {
+		editOverlay(index) { overlay in
+			guard case .effect(var effect) = overlay.kind else { return }
+			change(&effect)
+			overlay.kind = .effect(effect)
+		}
 	}
 
 	private func editSpinner(_ index: Int, _ change: (inout Spinner) -> Void) {
@@ -779,6 +835,9 @@ public final class PropertiesPanel: NSView {
 		preview.anchorName = overlay.anchor
 
 		switch overlay.kind {
+		case .effect:
+			// Never reached: an effect has no placement picture at all.
+			preview.content = .caption("", TextStyle.caption)
 		case .text(let content, let style):
 			preview.content = .caption(content, project.style(named: style))
 		case .spinner(let spinner):

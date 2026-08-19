@@ -70,7 +70,7 @@ public enum Theme {
 	/// appears — in the library, on the programme, on its badge, in the
 	/// properties. Colour is how somebody learns what `#` and `@` mean without
 	/// being told.
-	public enum Kind { case clip, query, list, section, text, spinner, anchor, tag, take }
+	public enum Kind { case clip, query, list, section, text, spinner, effect, anchor, tag, take }
 
 	public static func color(_ kind: Kind) -> NSColor {
 		switch kind {
@@ -80,6 +80,7 @@ public enum Theme {
 		case .section: return base(.violet)
 		case .text: return NSColor(calibratedWhite: 0.85, alpha: 1)
 		case .spinner: return base(.rose)
+		case .effect: return base(.violet)
 		case .anchor: return base(.teal)
 		}
 	}
@@ -104,6 +105,7 @@ public enum Theme {
 		case .section: name = "folder"
 		case .text: name = "textformat"
 		case .spinner: name = "circle.dotted"
+		case .effect: name = "sparkles"
 		case .anchor: name = "scope"
 		}
 		guard let image = NSImage(systemSymbolName: name, accessibilityDescription: name) else {

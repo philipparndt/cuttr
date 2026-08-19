@@ -578,6 +578,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			let kind: Theme.Kind
 			let title: String
 			switch overlay.kind {
+			case .effect(let effect):
+				kind = .effect
+				title = "\(effect.style.rawValue) ×\(effect.count)"
 			case .text(let text, _):
 				kind = .text
 				title = "“\(text)”"

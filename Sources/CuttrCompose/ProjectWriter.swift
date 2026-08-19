@@ -177,6 +177,15 @@ public enum ProjectWriter {
 				case .text(let text, let style):
 					out += "  - text:   \(scalar(text))\n"
 					if let style { out += "    style:  \(scalar(style))\n" }
+				case .effect(let effect):
+					out += "  - effect:  \(effect.style.rawValue)\n"
+					if effect.density != 1 { out += "    density: \(trim(effect.density))\n" }
+					if effect.speed != 1 { out += "    speed:   \(trim(effect.speed))\n" }
+					if effect.seed != 1 { out += "    seed:    \(effect.seed)\n" }
+					if !effect.palette.isEmpty {
+						out += "    palette: ["
+							+ effect.palette.map { scalar($0.hex) }.joined(separator: ", ") + "]\n"
+					}
 				case .spinner(let spinner):
 					out += "  - spinner: \(spinner.style.rawValue)\n"
 					if spinner.size != Spinner().size { out += "    size:    \(trim(spinner.size))\n" }

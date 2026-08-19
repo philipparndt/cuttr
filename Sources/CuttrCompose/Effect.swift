@@ -1,0 +1,107 @@
+import CoreGraphics
+import Foundation
+
+/// Something thrown over the whole frame: confetti, snow, a shower of sparks.
+///
+/// Not a caption and not a spinner. Those two are *placed* — they sit
+/// somewhere, they follow a face, they say something. An effect has no
+/// position: it is the whole frame for as long as it lasts, and what it is for
+/// is the moment rather than the information.
+///
+/// Rendered as real geometry with real light on it — slips of card that tumble
+/// and catch the key light as they turn, rather than flat shapes drifting down.
+/// That is the whole difference between an effect somebody enjoys and one that
+/// looks like a screensaver from 1998, and it costs a scene graph.
+public struct Effect: Sendable, Equatable {
+
+	public enum Style: String, Sendable, CaseIterable {
+		/// Slips of card, tumbling and drifting. The party one.
+		case confetti
+		/// Flakes, slower, smaller, going almost straight down.
+		case snow
+		/// Bright shards thrown upwards and falling back — a burst rather than
+		/// a fall, for the moment something lands.
+		case sparkle
+	}
+
+	public var style: Style
+	/// How much of it, against the style's own idea of enough. Two is twice as
+	/// much card in the air, not bigger pieces.
+	public var density: Double
+	/// How fast it falls or flies.
+	public var speed: Double
+	/// What the pieces are made of. Empty takes the style's own colours.
+	public var palette: [RGBA]
+	/// The same number gives the same cloud, every render, on every machine.
+	///
+	/// An effect nobody can reproduce is one nobody can approve: a director who
+	/// liked the third take of a shower of confetti has to be able to get that
+	/// one back, and "it is random" is not an answer.
+	public var seed: Int
+
+	public init(
+		style: Style = .confetti,
+		density: Double = 1,
+		speed: Double = 1,
+		palette: [RGBA] = [],
+		seed: Int = 1
+	) {
+		self.style = style
+		self.density = density
+		self.speed = speed
+		self.palette = palette
+		self.seed = seed
+	}
+
+	/// The colours a style falls back to when the file names none.
+	public var colours: [RGBA] {
+		guard palette.isEmpty else { return palette }
+		switch style {
+		case .confetti:
+			return [RGBA(hex: "#ff375f")!, RGBA(hex: "#ffd60a")!, RGBA(hex: "#30d158")!,
+			        RGBA(hex: "#0a84ff")!, RGBA(hex: "#bf5af2")!, RGBA(hex: "#ff9f0a")!]
+		case .snow:
+			return [RGBA(hex: "#ffffff")!, RGBA(hex: "#eaf4ff")!]
+		case .sparkle:
+			return [RGBA(hex: "#ffe680")!, RGBA(hex: "#ffffff")!, RGBA(hex: "#ffc74d")!]
+		}
+	}
+
+	/// How many pieces are in the air at once.
+	public var count: Int {
+		let base: Int
+		switch style {
+		case .confetti: base = 160
+		case .snow: base = 220
+		case .sparkle: base = 120
+		}
+		return max(4, min(1200, Int(Double(base) * max(0.05, density))))
+	}
+}
+
+/// The same numbers every time, from a number somebody chose.
+///
+/// `SystemRandomNumberGenerator` would make a render that cannot be repeated,
+/// and this file is the sort of thing a project is diffed and re-rendered from.
+/// Splitmix64: eight lines, and identical on every machine.
+struct Seeded: RandomNumberGenerator {
+	private var state: UInt64
+
+	init(_ seed: Int) {
+		state = UInt64(bitPattern: Int64(seed)) &+ 0x9e37_79b9_7f4a_7c15
+	}
+
+	mutating func next() -> UInt64 {
+		state &+= 0x9e37_79b9_7f4a_7c15
+		var z = state
+		z = (z ^ (z >> 30)) &* 0xbf58_476d_1ce4_e5b9
+		z = (z ^ (z >> 27)) &* 0x94d0_49bb_1331_11eb
+		return z ^ (z >> 31)
+	}
+
+	/// A number in a range, which is all any of this needs.
+	mutating func value(_ range: ClosedRange<Double>) -> Double {
+		let unit = Double(next() >> 11) * (1.0 / 9_007_199_254_740_992.0)
+		return range.lowerBound + unit * (range.upperBound - range.lowerBound)
+	}
+}

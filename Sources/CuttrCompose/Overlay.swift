@@ -15,6 +15,8 @@ public struct Overlay: Sendable, Equatable {
 		case text(String, style: String?)
 		/// A spinner, which is the same shape however it is drawn.
 		case spinner(Spinner)
+		/// Confetti, snow, sparks: the whole frame, for a moment.
+		case effect(Effect)
 	}
 
 	public var kind: Kind
@@ -72,6 +74,10 @@ public struct Overlay: Sendable, Equatable {
 		case .spinner(var spinner):
 			if let words = appearance.words { spinner.words = words }
 			out.kind = .spinner(spinner)
+		case .effect:
+			// An effect says nothing, so an appearance has nothing to say for
+			// it. It is simply on, twice.
+			break
 		}
 		return out
 	}

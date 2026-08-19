@@ -307,6 +307,8 @@ if describe {
 	for shown in resolved.overlays {
 		let what: String
 		switch shown.overlay.kind {
+		case .effect(let effect):
+			what = "effect \(effect.style.rawValue) ×\(effect.count) seed \(effect.seed)"
 		case .text(let text, let style):
 			what = "text \(text.debugDescription) style \(style ?? "lower-third")"
 		case .spinner(let spinner):
