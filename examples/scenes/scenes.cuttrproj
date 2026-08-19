@@ -1,0 +1,49 @@
+# cuttr project — the assembly. Clips are referenced by slug.
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+
+timeline:
+  - card:  00:01.100
+    as:    intro
+  - card:  00:01.100
+    as:    next
+
+overlays:
+  - scene:   next
+    from:   "@next"
+    in:     {fade: true, over: 0.4}
+    out:    {fade: true, over: 0.4}
+
+  - scene:   intro
+    from:   "@intro"
+    in:     {fade: true, over: 0.4}
+    out:    {fade: true, over: 0.4}
+
+scenes:
+  intro:
+    parts:
+      - background: {from: "#0b1220", to: "#1d3557", angle: 90}
+        keys:
+          - {t: 0, opacity: 0}
+          - {t: 0.4, opacity: 1, ease: out}
+      - text:  "{{title}}"
+        style: title
+        tracking: 0.08
+        keys:
+          - {t: 0.3, x: 0.5, y: 0.46, opacity: 0, scale: 0.94}
+          - {t: 1.1, y: 0.5, opacity: 1, scale: 1, ease: out}
+  next:
+    parts:
+      - background: {from: "#1f0c0d", to: "#1d3557", angle: 90}
+        keys:
+          - {t: 0, opacity: 0}
+          - {t: 0.4, opacity: 1, ease: out}
+      - text:  "{{title}}"
+        style: title
+        tracking: 0.08
+        keys:
+          - {t: 0.3, x: 0.5, y: 0.46, opacity: 0, scale: 0.94}
+          - {t: 1.1, y: 0.5, opacity: 1, scale: 1, ease: out}

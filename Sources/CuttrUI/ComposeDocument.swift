@@ -120,9 +120,29 @@ public final class ComposeDocument {
 	}
 
 	private func resolve() {
-		guard let baseURL else { resolved = nil; onChange?(); return }
+		// An untitled project can still be a programme.
+		//
+		// Everything a project points at is relative to where the project sits,
+		// so until it is saved there is nowhere to point *from* — which is why
+		// this used to give up. But a project that points at nothing needs no
+		// somewhere: a card with a scene on it is a whole intro screen, made of
+		// nothing but the file it is written in. Refusing to resolve one left
+		// the window empty with the render button greyed and not a word about
+		// why, which is the worst of both.
+		//
+		// So: resolve anyway when there is nothing to find on disk, and when
+		// there is, say what to do about it rather than going quiet.
+		guard let base = baseURL ?? (project.takes.isEmpty
+			? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true) : nil)
+		else {
+			resolved = nil
+			problem = "Save the project before adding takes — a take is found "
+				+ "relative to where the project sits."
+			onChange?()
+			return
+		}
 		do {
-			resolved = try Resolver.resolve(project, baseURL: baseURL)
+			resolved = try Resolver.resolve(project, baseURL: base)
 			problem = nil
 		} catch {
 			resolved = nil

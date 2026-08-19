@@ -372,3 +372,45 @@ import Testing
 		#expect(written == nil)
 	}
 }
+
+/// A project that has not been saved yet.
+///
+/// Everything a project points at is relative to where it sits, so an untitled
+/// one used to resolve to nothing at all — which greys the render button and
+/// empties the preview without saying why. A programme made of nothing but the
+/// file it is written in has nowhere to point, and needs nowhere.
+@Suite @MainActor struct UntitledProjectTests {
+
+	private func intro() -> Project {
+		var project = Project(timeline: [
+			TimelineEntry(source: .card(Card(duration: 1.1)), label: "intro"),
+		])
+		project.scenes["intro"] = Scene(parts: [
+			Scene.Part(content: .text("Hello", style: nil), keys: [Scene.Key(t: 0, opacity: 1)]),
+		])
+		project.overlays = [
+			Overlay(kind: .scene("intro", with: [:]),
+			        span: .marks(from: .group("intro"), to: .group("intro"))),
+		]
+		return project
+	}
+
+	@Test func anIntroScreenResolvesBeforeItIsSaved() {
+		let document = ComposeDocument()
+		document.apply(intro())
+		#expect(document.resolved != nil, "an untitled card-and-scene project did not resolve")
+		#expect(abs((document.resolved?.duration ?? 0) - 1.1) < 0.001)
+		#expect(document.problem == nil)
+	}
+
+	/// And one that does point at something says what to do rather than going
+	/// quiet.
+	@Test func anUnsavedProjectWithTakesSaysWhy() {
+		let document = ComposeDocument()
+		var project = intro()
+		project.takes = ["takes/one.cuttr"]
+		document.apply(project)
+		#expect(document.resolved == nil)
+		#expect(document.problem?.contains("Save the project") == true)
+	}
+}
