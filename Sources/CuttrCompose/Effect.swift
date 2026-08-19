@@ -30,6 +30,8 @@ public struct Effect: Sendable, Equatable {
 	public var density: Double
 	/// How fast it falls or flies.
 	public var speed: Double
+	/// How big each piece is, against the style's own idea of the right size.
+	public var size: Double
 	/// What the pieces are made of. Empty takes the style's own colours.
 	public var palette: [RGBA]
 	/// The same number gives the same cloud, every render, on every machine.
@@ -43,12 +45,14 @@ public struct Effect: Sendable, Equatable {
 		style: Style = .confetti,
 		density: Double = 1,
 		speed: Double = 1,
+		size: Double = 1,
 		palette: [RGBA] = [],
 		seed: Int = 1
 	) {
 		self.style = style
 		self.density = density
 		self.speed = speed
+		self.size = size
 		self.palette = palette
 		self.seed = seed
 	}

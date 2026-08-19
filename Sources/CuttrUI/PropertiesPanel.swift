@@ -387,6 +387,9 @@ public final class PropertiesPanel: NSView {
 					overlay.kind = .spinner(Spinner())
 				case (2, .text), (2, .spinner):
 					overlay.kind = .effect(Effect())
+					// It arrives by falling into the frame, not by fading up.
+					overlay.arrival = .cut
+					overlay.departure = .fade(over: 0.8)
 				default: break
 				}
 			}
@@ -404,7 +407,10 @@ public final class PropertiesPanel: NSView {
 			}, label("× \(effect.count) pieces")])
 			field("speed", [number(effect.speed, width: 72) { [weak self] value in
 				self?.editEffect(index) { $0.speed = max(0.05, value) }
-			}])
+			}], note: "2 falls twice as fast; 0.5 drifts")
+			field("size", [number(effect.size, width: 72) { [weak self] value in
+				self?.editEffect(index) { $0.size = max(0.05, value) }
+			}], note: "the size of each piece, not how many there are")
 			field("seed", [number(Double(effect.seed), width: 72) { [weak self] value in
 				self?.editEffect(index) { $0.seed = Int(value) }
 			}], note: "the same number gives the same cloud, every render")
@@ -511,24 +517,39 @@ public final class PropertiesPanel: NSView {
 			let appearance = overlay.appearances[position]
 			let span = appearance.span
 			let count = overlay.appearances.count
-			let byMarks: Bool
-			if case .marks = span { byMarks = true } else { byMarks = false }
+			// Three ways of saying when, in the order they should be reached
+			// for: the whole of something, a stretch of something, and — last,
+			// because it does not survive anything moving — the programme's own
+			// clock.
+			let modes = ["whole clip", "inside a clip", "programme times"]
+			let mode: Int
+			switch span {
+			case .marks: mode = 0
+			case .within: mode = 1
+			case .times: mode = 2
+			}
 
-			var controls: [NSView] = [pop(["clips", "times"], selected: byMarks ? 0 : 1) {
-				[weak self] pick in
-				guard let self else { return }
-				switch (pick, span) {
-				case (0, .times):
-					self.setSpan(index, position,
-					             .clips(from: ClipReference("clip"), to: ClipReference("clip")))
-				case (1, .marks):
-					let extent = self.extent(of: span) ?? (0, 5)
-					self.setSpan(index, position, .times(from: extent.0, to: extent.1))
-				default: break
-				}
+			var controls: [NSView] = [pop(modes, selected: mode) { [weak self] pick in
+				guard let self, pick != mode else { return }
+				self.setSpan(index, position, self.convert(span, to: pick))
 			}]
 
 			switch span {
+			case .within(let mark, let from, let to):
+				controls.append(combo(mark.description, values: endpoints, width: 150) {
+					[weak self] value in
+					self?.setSpan(index, position, .within(.init(value), from: from, to: to))
+				})
+				controls.append(text(Timecode.string(from), width: 90, placeholder: "00:00.000") {
+					[weak self] value in
+					guard let seconds = Timecode.parse(value) else { return }
+					self?.setSpan(index, position, .within(mark, from: seconds, to: to))
+				})
+				controls.append(text(Timecode.string(to), width: 90, placeholder: "00:05.000") {
+					[weak self] value in
+					guard let seconds = Timecode.parse(value) else { return }
+					self?.setSpan(index, position, .within(mark, from: from, to: seconds))
+				})
 			case .marks(let from, let to):
 				controls.append(combo(from.description, values: endpoints, width: 150) {
 					[weak self] value in
@@ -550,8 +571,13 @@ public final class PropertiesPanel: NSView {
 					self?.setSpan(index, position, .times(from: from, to: seconds))
 				})
 			}
-			field(count == 1 ? "when" : "when[\(position)]", controls,
-			      note: "bound to clips it survives a re-cut; the same mark twice is one clip, or one whole section")
+			let advice: String
+			switch span {
+			case .marks: advice = "the whole of it, however long it turns out to be"
+			case .within: advice = "so many seconds into that clip — it travels with the clip"
+			case .times: advice = "the programme's own clock: moving anything leaves this behind"
+			}
+			field(count == 1 ? "when" : "when[\(position)]", controls, note: advice)
 
 			var saysControls: [NSView] = []
 			switch overlay.kind {
@@ -597,6 +623,9 @@ public final class PropertiesPanel: NSView {
 					switch last.span {
 					case .times(let from, let to):
 						overlay.appearances.append(.init(.times(from: to, to: to + (to - from))))
+					case .within(let mark, let from, let to):
+						overlay.appearances.append(
+							.init(.within(mark, from: to, to: to + (to - from))))
 					case .marks:
 						overlay.appearances.append(.init(last.span))
 					}
@@ -703,6 +732,37 @@ public final class PropertiesPanel: NSView {
 		}
 	}
 
+	/// The same range, said a different way.
+	///
+	/// Kept as close to what it was as the new form allows: a stretch of a clip
+	/// becomes the whole of that clip, the whole of a clip becomes a stretch
+	/// covering it, and either becomes the programme times it currently
+	/// occupies. Nobody has to type the numbers again to change their mind.
+	private func convert(_ span: Overlay.Span, to mode: Int) -> Overlay.Span {
+		let extent = self.extent(of: span) ?? (0, 5)
+		let mark: Overlay.Span.Endpoint
+		switch span {
+		case .marks(let from, _): mark = from
+		case .within(let within, _, _): mark = within
+		case .times:
+			// Whichever clip the range starts in — the honest guess when the
+			// file said nothing about material at all.
+			let clip = (resolved?.clips ?? []).last { $0.start <= extent.0 + 0.001 }
+				?? resolved?.clips.first
+			mark = .clip(clip?.reference ?? ClipReference("clip"))
+		}
+
+		switch mode {
+		case 0:
+			return .marks(from: mark, to: mark)
+		case 1:
+			let start = self.extent(of: .marks(from: mark, to: mark))?.0 ?? 0
+			return .within(mark, from: max(0, extent.0 - start), to: max(0, extent.1 - start))
+		default:
+			return .times(from: extent.0, to: extent.1)
+		}
+	}
+
 	private func setSpan(_ index: Int, _ position: Int, _ span: Overlay.Span) {
 		editOverlay(index) { overlay in
 			guard position < overlay.appearances.count else { return }
@@ -774,6 +834,9 @@ public final class PropertiesPanel: NSView {
 		switch span {
 		case .times(let from, let to):
 			return (from, to)
+		case .within(let mark, let from, let to):
+			guard let where_ = self.extent(of: .marks(from: mark, to: mark)) else { return nil }
+			return (where_.0 + from, where_.0 + to)
 		case .marks(let from, let to):
 			func edges(_ endpoint: Overlay.Span.Endpoint) -> (Double, Double)? {
 				switch endpoint {
@@ -795,7 +858,7 @@ public final class PropertiesPanel: NSView {
 	/// one is shown and not dragged.
 	private func movable(_ span: Overlay.Span) -> Bool {
 		switch span {
-		case .times: return true
+		case .times, .within: return true
 		case .marks(let from, let to):
 			if case .group = from { return false }
 			if case .group = to { return false }
@@ -812,6 +875,12 @@ public final class PropertiesPanel: NSView {
 		switch existing {
 		case .times:
 			return .times(from: start, to: end)
+		case .within(let mark, _, _):
+			// Dragged on the programme, written down against the clip: the
+			// numbers that go in the file are still "so many seconds into that
+			// shot".
+			guard let where_ = self.extent(of: .marks(from: mark, to: mark)) else { return existing }
+			return .within(mark, from: max(0, start - where_.0), to: max(0, end - where_.0))
 		case .marks:
 			let clips = resolved?.clips ?? []
 			let first = clips.last { $0.start <= start + 0.001 } ?? clips.first

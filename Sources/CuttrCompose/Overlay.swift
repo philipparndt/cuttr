@@ -147,6 +147,18 @@ public struct Overlay: Sendable, Equatable {
 		/// From the start of one mark to the end of another, inclusive. The
 		/// same mark twice is a single clip or a single group.
 		case marks(from: Endpoint, to: Endpoint)
+		/// A stretch of one clip or section, timed from where that starts.
+		///
+		/// The form to reach for when a caption belongs to the middle of a
+		/// shot rather than to the whole of it. It is still bound to the
+		/// material: move the clip up the programme, re-cut the take, put three
+		/// more shots in front of it, and the caption is still four seconds
+		/// into *that* clip. An absolute time is not — which is the flaw this
+		/// case exists to fix.
+		case within(Endpoint, from: Double, to: Double)
+		/// Times on the programme's own clock. Kept because a file may say it
+		/// and because now and then somebody means it; it does not survive
+		/// anything moving.
 		case times(from: Double, to: Double)
 
 		/// A clip by slug, or a section by name.

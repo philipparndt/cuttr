@@ -231,6 +231,26 @@ import Testing
 		}
 	}
 
+	/// A stretch of a clip, written and read back.
+	@Test func aStretchOfAClipSurvivesTheFile() throws {
+		let project = Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"))],
+			overlays: [
+				Overlay(kind: .spinner(Spinner()),
+				        span: .within(.clip(ClipReference("intro")), from: 2.5, to: 6)),
+				Overlay(kind: .text("section", style: nil),
+				        appearances: [
+					        .init(.within(.group("middle"), from: 0, to: 4)),
+					        .init(.within(.clip(ClipReference("outro")), from: 1, to: 2)),
+				        ]),
+			])
+		let text = ProjectWriter.write(project)
+		#expect(text.contains("within: intro"))
+		let back = try ProjectReader.read(text)
+		#expect(back.overlays == project.overlays)
+		#expect(ProjectWriter.write(back) == text)
+	}
+
 	/// One range still writes the way it always did — a project nobody has
 	/// touched must not come out rewritten.
 	@Test func oneRangeIsStillWrittenInLine() {

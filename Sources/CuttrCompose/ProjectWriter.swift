@@ -159,6 +159,10 @@ public enum ProjectWriter {
 	/// When an overlay is on, as the file says it.
 	private static func range(_ span: Overlay.Span, indent: String) -> String {
 		switch span {
+		case .within(let mark, let from, let to):
+			return "\(indent)within: \(scalar(mark.description))\n"
+				+ "\(indent)from:   \(Timecode.string(from))\n"
+				+ "\(indent)to:     \(Timecode.string(to))\n"
 		case .marks(let from, let to):
 			var out = "\(indent)from:   \(scalar(from.description))\n"
 			if to != from { out += "\(indent)to:     \(scalar(to.description))\n" }
@@ -181,6 +185,7 @@ public enum ProjectWriter {
 					out += "  - effect:  \(effect.style.rawValue)\n"
 					if effect.density != 1 { out += "    density: \(trim(effect.density))\n" }
 					if effect.speed != 1 { out += "    speed:   \(trim(effect.speed))\n" }
+					if effect.size != 1 { out += "    size:    \(trim(effect.size))\n" }
 					if effect.seed != 1 { out += "    seed:    \(effect.seed)\n" }
 					if !effect.palette.isEmpty {
 						out += "    palette: ["

@@ -174,3 +174,67 @@ import Testing
 		}
 	}
 }
+
+/// A range timed inside a clip travels with the clip.
+///
+/// Which is the whole point of it, and the flaw it was added to fix: the same
+/// caption written as programme times is left behind the moment anything in
+/// front of it moves, and a project file that has to be maintained alongside
+/// the timeline is a project file that will be wrong.
+@Suite struct RelativeSpanTests {
+
+	private func project(order: [String]) -> Project {
+		Project(
+			takes: [],
+			timeline: order.map { TimelineEntry(clip: ClipReference($0)) },
+			overlays: [
+				Overlay(kind: .text("here", style: nil),
+				        span: .within(.clip(ClipReference("second")), from: 1, to: 3)),
+				Overlay(kind: .text("absolute", style: nil),
+				        span: .times(from: 11, to: 13)),
+			])
+	}
+
+	/// Two clips of ten seconds each, in one order and then the other.
+	private func resolve(_ project: Project) throws -> [(String, Double, Double)] {
+		let clips = project.timeline.enumerated().map { index, entry -> ResolvedClip in
+			var clip = Clip(slug: entry.source.description, start: 0, end: 10)
+			clip.name = ""
+			return ResolvedClip(
+				reference: ClipReference(entry.source.description), takeName: "take",
+				clip: clip, videoURL: nil, audioURL: nil, audioOffset: 0,
+				start: Double(index) * 10)
+		}
+		return clips.map { ($0.reference.slug, $0.start, $0.end) }
+	}
+
+	@Test func movingTheClipMovesWhatWasTimedInsideIt() throws {
+		// Resolved by hand, because the resolver needs media it cannot have in a
+		// test: what matters is the arithmetic the resolver does on the extents.
+		func extent(of span: Overlay.Span, clips: [(String, Double, Double)]) -> (Double, Double)? {
+			switch span {
+			case .times(let from, let to):
+				return (from, to)
+			case .within(let mark, let from, let to):
+				guard case .clip(let reference) = mark,
+				      let clip = clips.first(where: { $0.0 == reference.slug }) else { return nil }
+				return (clip.1 + from, clip.1 + to)
+			case .marks(let from, _):
+				guard case .clip(let reference) = from,
+				      let clip = clips.first(where: { $0.0 == reference.slug }) else { return nil }
+				return (clip.1, clip.2)
+			}
+		}
+
+		let first = try resolve(project(order: ["first", "second"]))
+		let swapped = try resolve(project(order: ["second", "first"]))
+		let overlays = project(order: ["first", "second"]).overlays
+
+		// Second clip starts at 10, so "one second in" is 11.
+		#expect(extent(of: overlays[0].span, clips: first)! == (11, 13))
+		// Swapped, that clip starts at 0 — and the caption goes with it.
+		#expect(extent(of: overlays[0].span, clips: swapped)! == (1, 3))
+		// The absolute one stays where it was, which is now the wrong clip.
+		#expect(extent(of: overlays[1].span, clips: swapped)! == (11, 13))
+	}
+}

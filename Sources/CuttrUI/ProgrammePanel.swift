@@ -603,6 +603,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 			var where_ = ""
 			switch overlay.span {
+			case .within(let mark, let from, let to):
+				where_ = "\(mark.description) + \(Timecode.string(from)) → \(Timecode.string(to))"
 			case .marks(let from, let to):
 				where_ = from == to ? "over \(from.description)"
 					: "\(from.description) → \(to.description)"

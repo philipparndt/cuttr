@@ -27,11 +27,15 @@ import Testing
 			return (Double(lit) / Double(width * height), "")
 		}
 
-		let first = try coverage(at: 0.5)
-		let later = try coverage(at: 2.5)
-		print("coverage at 0.5s:", first.covered, "at 2.5s:", later.covered)
-		#expect(first.covered > 0.02, "the frame is empty: \(first.covered)")
-		#expect(later.covered > 0.02)
+		// It falls in: nothing at the first frame, filling within a couple of
+		// seconds. Starting full and fading up is what it must *not* do.
+		let atStart = try coverage(at: 0)
+		let soon = try coverage(at: 1.5)
+		let full = try coverage(at: 4)
+		print("coverage at 0s:", atStart.covered, "1.5s:", soon.covered, "4s:", full.covered)
+		#expect(atStart.covered < 0.005, "the frame is already full at zero: \(atStart.covered)")
+		#expect(soon.covered > atStart.covered)
+		#expect(full.covered > 0.02, "it never fills: \(full.covered)")
 	}
 }
 

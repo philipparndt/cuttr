@@ -243,11 +243,15 @@ final class EffectRenderer: @unchecked Sendable {
 				// flight, not a loop, because a burst that repeats is a fountain.
 				y = floor + piece.lift * t - 4.9 * t * t / 2
 			} else {
-				// A loop: falling for ever, wrapped, and started part-way down
-				// so the frame is full at the first frame rather than empty for
-				// two seconds while the first pieces arrive.
-				let fallen = piece.fall * t + piece.phase / (2 * .pi) * height
-				y = ceiling - fallen.truncatingRemainder(dividingBy: height)
+				// It falls in from above rather than being there already: at
+				// zero every piece is over the top of the frame, spread out, so
+				// the first of them arrive within a moment and the rest follow.
+				// Starting the frame full and fading it up is the thing that
+				// looks like a screensaver.
+				let entry = piece.phase / (2 * .pi) * height * 1.6
+				let fallen = piece.fall * t - entry
+				let wrapped = fallen.truncatingRemainder(dividingBy: height + entry)
+				y = ceiling - (fallen < 0 ? fallen : wrapped)
 			}
 			let sway: Float = piece.sway * sin(piece.swayRate * t + piece.phase)
 			let x: Float = piece.x + sway
@@ -256,7 +260,8 @@ final class EffectRenderer: @unchecked Sendable {
 			let yaw: Float = piece.spinY * t + piece.phase
 			let roll: Float = piece.spinZ * t
 			piece.node.eulerAngles = SCNVector3(pitch, yaw, roll)
-			piece.node.scale = SCNVector3(piece.size, piece.size, piece.size)
+			let scale = piece.size * Float(max(0.05, effect.size))
+			piece.node.scale = SCNVector3(scale, scale, scale)
 		}
 	}
 

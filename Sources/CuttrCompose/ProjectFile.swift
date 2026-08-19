@@ -181,6 +181,7 @@ public enum ProjectReader {
 				var effect = Effect(style: Effect.Style(rawValue: named.lowercased()) ?? .confetti)
 				if let density = number(m["density"]) { effect.density = density }
 				if let speed = number(m["speed"]) { effect.speed = speed }
+				if let size = number(m["size"]) { effect.size = size }
 				if let seed = m["seed"] as? Int { effect.seed = seed }
 				if let palette = m["palette"] as? [Any] {
 					effect.palette = palette.compactMap { ($0 as? String).flatMap(RGBA.init(hex:)) }
@@ -194,6 +195,15 @@ public enum ProjectReader {
 			// singular — the same three keys, in a list — so learning the one
 			// teaches the other.
 			func range(_ fields: [String: Any]) -> Overlay.Span? {
+				// A stretch of one clip, timed from where that clip starts —
+				// which is what makes it survive the clip being moved.
+				if let mark = (fields["within"] as? String).flatMap(nonEmpty) {
+					let from = (fields["from"] as? String).flatMap(Timecode.parse)
+						?? (try? time(fields["from"], key: "from")) as? Double ?? 0
+					let to = (fields["to"] as? String).flatMap(Timecode.parse)
+						?? (try? time(fields["to"], key: "to")) as? Double ?? 0
+					return .within(.init(mark), from: from, to: max(from, to))
+				}
 				// `group: introduction` is the same as `from: @introduction`,
 				// and is worth its own key because hanging a caption on a whole
 				// section is the commonest thing anybody wants to do with one.

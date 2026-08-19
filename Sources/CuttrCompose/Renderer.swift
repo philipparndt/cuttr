@@ -254,10 +254,13 @@ public enum Renderer {
 		let arrive = min(shown.overlay.arrival.duration, span / 2)
 		let depart = min(shown.overlay.departure.duration, span / 2)
 		var opacity = 1.0
-		if arrive > 0, time < shown.start + arrive {
+		// Only a fade fades. An effect cannot slide — it is the whole frame —
+		// so anything else simply starts, which for confetti means the first
+		// pieces arriving over the top edge.
+		if case .fade = shown.overlay.arrival, arrive > 0, time < shown.start + arrive {
 			opacity = min(opacity, (time - shown.start) / arrive)
 		}
-		if depart > 0, time > shown.end - depart {
+		if case .fade = shown.overlay.departure, depart > 0, time > shown.end - depart {
 			opacity = min(opacity, (shown.end - time) / depart)
 		}
 		return max(0, min(1, opacity))

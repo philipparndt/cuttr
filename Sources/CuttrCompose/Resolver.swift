@@ -358,6 +358,24 @@ public enum Resolver {
 				case .times(let a, let b):
 					start = a
 					end = b
+				case .within(let mark, let a, let b):
+					// Timed from where the clip or section starts, so it travels
+					// with it.
+					func extent(_ endpoint: Overlay.Span.Endpoint) throws -> (start: Double, end: Double) {
+						switch endpoint {
+						case .clip(let reference):
+							guard let first = clips.first(where: { $0.reference.slug == reference.slug }),
+							      let last = clips.last(where: { $0.reference.slug == reference.slug })
+							else { throw ResolveError.unknownClip(reference) }
+							return (first.start, last.end)
+						case .group(let name):
+							guard let range = groups[name] else { throw ResolveError.unknownGroup(name) }
+							return range
+						}
+					}
+					let where_ = try extent(mark)
+					start = where_.start + a
+					end = where_.start + b
 				case .marks(let from, let to):
 					// Mark-bound, which is the point: the caption belongs to a
 					// section of the programme, so re-cutting the takes moves it.
