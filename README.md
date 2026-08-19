@@ -343,6 +343,7 @@ A scene has no length of its own, and the editor's "runs for" box is not
 written to the file. A scene plays for as long as the overlay using it is on
 screen — which is what lets one intro run four seconds in this episode and six
 in the next.
+
 ### Cards — programme with nothing behind it
 
 An intro screen is a stretch of programme that exists to be drawn on, so it is
