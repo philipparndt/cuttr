@@ -202,6 +202,34 @@ public final class ProgrammeStrip: NSView {
 			}
 		}
 
+		// The sounds, under the overlays, because that is where they are: laid
+		// beneath the programme rather than over it. Shown and not dragged —
+		// a sound is bound to a clip or a section like an overlay is, but there
+		// is no picture to place it against, so it is edited in the panel.
+		var soundRows: [Double] = []
+		let soundTop = top + clipRowHeight + CGFloat(rows.count) * overlayRowHeight + 2
+		for sound in resolved.sounds {
+			let row = soundRows.firstIndex { $0 <= sound.start + 1e-9 } ?? soundRows.count
+			if row < soundRows.count { soundRows[row] = sound.end } else { soundRows.append(sound.end) }
+			let a = x(for: sound.start), b = x(for: sound.end)
+			let y = soundTop + CGFloat(row) * overlayRowHeight
+			let rect = NSRect(x: a, y: y + 1, width: max(b - a - 1, 2), height: overlayRowHeight - 3)
+			let colour = Theme.color(.sound)
+			colour.withAlphaComponent(0.28).setFill()
+			rect.fill()
+			colour.setStroke()
+			NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5)).stroke()
+			var label = (sound.sound.file as NSString).lastPathComponent
+			if sound.sound.ducks != 0 { label += " ▼" }
+			let attributes: [NSAttributedString.Key: Any] = [
+				.font: Theme.monoSmall, .foregroundColor: Theme.text,
+			]
+			if (label as NSString).size(withAttributes: attributes).width < rect.width - 6 {
+				(label as NSString).draw(at: NSPoint(x: rect.minX + 3, y: rect.minY + 1),
+				                         withAttributes: attributes)
+			}
+		}
+
 		let px = x(for: playhead).rounded() + 0.5
 		Theme.playhead.setStroke()
 		let line = NSBezierPath()

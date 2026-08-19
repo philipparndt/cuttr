@@ -7,6 +7,7 @@ public enum ProjectSelection: Equatable {
 	case output
 	case entry([Int])
 	case overlay(Int)
+	case sound(Int)
 }
 
 /// The programme: what plays, in order, with what is drawn over it.
@@ -36,12 +37,15 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	private let outline = NSOutlineView()
 	private let overlayTable = NSTableView()
+	private let soundTable = NSTableView()
 	/// What to do when there is nothing there yet. An empty list that says
 	/// nothing looks like a list that is broken.
 	private let programmeHint = ProgrammePanel.hint(
 		"Drag a clip or a #tag from the library, or press + Clip")
 	private let overlayHint = ProgrammePanel.hint(
 		"Select where it should go, then + Text or + Spinner")
+	private let soundHint = ProgrammePanel.hint(
+		"Music, an atmosphere, a sting — a file, and when it plays")
 
 	/// Dragging an entry means dragging its position, so the position is what
 	/// travels: `0.2.1` is the second entry of the third entry of the first.
@@ -74,15 +78,17 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 		let programme = buildOutline()
 		let overlays = buildOverlays()
+		let sounds = buildSounds()
 
-		// The cut above, what is laid over it below, in that order because that
-		// is the order they happen in: a caption is drawn over a clip that has
-		// to exist first.
+		// The cut above, what is laid over it under that, and what is laid
+		// under it at the bottom — in the order they happen: a caption is drawn
+		// over a clip that has to exist first, and music goes under the lot.
 		let split = NSSplitView()
 		split.isVertical = false
 		split.dividerStyle = .thin
 		split.addArrangedSubview(programme)
 		split.addArrangedSubview(overlays)
+		split.addArrangedSubview(sounds)
 		split.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(split)
 		NSLayoutConstraint.activate([
@@ -91,7 +97,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			split.leadingAnchor.constraint(equalTo: leadingAnchor),
 			split.trailingAnchor.constraint(equalTo: trailingAnchor),
 			programme.heightAnchor.constraint(greaterThanOrEqualToConstant: 160),
-			overlays.heightAnchor.constraint(greaterThanOrEqualToConstant: 120),
+			overlays.heightAnchor.constraint(greaterThanOrEqualToConstant: 100),
+			sounds.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
 		])
 	}
 
@@ -301,6 +308,57 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		])
 	}
 
+	private func buildSounds() -> NSView {
+		soundTable.dataSource = self
+		soundTable.delegate = self
+		soundTable.rowHeight = 34
+		soundTable.backgroundColor = Theme.panel
+		soundTable.gridStyleMask = []
+		soundTable.headerView = nil
+		soundTable.intercellSpacing = NSSize(width: 0, height: 2)
+		let column = NSTableColumn(identifier: .init("sound"))
+		column.width = 420
+		soundTable.addTableColumn(column)
+
+		let scroll = TableScroll.fitting(soundTable)
+		over(scroll, soundHint)
+		return pane("sounds", scroll, [
+			button("waveform", #selector(addSound),
+			       "Add a sound under the programme: music, an atmosphere, a sting"),
+			button("plus.square.on.square", #selector(duplicateSound), "Another one just like it"),
+			button("minus", #selector(removeSound), "Take it off"),
+		])
+	}
+
+	@objc private func addSound() {
+		var next = project
+		// Under speech more often than not, so it arrives at a level that will
+		// not drown anybody and fades rather than starting flat out.
+		next.sounds.append(Sound(
+			file: "music.wav", span: spanForNewOverlay, gain: -6,
+			arrival: .fade(over: 0.5), departure: .fade(over: 1.5)))
+		pending = .sound(next.sounds.count - 1)
+		onChange?(next)
+	}
+
+	@objc private func duplicateSound() {
+		let row = soundTable.selectedRow
+		guard row >= 0, row < project.sounds.count else { return }
+		var next = project
+		next.sounds.insert(project.sounds[row], at: row + 1)
+		pending = .sound(row + 1)
+		onChange?(next)
+	}
+
+	@objc private func removeSound() {
+		let row = soundTable.selectedRow
+		guard row >= 0, row < project.sounds.count else { return }
+		var next = project
+		next.sounds.remove(at: row)
+		pending = .output
+		onChange?(next)
+	}
+
 	/// The clip or section a new overlay should cover: whatever is selected on
 	/// the programme, or the first thing on it.
 	private var spanForNewOverlay: Overlay.Span {
@@ -369,8 +427,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		pending = nil
 		outline.reloadData()
 		overlayTable.reloadData()
+		soundTable.reloadData()
 		programmeHint.isHidden = !project.timeline.isEmpty
 		overlayHint.isHidden = !project.overlays.isEmpty
+		soundHint.isHidden = !project.sounds.isEmpty
 		expandAll()
 
 		switch keep {
@@ -381,12 +441,19 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				outline.deselectAll(nil)
 			}
 			overlayTable.deselectAll(nil)
+			soundTable.deselectAll(nil)
 		case .overlay(let index) where index < project.overlays.count:
 			overlayTable.selectRowIndexes([index], byExtendingSelection: false)
 			outline.deselectAll(nil)
+			soundTable.deselectAll(nil)
+		case .sound(let index) where index < project.sounds.count:
+			soundTable.selectRowIndexes([index], byExtendingSelection: false)
+			outline.deselectAll(nil)
+			overlayTable.deselectAll(nil)
 		default:
 			outline.deselectAll(nil)
 			overlayTable.deselectAll(nil)
+			soundTable.deselectAll(nil)
 		}
 		selection = keep
 		onSelect?(selection)
@@ -519,9 +586,19 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	// MARK: - Overlay list
 
-	public func numberOfRows(in tableView: NSTableView) -> Int { project.overlays.count }
+	public func numberOfRows(in tableView: NSTableView) -> Int {
+		tableView === soundTable ? project.sounds.count : project.overlays.count
+	}
 
 	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+		if tableView === soundTable {
+			guard row < project.sounds.count else { return nil }
+			let view = (tableView.makeView(withIdentifier: .init("sound"), owner: self) as? SoundRow)
+				?? { let view = SoundRow(); view.identifier = .init("sound"); return view }()
+			view.sound = project.sounds[row]
+			view.needsDisplay = true
+			return view
+		}
 		guard row < project.overlays.count else { return nil }
 		let view = (tableView.makeView(withIdentifier: .init("overlay"), owner: self) as? OverlayRow)
 			?? { let view = OverlayRow(); view.identifier = .init("overlay"); return view }()
@@ -535,15 +612,25 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	public func outlineViewSelectionDidChange(_ notification: Notification) {
 		guard let path = selectedPath else { return }
 		if overlayTable.selectedRow >= 0 { overlayTable.deselectAll(nil) }
+		if soundTable.selectedRow >= 0 { soundTable.deselectAll(nil) }
 		selection = .entry(path)
 		onSelect?(selection)
 	}
 
 	public func tableViewSelectionDidChange(_ notification: Notification) {
-		let row = overlayTable.selectedRow
-		guard row >= 0, row < project.overlays.count else { return }
-		if outline.selectedRow >= 0 { outline.deselectAll(nil) }
-		selection = .overlay(row)
+		guard let table = notification.object as? NSTableView else { return }
+		let row = table.selectedRow
+		if table === soundTable {
+			guard row >= 0, row < project.sounds.count else { return }
+			if outline.selectedRow >= 0 { outline.deselectAll(nil) }
+			if overlayTable.selectedRow >= 0 { overlayTable.deselectAll(nil) }
+			selection = .sound(row)
+		} else {
+			guard row >= 0, row < project.overlays.count else { return }
+			if outline.selectedRow >= 0 { outline.deselectAll(nil) }
+			if soundTable.selectedRow >= 0 { soundTable.deselectAll(nil) }
+			selection = .overlay(row)
+		}
 		onSelect?(selection)
 	}
 
@@ -552,6 +639,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	public func selectOutput() {
 		outline.deselectAll(nil)
 		overlayTable.deselectAll(nil)
+		soundTable.deselectAll(nil)
 		selection = .output
 		onSelect?(selection)
 	}
@@ -649,6 +737,40 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			]
 			(text as NSString).draw(at: NSPoint(x: x, y: bounds.height / 2 - 6), withAttributes: attributes)
 			return x + (text as NSString).size(withAttributes: attributes).width
+		}
+	}
+
+	/// One sound, drawn: the file, when it plays, and what it does to the
+	/// programme underneath it.
+	fileprivate final class SoundRow: NSTableCellView {
+		var sound = Sound(file: "", span: .times(from: 0, to: 0))
+
+		override func draw(_ dirtyRect: NSRect) {
+			if let image = Theme.symbol(.sound, size: 13) {
+				Theme.draw(image, in: NSRect(x: 3, y: bounds.height / 2 - 8, width: 20, height: 16))
+			}
+			// The file's own name, not the path: a column of `music/` says
+			// nothing, and the folder is in the properties beside it.
+			let name = (sound.file as NSString).lastPathComponent
+			(name as NSString).draw(
+				at: NSPoint(x: 26, y: bounds.midY + 1),
+				withAttributes: [.font: Theme.bodyStrong, .foregroundColor: Theme.text])
+
+			var where_ = ""
+			switch sound.span {
+			case .within(let mark, let from, let to):
+				where_ = "\(mark.description) + \(Timecode.string(from)) → \(Timecode.string(to))"
+			case .marks(let from, let to):
+				where_ = from == to ? "under \(from.description)"
+					: "\(from.description) → \(to.description)"
+			case .times(let from, let to):
+				where_ = "\(Timecode.string(from)) → \(Timecode.string(to))"
+			}
+			if sound.gain != 0 { where_ += "   \(TakeWriter.number(sound.gain, places: 1)) dB" }
+			if sound.ducks != 0 { where_ += "   ducks \(TakeWriter.number(sound.ducks, places: 1))" }
+			(where_ as NSString).draw(
+				at: NSPoint(x: 26, y: bounds.midY - 14),
+				withAttributes: [.font: Theme.monoSmall, .foregroundColor: Theme.dimText])
 		}
 	}
 

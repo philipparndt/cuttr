@@ -290,6 +290,7 @@ leaves every project still correct. That is what the slug is for.
 | `- query: "#b-roll and not #reject"` | every clip the query selects |
 | `- tag: b-roll` | sugar for `query: "#b-roll"` |
 | `- group: name` + `clips:` | a named section; they nest |
+| `- card: 00:04.000` | time with no take behind it |
 
 Queries are over the tags you put on clips in the cutting window: `#tag`,
 `take-01/#tag`, `take-01/*`, a bare slug, combined with `and`, `or`, `not` and
@@ -304,6 +305,62 @@ introduction`, or `from: @a to: @b`, or `from: intro to: demo`. The in and out
 animations are taken from inside the span, so two overlays whose spans meet
 cross at the boundary — the first slides out to the right exactly as the second
 slides in from the left, with nothing to keep in step by hand.
+
+### Cards — programme with nothing behind it
+
+An intro screen is a stretch of programme that exists to be drawn on, so it is
+not a reference to anything. A card is a length and a colour:
+
+```yaml
+timeline:
+  - card:  00:04.000
+    fill:  "#101014"
+    as:    intro
+  - intro-shot
+```
+
+`fill:` is one colour, or two read down the page — `fill: ["#202030",
+"#050508"]` — for a vertical gradient, and it is left out altogether when the
+card is black, which is what a card is when nobody says. Everything else about a
+card is what any entry has: `as:` names the placement so an overlay can hang on
+`@intro`, `transition:` lets the first shot dissolve out of it, and it goes
+inside a `group:` like anything else. Overlays and film mode draw over a card
+exactly as they draw over a shot, because a card is only the picture underneath.
+
+Nothing plays under a card: the sound stops where the shot before it stopped and
+starts again with the next one.
+
+### Sounds — audio that is not from a take
+
+Music, an atmosphere, a sting. A take is a recording somebody cut into clips,
+and a music bed is not that, so it lives at the top level beside the overlays:
+
+```yaml
+sounds:
+  - file:  music/opening.wav
+    group: intro
+    gain:  -6
+    in:    {fade: true, over: 0.5}
+    out:   {fade: true, over: 1.5}
+    ducks: 8
+```
+
+**When it plays is said in exactly the words an overlay uses** — `group:`,
+`from:`/`to:`, `within:` a clip and its two times, or plain programme times —
+because it is the same question, and the same rule applies: bound to marks, a
+sound moves when the takes are re-cut. A clip used twice is two places, so a
+sound hung on it plays twice rather than across the middle.
+
+`gain:` is decibels on the file as it is. `in:` and `out:` are fades (only a
+fade means anything to a sound; it cannot slide in from the left). `ducks:` is
+how far the programme's own sound is pulled under this one, in decibels — it
+goes down as the sound fades up and comes back as it fades away, so it reads as
+room being made rather than as a drop. A sound shorter than its span stops
+rather than starting again.
+
+Sounds that are not on at once share one lane; two that overlap get one each.
+Paths are relative to the project file, the same as the takes, and a file that
+is not there is named rather than left as a silent track.
 
 ### Anchors — things pinned to a face
 
