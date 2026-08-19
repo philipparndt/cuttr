@@ -97,6 +97,30 @@ public struct ResolvedClip: Sendable {
 	}
 }
 
+/// A card, placed on the programme's clock.
+///
+/// A type of its own rather than a widened ``ResolvedClip``, and the reason is
+/// what the fields of that one are: a reference, a take name, a clip, two media
+/// URLs, an audio offset, a measured gain and a grade. Every one of them is a
+/// fact about a recording, and a card has no recording. Widening would have
+/// made eight fields optional and pushed an `if let` into the trim dialog, the
+/// grade, the loudness pass and the anchor mapping — none of which can ever
+/// mean anything for a card — in exchange for one merged array. This way each
+/// type is entirely about one kind of thing, and the one place that genuinely
+/// wants them interleaved says so: ``ResolvedProject/programme``.
+public struct ResolvedCard: Sendable, Equatable {
+	public let card: Card
+	/// Which timeline entry put this here — a path, the same as a clip's.
+	public var entry: [Int] = []
+	public let start: Double
+	/// How long this overlaps what came before it, in seconds. A card can be
+	/// dissolved into exactly as a shot can.
+	public var transition: Double = 0
+	public var blend: Transition = .cut
+	public var duration: Double { card.duration }
+	public var end: Double { start + card.duration }
+}
+
 /// An overlay with its times worked out.
 public struct ResolvedOverlay: Sendable {
 	public let overlay: Overlay
@@ -157,11 +181,68 @@ public struct ResolvedProject: Sendable {
 	/// a logo, a badge, a texture.
 	public var baseURL: URL = URL(fileURLWithPath: ".")
 	public let clips: [ResolvedClip]
+	/// The stretches with no footage behind them, in the order they play.
+	public var cards: [ResolvedCard] = []
 	public let overlays: [ResolvedOverlay]
 	public let groups: [ResolvedGroup]
 	/// Every anchor the takes brought, with its path on the programme's clock.
 	public let anchors: [(anchor: Anchor, path: AnchorPath?)]
-	public var duration: Double { clips.last?.end ?? 0 }
+	public var duration: Double { max(clips.last?.end ?? 0, cards.last?.end ?? 0) }
+
+	/// Everything that occupies time, in the order it plays.
+	///
+	/// The renderer's instruction list is a sequence of stretches of programme
+	/// and does not care which kind each one is; everything else — the grade,
+	/// the trim dialog, the strip's take names — wants one kind or the other.
+	/// So they are kept apart and put in order here, which is the only place
+	/// that needs them together.
+	public var programme: [Placement] {
+		(clips.map(Placement.clip) + cards.map(Placement.card))
+			.sorted { $0.start < $1.start }
+	}
+}
+
+/// One thing on the programme: a shot, or a card.
+public enum Placement: Sendable {
+	case clip(ResolvedClip)
+	case card(ResolvedCard)
+
+	public var start: Double {
+		switch self {
+		case .clip(let clip): return clip.start
+		case .card(let card): return card.start
+		}
+	}
+
+	public var duration: Double {
+		switch self {
+		case .clip(let clip): return clip.duration
+		case .card(let card): return card.duration
+		}
+	}
+
+	public var end: Double { start + duration }
+
+	/// How long this overlaps what came before it.
+	public var transition: Double {
+		switch self {
+		case .clip(let clip): return clip.transition
+		case .card(let card): return card.transition
+		}
+	}
+
+	public var blend: Transition {
+		switch self {
+		case .clip(let clip): return clip.blend
+		case .card(let card): return card.blend
+		}
+	}
+
+	/// The card's fill, for the one that has one.
+	public var fill: Card.Fill? {
+		if case .card(let card) = self { return card.card.fill }
+		return nil
+	}
 }
 
 public enum Resolver {
@@ -231,7 +312,15 @@ public enum Resolver {
 		}
 
 		var clips: [ResolvedClip] = []
+		var cards: [ResolvedCard] = []
 		var cursor = 0.0
+		/// How long the last thing laid down was, whatever kind it was.
+		///
+		/// A dissolve is never longer than half of either side, and "either
+		/// side" now includes a card — so the length has to be carried rather
+		/// than read off the end of the clip list, which no longer knows what
+		/// came immediately before.
+		var previousLength: Double?
 		/// Where each named section begins and ends, once its contents are laid
 		/// out. Recorded while flattening rather than computed afterwards,
 		/// because a group's extent is exactly what its entries produced — and
@@ -245,6 +334,17 @@ public enum Resolver {
 		/// it may be a section or a query: what dissolves is the first clip that
 		/// comes out of it, whatever that turns out to be.
 		var pending = Transition.cut
+
+		/// `as:` names this placement, and a named placement is a section of
+		/// one entry — the same thing an overlay hangs on, so nothing
+		/// downstream has to learn a new idea. A card wants one more than a
+		/// clip does: `@intro` is the only way a title finds it.
+		func name(_ label: String?, from: Double, to: Double, depth: Int) {
+			guard let label else { return }
+			let existing = groups[label]
+			groups[label] = (min(existing?.start ?? from, from), max(existing?.end ?? to, to))
+			groupDepth[label] = groupDepth[label] ?? depth
+		}
 
 		func lay(out entries: [TimelineEntry], depth: Int = 0, at prefix: [Int] = []) throws {
 			for (position, entry) in entries.enumerated() {
@@ -264,6 +364,28 @@ public enum Resolver {
 					continue
 				}
 
+				if case .card(let card) = entry.source {
+					// A card of no length is not a frame of nothing, it is
+					// nothing — the same rule a clip trimmed to nothing gets.
+					guard card.duration > 0 else { continue }
+					var overlap = 0.0
+					var blend = Transition.cut
+					if pending.duration > 0, let previousLength {
+						overlap = min(pending.duration, previousLength / 2, card.duration / 2)
+						blend = Transition(pending.kind, seconds: overlap, edge: pending.edge)
+						cursor -= overlap
+					}
+					pending = .cut
+					let placedAt = cursor
+					cards.append(ResolvedCard(
+						card: card, entry: path, start: cursor,
+						transition: overlap, blend: blend))
+					cursor += card.duration
+					previousLength = card.duration
+					name(entry.label, from: placedAt, to: cursor, depth: depth)
+					continue
+				}
+
 				let found: [(name: String, take: Take, directory: URL, clip: Clip)]
 				switch entry.source {
 				case .clip(let reference):
@@ -277,8 +399,8 @@ public enum Resolver {
 					// worst way to find that out.
 					guard !selected.isEmpty else { throw ResolveError.emptyQuery(source) }
 					found = selected
-				case .group:
-					continue   // handled above
+				case .group, .card:
+					continue   // both handled above
 				}
 
 				let trim = entry.trim
@@ -300,8 +422,8 @@ public enum Resolver {
 					// run past both.
 					var overlap = 0.0
 					var blend = Transition.cut
-					if pending.duration > 0, let last = clips.last {
-						overlap = min(pending.duration, last.duration / 2, clip.duration / 2)
+					if pending.duration > 0, let previousLength {
+						overlap = min(pending.duration, previousLength / 2, clip.duration / 2)
 						blend = Transition(pending.kind, seconds: overlap, edge: pending.edge)
 						cursor -= overlap
 					}
@@ -328,21 +450,16 @@ public enum Resolver {
 						transition: overlap,
 						blend: blend))
 					cursor += clip.duration
-					// `as:` names this placement, and a named placement is a
-					// section of one clip — the same thing an overlay hangs on,
-					// so nothing downstream has to learn a new idea.
-					if let label {
-						let existing = groups[label]
-						groups[label] = (min(existing?.start ?? placedAt, placedAt),
-						                 max(existing?.end ?? cursor, cursor))
-						groupDepth[label] = groupDepth[label] ?? depth
-					}
+					previousLength = clip.duration
+					name(label, from: placedAt, to: cursor, depth: depth)
 				}
 			}
 		}
 		guard !project.timeline.isEmpty else { throw ResolveError.nothingOnTheTimeline }
 		try lay(out: project.timeline)
-		guard !clips.isEmpty else { throw ResolveError.emptyProgramme }
+		// A programme of nothing but cards is a programme: an intro screen with
+		// a title over it and no footage at all is a thing somebody makes.
+		guard !clips.isEmpty || !cards.isEmpty else { throw ResolveError.emptyProgramme }
 
 		// Levels and grades.
 		//
@@ -512,7 +629,7 @@ public enum Resolver {
 		let resolvedAnchors = anchorsByName.keys.sorted().map {
 			(anchor: anchorsByName[$0]!, path: paths[$0])
 		}
-		return ResolvedProject(project: project, baseURL: baseURL, clips: clips, overlays: overlays,
-		                       groups: resolvedGroups, anchors: resolvedAnchors)
+		return ResolvedProject(project: project, baseURL: baseURL, clips: clips, cards: cards,
+		                       overlays: overlays, groups: resolvedGroups, anchors: resolvedAnchors)
 	}
 }

@@ -142,6 +142,13 @@ public struct TimelineEntry: Sendable, Equatable {
 		case list([ClipReference])
 		/// Every clip a query selects, sorted by each clip's own `order`.
 		case query(ClipQuery, source: String)
+		/// Time on the programme with no take behind it: a length and a fill.
+		///
+		/// The one entry that is not a reference. An intro screen is a stretch
+		/// of programme that exists to be drawn on, and making somebody shoot
+		/// four seconds of a blank wall to have somewhere to put a title is not
+		/// an assembly language.
+		case card(Card)
 		/// A named section of the programme.
 		///
 		/// Groups exist so that an overlay can be hung on a *section* rather
@@ -156,6 +163,7 @@ public struct TimelineEntry: Sendable, Equatable {
 			case .clip(let reference): return reference.description
 			case .list(let references): return references.map(\.description).joined(separator: ", ")
 			case .query(_, let source): return source
+			case .card(let card): return "card \(Timecode.string(card.duration))"
 			case .group(let name, _): return "@\(name)"
 			}
 		}
@@ -214,6 +222,12 @@ public struct TimelineEntry: Sendable, Equatable {
 	/// out the way it went in rather than re-printed from the parse tree.
 	public init(query: String, transition: Transition = .cut) throws {
 		self.init(source: .query(try QueryParser.parse(query), source: query), transition: transition)
+	}
+
+	/// A card, which takes a name for its placement like any other entry — and
+	/// wants one more than most, because `@intro` is how the title finds it.
+	public init(card: Card, transition: Transition = .cut, label: String? = nil) {
+		self.init(source: .card(card), transition: transition, label: label)
 	}
 
 	public init(group: String, entries: [TimelineEntry], transition: Transition = .cut) {

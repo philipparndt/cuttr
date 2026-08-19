@@ -175,6 +175,8 @@ public enum ProjectWriter {
 				if entry.transition.duration > 0 {
 					out += "\(indent)  transition: \(transition(entry.transition))\n"
 				}
+			case .card(let card):
+				out += cardEntry(card, entry.transition, indent, label: entry.label)
 			case .clip(let reference):
 				out += scalarEntry("clip", reference.description, entry.transition, indent,
 				                   label: entry.label, ends: entry.trim)
@@ -183,6 +185,41 @@ public enum ProjectWriter {
 			}
 		}
 		return out
+	}
+
+	/// A card: a length where a slug would be, and a colour only when it is not
+	/// black.
+	///
+	/// Its own writer rather than ``scalarEntry``'s, because a card has a
+	/// second key of its own and the column its values line up in is the width
+	/// of the widest key the entry actually has — `card:` on its own, and
+	/// `transition:` when there is one.
+	private static func cardEntry(
+		_ card: Card, _ how: Transition, _ indent: String, label: String?
+	) -> String {
+		let column = how.duration > 0 ? 12 : 7
+		func key(_ name: String) -> String {
+			(name + ":").padding(toLength: column, withPad: " ", startingAt: 0)
+		}
+		var out = "\(indent)- \(key("card"))\(Timecode.string(card.duration))\n"
+		// Black is what a card is when nobody says, so a black card says
+		// nothing — the commonest one is one line.
+		if card.fill != Card.black {
+			out += "\(indent)  \(key("fill"))\(fill(card.fill))\n"
+		}
+		if let label { out += "\(indent)  \(key("as"))\(scalar(label))\n" }
+		if how.duration > 0 { out += "\(indent)  \(key("transition"))\(transition(how))\n" }
+		return out
+	}
+
+	/// One colour, or two read down the page.
+	private static func fill(_ value: Card.Fill) -> String {
+		switch value {
+		case .solid(let colour):
+			return scalar(colour.hex)
+		case .gradient(let top, let bottom):
+			return "[\(scalar(top.hex)), \(scalar(bottom.hex))]"
+		}
 	}
 
 	private static func scalarEntry(

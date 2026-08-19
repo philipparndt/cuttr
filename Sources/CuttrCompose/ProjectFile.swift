@@ -151,6 +151,12 @@ public enum ProjectReader {
 						// commonest one — worth its own key so the simple case
 						// reads simply.
 						out.append(try TimelineEntry(query: "#\(tag)", transition: transition))
+					} else if let seconds = try time(m["card"], key: "card") {
+						// A length where a slug goes, because a card has no
+						// slug: there is no take behind it to name.
+						var card = Card(duration: max(0, seconds))
+						if let said = fill(m["fill"]) { card.fill = said }
+						out.append(TimelineEntry(card: card, transition: transition, label: label))
 					} else if let clips = m["clips"] as? [Any] {
 						out.append(TimelineEntry(
 							list: clips.compactMap { ($0 as? String).map(ClipReference.init) },
@@ -439,6 +445,20 @@ public enum ProjectReader {
 		// A shower that runs out rather than one somebody switched off.
 		if m["fall"] != nil { return .fall(over: number(m["over"]) ?? 1.5) }
 		return .cut
+	}
+
+	/// What a card is made of: one colour, or two read down the page.
+	///
+	/// `fill: "#101014"` and `fill: ["#202030", "#050508"]`, top first — which
+	/// is the order somebody looking at the card would name them in.
+	private static func fill(_ value: Any?) -> Card.Fill? {
+		if let text = (value as? String).flatMap(RGBA.init(hex:)) { return .solid(text) }
+		if let pair = value as? [Any], pair.count == 2,
+		   let top = (pair[0] as? String).flatMap(RGBA.init(hex:)),
+		   let bottom = (pair[1] as? String).flatMap(RGBA.init(hex:)) {
+			return .gradient(top: top, bottom: bottom)
+		}
+		return nil
 	}
 
 	private static func point(_ value: Any?, key: String) throws -> CGPoint? {
