@@ -40,14 +40,10 @@ public final class PropertiesPanel: NSView {
 	private var selection: ProjectSelection = .output
 	private var built: ProjectSelection?
 
-	/// Made afresh for every selection rather than emptied.
-	///
-	/// `NSGridView` refuses to remove a row whose cells were merged — and the
-	/// picture and the headings are merged rows — so emptying one means walking
-	/// into an assertion. A grid is cheap; a crash on selecting an overlay is
-	/// not.
-	private var grid = NSGridView(numberOfColumns: 2, rows: 0)
-	private let formHolder = NSView()
+	/// The rows, stacked. One column of keys and one of controls, and nothing
+	/// in either that can push back on the pane it is in.
+	private let form = NSStackView()
+	private static let keyWidth: CGFloat = 112
 	private let title = NSTextField(labelWithString: "")
 	/// The closures the controls call. Held because a target is unowned.
 	private var sinks: [Sink] = []
@@ -75,62 +71,45 @@ public final class PropertiesPanel: NSView {
 		title.font = Theme.heading
 		title.textColor = Theme.faintText
 
-		install(grid)
+		form.orientation = .vertical
+		form.alignment = .leading
+		form.spacing = 7
+		form.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 16, right: 14)
+		form.setHuggingPriority(.required, for: .vertical)
 
-		let stack = NSStackView(views: [title, formHolder])
-		stack.orientation = .vertical
-		stack.spacing = 10
-		stack.alignment = .leading
-		stack.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 14, right: 14)
-
-		let scroll = TableScroll.wrap(stack)
+		// The scroll view decides the width; the form fills it and grows only
+		// downwards.
+		//
+		// This is the whole arrangement, and it is deliberately the plainest one
+		// AppKit has. Everything that went wrong here went wrong because two
+		// things were each entitled to decide a size: a grid whose columns
+		// shared out the width of a picture, a form whose width was tied to its
+		// pane, a split view whose panes both had opinions about their height.
+		// One direction of travel, and none of that can happen: the pane sizes
+		// the scroll view, the scroll view sizes the form, the form stacks rows,
+		// and every control inside a row will shrink rather than argue.
+		let scroll = TableScroll.wrap(form, horizontal: false)
 		scroll.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(scroll)
+
+		title.translatesAutoresizingMaskIntoConstraints = false
+		addSubview(title)
 		NSLayoutConstraint.activate([
-			scroll.topAnchor.constraint(equalTo: topAnchor),
+			title.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+			title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+			title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -14),
+
+			scroll.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 6),
 			scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
 			scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
 			scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+			form.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+			form.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
 		])
-		// The form fills the pane when it fits, and scrolls when it does not —
-		// but it never *demands* the width it would like.
-		//
-		// This one line is why the window used to rearrange itself: tying the
-		// form's width to the scroll view's with a required constraint hands
-		// every width inside the form to the pane, the pane is one side of a
-		// split view, and selecting an overlay moved the divider.
-		let fills = stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)
-		fills.priority = NSLayoutConstraint.Priority(240)
-		fills.isActive = true
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
-
-	/// Puts a fresh grid in the form's place, set up the same way every time.
-	private func install(_ grid: NSGridView) {
-		grid.columnSpacing = 10
-		grid.rowSpacing = 7
-		// Keys along the left edge, not pushed up against their fields. Reading
-		// down a column of names is how somebody finds the one they want, and
-		// ragged-left ruins that — the eye has nowhere to start.
-		grid.column(at: 0).xPlacement = .leading
-		grid.column(at: 0).width = 116
-		// The control column takes the slack, so a picture or a rule reaches the
-		// far edge. Each row of controls keeps a spacer on its right, which is
-		// what stops the controls themselves being stretched.
-		grid.column(at: 1).xPlacement = .fill
-		grid.setContentHuggingPriority(.defaultHigh, for: .vertical)
-
-		for view in formHolder.subviews { view.removeFromSuperview() }
-		grid.translatesAutoresizingMaskIntoConstraints = false
-		formHolder.addSubview(grid)
-		NSLayoutConstraint.activate([
-			grid.topAnchor.constraint(equalTo: formHolder.topAnchor),
-			grid.bottomAnchor.constraint(equalTo: formHolder.bottomAnchor),
-			grid.leadingAnchor.constraint(equalTo: formHolder.leadingAnchor),
-			grid.trailingAnchor.constraint(lessThanOrEqualTo: formHolder.trailingAnchor),
-		])
-	}
 
 	// MARK: - Loading
 
@@ -170,8 +149,10 @@ public final class PropertiesPanel: NSView {
 		mine = false
 		sinks.removeAll()
 		generation += 1
-		grid = NSGridView(numberOfColumns: 2, rows: 0)
-		install(grid)
+		for row in form.arrangedSubviews {
+			form.removeArrangedSubview(row)
+			row.removeFromSuperview()
+		}
 
 		built = selection
 		switch selection {
@@ -799,49 +780,38 @@ public final class PropertiesPanel: NSView {
 
 	// MARK: - Rows
 
-	/// A heading, across both columns, with a hairline under it.
+	/// Adds a row and makes it as wide as the form. Every row in this panel is
+	/// exactly one of these, so there is one place where width is decided.
+	private func add(_ row: NSView) {
+		form.addArrangedSubview(row)
+		row.translatesAutoresizingMaskIntoConstraints = false
+		row.widthAnchor.constraint(equalTo: form.widthAnchor, constant: -28).isActive = true
+	}
+
+	/// A heading with a hairline running to the far edge.
 	private func section(_ name: String) {
 		let label = NSTextField(labelWithString: name.uppercased())
 		label.font = Theme.heading
 		label.textColor = Theme.faintText
+		label.setContentHuggingPriority(.required, for: .horizontal)
 
 		let rule = NSBox()
 		rule.boxType = .separator
+		rule.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+		rule.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
 
 		let header = NSStackView(views: [label, rule])
 		header.orientation = .horizontal
 		header.spacing = 8
 		header.alignment = .centerY
-		// The rule reaches the far edge, which is what a section break is for:
-		// it separates the page, not the column of controls.
-		rule.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-		rule.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-		header.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-
-		let row = grid.addRow(with: [header])
-		// Merged, unlike the pictures: a heading asks for no width of its own, so
-		// there is nothing for the two columns to share out and nothing moves.
-		row.mergeCells(in: NSRange(location: 0, length: 2))
-		row.topPadding = grid.numberOfRows == 1 ? 0 : 12
-		row.yPlacement = .center
+		header.edgeInsets = NSEdgeInsets(
+			top: form.arrangedSubviews.isEmpty ? 0 : 8, left: 0, bottom: 0, right: 0)
+		add(header)
 	}
 
-	/// Something that takes the width of the control column — the picture, the
-	/// range strip.
-	///
-	/// In the column rather than across both, because merging cells hands the
-	/// merged width to *both* columns to share, and AppKit shared it by making
-	/// the column of keys as wide as the picture. Every label was then a
-	/// hundred points from the field it named.
+	/// Something that takes the whole width — the picture, the range strip.
 	private func full(_ view: NSView) {
-		grid.addRow(with: [NSGridCell.emptyContentView, view])
-		view.translatesAutoresizingMaskIntoConstraints = false
-		// Squeezable. Nothing in this panel may insist on being wider than the
-		// pane it is in: the pane is one side of a split view, and a form that
-		// demands three hundred points pushes the divider — so the whole window
-		// rearranges itself when somebody selects an overlay.
-		view.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-		view.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
+		add(view)
 	}
 
 	/// A labelled line. The label is the **key it writes**, not a paraphrase of
@@ -851,28 +821,53 @@ public final class PropertiesPanel: NSView {
 		name.font = Theme.mono
 		name.textColor = Theme.text
 		name.alignment = .left
+		name.lineBreakMode = .byTruncatingTail
+		name.translatesAutoresizingMaskIntoConstraints = false
+		name.widthAnchor.constraint(equalToConstant: Self.keyWidth).isActive = true
 
-		// A spacer on the right: the column stretches so that a picture can fill
-		// it, and without something willing to give, the controls stretch too.
+		// A spacer that gives before any control does, so a narrow pane takes
+		// the empty space away rather than the fields.
 		let slack = NSView()
 		slack.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-		let row = NSStackView(views: controls + [slack])
+		slack.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+
+		let row = NSStackView(views: [name] + controls + [slack])
 		row.orientation = .horizontal
 		row.spacing = 6
 		row.alignment = .centerY
-		row.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+		add(row)
 
-		grid.addRow(with: [name, row]).yPlacement = .center
-		if let note {
-			let caption = NSTextField(labelWithString: note)
-			caption.font = Theme.monoSmall
-			caption.textColor = Theme.faintText
-			caption.lineBreakMode = .byWordWrapping
-			caption.preferredMaxLayoutWidth = 260
-			caption.setContentCompressionResistancePriority(
-				NSLayoutConstraint.Priority(1), for: .horizontal)
-			let spacer = NSGridCell.emptyContentView
-			grid.addRow(with: [spacer, caption])
+		if let note { add(caption(note)) }
+	}
+
+	/// A line of explanation, indented under the controls it explains.
+	private func caption(_ message: String) -> NSView {
+		let label = WrappingLabel(labelWithString: message)
+		label.font = Theme.monoSmall
+		label.textColor = Theme.faintText
+		label.lineBreakMode = .byWordWrapping
+		label.setContentCompressionResistancePriority(
+			NSLayoutConstraint.Priority(1), for: .horizontal)
+
+		let row = NSStackView(views: [label])
+		row.orientation = .horizontal
+		row.edgeInsets = NSEdgeInsets(top: 0, left: Self.keyWidth + 6, bottom: 4, right: 0)
+		return row
+	}
+
+	/// A label that wraps to whatever width it is given.
+	///
+	/// `preferredMaxLayoutWidth` is the only way to tell AppKit how tall a
+	/// wrapped label is, and it has to be set from the width the label actually
+	/// got — which is known at layout, not before. Setting it only when it
+	/// changes is what stops that from being a loop.
+	private final class WrappingLabel: NSTextField {
+		override func layout() {
+			if preferredMaxLayoutWidth != bounds.width {
+				preferredMaxLayoutWidth = bounds.width
+				invalidateIntrinsicContentSize()
+			}
+			super.layout()
 		}
 	}
 
@@ -896,9 +891,17 @@ public final class PropertiesPanel: NSView {
 		// Both dimensions stated. A grid row takes its height from what is in it,
 		// and a field that only says how wide it is gets whatever is left —
 		// which was two thirds of a line, with the descenders cut off.
+		// Wide enough to read, willing to be narrower. A pane can be dragged to
+		// any width, and a field that insists on 260 points in a 300-point pane
+		// is how a form comes to have a horizontal scrollbar.
+		field.translatesAutoresizingMaskIntoConstraints = false
+		field.setContentCompressionResistancePriority(
+			NSLayoutConstraint.Priority(1), for: .horizontal)
+		field.setContentHuggingPriority(NSLayoutConstraint.Priority(200), for: .horizontal)
 		let wide = field.widthAnchor.constraint(equalToConstant: width)
-		wide.priority = .defaultHigh
+		wide.priority = NSLayoutConstraint.Priority(400)
 		wide.isActive = true
+		field.widthAnchor.constraint(greaterThanOrEqualToConstant: 52).isActive = true
 		field.heightAnchor.constraint(equalToConstant: 22).isActive = true
 		let sink = Sink { control in onCommit(control.stringValue) }
 		sinks.append(sink)
@@ -937,9 +940,13 @@ public final class PropertiesPanel: NSView {
 		box.addItems(withObjectValues: values)
 		box.stringValue = value
 		box.translatesAutoresizingMaskIntoConstraints = false
+		box.setContentCompressionResistancePriority(
+			NSLayoutConstraint.Priority(1), for: .horizontal)
+		box.setContentHuggingPriority(NSLayoutConstraint.Priority(200), for: .horizontal)
 		let wide = box.widthAnchor.constraint(equalToConstant: width)
-		wide.priority = .defaultHigh
+		wide.priority = NSLayoutConstraint.Priority(400)
 		wide.isActive = true
+		box.widthAnchor.constraint(greaterThanOrEqualToConstant: 60).isActive = true
 		box.heightAnchor.constraint(equalToConstant: 24).isActive = true
 		let sink = Sink { control in onCommit(control.stringValue) }
 		sinks.append(sink)

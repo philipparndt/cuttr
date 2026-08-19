@@ -60,17 +60,36 @@ public final class ProjectInspector: NSView {
 		}
 		properties.onChange = { [weak self] project in self?.onChange?(project) }
 
-		let side = NSSplitView()
-		side.isVertical = false
-		side.dividerStyle = .thin
-		side.addArrangedSubview(properties)
-		side.addArrangedSubview(writes())
+		// The properties fill the column and the file fragment sits under them at
+		// a fixed height.
+		//
+		// Not a split view. Two panes that both size themselves from their
+		// contents is a negotiation, and this one oscillated: the text pane grew,
+		// the form re-laid out, the text pane shrank, and the window flickered
+		// while it was resized. A footer of a stated height cannot argue.
+		let column = NSView()
+		let writes = self.writes()
+		for view in [properties, writes] as [NSView] {
+			view.translatesAutoresizingMaskIntoConstraints = false
+			column.addSubview(view)
+		}
+		NSLayoutConstraint.activate([
+			properties.topAnchor.constraint(equalTo: column.topAnchor),
+			properties.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+			properties.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+			properties.bottomAnchor.constraint(equalTo: writes.topAnchor),
+
+			writes.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+			writes.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+			writes.bottomAnchor.constraint(equalTo: column.bottomAnchor),
+			writes.heightAnchor.constraint(equalToConstant: 168),
+		])
 
 		let split = NSSplitView()
 		split.isVertical = true
 		split.dividerStyle = .thin
 		split.addArrangedSubview(programme)
-		split.addArrangedSubview(side)
+		split.addArrangedSubview(column)
 		split.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(split)
 
@@ -83,8 +102,7 @@ public final class ProjectInspector: NSView {
 			split.leadingAnchor.constraint(equalTo: leadingAnchor),
 			split.trailingAnchor.constraint(equalTo: trailingAnchor),
 			programme.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
-			side.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
-			properties.heightAnchor.constraint(greaterThanOrEqualToConstant: 220),
+			column.widthAnchor.constraint(greaterThanOrEqualToConstant: 300),
 		])
 	}
 
@@ -110,23 +128,22 @@ public final class ProjectInspector: NSView {
 		yaml.textContainer?.widthTracksTextView = true
 
 		let scroll = TableScroll.wrap(yaml, horizontal: false)
-		let stack = NSStackView(views: [writesTitle, scroll])
-		stack.orientation = .vertical
-		stack.spacing = 6
-		stack.alignment = .leading
-		stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
-
 		let holder = NSView()
-		stack.translatesAutoresizingMaskIntoConstraints = false
-		scroll.translatesAutoresizingMaskIntoConstraints = false
-		holder.addSubview(stack)
+		holder.wantsLayer = true
+		holder.layer?.backgroundColor = Theme.panel.cgColor
+
+		for view in [writesTitle, scroll] as [NSView] {
+			view.translatesAutoresizingMaskIntoConstraints = false
+			holder.addSubview(view)
+		}
 		NSLayoutConstraint.activate([
-			stack.topAnchor.constraint(equalTo: holder.topAnchor),
-			stack.bottomAnchor.constraint(equalTo: holder.bottomAnchor),
-			stack.leadingAnchor.constraint(equalTo: holder.leadingAnchor),
-			stack.trailingAnchor.constraint(equalTo: holder.trailingAnchor),
-			scroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24),
-			holder.heightAnchor.constraint(greaterThanOrEqualToConstant: 120),
+			writesTitle.topAnchor.constraint(equalTo: holder.topAnchor, constant: 10),
+			writesTitle.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: 14),
+
+			scroll.topAnchor.constraint(equalTo: writesTitle.bottomAnchor, constant: 6),
+			scroll.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: 14),
+			scroll.trailingAnchor.constraint(equalTo: holder.trailingAnchor, constant: -14),
+			scroll.bottomAnchor.constraint(equalTo: holder.bottomAnchor, constant: -12),
 		])
 		return holder
 	}

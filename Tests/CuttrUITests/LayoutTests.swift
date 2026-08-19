@@ -60,4 +60,66 @@ import Testing
 		// …and it is the same x in every form.
 		#expect(seen.count == 1, "the form moves between selections: \(seen.sorted())")
 	}
+
+	/// The form fits whatever width the pane has.
+	///
+	/// A control that insists on its ideal width in a pane narrower than that is
+	/// how a form comes to need a horizontal scrollbar — and then the scrollbar
+	/// takes height, which changes the layout, which is the flicker.
+	@Test func theFormFitsEveryWidthItIsGiven() {
+		_ = NSApplication.shared
+		let panel = PropertiesPanel()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 900),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = panel
+		panel.reload(project(), vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(1))
+
+		for width in [300.0, 340.0, 420.0, 560.0, 700.0] {
+			window.setContentSize(NSSize(width: width, height: 900))
+			panel.layoutSubtreeIfNeeded()
+			for row in rows(of: panel) {
+				#expect(row.frame.width <= width + 0.5,
+				        "a row is \(row.frame.width) wide in a \(width) pane")
+			}
+		}
+	}
+
+	/// Laying out twice must change nothing.
+	///
+	/// Anything that answers differently the second time is a loop, and a loop
+	/// is what the window flickering actually is: two views taking turns to be
+	/// right about a size.
+	@Test func layingOutTwiceSettles() {
+		_ = NSApplication.shared
+		let panel = PropertiesPanel()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 820),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = panel
+
+		for selection: ProjectSelection in [.output, .overlay(0), .overlay(1), .entry([1])] {
+			panel.reload(project(), vocabulary: ComposeDocument.Vocabulary(), selection: selection)
+			panel.layoutSubtreeIfNeeded()
+			let first = geometry(of: panel)
+			panel.needsLayout = true
+			panel.layoutSubtreeIfNeeded()
+			#expect(geometry(of: panel) == first, "the layout moved on its own for \(selection)")
+		}
+	}
+
+	/// Every row of the form.
+	private func rows(of panel: PropertiesPanel) -> [NSView] {
+		func stacks(in view: NSView) -> [NSStackView] {
+			view.subviews.flatMap { subview -> [NSStackView] in
+				((subview as? NSStackView).map { [$0] } ?? []) + stacks(in: subview)
+			}
+		}
+		guard let form = stacks(in: panel).first(where: { $0.orientation == .vertical }) else { return [] }
+		return form.arrangedSubviews
+	}
+
+	private func geometry(of view: NSView) -> [String] {
+		view.subviews.flatMap { subview in
+			["\(type(of: subview)) \(NSStringFromRect(subview.frame))"] + geometry(of: subview)
+		}
+	}
 }
