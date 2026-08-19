@@ -643,12 +643,15 @@ public final class PropertiesPanel: NSView {
 		preview.anchorName = overlay.anchor
 
 		switch overlay.kind {
-		case .text(let content, _):
-			preview.label = content
-			preview.kind = .text
+		case .text(let content, let style):
+			preview.content = .caption(content, project.style(named: style))
 		case .spinner(let spinner):
-			preview.label = spinner.words.first?.text ?? "spinner"
-			preview.kind = .spinner
+			// The words beside a spinner have a style of their own, and it is
+			// not the caption style: `caption` has no plate behind it, because
+			// a spinner over somebody's head should not arrive with a black box.
+			preview.content = .spinner(
+				spinner,
+				words: spinner.wordStyle.map { project.style(named: $0) } ?? TextStyle.caption)
 		}
 
 		preview.spot = spot(of: overlay, anchor: anchor)

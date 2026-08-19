@@ -25,9 +25,21 @@ public final class FramePreview: NSView {
 	public var anchorName: String?
 	/// Where the overlay sits, in unit coordinates, origin bottom-left.
 	public var spot = CGPoint(x: 0.5, y: 0.5) { didSet { needsDisplay = true } }
-	/// What to draw there.
-	public var label = ""
-	public var kind: Theme.Kind = .text
+	/// What to draw there — the overlay itself, as it will be drawn.
+	///
+	/// Not a chip with a name on it. Placing a spinner means knowing how big the
+	/// spinner is: `size: 0.09` is a ninth of the frame height, and whether that
+	/// clears somebody's head is a question about the picture, not about a
+	/// number. So the ring is the size the ring will be, the caption is set in
+	/// the type the caption is set in, and the plate behind it is the plate.
+	public enum Content {
+		case caption(String, TextStyle)
+		case spinner(Spinner, words: TextStyle)
+	}
+
+	public var content: Content = .caption("", TextStyle.lowerThird) {
+		didSet { needsDisplay = true }
+	}
 	/// Said under the picture: what a drag will change.
 	public var explanation = ""
 
@@ -38,6 +50,9 @@ public final class FramePreview: NSView {
 
 	private var dragging = false
 	private var grab = CGSize.zero
+	/// Where the overlay was last drawn, so it can be grabbed by itself rather
+	/// than by a rectangle guessed from its name.
+	private var grabBox = NSRect.zero
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
@@ -146,7 +161,7 @@ public final class FramePreview: NSView {
 			}
 		}
 
-		drawPuck(at: point(spot))
+		drawContent(at: point(spot))
 
 		if !explanation.isEmpty {
 			(explanation as NSString).draw(
@@ -155,24 +170,111 @@ public final class FramePreview: NSView {
 		}
 	}
 
-	/// The overlay itself, as a chip: it is dragged, so it has to look grabbable
-	/// and it has to say which overlay it is.
-	private func drawPuck(at centre: NSPoint) {
-		let colour = Theme.color(kind)
-		let attributes: [NSAttributedString.Key: Any] = [
-			.font: Theme.monoSmall, .foregroundColor: NSColor.black,
-		]
-		let text = label.isEmpty ? "overlay" : String(label.prefix(24))
-		let size = (text as NSString).size(withAttributes: attributes)
-		let box = NSRect(x: centre.x - (size.width + 16) / 2, y: centre.y - 9,
-		                 width: size.width + 16, height: 18)
-		colour.withAlphaComponent(dragging ? 1 : 0.85).setFill()
-		NSBezierPath(roundedRect: box, xRadius: 4, yRadius: 4).fill()
-		(text as NSString).draw(at: NSPoint(x: box.minX + 8, y: box.minY + 3), withAttributes: attributes)
+	/// The overlay, drawn the way the renderer draws it.
+	private func drawContent(at centre: NSPoint) {
+		switch content {
+		case .caption(let text, let style):
+			drawCaption(text, style: style, at: centre)
+		case .spinner(let spinner, let wordStyle):
+			drawSpinner(spinner, words: wordStyle, at: centre)
+		}
+		if dragging {
+			// While it is being moved, say where it has got to.
+			Theme.accent.setStroke()
+			let ring = NSBezierPath(ovalIn: NSRect(x: centre.x - 3, y: centre.y - 3, width: 6, height: 6))
+			ring.lineWidth = 1.5
+			ring.stroke()
+		}
+	}
 
-		NSColor.white.withAlphaComponent(0.9).setStroke()
-		let dot = NSBezierPath(ovalIn: NSRect(x: centre.x - 1.5, y: centre.y - 1.5, width: 3, height: 3))
-		dot.stroke()
+	/// The plate and the type, at the sizes the file asks for: point size and
+	/// padding are fractions of the frame height, so they are worked out
+	/// against the picture on screen rather than against this view.
+	private func drawCaption(_ text: String, style: TextStyle, at centre: NSPoint) {
+		let height = picture.height
+		let font = NSFont(name: style.font, size: max(4, style.size * height))
+			?? NSFont.systemFont(ofSize: max(4, style.size * height))
+		let attributes: [NSAttributedString.Key: Any] = [
+			.font: font, .foregroundColor: colour(style.color),
+		]
+		let shown = text.isEmpty ? "caption" : text
+		let size = (shown as NSString).size(withAttributes: attributes)
+		let padding = style.padding * height
+		let plate = NSSize(width: size.width + padding * 2, height: size.height + padding * 2)
+
+		// Which point of the caption sits on the position is what `alignment`
+		// decides — the same rule the renderer uses.
+		let anchorX: CGFloat
+		switch style.alignment {
+		case .left: anchorX = 0
+		case .right: anchorX = 1
+		case .centre: anchorX = 0.5
+		}
+		let box = NSRect(x: centre.x - anchorX * plate.width, y: centre.y - plate.height / 2,
+		                 width: plate.width, height: plate.height)
+		grabBox = box.insetBy(dx: -4, dy: -4)
+
+		if style.background.a > 0 {
+			colour(style.background).setFill()
+			let radius = min(style.cornerRadius * height, plate.height / 2)
+			NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius).fill()
+		}
+		(shown as NSString).draw(at: NSPoint(x: box.minX + padding, y: box.minY + padding),
+		                         withAttributes: attributes)
+	}
+
+	/// The ring, the dots or the arc, at the diameter the file asks for, with
+	/// the first of its words beside it.
+	private func drawSpinner(_ spinner: Spinner, words style: TextStyle, at centre: NSPoint) {
+		let height = picture.height
+		let diameter = max(6, spinner.size * height)
+		let ink = colour(spinner.color)
+		let box = NSRect(x: centre.x - diameter / 2, y: centre.y - diameter / 2,
+		                 width: diameter, height: diameter)
+		grabBox = box.insetBy(dx: -4, dy: -4)
+
+		switch spinner.style {
+		case .dots:
+			// Twelve dots round the circle, each further through the same fade.
+			let count = 12
+			let dot = diameter * 0.16
+			let radius = (diameter - dot) / 2
+			for step in 0..<count {
+				let angle = Double(step) / Double(count) * 2 * .pi
+				let at = NSPoint(x: centre.x + CGFloat(sin(angle)) * radius,
+				                 y: centre.y + CGFloat(cos(angle)) * radius)
+				ink.withAlphaComponent(max(0.12, 1 - Double(step) / Double(count))).setFill()
+				NSBezierPath(ovalIn: NSRect(x: at.x - dot / 2, y: at.y - dot / 2,
+				                            width: dot, height: dot)).fill()
+			}
+
+		case .ring, .arc:
+			let inset = diameter * 0.12
+			let path = NSBezierPath()
+			let sweep = spinner.style == .ring ? 270.0 : 100.0
+			path.appendArc(withCenter: centre, radius: (diameter - inset * 2) / 2,
+			               startAngle: 90, endAngle: 90 - sweep, clockwise: true)
+			path.lineWidth = diameter * 0.10
+			path.lineCapStyle = .round
+			ink.setStroke()
+			path.stroke()
+		}
+
+		guard let word = spinner.words.first else { return }
+		let font = NSFont(name: style.font, size: max(4, style.size * height))
+			?? NSFont.systemFont(ofSize: max(4, style.size * height))
+		let attributes: [NSAttributedString.Key: Any] = [
+			.font: font, .foregroundColor: colour(style.color),
+		]
+		let size = (word.text as NSString).size(withAttributes: attributes)
+		let gap = diameter * 0.45
+		(word.text as NSString).draw(
+			at: NSPoint(x: box.maxX + gap, y: centre.y - size.height / 2),
+			withAttributes: attributes)
+	}
+
+	private func colour(_ rgba: RGBA) -> NSColor {
+		NSColor(calibratedRed: rgba.r, green: rgba.g, blue: rgba.b, alpha: rgba.a)
 	}
 
 	// MARK: - Dragging
@@ -189,10 +291,10 @@ public final class FramePreview: NSView {
 		window?.makeFirstResponder(self)
 		let place = convert(event.locationInWindow, from: nil)
 		let centre = point(spot)
-		// Grabbed by the chip keeps the pointer where it took hold; a click
+		// Grabbed by the overlay keeps the pointer where it took hold; a click
 		// anywhere else on the frame puts it there, which is what a click on a
 		// picture means.
-		if abs(place.x - centre.x) < 60, abs(place.y - centre.y) < 14 {
+		if grabBox.contains(place) {
 			grab = CGSize(width: centre.x - place.x, height: centre.y - place.y)
 		} else {
 			grab = .zero
