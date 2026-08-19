@@ -29,6 +29,18 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 	public var onActivate: ((Clip.ID) -> Void)?
 
 	private let table = NSTableView()
+
+	/// Whether the list itself has the keyboard — which is what decides whether
+	/// a key press is about the selected clip or about the window.
+	public var hasKeyboard: Bool {
+		guard let responder = window?.firstResponder as? NSView else { return false }
+		var view: NSView? = responder
+		while let current = view {
+			if current === table { return true }
+			view = current.superview
+		}
+		return false
+	}
 	private var rows: [Clip] = []
 
 	private enum Column: String, CaseIterable {

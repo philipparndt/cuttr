@@ -134,3 +134,36 @@ import Testing
 		#expect(table.numberOfRows == all)
 	}
 }
+
+/// What the space bar means depends on where the keyboard is.
+@Suite @MainActor struct ClipTableFocusTests {
+
+	@Test func theListKnowsWhetherItHasTheKeyboard() throws {
+		_ = NSApplication.shared
+		let clips = ClipTable()
+		let other = NSTextField(string: "")
+		let holder = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+		clips.frame = holder.bounds
+		holder.addSubview(clips)
+		holder.addSubview(other)
+
+		let window = NSWindow(contentRect: holder.bounds, styleMask: [.titled],
+		                      backing: .buffered, defer: false)
+		window.contentView = holder
+		window.makeKeyAndOrderFront(nil)
+
+		func table(in view: NSView) -> NSTableView? {
+			for subview in view.subviews {
+				if let found = subview as? NSTableView { return found }
+				if let found = table(in: subview) { return found }
+			}
+			return nil
+		}
+		let list = try #require(table(in: clips))
+
+		window.makeFirstResponder(other)
+		#expect(!clips.hasKeyboard, "the list claims the keyboard while a field has it")
+		window.makeFirstResponder(list)
+		#expect(clips.hasKeyboard)
+	}
+}

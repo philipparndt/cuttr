@@ -499,7 +499,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			transport.pause()
 			return
 		}
-		guard let id = selectedClip,
+		// A clip is played end to end only when the clip *list* has the
+		// keyboard. Everywhere else — the timeline, the picture, the anchors —
+		// space is what it is in every player there has ever been: play from
+		// where the playhead is. Selecting a clip in order to look at it should
+		// not change what the space bar means for the rest of the window.
+		guard clipTable.hasKeyboard,
+		      let id = selectedClip,
 		      let clip = takeDocument.take.clips.first(where: { $0.id == id })
 		else {
 			transport.togglePlay()
