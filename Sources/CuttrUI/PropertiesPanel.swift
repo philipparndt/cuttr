@@ -455,9 +455,19 @@ public final class PropertiesPanel: NSView {
 		section("when it is on")
 		full(strip(index, overlay))
 		let endpoints = vocabulary.items.map(\.reference) + vocabulary.groups.map { "@\($0)" }
-		for (position, span) in overlay.spans.enumerated() {
+
+		// One range at a time: the strip above is the list, and what is under it
+		// is whichever range is selected there. Every range laid out at once was
+		// four identical rows of controls with no way to tell which of them the
+		// picture was about.
+		if !overlay.appearances.isEmpty {
+			let position = min(max(0, selectedSpan), overlay.appearances.count - 1)
+			let appearance = overlay.appearances[position]
+			let span = appearance.span
+			let count = overlay.appearances.count
 			let byMarks: Bool
 			if case .marks = span { byMarks = true } else { byMarks = false }
+
 			var controls: [NSView] = [pop(["clips", "times"], selected: byMarks ? 0 : 1) {
 				[weak self] pick in
 				guard let self else { return }
@@ -494,24 +504,14 @@ public final class PropertiesPanel: NSView {
 					self?.setSpan(index, position, .times(from: from, to: seconds))
 				})
 			}
-			if overlay.spans.count > 1 {
-				controls.append(small("−") { [weak self] in
-					self?.editOverlay(index) {
-						guard position < $0.appearances.count else { return }
-						$0.appearances.remove(at: position)
-					}
-				})
-			}
-			// Each range says which one it is. Two rows of identical controls
-			// with one label between them is a form nobody can point at.
+			field(count == 1 ? "when" : "when[\(position)]", controls,
+			      note: "bound to clips it survives a re-cut; the same mark twice is one clip, or one whole section")
+
 			var saysControls: [NSView] = []
-			// What it says *here*. Blank means what the overlay says everywhere,
-			// which is shown as the placeholder so the difference is visible.
-			let appearance = overlay.appearances[position]
 			switch overlay.kind {
 			case .text(let content, _):
-				saysControls.append(text(appearance.text ?? "", width: 150,
-				                     placeholder: content.isEmpty ? "text" : content) {
+				saysControls.append(text(appearance.text ?? "", width: 220,
+				                         placeholder: content.isEmpty ? "text" : content) {
 					[weak self] value in
 					self?.editOverlay(index) {
 						guard position < $0.appearances.count else { return }
@@ -520,9 +520,10 @@ public final class PropertiesPanel: NSView {
 				})
 			case .spinner(let spinner):
 				let mine = appearance.words ?? []
-				saysControls.append(text(mine.map(\.text).joined(separator: ", "), width: 150,
-				                     placeholder: spinner.words.isEmpty
-					                     ? "words" : spinner.words.map(\.text).joined(separator: ", ")) {
+				saysControls.append(text(mine.map(\.text).joined(separator: ", "), width: 220,
+				                         placeholder: spinner.words.isEmpty
+					                         ? "words"
+					                         : spinner.words.map(\.text).joined(separator: ", ")) {
 					[weak self] value in
 					let said = value.split(separator: ",")
 						.map { SpinnerWord($0.trimmingCharacters(in: .whitespaces)) }
@@ -533,34 +534,40 @@ public final class PropertiesPanel: NSView {
 					}
 				})
 			}
+			field(count == 1 ? "says" : "says[\(position)]", saysControls,
+			      note: "blank says what the overlay says; a spinner that comes back usually says something else")
 
-			field(overlay.spans.count == 1 ? "when" : "when[\(position)]", controls,
-			      note: position == 0
-				? "bound to clips it survives a re-cut; the same mark twice is one clip, or one whole section"
-				: nil)
-			// What it says *here*, on a line of its own. Blank means what the
-			// overlay says everywhere, which is the placeholder, so the two are
-			// told apart by reading rather than by remembering.
-			field(overlay.spans.count == 1 ? "says" : "says[\(position)]", saysControls,
-			      note: position == 0 && overlay.spans.count > 1
-				? "blank says what the overlay says; a spinner that comes back usually says something else"
-				: nil)
-		}
-		field("", [small("+ range") { [weak self] in
-			self?.editOverlay(index) { overlay in
-				// On again later: the last range repeated, moved along by its
-				// own length when it is a time, ready to be pointed somewhere
-				// else when it is a mark. What it says is not copied — a second
-				// appearance usually exists because it says something else.
-				guard let last = overlay.appearances.last else { return }
-				switch last.span {
-				case .times(let from, let to):
-					overlay.appearances.append(.init(.times(from: to, to: to + (to - from))))
-				case .marks:
-					overlay.appearances.append(.init(last.span))
+			var buttons: [NSView] = [small("+ range") { [weak self] in
+				guard let self else { return }
+				self.selectedSpan = count
+				self.editOverlay(index) { overlay in
+					// The last range repeated, moved along by its own length
+					// when it is a time, ready to be pointed somewhere else when
+					// it is a mark. What it says is not copied — a second
+					// appearance usually says something else.
+					guard let last = overlay.appearances.last else { return }
+					switch last.span {
+					case .times(let from, let to):
+						overlay.appearances.append(.init(.times(from: to, to: to + (to - from))))
+					case .marks:
+						overlay.appearances.append(.init(last.span))
+					}
 				}
+			}]
+			if count > 1 {
+				buttons.append(small("− range") { [weak self] in
+					guard let self else { return }
+					self.selectedSpan = max(0, position - 1)
+					self.editOverlay(index) {
+						guard position < $0.appearances.count else { return }
+						$0.appearances.remove(at: position)
+					}
+				})
 			}
-		}], note: "the same overlay, on over another stretch of the programme")
+			field("", buttons, note: count == 1
+				? "the same overlay, on over another stretch of the programme"
+				: "\(count) ranges — the strip above chooses which one this is about")
+		}
 
 		section("how it arrives and leaves")
 		transitionRow("arrival", overlay.arrival) { [weak self] transition in

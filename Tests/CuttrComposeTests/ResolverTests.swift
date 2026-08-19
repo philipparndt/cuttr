@@ -1,5 +1,6 @@
 import CuttrKit
 import Foundation
+import QuartzCore
 import Testing
 @testable import CuttrCompose
 
@@ -138,5 +139,38 @@ import Testing
 		// without anybody writing a time down. Re-cutting the take moves it.
 		#expect(resolved.overlays[0].start == 0)
 		#expect(resolved.overlays[0].end == 15)
+	}
+}
+
+/// Where an overlay's parts sit inside the layer that carries it.
+///
+/// The bug this is about: changing a layer's anchor point *moves* it — Core
+/// Animation keeps `position` and shifts the frame by the difference. The
+/// spinner's anchor is the spinner itself, at the left end of a block that also
+/// holds its words, so adding a word moved the whole block sideways by half the
+/// width of the word. On screen, the spinner walked off the head it follows.
+@Suite struct OverlayGeometryTests {
+
+	private func tree(words: [SpinnerWord]) -> CALayer {
+		let overlay = Overlay(
+			kind: .spinner(Spinner(size: 0.1, words: words)),
+			span: .times(from: 0, to: 4))
+		let resolved = ResolvedProject(
+			project: Project(overlays: [overlay]), clips: [],
+			overlays: [ResolvedOverlay(overlay: overlay, source: 0, start: 0, end: 4, path: nil)],
+			groups: [], anchors: [])
+		return OverlayLayers.build(resolved, size: CGSize(width: 1920, height: 1080), host: .export)
+	}
+
+	@Test func theBlockSitsSquarelyOnWhatCarriesIt() throws {
+		for words in [[], [SpinnerWord("a word long enough to matter")]] {
+			let placer = try #require(tree(words: words).sublayers?.first)
+			let mover = try #require(placer.sublayers?.first)
+			// Within a rounding error of nothing: the anchor point divides, so
+			// the arithmetic comes back a fifteenth decimal place off zero.
+			#expect(abs(mover.frame.origin.x) < 0.001 && abs(mover.frame.origin.y) < 0.001,
+			        "the block is \(mover.frame.origin) from its carrier with \(words.count) words")
+			#expect(mover.frame.size == placer.frame.size)
+		}
 	}
 }

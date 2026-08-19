@@ -119,7 +119,18 @@ public enum OverlayLayers {
 			               y: (0.5 + overlay.offset.y) * size.height)
 		}
 		placer.anchorPoint = anchorPoint
+		// Changing an anchor point moves the layer: Core Animation keeps
+		// `position` and shifts the frame by the difference. For the placer that
+		// is wanted — its position is set below — but the mover has to stay
+		// exactly over it, so it is put back.
+		//
+		// Left out, the whole block slid right by half the difference, which is
+		// nothing when the anchor is the middle and a great deal when it is the
+		// spinner at the left end of a spinner-and-its-words. Adding a word
+		// moved the spinner off the head it was following.
 		mover.anchorPoint = anchorPoint
+		mover.position = CGPoint(x: anchorPoint.x * contentSize.width,
+		                         y: anchorPoint.y * contentSize.height)
 		placer.position = home
 
 		// Hidden unless an animation says otherwise. `fillMode: .both` on the
