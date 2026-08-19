@@ -123,9 +123,14 @@ public final class PropertiesPanel: NSView {
 		// Not while something is being typed into: every commit writes the file
 		// and the file comes back, and rebuilding the form mid-word would take
 		// the cursor with it.
-		if built == selection, isEditing { return }
+		if built == selection, isEditing, !dragged { return }
 		rebuild()
 	}
+
+	/// Set by a drag on one of the pictures, so the next reload rebuilds even if
+	/// a field still holds the focus. A drag is an edit somebody can see being
+	/// made; it has to show up in the numbers beside it.
+	private var dragged = false
 
 	private var isEditing: Bool {
 		guard let responder = window?.firstResponder as? NSView else { return false }
@@ -138,6 +143,7 @@ public final class PropertiesPanel: NSView {
 	}
 
 	private func rebuild() {
+		dragged = false
 		sinks.removeAll()
 		generation += 1
 		grid = NSGridView(numberOfColumns: 2, rows: 0)
@@ -566,6 +572,7 @@ public final class PropertiesPanel: NSView {
 		}
 		strip.onDrag = { [weak self] position, start, end in
 			guard let self, position < overlay.spans.count else { return }
+			self.dragged = true
 			self.setSpan(index, position, self.span(from: overlay.spans[position], start: start, end: end))
 		}
 		return strip
@@ -647,6 +654,7 @@ public final class PropertiesPanel: NSView {
 		preview.spot = spot(of: overlay, anchor: anchor)
 		preview.explanation = explanation(for: overlay, anchored: anchor != nil)
 		preview.onMove = { [weak self] spot in
+			self?.dragged = true
 			self?.place(index, overlay, at: spot, anchor: anchor)
 		}
 

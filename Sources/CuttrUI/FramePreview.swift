@@ -177,7 +177,16 @@ public final class FramePreview: NSView {
 
 	// MARK: - Dragging
 
+	/// Grabbing the picture takes the focus off whatever field had it.
+	///
+	/// Which matters for more than the ring: a field being typed into stops the
+	/// panel reloading — otherwise the file would come back mid-word and take
+	/// the cursor with it — so a drag that left the focus where it was wrote a
+	/// new value into a form that had been told not to look.
+	public override var acceptsFirstResponder: Bool { true }
+
 	public override func mouseDown(with event: NSEvent) {
+		window?.makeFirstResponder(self)
 		let place = convert(event.locationInWindow, from: nil)
 		let centre = point(spot)
 		// Grabbed by the chip keeps the pointer where it took hold; a click
