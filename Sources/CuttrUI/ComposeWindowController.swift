@@ -35,6 +35,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// Opening a take is the application's business, not this window's: it may
 	/// already be open in another tab.
 	public var onOpenTake: ((URL) -> Void)?
+	/// Open a take *at* a moment: from a clip on the programme to the place it
+	/// was cut from, which is the question somebody asks when a shot is wrong.
+	public var onOpenTakeAt: ((URL, Double) -> Void)?
 	/// Whether a take already has a tab of its own. Renaming one that is open
 	/// would leave that tab writing to a file that no longer exists.
 	public var isTakeOpen: ((URL) -> Bool)?
@@ -258,6 +261,16 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private func wire() {
 		composeDocument.onChange = { [weak self] in self?.rebuild() }
 		strip.onScrub = { [weak self] time in self?.seek(to: time) }
+
+		// Double-click a clip on the programme to open the take it came from,
+		// at the moment under the pointer — the programme's clock turned back
+		// into the take's.
+		strip.onOpenClip = { [weak self] clip, time in
+			guard let self, let take = self.composeDocument.takes
+				.first(where: { $0.name == clip.takeName })
+			else { return }
+			self.onOpenTakeAt?(take.url, clip.takeTime(forProgramme: time))
+		}
 
 		// Dragged on the big timeline, written back the way the file says it:
 		// snapped to a clip, kept relative to one, or in programme times —

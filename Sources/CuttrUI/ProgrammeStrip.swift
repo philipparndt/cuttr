@@ -23,6 +23,8 @@ public final class ProgrammeStrip: NSView {
 	public var playhead: Double = 0 { didSet { needsDisplay = true } }
 	public var onScrub: ((Double) -> Void)?
 	public var onSelect: ((ResolvedClip) -> Void)?
+	/// Somebody asked to see where this clip came from, at this moment.
+	public var onOpenClip: ((ResolvedClip, Double) -> Void)?
 	/// An overlay's bar was dragged: which overlay it came from, and where its
 	/// ends are now, on the programme's clock. The window writes it back the
 	/// way the file says it — snapped to a clip, or relative to one.
@@ -241,7 +243,12 @@ public final class ProgrammeStrip: NSView {
 		}
 
 		onScrub?(t)
-		if let clip = resolved?.clips.last(where: { t >= $0.start && t < $0.end }) { onSelect?(clip) }
+		if let clip = resolved?.clips.last(where: { t >= $0.start && t < $0.end }) {
+			onSelect?(clip)
+			// Twice for "show me where this came from". Once selects, which is
+			// what a single click on a timeline means everywhere.
+			if event.clickCount == 2 { onOpenClip?(clip, t) }
+		}
 	}
 
 	public override func mouseDragged(with event: NSEvent) {

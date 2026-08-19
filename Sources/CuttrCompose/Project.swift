@@ -165,13 +165,43 @@ public struct TimelineEntry: Sendable, Equatable {
 	/// Seconds to cross-fade into this entry from the one before, 0 for a cut.
 	public var transition: Double
 
-	public init(source: Source, transition: Double = 0) {
-		self.source = source
-		self.transition = transition
+	/// A name for *this placement* of the clip.
+	///
+	/// A clip used twice is two places on the programme, and `from: intro`
+	/// cannot tell them apart — which is what makes using one twice awkward.
+	/// `as: opening` names the placement, and an overlay hangs on `@opening`
+	/// exactly as it would on a section. It behaves like a section of one clip,
+	/// because that is what it is.
+	public var label: String?
+
+	/// Seconds off the head and the tail of the clip, for this placement only.
+	///
+	/// The take is not touched: trimming here says "use a bit less of it here",
+	/// which is what somebody wants when the same shot is used twice at
+	/// different lengths. A clip trimmed to nothing is dropped rather than
+	/// rendered as a frame of nothing.
+	public var trim: (head: Double, tail: Double)
+
+	public static func == (a: TimelineEntry, b: TimelineEntry) -> Bool {
+		a.source == b.source && a.transition == b.transition && a.label == b.label
+			&& a.trim == b.trim
 	}
 
-	public init(clip: ClipReference, transition: Double = 0) {
-		self.init(source: .clip(clip), transition: transition)
+	public init(
+		source: Source, transition: Double = 0,
+		label: String? = nil, trim: (head: Double, tail: Double) = (0, 0)
+	) {
+		self.source = source
+		self.transition = transition
+		self.label = label
+		self.trim = trim
+	}
+
+	public init(
+		clip: ClipReference, transition: Double = 0,
+		label: String? = nil, trim: (head: Double, tail: Double) = (0, 0)
+	) {
+		self.init(source: .clip(clip), transition: transition, label: label, trim: trim)
 	}
 
 	public init(list: [ClipReference], transition: Double = 0) {

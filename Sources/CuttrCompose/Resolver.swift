@@ -259,8 +259,18 @@ public enum Resolver {
 					continue   // handled above
 				}
 
+				let trim = entry.trim
+				let label = entry.label
 				for entry in found {
-					guard entry.clip.duration > 0 else { continue }
+					// Trimmed for this placement only: the take keeps its own
+					// marks, and the same shot used twice can be a different
+					// length each time.
+					var clip = entry.clip
+					if trim.head > 0 || trim.tail > 0 {
+						clip.start += max(0, trim.head)
+						clip.end -= max(0, trim.tail)
+					}
+					guard clip.duration > 0 else { continue }
 					// A dissolve is an overlap: the incoming clip starts before
 					// the outgoing one ends, and the programme is shorter by
 					// exactly that much. Never longer than half of either clip,
@@ -268,10 +278,11 @@ public enum Resolver {
 					// run past both.
 					var overlap = 0.0
 					if pending > 0, let last = clips.last {
-						overlap = min(pending, last.duration / 2, entry.clip.duration / 2)
+						overlap = min(pending, last.duration / 2, clip.duration / 2)
 						cursor -= overlap
 					}
 					pending = 0
+					let placedAt = cursor
 					let video = entry.take.video.map {
 						URL(fileURLWithPath: $0, relativeTo: entry.directory).standardizedFileURL
 					}
@@ -284,13 +295,22 @@ public enum Resolver {
 					clips.append(ResolvedClip(
 						reference: ClipReference(take: entry.name, slug: entry.clip.slug),
 						takeName: entry.name,
-						clip: entry.clip,
+						clip: clip,
 						videoURL: video,
 						audioURL: audio,
 						audioOffset: entry.take.audio?.offset ?? 0,
 						start: cursor,
 						transition: overlap))
-					cursor += entry.clip.duration
+					cursor += clip.duration
+					// `as:` names this placement, and a named placement is a
+					// section of one clip — the same thing an overlay hangs on,
+					// so nothing downstream has to learn a new idea.
+					if let label {
+						let existing = groups[label]
+						groups[label] = (min(existing?.start ?? placedAt, placedAt),
+						                 max(existing?.end ?? cursor, cursor))
+						groupDepth[label] = groupDepth[label] ?? depth
+					}
 				}
 			}
 		}
@@ -390,59 +410,65 @@ public enum Resolver {
 			// that is on from one moment to another, so an overlay that is on
 			// three times is three of those and nothing else changes.
 			for (position, appearance) in overlay.appearances.enumerated() {
-				let start: Double
-				let end: Double
+				/// Where a mark is on the programme, once for each time it is
+				/// there.
+				///
+				/// A clip used twice is two places, not one long one. Spanning
+				/// from the first to the last covered everything in between —
+				/// which is why using a clip twice was awkward: an overlay hung
+				/// on it swallowed whatever came between the two uses.
+				func places(_ endpoint: Overlay.Span.Endpoint) throws -> [(start: Double, end: Double)] {
+					switch endpoint {
+					case .clip(let reference):
+						let matching = clips.filter {
+							$0.reference.slug == reference.slug
+								&& (reference.take == nil || $0.takeName == reference.take)
+						}
+						guard !matching.isEmpty else { throw ResolveError.unknownClip(reference) }
+						return matching.map { ($0.start, $0.end) }
+					case .group(let name):
+						guard let range = groups[name] else { throw ResolveError.unknownGroup(name) }
+						return [range]
+					}
+				}
+
+				var spans: [(start: Double, end: Double)] = []
 				switch appearance.span {
 				case .times(let a, let b):
-					start = a
-					end = b
+					spans = [(a, b)]
 				case .within(let mark, let a, let b):
 					// Timed from where the clip or section starts, so it travels
-					// with it.
-					func extent(_ endpoint: Overlay.Span.Endpoint) throws -> (start: Double, end: Double) {
-						switch endpoint {
-						case .clip(let reference):
-							guard let first = clips.first(where: { $0.reference.slug == reference.slug }),
-							      let last = clips.last(where: { $0.reference.slug == reference.slug })
-							else { throw ResolveError.unknownClip(reference) }
-							return (first.start, last.end)
-						case .group(let name):
-							guard let range = groups[name] else { throw ResolveError.unknownGroup(name) }
-							return range
-						}
-					}
-					let where_ = try extent(mark)
-					start = where_.start + a
-					end = where_.start + b
+					// with it — and once for each time that clip is used.
+					spans = try places(mark).map { ($0.start + a, $0.start + b) }
 				case .marks(let from, let to):
 					// Mark-bound, which is the point: the caption belongs to a
 					// section of the programme, so re-cutting the takes moves it.
-					func extent(_ endpoint: Overlay.Span.Endpoint) throws -> (start: Double, end: Double) {
-						switch endpoint {
-						case .clip(let reference):
-							guard let first = clips.first(where: { $0.reference.slug == reference.slug }),
-							      let last = clips.last(where: { $0.reference.slug == reference.slug })
-							else { throw ResolveError.unknownClip(reference) }
-							return (first.start, last.end)
-						case .group(let name):
-							guard let range = groups[name] else { throw ResolveError.unknownGroup(name) }
-							return range
+					let heads = try places(from)
+					let tails = try places(to)
+					if from == to {
+						spans = heads
+					} else {
+						// From the first time the head is used to the first end
+						// of the tail after it, so a range across the programme
+						// is one range rather than every combination.
+						for head in heads {
+							guard let tail = tails.first(where: { $0.end >= head.end })
+								?? tails.last else { continue }
+							spans.append((head.start, max(tail.end, head.end)))
 						}
 					}
-					let a = try extent(from)
-					let b = try extent(to)
-					start = a.start
-					end = max(b.end, a.end)
 				}
-				guard end > start else { continue }
-				// What it says *here*: a spinner that comes back saying
-				// something else is one overlay with two appearances, and by
-				// the time it reaches the layer tree it is simply two overlays
-				// that happen to agree about everything but their words.
-				overlays.append(ResolvedOverlay(
-					overlay: overlay.shown(at: appearance), source: index, appearance: position,
-					start: start, end: end,
-					path: overlay.anchor.flatMap { paths[$0] }))
+
+				for span in spans where span.end > span.start {
+					// What it says *here*: a spinner that comes back saying
+					// something else is one overlay with two appearances, and by
+					// the time it reaches the layer tree it is simply two
+					// overlays that agree about everything but their words.
+					overlays.append(ResolvedOverlay(
+						overlay: overlay.shown(at: appearance), source: index, appearance: position,
+						start: span.start, end: span.end,
+						path: overlay.anchor.flatMap { paths[$0] }))
+				}
 			}
 		}
 

@@ -521,6 +521,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	/// "The clip" is the selected one when there is a selection, and otherwise
 	/// whatever the playhead is inside — so it works whether somebody is
 	/// working from the list or from the timeline.
+	/// Put the playhead on a moment of this take, and select the clip that is
+	/// there — how the composing window hands over.
+	public func reveal(at time: Double) {
+		let clip = takeDocument.take.clips.last { $0.contains(time) }
+		if let clip {
+			selectedClip = clip.id
+			clipTable.reload(takeDocument.take.clips, selected: clip.id)
+			timeline.selectedClip = clip.id
+			timeline.reveal(from: clip.start, to: clip.end)
+		}
+		move(to: time)
+	}
+
 	private func jumpToEdge() {
 		let clips = takeDocument.take.clips
 		let clip = selectedClip.flatMap { id in clips.first { $0.id == id } }

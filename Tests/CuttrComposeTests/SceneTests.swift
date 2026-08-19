@@ -181,3 +181,36 @@ import Testing
 		#expect(clips[1].start == 5)
 	}
 }
+
+/// Using one clip twice, at different lengths, in different places.
+@Suite struct PlacementTests {
+
+	@Test func aPlacementCanBeNamedAndTrimmed() throws {
+		let project = Project(
+			timeline: [
+				TimelineEntry(clip: ClipReference("intro")),
+				TimelineEntry(clip: ClipReference("intro"), label: "reprise",
+				              trim: (head: 1.5, tail: 0.5)),
+			],
+			overlays: [Overlay(kind: .text("again", style: nil),
+			                   span: .marks(from: .group("reprise"), to: .group("reprise")))])
+
+		let text = ProjectWriter.write(project)
+		#expect(text.contains("as:"))
+		#expect(text.contains("trim:"))
+		let back = try ProjectReader.read(text)
+		#expect(back.timeline == project.timeline)
+		#expect(back.timeline[1].label == "reprise")
+		#expect(back.timeline[1].trim.head == 1.5)
+		#expect(back.timeline[1].trim.tail == 0.5)
+		#expect(ProjectWriter.write(back) == text)
+	}
+
+	/// A clip with nothing said about it is still written in the short form.
+	@Test func theOrdinaryEntryIsUnchanged() {
+		let text = ProjectWriter.write(Project(timeline: [TimelineEntry(clip: ClipReference("intro"))]))
+		#expect(text.contains("  - clip: intro\n"))
+		#expect(!text.contains("as:"))
+		#expect(!text.contains("trim:"))
+	}
+}

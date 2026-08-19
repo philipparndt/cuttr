@@ -141,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		let controller = ComposeWindowController(document: document)
 		// The project opens its takes, and they arrive as tabs beside it.
 		controller.onOpenTake = { [weak self] url in self?.open(url) }
+		controller.onOpenTakeAt = { [weak self] url, time in self?.open(url, at: time) }
 		controller.isTakeOpen = { [weak self] url in
 			self?.controllers.contains { $0.takeDocument.url?.standardizedFileURL == url } ?? false
 		}
@@ -192,6 +193,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		let media = urls.filter { $0.pathExtension != "cuttr" }
 		for url in takes { open(url) }
 		if !media.isEmpty { openMedia(media) }
+	}
+
+	/// Opens a take and puts the playhead somewhere in it — what the composing
+	/// window asks for when somebody wants to see where a clip came from.
+	private func open(_ url: URL, at time: Double?) {
+		open(url)
+		guard let time,
+		      let controller = controllers.first(where: { $0.takeDocument.url == url })
+		else { return }
+		controller.reveal(at: time)
 	}
 
 	private func open(_ url: URL) {

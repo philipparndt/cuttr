@@ -128,6 +128,17 @@ public enum ProjectReader {
 					out.append(try entryFromText(text, transition: 0))
 				} else if let m = mapping(entry) {
 					let transition = try time(m["transition"], key: "transition") ?? 0
+					// A name for this placement, and how much of the clip to
+					// leave off at each end — both about *this* use of it.
+					let label = (m["as"] as? String).flatMap(nonEmpty).map(Slug.make(from:))
+					var trim = (head: 0.0, tail: 0.0)
+					if let pair = m["trim"] as? [Any], pair.count == 2 {
+						trim = (try time(pair[0], key: "trim") ?? 0,
+						        try time(pair[1], key: "trim") ?? 0)
+					} else if let fields = mapping(m["trim"]) {
+						trim = (try time(fields["head"], key: "trim") ?? 0,
+						        try time(fields["tail"], key: "trim") ?? 0)
+					}
 					if let group = (m["group"] as? String).flatMap(nonEmpty) {
 						out.append(TimelineEntry(
 							group: Slug.make(from: group),
@@ -145,7 +156,9 @@ public enum ProjectReader {
 							list: clips.compactMap { ($0 as? String).map(ClipReference.init) },
 							transition: transition))
 					} else if let clip = (m["clip"] as? String).flatMap(nonEmpty) {
-						out.append(TimelineEntry(clip: ClipReference(clip), transition: transition))
+						out.append(TimelineEntry(
+							clip: ClipReference(clip), transition: transition,
+							label: label, trim: trim))
 					}
 				}
 			}

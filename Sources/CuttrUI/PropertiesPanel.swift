@@ -297,6 +297,30 @@ public final class PropertiesPanel: NSView {
 				self?.replace(path, TimelineEntry(clip: ClipReference(value),
 				                                  transition: entry.transition))
 			}], note: "a slug, or take/slug when two takes share one")
+			field("as", [text(entry.label ?? "", width: 210, placeholder: "a name for this use") {
+				[weak self] value in
+				let name = value.trimmingCharacters(in: .whitespaces)
+				self?.replace(path, TimelineEntry(
+					clip: reference, transition: entry.transition,
+					label: name.isEmpty ? nil : Slug.make(from: name), trim: entry.trim))
+			}], note: "the same clip used twice is two places; a name tells them apart, "
+				+ "and an overlay hangs on `@name`")
+			field("trim", [
+				text(Timecode.string(entry.trim.head), width: 96, placeholder: "00:00.000") {
+					[weak self] value in
+					guard let seconds = Timecode.parse(value) else { return }
+					self?.replace(path, TimelineEntry(
+						clip: reference, transition: entry.transition, label: entry.label,
+						trim: (max(0, seconds), entry.trim.tail)))
+				},
+				text(Timecode.string(entry.trim.tail), width: 96, placeholder: "00:00.000") {
+					[weak self] value in
+					guard let seconds = Timecode.parse(value) else { return }
+					self?.replace(path, TimelineEntry(
+						clip: reference, transition: entry.transition, label: entry.label,
+						trim: (entry.trim.head, max(0, seconds))))
+				},
+			], note: "off the head and off the tail, here only — the take keeps its own marks")
 
 		case .list(let references):
 			field("list", [text(references.map(\.description).joined(separator: ", "),

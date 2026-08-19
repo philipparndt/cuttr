@@ -174,7 +174,8 @@ public enum ProjectWriter {
 				out += "\(indent)- clips: [\(references.map(\.description).joined(separator: ", "))]\n"
 				if entry.transition != 0 { out += "\(indent)  transition: \(trim(entry.transition))\n" }
 			case .clip(let reference):
-				out += scalarEntry("clip", reference.description, entry.transition, indent)
+				out += scalarEntry("clip", reference.description, entry.transition, indent,
+				                   label: entry.label, ends: entry.trim)
 			case .query(_, let source):
 				out += scalarEntry("query", source, entry.transition, indent)
 			}
@@ -182,11 +183,31 @@ public enum ProjectWriter {
 		return out
 	}
 
-	private static func scalarEntry(_ key: String, _ value: String, _ transition: Double, _ indent: String) -> String {
-		// The short form for a straight cut, which is nearly all of them.
-		if transition == 0 { return "\(indent)- \(key): \(scalar(value))\n" }
-		return "\(indent)- \(key):       \(scalar(value))\n"
-			+ "\(indent)  transition: \(trim(transition))\n"
+	private static func scalarEntry(
+		_ key: String, _ value: String, _ transition: Double, _ indent: String,
+		label: String? = nil, ends: (head: Double, tail: Double) = (0, 0)
+	) -> String {
+		// The short form for a straight cut of the whole clip, which is nearly
+		// all of them.
+		if transition == 0, label == nil, ends == (0, 0) {
+			return "\(indent)- \(key): \(scalar(value))\n"
+		}
+		if transition == 0 {
+			var out = "\(indent)- \(key): \(scalar(value))\n"
+			if let label { out += "\(indent)  as:   \(scalar(label))\n" }
+			if ends != (0, 0) {
+				out += "\(indent)  trim: [\(Timecode.string(ends.head)), \(Timecode.string(ends.tail))]\n"
+			}
+			return out
+		}
+		var out = "\(indent)- \(key):       \(scalar(value))\n"
+		if let label { out += "\(indent)  as:         \(scalar(label))\n" }
+		if ends != (0, 0) {
+			out += "\(indent)  trim:       "
+				+ "[\(Timecode.string(ends.head)), \(Timecode.string(ends.tail))]\n"
+		}
+		out += "\(indent)  transition: \(trim(transition))\n"
+		return out
 	}
 
 	/// What a spinner says at one appearance, in the flow form the `when:` list
