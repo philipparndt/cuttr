@@ -120,6 +120,27 @@ public enum Theme {
 		return image.withSymbolConfiguration(configuration)
 	}
 
+	/// The rectangle a picture of this size fills inside a slot, without being
+	/// stretched to fit it.
+	///
+	/// Every symbol in this program was being drawn into a rectangle somebody
+	/// picked by eye — 17 by 16, 13 by 12 — and a symbol is not those
+	/// proportions. A folder came out wider than it is, and a chevron came out
+	/// squashed. The slot says how much room there is; the picture keeps its
+	/// own shape inside it.
+	public static func fit(_ size: NSSize, in slot: NSRect) -> NSRect {
+		guard size.width > 0, size.height > 0 else { return slot }
+		let scale = min(slot.width / size.width, slot.height / size.height)
+		let fitted = NSSize(width: size.width * scale, height: size.height * scale)
+		return NSRect(x: slot.midX - fitted.width / 2, y: slot.midY - fitted.height / 2,
+		              width: fitted.width, height: fitted.height)
+	}
+
+	/// Draws a picture in the middle of a slot, its own shape.
+	public static func draw(_ image: NSImage, in slot: NSRect) {
+		image.draw(in: fit(image.size, in: slot))
+	}
+
 	public static let mono = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 	public static let monoSmall = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
 	public static let label = NSFont.systemFont(ofSize: 11, weight: .medium)

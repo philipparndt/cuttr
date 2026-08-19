@@ -266,12 +266,13 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 					accessibilityDescription: folded ? "folded" : "open") {
 					let configuration = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
 						.applying(NSImage.SymbolConfiguration(paletteColors: [Theme.dimText]))
-					chevron.withSymbolConfiguration(configuration)?
-						.draw(in: NSRect(x: x, y: bounds.height - 15, width: 11, height: 10))
+					if let drawn = chevron.withSymbolConfiguration(configuration) {
+						Theme.draw(drawn, in: NSRect(x: x, y: bounds.height - 16, width: 11, height: 12))
+					}
 				}
 				x += 14
 				if let kind, let image = Theme.symbol(kind, size: 10, colour: Theme.faintText) {
-					image.draw(in: NSRect(x: x, y: bounds.height - 16, width: 13, height: 12))
+					Theme.draw(image, in: NSRect(x: x, y: bounds.height - 17, width: 13, height: 14))
 					x += 17
 				}
 				let text = title.uppercased() as NSString
@@ -306,7 +307,7 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 
 		private func mark(_ kind: Theme.Kind) {
 			guard let image = Theme.symbol(kind) else { return }
-			image.draw(in: NSRect(x: 5, y: bounds.height / 2 - 7, width: 15, height: 14))
+			Theme.draw(image, in: NSRect(x: 5, y: bounds.height / 2 - 8, width: 15, height: 16))
 		}
 
 		private func primary(_ text: String, x: CGFloat, y: CGFloat) {

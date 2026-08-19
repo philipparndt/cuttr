@@ -222,3 +222,46 @@ import Testing
 		#expect((fragment?.enclosingScrollView?.frame.height ?? 0) > 100)
 	}
 }
+
+/// Pictures keep their own shape.
+///
+/// Every symbol in this program was drawn into a rectangle picked by eye, and
+/// a folder is not 17 by 16.
+@Suite @MainActor struct SymbolFittingTests {
+
+	@Test func aWidePictureFitsTheSlotWithoutStretching() {
+		let slot = NSRect(x: 10, y: 20, width: 20, height: 10)
+		let fitted = Theme.fit(NSSize(width: 40, height: 10), in: slot)
+		#expect(fitted.width == 20)
+		#expect(fitted.height == 5)
+		// And it sits in the middle of the room it was given.
+		#expect(fitted.midX == slot.midX)
+		#expect(fitted.midY == slot.midY)
+	}
+
+	@Test func aTallPictureFitsTheOtherWay() {
+		let fitted = Theme.fit(NSSize(width: 10, height: 40),
+		                       in: NSRect(x: 0, y: 0, width: 20, height: 20))
+		#expect(fitted.height == 20)
+		#expect(fitted.width == 5)
+	}
+
+	/// A picture with no size cannot be fitted, and stretching nothing is not
+	/// an improvement — it gets the slot.
+	@Test func nothingIsLeftAlone() {
+		let slot = NSRect(x: 1, y: 2, width: 3, height: 4)
+		#expect(Theme.fit(.zero, in: slot) == slot)
+	}
+
+	/// The symbols this program actually draws are not square, which is the
+	/// whole reason any of this is here.
+	@Test func theSymbolsInUseAreNotSquare() {
+		let folder = Theme.symbol(.section, size: 13)
+		#expect(folder != nil)
+		if let folder {
+			let slot = NSRect(x: 0, y: 0, width: 17, height: 16)
+			let fitted = Theme.fit(folder.size, in: slot)
+			#expect(abs(fitted.width / fitted.height - folder.size.width / folder.size.height) < 0.001)
+		}
+	}
+}
