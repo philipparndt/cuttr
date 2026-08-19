@@ -156,15 +156,18 @@ public enum Renderer {
 		videoComposition.renderSize = size
 		videoComposition.frameDuration = CMTime(
 			value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
+		// Said out loud: the programme is Rec. 709. Without it a render at any
+		// size other than the footage's own came back flat and milky, because
+		// the pixels were converted and the file did not say into what.
+		videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+		videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+		videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
 		// Said out loud: the programme is Rec. 709.
 		//
 		// A phone shoots HLG, and a file whose pixels are HLG but whose tags say
 		// nothing is shown as sRGB — flat, milky, the blacks lifted and the sky
 		// gone. Naming the colour makes AVFoundation convert into it instead of
 		// hoping.
-		videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
-		videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
-		videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
 
 		// The mix: one parameter set over the single audio track, stepping the
 		// volume at each cut. A step rather than a ramp because the cut is
@@ -199,16 +202,42 @@ public enum Renderer {
 		videoComposition.renderSize = size
 		videoComposition.frameDuration = CMTime(
 			value: 1, timescale: CMTimeScale(max(1, resolved.project.output.framesPerSecond.rounded())))
+		// The same colour as the pass before it, or the picture is converted
+		// twice and comes back lifted.
+		videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+		videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+		videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
 
 		let overlays = OverlayLayers.build(resolved, size: size, host: .export)
-		let videoLayer = CALayer()
-		videoLayer.frame = CGRect(origin: .zero, size: size)
-		let parent = CALayer()
-		parent.frame = CGRect(origin: .zero, size: size)
-		parent.addSublayer(videoLayer)
-		parent.addSublayer(overlays)
+		// As an *additional* layer rather than by drawing the video into one.
+		//
+		// `postProcessingAsVideoLayer:` puts the picture inside a Core Animation
+		// tree, and Core Animation composites in its own colour: the frame came
+		// back twenty levels lifted, milky, with the sky gone. This variant
+		// leaves the video where it is and lays the overlays over it.
+		let track = try await asset.loadTracks(withMediaType: .video).first
+		let trackID = (track?.trackID ?? 1) &+ 1
+		overlays.frame = CGRect(origin: .zero, size: size)
 		videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
-			postProcessingAsVideoLayer: videoLayer, in: parent)
+			additionalLayer: overlays, asTrackID: trackID)
+		// The overlay track has to be named in the instruction, or the tool has
+		// nowhere to put it.
+		if let source = track {
+			let instruction = AVMutableVideoCompositionInstruction()
+			instruction.timeRange = CMTimeRange(
+				start: .zero, duration: try await asset.load(.duration))
+			// Both tracks named: the picture, and the layer that is laid over
+			// it. `requiredSourceTrackIDs` is worked out from these, and the
+			// tool draws nothing for a track nobody asked for.
+			let overlayInstruction = AVMutableVideoCompositionLayerInstruction()
+			overlayInstruction.trackID = trackID
+			instruction.layerInstructions = [
+				overlayInstruction,
+				AVMutableVideoCompositionLayerInstruction(assetTrack: source),
+			]
+			instruction.enablePostProcessing = true
+			videoComposition.instructions = [instruction]
+		}
 
 		try await write(asset, videoComposition: videoComposition, audioMix: nil,
 		                to: url, progress: progress)
