@@ -63,6 +63,10 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		table.gridStyleMask = []
 		table.target = self
 		table.doubleAction = #selector(doubleClicked)
+		// A scene can be dragged from here onto the programme, the same as from
+		// the library — this is a list of what the project is made of, and
+		// dragging from it is how material gets used.
+		table.setDraggingSourceOperationMask(.copy, forLocal: true)
 		// Delete takes the selected row out of the *project* — the take file
 		// itself is left alone, which is what the menu item beside it says and
 		// why this is not a frightening key to press here.
@@ -251,6 +255,16 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 			// A scene *is* the project, so this one really does remove it.
 			onRemoveScene?(name)
 		}
+	}
+
+	public func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+		// Only scenes. A take is not something the programme can hold: what
+		// goes on a timeline is a clip out of one, and those are in the library
+		// below.
+		guard let name = sceneName(row) else { return nil }
+		let item = NSPasteboardItem()
+		item.setString(name, forType: ProgrammePanel.sceneType)
+		return item
 	}
 
 	// MARK: - Data source

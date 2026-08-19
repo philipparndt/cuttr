@@ -148,3 +148,87 @@ import Testing
 		#expect(find(SpanStrip.self, in: panel).first?.selected == 0)
 	}
 }
+
+/// Dragging a scene onto the programme.
+///
+/// A clip dropped there is a clip; a scene has nowhere to be until something
+/// holds it, so the drop makes the something.
+@Suite @MainActor struct SceneDropTests {
+
+	private func project() -> Project {
+		var project = Project(timeline: [TimelineEntry(clip: ClipReference("intro"))])
+		project.scenes["opening"] = Scene(parts: [
+			Scene.Part(content: .text("{{title}}", style: nil),
+			           keys: [Scene.Key(t: 0, opacity: 0), Scene.Key(t: 2.5, opacity: 1)]),
+		])
+		project.scenes["plain"] = Scene(parts: [
+			Scene.Part(content: .shape(fill: RGBA(hex: "#ffffff")!, corner: 0),
+			           keys: [Scene.Key(t: 0)]),
+		])
+		return project
+	}
+
+	private func panel() -> ProgrammePanel {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+		panel.reload(project(), vocabulary: ComposeDocument.Vocabulary())
+		return panel
+	}
+
+	@Test func aDroppedSceneBringsACardWithIt() {
+		let panel = self.panel()
+		var written: Project?
+		panel.onChange = { written = $0 }
+		#expect(panel.dropScene("opening", into: [], at: 0))
+
+		// The card, at the length the scene actually runs for.
+		guard case .card(let card)? = written?.timeline.first?.source else {
+			Issue.record("no card was inserted")
+			return
+		}
+		#expect(abs(card.duration - 2.5) < 0.001)
+		#expect(written?.timeline.first?.label == "opening")
+		#expect(written?.timeline.count == 2)
+
+		// And the scene, hung on the card by the name the card was given.
+		#expect(written?.overlays.count == 1)
+		#expect(written?.overlays.first?.kind == .scene("opening", with: [:]))
+		#expect(written?.overlays.first?.span == .marks(from: .group("opening"),
+		                                                to: .group("opening")))
+	}
+
+	/// A scene that never moves gets a title card's length rather than nothing.
+	@Test func aSceneWithNothingHappeningStillTakesTime() {
+		let panel = self.panel()
+		var written: Project?
+		panel.onChange = { written = $0 }
+		_ = panel.dropScene("plain", into: [], at: 0)
+		guard case .card(let card)? = written?.timeline.first?.source else { return }
+		#expect(card.duration == 4)
+	}
+
+	/// Two of the same scene are two places, and each overlay must hang on its
+	/// own — otherwise both play over the first card.
+	@Test func theSecondOneGetsItsOwnName() {
+		let panel = self.panel()
+		var written = project()
+		panel.onChange = { written = $0 }
+		_ = panel.dropScene("opening", into: [], at: 0)
+		panel.reload(written, vocabulary: ComposeDocument.Vocabulary())
+		_ = panel.dropScene("opening", into: [], at: 0)
+
+		let labels = written.timeline.compactMap(\.label)
+		#expect(labels == ["opening-2", "opening"] || labels == ["opening", "opening-2"])
+		#expect(written.overlays.count == 2)
+		#expect(written.overlays[0].span != written.overlays[1].span,
+		        "both scenes hang on the same card")
+	}
+
+	@Test func anUnknownSceneIsNotDropped() {
+		let panel = self.panel()
+		var written: Project?
+		panel.onChange = { written = $0 }
+		#expect(panel.dropScene("nothing-like-this", into: [], at: 0) == false)
+		#expect(written == nil)
+	}
+}

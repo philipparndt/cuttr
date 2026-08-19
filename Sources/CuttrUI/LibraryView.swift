@@ -301,9 +301,14 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 	/// project writes. The same string works dropped into the timeline, into
 	/// the text editor, or into somebody's notes.
 	public func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-		// A scene is not a reference to material, so there is nothing to drop
-		// on the programme: it goes on one by being an overlay's `scene:`.
-		if case .scene = rows[row] { return nil }
+		// A scene is dragged as itself rather than as a reference: dropped on
+		// the programme it becomes a card with the scene drawn on it, which is
+		// what an intro screen is, and that is the drop's business to arrange.
+		if case .scene(let name) = rows[row] {
+			let item = NSPasteboardItem()
+			item.setString(name, forType: ProgrammePanel.sceneType)
+			return item
+		}
 		guard row < rows.count, let reference = rows[row].reference else { return nil }
 		let item = NSPasteboardItem()
 		item.setString(reference, forType: .string)

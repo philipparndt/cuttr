@@ -54,6 +54,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// Dragging an entry means dragging its position, so the position is what
 	/// travels: `0.2.1` is the second entry of the third entry of the first.
 	private static let entryType = NSPasteboard.PasteboardType("de.rnd7.cuttr.entry")
+	/// A scene, dragged. Its own type rather than plain text because plain text
+	/// dropped on the programme is read as a clip reference, and a scene is not
+	/// one: it is a thing to be *drawn*, and what it needs underneath it is a
+	/// card.
+	public static let sceneType = NSPasteboard.PasteboardType("de.rnd7.cuttr.scene")
 
 	// MARK: - Tree
 
@@ -222,7 +227,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		outline.outlineTableColumn = column
 
 		// Dropped on from the library, and dragged about within itself.
-		outline.registerForDraggedTypes([.string, Self.entryType])
+		outline.registerForDraggedTypes([.string, Self.entryType, Self.sceneType])
 		outline.setDraggingSourceOperationMask(.move, forLocal: true)
 
 		let scroll = TableScroll.fitting(outline)
@@ -625,9 +630,59 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			return true
 		}
 
+		if let scene = board.string(forType: Self.sceneType) {
+			return drop(scene: scene, into: parent, at: index, of: &next)
+		}
+
 		guard let text = board.string(forType: .string),
 		      let entry = try? TimelineEntry(text: text) else { return false }
 		pending = .entry(next.insertEntry(entry, into: parent, at: index < 0 ? Int.max : index))
+		onChange?(next)
+		return true
+	}
+
+	/// A scene dropped on the programme becomes an intro screen: a card with
+	/// nothing behind it, and the scene drawn on that card.
+	///
+	/// Both, because a scene on its own has nowhere to be — an overlay hangs on
+	/// a stretch of programme, and until the card exists there is no stretch.
+	/// The card is named with `as:` and the overlay hangs on that name, so
+	/// moving the card later takes the scene with it.
+	///
+	/// How long: the scene's own last keyframe, rounded up, because that is
+	/// when it has finished happening. A scene with no keys gets four seconds,
+	/// which is a title card.
+	@discardableResult
+	func dropScene(_ name: String, into parent: [Int], at index: Int) -> Bool {
+		var next = project
+		return drop(scene: name, into: parent, at: index, of: &next)
+	}
+
+	private func drop(scene name: String, into parent: [Int], at index: Int,
+	                  of next: inout Project) -> Bool {
+		guard let scene = project.scenes[name] else { return false }
+		let last = scene.parts.flatMap { $0.keys }.map(\.t).max() ?? 0
+		let seconds = last > 0.05 ? (last * 10).rounded(.up) / 10 : 4
+
+		// The label has to be one nothing else answers to, or an overlay that
+		// hangs on it would follow whichever came first.
+		var label = name
+		var suffix = 2
+		let taken = Set(next.timeline.flatMap { entry -> [String] in
+			entry.label.map { [$0] } ?? []
+		})
+		while taken.contains(label) {
+			label = "\(name)-\(suffix)"
+			suffix += 1
+		}
+
+		let card = TimelineEntry(source: .card(Card(duration: seconds)), label: label)
+		let where_ = next.insertEntry(card, into: parent, at: index < 0 ? Int.max : index)
+		next.overlays.append(Overlay(
+			kind: .scene(name, with: [:]),
+			span: .marks(from: .group(label), to: .group(label)),
+			arrival: .fade(over: 0.4), departure: .fade(over: 0.4)))
+		pending = .entry(where_)
 		onChange?(next)
 		return true
 	}
