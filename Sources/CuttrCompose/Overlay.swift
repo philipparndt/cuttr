@@ -220,6 +220,18 @@ public struct Spinner: Sendable, Equatable {
 		case ring
 		/// A single arc sweeping.
 		case arc
+		/// Tapered spokes round a circle, fading in turn. The oldest spinner
+		/// there is, and the most legible over busy footage: the spokes reach
+		/// the edge of the circle, so it reads at a smaller size than dots.
+		case bars
+		/// One dot travelling round a faint track. Quieter than the others —
+		/// for a corner of the frame rather than over somebody's head.
+		case orbit
+		/// A circle breathing, going nowhere. For "hold on" rather than
+		/// "working": nothing about it suggests progress round a loop.
+		case pulse
+		/// Three dots rising in turn, the way a terminal says it is thinking.
+		case bounce
 	}
 
 	public var style: Style

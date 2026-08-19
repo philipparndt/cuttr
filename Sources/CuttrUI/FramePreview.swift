@@ -234,6 +234,63 @@ public final class FramePreview: NSView {
 		grabBox = box.insetBy(dx: -4, dy: -4)
 
 		switch spinner.style {
+		case .bars:
+			// Lines round a circle: the classic spinner, and the one that reads
+			// best over busy footage because the spokes reach the rim.
+			let count = 12
+			let width = diameter * 0.09
+			let length = diameter * 0.28
+			for step in 0..<count {
+				let angle = Double(step) / Double(count) * 2 * .pi
+				ink.withAlphaComponent(max(0.1, 1 - Double(step) / Double(count))).setFill()
+				let path = NSBezierPath(roundedRect: NSRect(
+					x: -width / 2, y: diameter / 2 - length - diameter * 0.04,
+					width: width, height: length), xRadius: width / 2, yRadius: width / 2)
+				let move = AffineTransform(translationByX: centre.x, byY: centre.y)
+				var turn = AffineTransform(rotationByRadians: CGFloat(-angle))
+				turn.append(move)
+				let spoke = path.copy() as! NSBezierPath
+				spoke.transform(using: turn)
+				spoke.fill()
+			}
+
+		case .orbit:
+			let inset = diameter * 0.12
+			ink.withAlphaComponent(0.25).setStroke()
+			let track = NSBezierPath(ovalIn: NSRect(
+				x: centre.x - diameter / 2 + inset, y: centre.y - diameter / 2 + inset,
+				width: diameter - inset * 2, height: diameter - inset * 2))
+			track.lineWidth = diameter * 0.07
+			track.stroke()
+			let dot = diameter * 0.2
+			ink.setFill()
+			NSBezierPath(ovalIn: NSRect(
+				x: centre.x - dot / 2, y: centre.y + diameter / 2 - inset - dot / 2 - diameter * 0.035,
+				width: dot, height: dot)).fill()
+
+		case .pulse:
+			let inset = diameter * 0.14
+			let box = NSRect(x: centre.x - diameter / 2 + inset, y: centre.y - diameter / 2 + inset,
+			                 width: diameter - inset * 2, height: diameter - inset * 2)
+			ink.withAlphaComponent(0.18).setFill()
+			NSBezierPath(ovalIn: box).fill()
+			ink.setStroke()
+			let ring = NSBezierPath(ovalIn: box)
+			ring.lineWidth = diameter * 0.08
+			ring.stroke()
+
+		case .bounce:
+			let dots = 3
+			let dot = diameter * 0.26
+			let gap = (diameter - dot * CGFloat(dots)) / CGFloat(dots - 1)
+			for step in 0..<dots {
+				ink.withAlphaComponent(step == 1 ? 1 : 0.7).setFill()
+				let rise = step == 1 ? diameter * 0.18 : 0
+				NSBezierPath(ovalIn: NSRect(
+					x: centre.x - diameter / 2 + CGFloat(step) * (dot + gap),
+					y: centre.y - dot / 2 + rise, width: dot, height: dot)).fill()
+			}
+
 		case .dots:
 			// Twelve dots round the circle, each further through the same fade.
 			let count = 12

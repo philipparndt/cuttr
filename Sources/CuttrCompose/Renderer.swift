@@ -136,6 +136,15 @@ public enum Renderer {
 		videoComposition.renderSize = size
 		videoComposition.frameDuration = CMTime(
 			value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
+		// Said out loud: the programme is Rec. 709.
+		//
+		// A phone shoots HLG, and a file whose pixels are HLG but whose tags say
+		// nothing is shown as sRGB — flat, milky, the blacks lifted and the sky
+		// gone. Naming the colour makes AVFoundation convert into it instead of
+		// hoping.
+		videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+		videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+		videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
 
 		// The mix: one parameter set over the single audio track, stepping the
 		// volume at each cut. A step rather than a ramp because the cut is

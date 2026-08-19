@@ -209,6 +209,28 @@ import Testing
 			== .text("Installed", style: nil))
 	}
 
+	/// Every spinner there is, written and read back.
+	///
+	/// The list is the enum, so a style added without a line in the reader or a
+	/// line in the writer fails here rather than in somebody's render.
+	@Test func everySpinnerStyleSurvivesTheFile() throws {
+		let project = Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"))],
+			overlays: Spinner.Style.allCases.map { style in
+				Overlay(kind: .spinner(Spinner(style: style)),
+				        span: .clips(from: ClipReference("intro"), to: ClipReference("intro")))
+			})
+		let back = try ProjectReader.read(ProjectWriter.write(project))
+		#expect(back.overlays.count == Spinner.Style.allCases.count)
+		for (overlay, style) in zip(back.overlays, Spinner.Style.allCases) {
+			guard case .spinner(let spinner) = overlay.kind else {
+				Issue.record("\(style) came back as something else")
+				continue
+			}
+			#expect(spinner.style == style)
+		}
+	}
+
 	/// One range still writes the way it always did — a project nobody has
 	/// touched must not come out rewritten.
 	@Test func oneRangeIsStillWrittenInLine() {

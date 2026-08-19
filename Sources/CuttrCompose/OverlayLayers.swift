@@ -415,6 +415,139 @@ public enum OverlayLayers {
 			// and, half a second later, upside down.
 			replicator.add(spin, forKey: "spin")
 
+		case .bars:
+			// The same replicator idea as the dots, with a tapered spoke that
+			// reaches the rim. Rounded ends, because a square-ended spoke at
+			// this size reads as a scratch on the lens.
+			let count = 12
+			let replicator = CAReplicatorLayer()
+			replicator.frame = CGRect(x: 0, y: (box.height - diameter) / 2,
+			                          width: diameter, height: diameter)
+			replicator.instanceCount = count
+			replicator.instanceDelay = spin.duration / Double(count)
+			replicator.instanceTransform = CATransform3DMakeRotation(-2 * .pi / Double(count), 0, 0, 1)
+
+			let barWidth = diameter * 0.09
+			let barHeight = diameter * 0.28
+			let bar = CALayer()
+			bar.frame = CGRect(x: (diameter - barWidth) / 2, y: diameter - barHeight - diameter * 0.04,
+			                   width: barWidth, height: barHeight)
+			bar.cornerRadius = barWidth / 2
+			bar.backgroundColor = cgColor(spinner.color)
+
+			let fade = CABasicAnimation(keyPath: "opacity")
+			fade.fromValue = 1
+			fade.toValue = 0.1
+			fade.duration = spin.duration
+			fade.repeatCount = .greatestFiniteMagnitude
+			fade.isRemovedOnCompletion = false
+			fade.beginTime = host.beginTime(0)
+			bar.add(fade, forKey: "fade")
+			replicator.addSublayer(bar)
+			container.addSublayer(replicator)
+			replicator.add(spin, forKey: "spin")
+
+		case .orbit:
+			// A track that does not move and a dot that does, so the eye has
+			// something to measure the movement against.
+			let track = CAShapeLayer()
+			let trackBox = CGRect(x: 0, y: (box.height - diameter) / 2, width: diameter, height: diameter)
+			let inset = diameter * 0.12
+			track.frame = trackBox
+			track.path = CGPath(
+				ellipseIn: CGRect(origin: .zero, size: trackBox.size).insetBy(dx: inset, dy: inset),
+				transform: nil)
+			track.fillColor = nil
+			track.strokeColor = cgColor(spinner.color, alpha: 0.25)
+			track.lineWidth = diameter * 0.07
+			container.addSublayer(track)
+
+			let carrier = CALayer()
+			carrier.frame = trackBox
+			let dotDiameter = diameter * 0.2
+			let dot = CALayer()
+			dot.frame = CGRect(x: (diameter - dotDiameter) / 2, y: diameter - inset - dotDiameter / 2 - diameter * 0.035,
+			                   width: dotDiameter, height: dotDiameter)
+			dot.cornerRadius = dotDiameter / 2
+			dot.backgroundColor = cgColor(spinner.color)
+			carrier.addSublayer(dot)
+			carrier.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+			carrier.frame = trackBox
+			container.addSublayer(carrier)
+			carrier.add(spin, forKey: "spin")
+
+		case .pulse:
+			// Scale and opacity in step, and no rotation at all: it is not
+			// going round anything.
+			let ring = CAShapeLayer()
+			let ringBox = CGRect(x: 0, y: (box.height - diameter) / 2, width: diameter, height: diameter)
+			ring.frame = ringBox
+			let ringInset = diameter * 0.14
+			ring.path = CGPath(
+				ellipseIn: CGRect(origin: .zero, size: ringBox.size).insetBy(dx: ringInset, dy: ringInset),
+				transform: nil)
+			ring.fillColor = cgColor(spinner.color, alpha: 0.18)
+			ring.strokeColor = cgColor(spinner.color)
+			ring.lineWidth = diameter * 0.08
+			ring.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+			ring.frame = ringBox
+			container.addSublayer(ring)
+
+			let breathe = CABasicAnimation(keyPath: "transform.scale")
+			breathe.fromValue = 0.72
+			breathe.toValue = 1
+			breathe.duration = spin.duration
+			breathe.autoreverses = true
+			breathe.repeatCount = .greatestFiniteMagnitude
+			breathe.isRemovedOnCompletion = false
+			breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+			breathe.beginTime = host.beginTime(0)
+			ring.add(breathe, forKey: "breathe")
+
+			let dim = CABasicAnimation(keyPath: "opacity")
+			dim.fromValue = 0.45
+			dim.toValue = 1
+			dim.duration = spin.duration
+			dim.autoreverses = true
+			dim.repeatCount = .greatestFiniteMagnitude
+			dim.isRemovedOnCompletion = false
+			dim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+			dim.beginTime = host.beginTime(0)
+			ring.add(dim, forKey: "dim")
+
+		case .bounce:
+			// Three dots in a row, each rising a third of a cycle after the
+			// one before — the terminal's way of saying it is thinking, and the
+			// only one of these that is wider than it is tall.
+			let dots = 3
+			let dotDiameter = diameter * 0.26
+			let gap = (diameter - dotDiameter * CGFloat(dots)) / CGFloat(dots - 1)
+			let replicator = CAReplicatorLayer()
+			replicator.frame = CGRect(x: 0, y: (box.height - diameter) / 2,
+			                          width: diameter, height: diameter)
+			replicator.instanceCount = dots
+			replicator.instanceDelay = spin.duration / Double(dots)
+			replicator.instanceTransform = CATransform3DMakeTranslation(dotDiameter + gap, 0, 0)
+
+			let dot = CALayer()
+			dot.frame = CGRect(x: 0, y: (diameter - dotDiameter) / 2 - diameter * 0.1,
+			                   width: dotDiameter, height: dotDiameter)
+			dot.cornerRadius = dotDiameter / 2
+			dot.backgroundColor = cgColor(spinner.color)
+
+			let hop = CABasicAnimation(keyPath: "transform.translation.y")
+			hop.fromValue = 0
+			hop.toValue = diameter * 0.28
+			hop.duration = spin.duration / 2
+			hop.autoreverses = true
+			hop.repeatCount = .greatestFiniteMagnitude
+			hop.isRemovedOnCompletion = false
+			hop.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+			hop.beginTime = host.beginTime(0)
+			dot.add(hop, forKey: "hop")
+			replicator.addSublayer(dot)
+			container.addSublayer(replicator)
+
 		case .ring, .arc:
 			let ring = CAShapeLayer()
 			let ringBox = CGRect(x: 0, y: (box.height - diameter) / 2, width: diameter, height: diameter)
@@ -504,5 +637,11 @@ public enum OverlayLayers {
 
 	private static func cgColor(_ color: RGBA) -> CGColor {
 		CGColor(srgbRed: color.r, green: color.g, blue: color.b, alpha: color.a)
+	}
+
+	/// The same colour, fainter — for the parts of a spinner that stay put
+	/// while another part moves over them.
+	private static func cgColor(_ color: RGBA, alpha: Double) -> CGColor {
+		CGColor(srgbRed: color.r, green: color.g, blue: color.b, alpha: color.a * alpha)
 	}
 }
