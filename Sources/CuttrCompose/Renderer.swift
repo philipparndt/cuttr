@@ -64,6 +64,9 @@ public enum Renderer {
 		var grades: [(start: Double, end: Double, look: Look)] = []
 		/// Volume steps for the audio mix, one per clip.
 		var levels: [(at: CMTime, volume: Float)] = []
+		/// What size each clip's picture arrives at, and when — for the pass
+		/// that fits without filtering.
+		var pictures: [(at: CMTime, size: CGSize)] = []
 
 		for clip in resolved.clips {
 			let at = CMTime(seconds: clip.start, preferredTimescale: scale)
@@ -81,6 +84,10 @@ public enum Renderer {
 				if let source = try await asset.loadTracks(withMediaType: .video).first {
 					try? videoTrack.insertTimeRange(range, of: source, at: at)
 					sawVideo = true
+					let natural = try await source.load(.naturalSize)
+					let transform = try await source.load(.preferredTransform)
+					let turned = natural.applying(transform)
+					pictures.append((at, CGSize(width: abs(turned.width), height: abs(turned.height))))
 				}
 				// The camera's own audio, but only when the take has no separate
 				// recorder. A take that has one has it because the camera's is
@@ -117,13 +124,6 @@ public enum Renderer {
 
 		guard sawVideo else { throw RenderError.noVideo }
 
-		// One rendering path, through Core Image.
-		//
-		// The fit used to be a layer instruction's transform and the grade would
-		// have had to be a second mechanism beside it. Two mechanisms deciding
-		// where a frame lands is how a preview and an export come to disagree,
-		// which this file exists to prevent — so the transform moved in here
-		// beside the grade, and there is one answer.
 		let overlays = OverlayLayers.build(resolved, size: size, host: host)
 
 		// The effects are drawn into the frame here, in the same pass as the
@@ -135,6 +135,47 @@ public enum Renderer {
 				      let renderer = EffectRenderer(effect, size: size) else { return nil }
 				return (shown, renderer)
 			}
+
+		// Colour management off.
+		//
+		// Core Image's own working space is linear with sRGB primaries, and
+		// converting Rec. 709 video into it and back does not come home: the
+		// picture came out six or seven levels lifted across the whole frame,
+		// which reads as washed out beside the same footage in the player. With
+		// management off the values pass through untouched, and the grade — a
+		// gain, an exposure, a saturation — works on them as it finds them.
+		let plain = CIContext(options: [.workingColorSpace: NSNull()])
+
+		// Nothing to filter? Then do not filter.
+		//
+		// Core Image's pass costs colour: measured against the same frame of the
+		// same footage, the picture came back seven or eight levels lifted right
+		// across, which is what "washed out" was. A programme with no grade and
+		// no effects, at the size it was shot, has nothing for that pass to do —
+		// so it goes through AVFoundation's own path instead and comes out
+		// identical to what went in. A fit, when one is needed, is a transform
+		// on a layer instruction, which is exact.
+		let graded = grades.contains { $0.look != .none }
+		if !graded, effects.isEmpty {
+			let plainComposition = AVMutableVideoComposition(propertiesOf: composition)
+			plainComposition.renderSize = size
+			plainComposition.frameDuration = CMTime(
+				value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
+
+			// The fit, per clip, as a step at the moment that clip starts.
+			let instruction = AVMutableVideoCompositionInstruction()
+			instruction.timeRange = CMTimeRange(start: .zero, duration: cursor)
+			let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+			for picture in pictures {
+				let fit = Grading.fit(CGRect(origin: .zero, size: picture.size), into: size)
+				layer.setTransform(fit, at: picture.at)
+			}
+			instruction.layerInstructions = [layer]
+			plainComposition.instructions = [instruction]
+
+			return Built(composition: composition, videoComposition: plainComposition,
+			             overlays: overlays, audioMix: audioMix(audioTrack, levels: levels))
+		}
 
 		let videoComposition = AVMutableVideoComposition(asset: composition) { request in
 			let time = request.compositionTime.seconds
@@ -151,17 +192,11 @@ public enum Renderer {
 				])
 				image = faded.composited(over: image)
 			}
-			request.finish(with: image, context: nil)
+			request.finish(with: image, context: plain)
 		}
 		videoComposition.renderSize = size
 		videoComposition.frameDuration = CMTime(
 			value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
-		// Said out loud: the programme is Rec. 709. Without it a render at any
-		// size other than the footage's own came back flat and milky, because
-		// the pixels were converted and the file did not say into what.
-		videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
-		videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
-		videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
 		// Said out loud: the programme is Rec. 709.
 		//
 		// A phone shoots HLG, and a file whose pixels are HLG but whose tags say
@@ -169,22 +204,25 @@ public enum Renderer {
 		// gone. Naming the colour makes AVFoundation convert into it instead of
 		// hoping.
 
-		// The mix: one parameter set over the single audio track, stepping the
-		// volume at each cut. A step rather than a ramp because the cut is
-		// already a discontinuity — a crossfade of levels across it would be
-		// audible as a swell on the wrong side of the edit.
-		var audioMix: AVAudioMix?
-		if let audioTrack, levels.contains(where: { $0.volume != 1 }) {
-			let parameters = AVMutableAudioMixInputParameters(track: audioTrack)
-			for level in levels { parameters.setVolume(level.volume, at: level.at) }
-			let mix = AVMutableAudioMix()
-			mix.inputParameters = [parameters]
-			audioMix = mix
-		}
-
-		_ = cursor
 		return Built(composition: composition, videoComposition: videoComposition,
-		             overlays: overlays, audioMix: audioMix)
+		             overlays: overlays, audioMix: audioMix(audioTrack, levels: levels))
+	}
+
+	/// The mix: one parameter set over the single audio track, stepping the
+	/// volume at each cut.
+	///
+	/// A step rather than a ramp because the cut is already a discontinuity — a
+	/// crossfade of levels across it would be audible as a swell on the wrong
+	/// side of the edit.
+	private static func audioMix(
+		_ track: AVMutableCompositionTrack?, levels: [(at: CMTime, volume: Float)]
+	) -> AVAudioMix? {
+		guard let track, levels.contains(where: { $0.volume != 1 }) else { return nil }
+		let parameters = AVMutableAudioMixInputParameters(track: track)
+		for level in levels { parameters.setVolume(level.volume, at: level.at) }
+		let mix = AVMutableAudioMix()
+		mix.inputParameters = [parameters]
+		return mix
 	}
 
 	/// Draws the overlays over a file that has already been graded and fitted.
@@ -202,11 +240,6 @@ public enum Renderer {
 		videoComposition.renderSize = size
 		videoComposition.frameDuration = CMTime(
 			value: 1, timescale: CMTimeScale(max(1, resolved.project.output.framesPerSecond.rounded())))
-		// The same colour as the pass before it, or the picture is converted
-		// twice and comes back lifted.
-		videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
-		videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
-		videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
 
 		let overlays = OverlayLayers.build(resolved, size: size, host: .export)
 		// As an *additional* layer rather than by drawing the video into one.
@@ -315,8 +348,19 @@ public enum Renderer {
 		to url: URL,
 		progress: @escaping @Sendable (Double) -> Void
 	) async throws {
-		guard let session = AVAssetExportSession(
-			asset: asset, presetName: AVAssetExportPresetHighestQuality)
+		// HEVC, when the machine will do it.
+		//
+		// Measured, not assumed: the same frame of the same footage through
+		// `AVAssetExportPresetHighestQuality` — which is H.264 — came out eight
+		// levels lifted across the whole picture, and through the HEVC preset
+		// came out identical to the source. Whatever H.264's transcode is doing
+		// to the range, a video tool cannot ship a render that is a different
+		// colour from its own preview.
+		let presets = AVAssetExportSession.exportPresets(compatibleWith: asset)
+		let preset = presets.contains(AVAssetExportPresetHEVCHighestQuality)
+			? AVAssetExportPresetHEVCHighestQuality
+			: AVAssetExportPresetHighestQuality
+		guard let session = AVAssetExportSession(asset: asset, presetName: preset)
 		else { throw RenderError.exportFailed("no exporter for this composition") }
 		session.videoComposition = videoComposition
 		session.audioMix = audioMix
