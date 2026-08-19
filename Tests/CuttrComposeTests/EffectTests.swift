@@ -174,7 +174,7 @@ import Testing
 			                 span: .times(from: 0, to: 4),
 			                 arrival: .fade(over: 1), departure: .fade(over: 1),
 			                 behind: behind),
-			source: 0, start: 0, end: 4, path: nil)
+			source: 0, appearance: 0, start: 0, end: 4, path: nil)
 	}
 
 	@Test func onlyWhatStaysInFrontIsALayer() {

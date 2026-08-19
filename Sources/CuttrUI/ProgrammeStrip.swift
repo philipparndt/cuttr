@@ -18,6 +18,20 @@ public final class ProgrammeStrip: NSView {
 	public var playhead: Double = 0 { didSet { needsDisplay = true } }
 	public var onScrub: ((Double) -> Void)?
 	public var onSelect: ((ResolvedClip) -> Void)?
+	/// An overlay's bar was dragged: which overlay it came from, and where its
+	/// ends are now, on the programme's clock. The window writes it back the
+	/// way the file says it — snapped to a clip, or relative to one.
+	public var onMoveOverlay: ((Int, Int, Double, Double) -> Void)?
+	/// Whether the anchor markers are drawn over the picture. Kept here because
+	/// the strip is where the switch lives.
+	public var showAnchors = true { didSet { needsDisplay = true } }
+
+	/// Where each overlay's bar is, so a drag can find it again.
+	private var bars: [(source: Int, appearance: Int, rect: NSRect,
+	                    start: Double, end: Double)] = []
+	private enum Grip { case body(Double), start, end }
+	private var dragging: (source: Int, appearance: Int, grip: Grip,
+	                       start: Double, end: Double)?
 
 	private let clipRowHeight: CGFloat = 34
 	private let overlayRowHeight: CGFloat = 16
@@ -106,14 +120,20 @@ public final class ProgrammeStrip: NSView {
 		// The overlays, each on its own row under the clips, so a caption that
 		// spans three clips is visibly one thing rather than three.
 		var rows: [Double] = []
+		bars.removeAll()
 		for overlay in resolved.overlays {
 			let row = rows.firstIndex { $0 <= overlay.start + 1e-9 } ?? rows.count
 			if row < rows.count { rows[row] = overlay.end } else { rows.append(overlay.end) }
 			let y = top + clipRowHeight + CGFloat(row) * overlayRowHeight
-			let a = x(for: overlay.start), b = x(for: overlay.end)
+			let moved = dragging?.source == overlay.source
+				&& dragging?.appearance == overlay.appearance ? dragging : nil
+			let a = x(for: moved?.start ?? overlay.start), b = x(for: moved?.end ?? overlay.end)
 			let rect = NSRect(x: a, y: y + 1, width: max(b - a - 1, 2), height: overlayRowHeight - 3)
+			bars.append((overlay.source, overlay.appearance, rect, overlay.start, overlay.end))
+			let dragged = dragging?.source == overlay.source
+				&& dragging?.appearance == overlay.appearance
 			let colour: NSColor = overlay.path != nil ? Theme.externalWave : Theme.cameraWave
-			colour.withAlphaComponent(0.35).setFill()
+			colour.withAlphaComponent(dragged ? 0.6 : 0.35).setFill()
 			rect.fill()
 			colour.setStroke()
 			NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5)).stroke()
@@ -167,11 +187,60 @@ public final class ProgrammeStrip: NSView {
 	public override func mouseDown(with event: NSEvent) {
 		let point = convert(event.locationInWindow, from: nil)
 		let t = time(forX: point.x)
+
+		// A bar under the pointer is a thing to move; anywhere else is the
+		// playhead, which is what a click on a timeline usually means.
+		if let bar = bars.last(where: { $0.rect.insetBy(dx: -3, dy: -2).contains(point) }) {
+			let grip: Grip
+			if abs(point.x - bar.rect.minX) < 5 {
+				grip = .start
+			} else if abs(point.x - bar.rect.maxX) < 5 {
+				grip = .end
+			} else {
+				grip = .body(t - bar.start)
+			}
+			dragging = (bar.source, bar.appearance, grip, bar.start, bar.end)
+			needsDisplay = true
+			return
+		}
+
 		onScrub?(t)
 		if let clip = resolved?.clips.last(where: { t >= $0.start && t < $0.end }) { onSelect?(clip) }
 	}
 
 	public override func mouseDragged(with event: NSEvent) {
-		onScrub?(time(forX: convert(event.locationInWindow, from: nil).x))
+		let at = time(forX: convert(event.locationInWindow, from: nil).x)
+		guard var moving = dragging else {
+			onScrub?(at)
+			return
+		}
+		switch moving.grip {
+		case .start: moving.start = min(at, moving.end - 0.05)
+		case .end: moving.end = max(at, moving.start + 0.05)
+		case .body(let grab):
+			let length = moving.end - moving.start
+			moving.start = max(0, at - grab)
+			moving.end = moving.start + length
+		}
+		dragging = moving
+		// Shown while it is being dragged rather than only when it is let go,
+		// so the bar follows the pointer.
+		if let index = bars.firstIndex(where: {
+			$0.source == moving.source && $0.appearance == moving.appearance
+		}) {
+			bars[index].start = moving.start
+			bars[index].end = moving.end
+			bars[index].rect.origin.x = x(for: moving.start)
+			bars[index].rect.size.width = max(x(for: moving.end) - x(for: moving.start) - 1, 2)
+		}
+		onScrub?(moving.start)
+		needsDisplay = true
+	}
+
+	public override func mouseUp(with event: NSEvent) {
+		guard let moving = dragging else { return }
+		dragging = nil
+		needsDisplay = true
+		onMoveOverlay?(moving.source, moving.appearance, moving.start, moving.end)
 	}
 }

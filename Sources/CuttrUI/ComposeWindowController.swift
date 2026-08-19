@@ -99,6 +99,11 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		bar.onRender = { [weak self] in self?.render(nil) }
 		bar.onReload = { [weak self] in self?.composeDocument.reload() }
 		bar.onMode = { [weak self] index in self?.show(Mode(rawValue: index) ?? .edit) }
+		bar.onAnchors = { [weak self] shown in
+			// The markers are for placing an overlay against a face, and once it
+			// is placed they are in the way of seeing the thing they placed.
+			self?.markers.isHidden = !shown
+		}
 
 		source.onApply = { [weak self] text in
 			guard let self, let url = self.composeDocument.url else { return }
@@ -252,6 +257,21 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private func wire() {
 		composeDocument.onChange = { [weak self] in self?.rebuild() }
 		strip.onScrub = { [weak self] time in self?.seek(to: time) }
+
+		// Dragged on the big timeline, written back the way the file says it:
+		// snapped to a clip, kept relative to one, or in programme times —
+		// whichever that range was already using.
+		strip.onMoveOverlay = { [weak self] source, appearance, start, end in
+			guard let self, let resolved = self.composeDocument.resolved else { return }
+			var next = self.composeDocument.project
+			guard source < next.overlays.count,
+			      appearance < next.overlays[source].appearances.count else { return }
+			let span = next.overlays[source].appearances[appearance].span
+			next.overlays[source].appearances[appearance].span =
+				span.moved(start: start, end: end, in: resolved)
+			self.composeDocument.apply(next)
+			try? self.composeDocument.write()
+		}
 
 		inspector.onChange = { [weak self] project in
 			guard let self else { return }

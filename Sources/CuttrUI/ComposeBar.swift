@@ -15,10 +15,13 @@ public final class ComposeBar: NSView {
 	public var onRender: (() -> Void)?
 	public var onReload: (() -> Void)?
 	public var onMode: ((Int) -> Void)?
+	/// Whether the anchor markers are drawn over the picture.
+	public var onAnchors: ((Bool) -> Void)?
 
 	private let renderButton = NSButton()
 	private let reloadButton = NSButton()
 	private let modes = NSSegmentedControl()
+	private let anchors = NSButton(checkboxWithTitle: "Anchors", target: nil, action: nil)
 	private let statusLabel = NSTextField(labelWithString: "")
 	private let progress = NSProgressIndicator()
 
@@ -65,7 +68,14 @@ public final class ComposeBar: NSView {
 		// fourth place to go.
 		statusLabel.alignment = .center
 
-		let navigation = row([modes])
+		anchors.state = .on
+		anchors.font = NSFont.systemFont(ofSize: 11)
+		anchors.target = self
+		anchors.action = #selector(anchorsChanged)
+		anchors.toolTip = "Show where the tracked faces are. They are for placing an overlay, "
+			+ "and in the way once it is placed."
+
+		let navigation = row([modes, anchors])
 		let middle = row([progress, statusLabel])
 		let actions = row([renderButton, reloadButton])
 		for stack in [navigation, middle, actions] { addSubview(stack) }
@@ -118,6 +128,7 @@ public final class ComposeBar: NSView {
 	@objc private func render() { onRender?() }
 	@objc private func reload() { onReload?() }
 	@objc private func modeChanged() { onMode?(modes.selectedSegment) }
+	@objc private func anchorsChanged() { onAnchors?(anchors.state == .on) }
 
 	public func setMode(_ index: Int) { modes.selectedSegment = index }
 

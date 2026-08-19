@@ -1,3 +1,4 @@
+import CuttrKit
 import Foundation
 import Testing
 @testable import CuttrCompose
@@ -59,5 +60,43 @@ import Testing
 			.init(t: 2, x: 1), .init(t: 0, x: 0), .init(t: 1, x: 0.5),
 		])])
 		#expect(Scene.filled(scene.parts[0].keys).map(\.t) == [0, 1, 2])
+	}
+}
+
+/// Dragging a bar on the timeline writes back the way the range was written.
+///
+/// The point being that a drag must not quietly convert somebody's
+/// re-cut-proof caption into one that is not.
+@Suite struct SpanMovingTests {
+
+	private func resolved() -> ResolvedProject {
+		let clips = ["first", "second"].enumerated().map { index, slug -> ResolvedClip in
+			ResolvedClip(
+				reference: ClipReference(slug), takeName: "take",
+				clip: Clip(slug: slug, start: 0, end: 10), videoURL: nil, audioURL: nil,
+				audioOffset: 0, start: Double(index) * 10)
+		}
+		return ResolvedProject(
+			project: Project(), baseURL: URL(fileURLWithPath: "."), clips: clips,
+			overlays: [], groups: [], anchors: [])
+	}
+
+	@Test func programmeTimesStayProgrammeTimes() {
+		let moved = Overlay.Span.times(from: 1, to: 3).moved(start: 5, end: 8, in: resolved())
+		#expect(moved == .times(from: 5, to: 8))
+	}
+
+	@Test func aStretchOfAClipKeepsItsOffsetIntoThatClip() {
+		let span = Overlay.Span.within(.clip(ClipReference("second")), from: 1, to: 3)
+		// The second clip starts at ten, so 12 → 15 is "two to five seconds in".
+		#expect(span.moved(start: 12, end: 15, in: resolved())
+			== .within(.clip(ClipReference("second")), from: 2, to: 5))
+	}
+
+	@Test func aClipBoundRangeSnapsToWhicheverClipItNowCovers() {
+		let span = Overlay.Span.clips(from: ClipReference("first"), to: ClipReference("first"))
+		let moved = span.moved(start: 11, end: 18, in: resolved())
+		#expect(moved == .marks(from: .clip(ClipReference("second")),
+		                        to: .clip(ClipReference("second"))))
 	}
 }

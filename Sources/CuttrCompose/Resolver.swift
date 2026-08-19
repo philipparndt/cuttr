@@ -95,6 +95,9 @@ public struct ResolvedOverlay: Sendable {
 	/// nothing, and the panel lost the picture and the anchor as soon as
 	/// anybody typed a word into a range.
 	public let source: Int
+	/// Which of that overlay's appearances — a caption on twice is two of
+	/// these, and a drag on the second bar moves the second one.
+	public let appearance: Int
 	public let start: Double
 	public let end: Double
 	/// The anchor's path, already mapped onto the programme's clock. `nil` for
@@ -354,7 +357,7 @@ public enum Resolver {
 			// tree, the transitions, the anchor following — is about a thing
 			// that is on from one moment to another, so an overlay that is on
 			// three times is three of those and nothing else changes.
-			for appearance in overlay.appearances {
+			for (position, appearance) in overlay.appearances.enumerated() {
 				let start: Double
 				let end: Double
 				switch appearance.span {
@@ -405,7 +408,8 @@ public enum Resolver {
 				// the time it reaches the layer tree it is simply two overlays
 				// that happen to agree about everything but their words.
 				overlays.append(ResolvedOverlay(
-					overlay: overlay.shown(at: appearance), source: index, start: start, end: end,
+					overlay: overlay.shown(at: appearance), source: index, appearance: position,
+					start: start, end: end,
 					path: overlay.anchor.flatMap { paths[$0] }))
 			}
 		}
