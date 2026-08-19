@@ -89,6 +89,20 @@ public struct Overlay: Sendable, Equatable {
 	public var arrival: Transition
 	public var departure: Transition
 
+	/// What it goes behind.
+	///
+	/// `people` asks Vision, on this machine, for the shape of whoever is in the
+	/// frame and puts the overlay behind them — a caption that goes round the
+	/// back of the person talking, confetti that falls between her and the
+	/// camera and behind her both. It costs a segmentation pass per frame, so it
+	/// is asked for rather than assumed.
+	public var behind: Occlusion
+
+	public enum Occlusion: String, Sendable, CaseIterable {
+		case nothing
+		case people
+	}
+
 	/// Where it sits. An anchor overrides the style's position and makes the
 	/// overlay follow whatever the anchor follows.
 	public var anchor: String?
@@ -102,11 +116,13 @@ public struct Overlay: Sendable, Equatable {
 		appearances: [Appearance],
 		arrival: Transition = .slide(.left, over: 0.4),
 		departure: Transition = .slide(.right, over: 0.4),
+		behind: Occlusion = .nothing,
 		anchor: String? = nil,
 		offset: CGPoint = .zero
 	) {
 		self.kind = kind
 		self.appearances = appearances
+		self.behind = behind
 		self.arrival = arrival
 		self.departure = departure
 		self.anchor = anchor
@@ -119,11 +135,12 @@ public struct Overlay: Sendable, Equatable {
 		span: Span,
 		arrival: Transition = .slide(.left, over: 0.4),
 		departure: Transition = .slide(.right, over: 0.4),
+		behind: Occlusion = .nothing,
 		anchor: String? = nil,
 		offset: CGPoint = .zero
 	) {
 		self.init(kind: kind, appearances: [Appearance(span)], arrival: arrival,
-		          departure: departure, anchor: anchor, offset: offset)
+		          departure: departure, behind: behind, anchor: anchor, offset: offset)
 	}
 
 	/// Several ranges, all saying the same thing.
@@ -132,11 +149,12 @@ public struct Overlay: Sendable, Equatable {
 		spans: [Span],
 		arrival: Transition = .slide(.left, over: 0.4),
 		departure: Transition = .slide(.right, over: 0.4),
+		behind: Occlusion = .nothing,
 		anchor: String? = nil,
 		offset: CGPoint = .zero
 	) {
 		self.init(kind: kind, appearances: spans.map { Appearance($0) }, arrival: arrival,
-		          departure: departure, anchor: anchor, offset: offset)
+		          departure: departure, behind: behind, anchor: anchor, offset: offset)
 	}
 
 	/// Where an overlay lives on the programme's clock.

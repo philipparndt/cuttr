@@ -111,14 +111,15 @@ import Testing
 @Suite struct EffectFileTests {
 
 	@Test func everyDialSurvivesTheFile() throws {
-		let effect = Effect(style: .confetti, finish: .metallic, behind: .people,
+		let effect = Effect(style: .confetti, finish: .metallic,
 		                    density: 1.4, speed: 1.2, size: 1.6,
 		                    palette: [RGBA(hex: "#ff0000")!], seed: 9)
 		let project = Project(
 			timeline: [TimelineEntry(clip: ClipReference("intro"))],
 			overlays: [Overlay(kind: .effect(effect),
 			                   span: .times(from: 0, to: 4),
-			                   arrival: .cut, departure: .fall(over: 1.5))])
+			                   arrival: .cut, departure: .fall(over: 1.5),
+			                   behind: .people)])
 		let text = ProjectWriter.write(project)
 		let back = try ProjectReader.read(text)
 		guard case .effect(let read) = back.overlays.first?.kind else {
@@ -127,6 +128,7 @@ import Testing
 		}
 		#expect(read == effect, "written:\n\(text)")
 		#expect(back.overlays.first?.departure == .fall(over: 1.5))
+		#expect(back.overlays.first?.behind == .people)
 		#expect(ProjectWriter.write(back) == text)
 	}
 }
@@ -143,7 +145,7 @@ import Testing
 
 	@Test func theHalvesPartitionTheCloud() throws {
 		let renderer = try #require(EffectRenderer(
-			Effect(style: .confetti, behind: .people, density: 1, seed: 6),
+			Effect(style: .confetti, density: 1, seed: 6),
 			size: CGSize(width: 320, height: 180)))
 
 		_ = renderer.image(at: 6, only: .all)
@@ -158,5 +160,49 @@ import Testing
 		#expect(front > 0, "nothing stays in front")
 		#expect(back + front == all, "\(back) + \(front) is not \(all)")
 		#expect(back < all)
+	}
+}
+
+/// A caption that goes behind somebody is painted into the frame instead of
+/// laid over it, because the shape of the person is only known in the pass that
+/// has the pixels.
+@Suite struct BehindTests {
+
+	private func caption(behind: Overlay.Occlusion) -> ResolvedOverlay {
+		ResolvedOverlay(
+			overlay: Overlay(kind: .text("behind her", style: nil),
+			                 span: .times(from: 0, to: 4),
+			                 arrival: .fade(over: 1), departure: .fade(over: 1),
+			                 behind: behind),
+			source: 0, start: 0, end: 4, path: nil)
+	}
+
+	@Test func onlyWhatStaysInFrontIsALayer() {
+		#expect(OverlayLayers.isLayered(caption(behind: .nothing).overlay))
+		#expect(!OverlayLayers.isLayered(caption(behind: .people).overlay))
+	}
+
+	@Test func thePainterFadesTheSameWayTheLayerWould() {
+		let shown = caption(behind: .people)
+		let size = CGSize(width: 640, height: 360)
+		let project = Project()
+
+		// Nothing at the very start of a one-second fade, something in the
+		// middle of the span, nothing at the very end.
+		#expect(CaptionPainter.image(for: shown, project: project, size: size, at: 0) == nil)
+		#expect(CaptionPainter.image(for: shown, project: project, size: size, at: 2) != nil)
+		#expect(CaptionPainter.image(for: shown, project: project, size: size, at: 4) == nil)
+	}
+
+	/// It lands where the style says, in the frame's own coordinates.
+	@Test func itIsWhereTheStyleSays() throws {
+		let shown = caption(behind: .people)
+		let size = CGSize(width: 640, height: 360)
+		let image = try #require(CaptionPainter.image(
+			for: shown, project: Project(), size: size, at: 2))
+		let style = TextStyle.lowerThird
+		// Left-aligned, so the left edge of the plate sits on the position.
+		#expect(abs(image.extent.minX - style.position.x * size.width) < 2)
+		#expect(image.extent.midY < size.height / 2)
 	}
 }

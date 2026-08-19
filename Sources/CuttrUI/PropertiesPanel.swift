@@ -447,11 +447,6 @@ public final class PropertiesPanel: NSView {
 				[weak self] pick in
 				self?.editEffect(index) { $0.finish = Effect.Finish.allCases[pick] }
 			}], note: "matte is printed card; metallic is foil; glitter is foil cut small")
-			field("behind", [pop(Effect.Occlusion.allCases.map(\.rawValue),
-			                     selected: Effect.Occlusion.allCases.firstIndex(of: effect.behind) ?? 0) {
-				[weak self] pick in
-				self?.editEffect(index) { $0.behind = Effect.Occlusion.allCases[pick] }
-			}], note: "`people` lets the far half of the cloud pass behind whoever is in the frame")
 			field("density", [number(effect.density, width: 72) { [weak self] value in
 				self?.editEffect(index) { $0.density = max(0.05, value) }
 			}, label("× \(effect.count) pieces")])
@@ -709,6 +704,12 @@ public final class PropertiesPanel: NSView {
 		}, canFall: isEffect)
 
 		section("where it sits")
+		field("behind", [pop(Overlay.Occlusion.allCases.map(\.rawValue),
+		                     selected: Overlay.Occlusion.allCases.firstIndex(of: overlay.behind) ?? 0) {
+			[weak self] pick in
+			self?.editOverlay(index) { $0.behind = Overlay.Occlusion.allCases[pick] }
+		}], note: "`people` puts it behind whoever is in the frame — found on this machine, "
+			+ "and it costs a pass per frame")
 		field("anchor", [combo(overlay.anchor ?? "", values: [""] + vocabulary.anchors, width: 210) {
 			[weak self] value in
 			let name = value.trimmingCharacters(in: .whitespaces)

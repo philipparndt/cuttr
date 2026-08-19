@@ -27,19 +27,6 @@ public struct Effect: Sendable, Equatable {
 	public var style: Style
 	/// What the pieces are made of, which is most of how expensive they look.
 	public var finish: Finish
-	/// What the far half of the cloud goes behind.
-	///
-	/// `people` asks Vision, on this machine, for the shape of whoever is in
-	/// the frame, and lets the pieces at the back of the cloud pass behind
-	/// them. It is the one thing that makes confetti look like it is in the
-	/// room rather than stuck to the lens — and it costs a segmentation pass
-	/// per frame, which is why it is asked for rather than assumed.
-	public var behind: Occlusion
-
-	public enum Occlusion: String, Sendable, CaseIterable {
-		case nothing
-		case people
-	}
 
 	public enum Finish: String, Sendable, CaseIterable {
 		/// Printed card: the colour it is, lit and shaded, no shine.
@@ -70,7 +57,6 @@ public struct Effect: Sendable, Equatable {
 	public init(
 		style: Style = .confetti,
 		finish: Finish = .matte,
-		behind: Occlusion = .nothing,
 		density: Double = 1,
 		speed: Double = 1,
 		size: Double = 1,
@@ -79,7 +65,6 @@ public struct Effect: Sendable, Equatable {
 	) {
 		self.style = style
 		self.finish = finish
-		self.behind = behind
 		self.density = density
 		self.speed = speed
 		self.size = size

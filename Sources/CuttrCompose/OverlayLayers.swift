@@ -45,6 +45,11 @@ public enum OverlayLayers {
 	/// frame itself, and a layer tree has nothing to say about them.
 	static func isLayered(_ overlay: Overlay) -> Bool {
 		if case .effect = overlay.kind { return false }
+		// Anything that goes behind somebody is drawn into the frame instead:
+		// the mask that knows where they are lives in the pass that has the
+		// pixels, and a layer laid over the finished frame is by definition in
+		// front of everything in it.
+		if overlay.behind == .people { return false }
 		return true
 	}
 
@@ -57,7 +62,7 @@ public enum OverlayLayers {
 		// property change would sit underneath all of them.
 		root.isGeometryFlipped = false
 
-		for resolvedOverlay in resolved.overlays {
+		for resolvedOverlay in resolved.overlays where isLayered(resolvedOverlay.overlay) {
 			guard let layer = layer(for: resolvedOverlay, project: resolved.project,
 			                        baseURL: resolved.baseURL, size: size, host: host)
 			else { continue }
@@ -314,7 +319,7 @@ public enum OverlayLayers {
 	/// CoreText into a bitmap has no such pass: the image is `contents` before
 	/// anybody renders anything, and the preview and the export show the same
 	/// pixels because they are the same pixels.
-	private static func textLayer(_ text: String, style: TextStyle, size: CGSize) -> (CALayer, CGSize) {
+	static func textLayer(_ text: String, style: TextStyle, size: CGSize) -> (CALayer, CGSize) {
 		// Twice the output resolution. Type is the thing people notice, and a
 		// caption drawn at 1× and scaled is soft in a way a plate is not.
 		let scale: CGFloat = 2

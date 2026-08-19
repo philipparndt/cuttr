@@ -136,7 +136,7 @@ public enum Renderer {
 				return (shown, effect, renderer)
 			}
 		// Asked for only when something wants to go behind somebody.
-		let people = effects.contains { $0.effect.behind == .people } ? PersonMask() : nil
+		let people = resolved.overlays.contains { $0.overlay.behind == .people } ? PersonMask() : nil
 
 		// Colour management off.
 		//
@@ -158,7 +158,10 @@ public enum Renderer {
 		// identical to what went in. A fit, when one is needed, is a transform
 		// on a layer instruction, which is exact.
 		let graded = grades.contains { $0.look != .none }
-		if !graded, effects.isEmpty {
+		// Anything that goes behind somebody is painted into the frame, which
+		// is the filter pass's job — so there *is* something for it to do.
+		let painted = resolved.overlays.contains { $0.overlay.behind == .people }
+		if !graded, effects.isEmpty, !painted {
 			let plainComposition = AVMutableVideoComposition(propertiesOf: composition)
 			plainComposition.renderSize = size
 			plainComposition.frameDuration = CMTime(
@@ -193,6 +196,22 @@ public enum Renderer {
 			// of the footage is the wrong place by exactly the scale factor.
 			let frame = image
 
+			// Captions that go behind somebody are painted here rather than laid
+			// over the finished frame, and the person goes over them.
+			for shown in resolved.overlays
+			where shown.overlay.behind == .people && OverlayLayers.isLayered(shown.overlay) == false
+				&& time >= shown.start && time <= shown.end {
+				guard case .text = shown.overlay.kind,
+				      let caption = CaptionPainter.image(
+					      for: shown, project: resolved.project, size: size, at: time),
+				      let mask = people?.mask(for: frame, at: time) else { continue }
+				image = caption.composited(over: image)
+				image = frame.applyingFilter("CIBlendWithRedMask", parameters: [
+					"inputBackgroundImage": image,
+					"inputMaskImage": mask,
+				])
+			}
+
 			for (shown, effect, renderer) in effects where time >= shown.start && time <= shown.end {
 				// A fall-out stops letting pieces go before the end, so what is
 				// already in the air has time to leave the frame.
@@ -216,7 +235,7 @@ public enum Renderer {
 				// Behind whoever is in the frame, then them, then the near half
 				// over the top. The mask is the only thing that knows where
 				// they are; everything else is arithmetic on depth.
-				if effect.behind == .people,
+				if shown.overlay.behind == .people,
 				   let mask = people?.mask(for: frame, at: time) {
 					if let back = plate(.back) {
 						image = back.composited(over: image)

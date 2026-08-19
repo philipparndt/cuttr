@@ -198,9 +198,6 @@ public enum ProjectReader {
 				if let finish = (m["finish"] as? String).flatMap({ Effect.Finish(rawValue: $0) }) {
 					effect.finish = finish
 				}
-				if let behind = (m["behind"] as? String).flatMap({ Effect.Occlusion(rawValue: $0) }) {
-					effect.behind = behind
-				}
 				if let density = number(m["density"]) { effect.density = density }
 				if let speed = number(m["speed"]) { effect.speed = speed }
 				if let size = number(m["size"]) { effect.size = size }
@@ -280,6 +277,7 @@ public enum ProjectReader {
 				appearances: appearances,
 				arrival: try transition(m["in"], key: "in") ?? .slide(.left, over: 0.4),
 				departure: try transition(m["out"], key: "out") ?? .slide(.right, over: 0.4),
+				behind: (m["behind"] as? String).flatMap { Overlay.Occlusion(rawValue: $0) } ?? .nothing,
 				anchor: (m["anchor"] as? String).flatMap(nonEmpty),
 				offset: try point(m["offset"], key: "offset") ?? .zero
 			))
