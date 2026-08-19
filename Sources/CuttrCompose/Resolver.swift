@@ -87,6 +87,14 @@ public struct ResolvedClip: Sendable {
 /// An overlay with its times worked out.
 public struct ResolvedOverlay: Sendable {
 	public let overlay: Overlay
+	/// Which of the project's overlays this came from.
+	///
+	/// The overlay itself is not the answer: what is resolved is the overlay
+	/// *as it is at one appearance*, so an overlay that says something else the
+	/// second time is not equal to the one in the file. Matching by value found
+	/// nothing, and the panel lost the picture and the anchor as soon as
+	/// anybody typed a word into a range.
+	public let source: Int
 	public let start: Double
 	public let end: Double
 	/// The anchor's path, already mapped onto the programme's clock. `nil` for
@@ -335,7 +343,7 @@ public enum Resolver {
 		}
 
 		var overlays: [ResolvedOverlay] = []
-		for overlay in project.overlays {
+		for (index, overlay) in project.overlays.enumerated() {
 			if let name = overlay.anchor, anchorsByName[name] == nil {
 				throw ResolveError.unknownAnchor(name)
 			}
@@ -376,7 +384,7 @@ public enum Resolver {
 				// the time it reaches the layer tree it is simply two overlays
 				// that happen to agree about everything but their words.
 				overlays.append(ResolvedOverlay(
-					overlay: overlay.shown(at: appearance), start: start, end: end,
+					overlay: overlay.shown(at: appearance), source: index, start: start, end: end,
 					path: overlay.anchor.flatMap { paths[$0] }))
 			}
 		}

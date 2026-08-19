@@ -124,6 +124,8 @@ public enum Renderer {
 		// where a frame lands is how a preview and an export come to disagree,
 		// which this file exists to prevent — so the transform moved in here
 		// beside the grade, and there is one answer.
+		let overlays = OverlayLayers.build(resolved, size: size, host: host)
+
 		let videoComposition = AVMutableVideoComposition(asset: composition) { request in
 			let time = request.compositionTime.seconds
 			let look = grades.last { time >= $0.start - 1e-6 && time < $0.end + 1e-6 }?.look ?? .none
@@ -135,20 +137,6 @@ public enum Renderer {
 		videoComposition.frameDuration = CMTime(
 			value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
 
-		let overlays = OverlayLayers.build(resolved, size: size, host: host)
-		if host == .export {
-			// The tool wants two layers: the video, and a parent to draw it
-			// into. They must not be in any live layer tree, which is why the
-			// preview builds its own tree rather than borrowing this one.
-			let videoLayer = CALayer()
-			videoLayer.frame = CGRect(origin: .zero, size: size)
-			let parent = CALayer()
-			parent.frame = CGRect(origin: .zero, size: size)
-			parent.addSublayer(videoLayer)
-			parent.addSublayer(overlays)
-			videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
-				postProcessingAsVideoLayer: videoLayer, in: parent)
-		}
 		// The mix: one parameter set over the single audio track, stepping the
 		// volume at each cut. A step rather than a ramp because the cut is
 		// already a discontinuity — a crossfade of levels across it would be
@@ -167,7 +155,44 @@ public enum Renderer {
 		             overlays: overlays, audioMix: audioMix)
 	}
 
+	/// Draws the overlays over a file that has already been graded and fitted.
+	///
+	/// A second pass, because the first one cannot do it: a video composition
+	/// built with `applyingCIFiltersWithHandler` — which is how the grade and
+	/// the fit are done — silently ignores `AVVideoCompositionCoreAnimationTool`.
+	public static func overlays(
+		of resolved: ResolvedProject, onto source: URL, to url: URL,
+		progress: @escaping @Sendable (Double) -> Void = { _ in }
+	) async throws {
+		let asset = AVURLAsset(url: source)
+		let size = resolved.project.output.size
+		let videoComposition = try await AVMutableVideoComposition.videoComposition(withPropertiesOf: asset)
+		videoComposition.renderSize = size
+		videoComposition.frameDuration = CMTime(
+			value: 1, timescale: CMTimeScale(max(1, resolved.project.output.framesPerSecond.rounded())))
+
+		let overlays = OverlayLayers.build(resolved, size: size, host: .export)
+		let videoLayer = CALayer()
+		videoLayer.frame = CGRect(origin: .zero, size: size)
+		let parent = CALayer()
+		parent.frame = CGRect(origin: .zero, size: size)
+		parent.addSublayer(videoLayer)
+		parent.addSublayer(overlays)
+		videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
+			postProcessingAsVideoLayer: videoLayer, in: parent)
+
+		try await write(asset, videoComposition: videoComposition, audioMix: nil,
+		                to: url, progress: progress)
+	}
+
 	/// Renders to a file.
+	///
+	/// In two passes when there is anything drawn over the cut, because one pass
+	/// cannot do both: the grade and the aspect fit are a Core Image video
+	/// composition, and such a composition silently ignores the Core Animation
+	/// tool that draws the overlays. That combination is why a render came out
+	/// correct in every respect except that it had no captions and no spinners
+	/// on it. A project with no overlays is still one pass, and encoded once.
 	///
 	/// `progress` is called on an unspecified thread, often, with 0…1.
 	public static func export(
@@ -176,12 +201,44 @@ public enum Renderer {
 		progress: @escaping @Sendable (Double) -> Void = { _ in }
 	) async throws {
 		let built = try await build(resolved, host: .export)
+		let drawsOver = !resolved.overlays.isEmpty
 
+		guard FileManager.default.isWritableFile(atPath: url.deletingLastPathComponent().path)
+		else { throw RenderError.cannotWrite(url) }
+
+		// The graded pass goes beside the output rather than into a temporary
+		// folder: it is the size of the finished film, and somebody who runs out
+		// of room should run out of room where they can see it.
+		let graded = drawsOver
+			? url.deletingPathExtension().appendingPathExtension("grading.mov")
+			: url
+
+		try await write(built.composition, videoComposition: built.videoComposition,
+		                audioMix: built.audioMix, to: graded) { done in
+			progress(drawsOver ? done * 0.6 : done)
+		}
+
+		guard drawsOver else { return }
+		defer { try? FileManager.default.removeItem(at: graded) }
+		try await overlays(of: resolved, onto: graded, to: url) { done in
+			progress(0.6 + done * 0.4)
+		}
+		progress(1)
+	}
+
+	/// One export session, run to completion.
+	private static func write(
+		_ asset: AVAsset,
+		videoComposition: AVVideoComposition?,
+		audioMix: AVAudioMix?,
+		to url: URL,
+		progress: @escaping @Sendable (Double) -> Void
+	) async throws {
 		guard let session = AVAssetExportSession(
-			asset: built.composition, presetName: AVAssetExportPresetHighestQuality)
+			asset: asset, presetName: AVAssetExportPresetHighestQuality)
 		else { throw RenderError.exportFailed("no exporter for this composition") }
-		session.videoComposition = built.videoComposition
-		session.audioMix = built.audioMix
+		session.videoComposition = videoComposition
+		session.audioMix = audioMix
 		session.outputFileType = .mov
 		session.outputURL = url
 		session.shouldOptimizeForNetworkUse = false
@@ -190,8 +247,6 @@ public enum Renderer {
 		// overwriting, so the removal is ours to do — and is worth doing
 		// explicitly rather than discovering as a failure ten seconds in.
 		try? FileManager.default.removeItem(at: url)
-		guard FileManager.default.isWritableFile(atPath: url.deletingLastPathComponent().path)
-		else { throw RenderError.cannotWrite(url) }
 
 		let ticker = Task {
 			while !Task.isCancelled {
@@ -212,28 +267,4 @@ public enum Renderer {
 		}
 	}
 
-	/// The transform that fits a source frame into the output frame.
-	///
-	/// Aspect-fit and centred, which is the only choice that never crops
-	/// somebody's head off. A source already the right shape gets a scale of one
-	/// and a translation of zero, so the common case costs nothing.
-	static func fit(natural: CGSize, preferred: CGAffineTransform, into output: CGSize) -> CGAffineTransform {
-		// What the source measures once its own rotation is applied: a portrait
-		// clip from a phone declares a landscape natural size and a 90°
-		// transform, and fitting the declared size would letterbox it wrongly.
-		let oriented = CGRect(origin: .zero, size: natural).applying(preferred)
-		let width = abs(oriented.width), height = abs(oriented.height)
-		guard width > 0, height > 0 else { return preferred }
-		let scale = min(output.width / width, output.height / height)
-		// `preferred` may translate the frame off the origin — a 90° rotation
-		// does — so the fit is measured from where the rotated frame actually
-		// lands rather than from zero.
-		let translated = preferred.concatenating(
-			CGAffineTransform(translationX: -oriented.minX, y: -oriented.minY))
-		return translated
-			.concatenating(CGAffineTransform(scaleX: scale, y: scale))
-			.concatenating(CGAffineTransform(
-				translationX: (output.width - width * scale) / 2,
-				y: (output.height - height * scale) / 2))
-	}
 }

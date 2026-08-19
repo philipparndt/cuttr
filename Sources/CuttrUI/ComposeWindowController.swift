@@ -21,6 +21,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private var playerView: PlayerView!
 	private let strip = ProgrammeStrip()
 	private let markers = AnchorMarkerView()
+	private let overlayHost = NSView()
 	private let takesTable = TakesTable()
 	private let library = LibraryView()
 	private let inspector = ProjectInspector()
@@ -138,8 +139,14 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// view in the window, so a constraint from here to the player would be
 		// tying together two hierarchies with nothing in common, which AppKit
 		// answers by throwing.
+		// The overlays get a view of their own between the picture and the
+		// markers, rather than a sublayer of the player's own layer. A player
+		// layer is the video's, and what it does with sublayers is its business.
+		overlayHost.wantsLayer = true
+		overlayHost.layer?.masksToBounds = true
+
 		let picture = NSView()
-		for view in [playerView, markers] as [NSView] {
+		for view in [playerView, overlayHost, markers] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			picture.addSubview(view)
 			NSLayoutConstraint.activate([
@@ -403,7 +410,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// rebuild the project. Attaching is idempotent and cheap, so it is done
 	/// whenever the preview comes to the front as well.
 	private func attachOverlays() {
-		guard let overlayLayer, let host = playerView.layer else { return }
+		guard let overlayLayer, let host = overlayHost.layer else { return }
 		if overlayLayer.superlayer !== host {
 			overlayLayer.removeFromSuperlayer()
 			host.addSublayer(overlayLayer)
@@ -422,7 +429,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard let overlayLayer, let resolved = composeDocument.resolved else { return }
 		let output = resolved.project.output.size
 		guard output.width > 0, output.height > 0 else { return }
-		let bounds = playerView.bounds
+		let bounds = overlayHost.bounds
 		let scale = min(bounds.width / output.width, bounds.height / output.height)
 		let size = CGSize(width: output.width * scale, height: output.height * scale)
 		CATransaction.begin()

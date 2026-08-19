@@ -20,6 +20,12 @@ func usage() -> Never {
 	  -o        where to write; defaults to the project's own `output.file`
 	  --solve   re-solve every anchor's path before rendering, rather than
 	            using the sidecars the composing window wrote
+	  --describe
+	            print what the project resolves to — every clip with its times,
+	            every overlay with when it is on, what it says then and whether
+	            its anchor was found — and render nothing. The first question
+	            when something is missing from a render is whether it was ever
+	            in the programme.
 	  --quiet   no progress
 
 	  --analyse measure every take's loudness and colour, and write the numbers
@@ -43,6 +49,7 @@ func usage() -> Never {
 var projectPath: String?
 var outputPath: String?
 var solve = false
+var describe = false
 var quiet = false
 var facesOf: String?
 var facesAt = 0.0
@@ -57,6 +64,8 @@ while index < arguments.count {
 		index += 1
 		guard index < arguments.count else { usage() }
 		outputPath = arguments[index]
+	case "--describe":
+		describe = true
 	case "--faces":
 		index += 1
 		guard index < arguments.count else { usage() }
@@ -279,6 +288,39 @@ do {
 	resolved = try Resolver.resolve(project, baseURL: baseURL)
 } catch {
 	fail(error.localizedDescription)
+}
+
+if describe {
+	print("clips")
+	for clip in resolved.clips {
+		print(String(format: "  %-28@ %7.3f → %7.3f  %@",
+		             clip.reference.description as NSString, clip.start, clip.end,
+		             clip.takeName as NSString))
+	}
+	print("anchors")
+	for entry in resolved.anchors {
+		let samples = entry.path?.samples.count ?? 0
+		print("  \(entry.anchor.name): \(samples) samples"
+			+ (entry.path == nil ? "  — NO PATH: nothing will follow it" : ""))
+	}
+	print("overlays")
+	for shown in resolved.overlays {
+		let what: String
+		switch shown.overlay.kind {
+		case .text(let text, let style):
+			what = "text \(text.debugDescription) style \(style ?? "lower-third")"
+		case .spinner(let spinner):
+			what = "spinner \(spinner.style.rawValue) size \(spinner.size)"
+				+ (spinner.words.isEmpty ? " (no words)"
+					: " words \(spinner.words.map(\.text).joined(separator: " · "))")
+		}
+		print(String(format: "  %7.3f → %7.3f  %@", shown.start, shown.end, what as NSString))
+		print("           anchor \(shown.overlay.anchor ?? "none")"
+			+ (shown.overlay.anchor != nil && shown.path == nil
+				? "  — NOT FOUND: it will sit where its style says" : "")
+			+ "  in \(shown.overlay.arrival)  out \(shown.overlay.departure)")
+	}
+	exit(0)
 }
 
 // `-o`, then the project's own `output.file`, then the project's name. A

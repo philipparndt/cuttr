@@ -766,7 +766,7 @@ public final class PropertiesPanel: NSView {
 		currentPreview = preview
 		preview.aspect = project.output.size
 
-		let found = resolved?.overlays.first { $0.overlay == overlay }
+		let found = resolved?.overlays.first { $0.source == index }
 		let anchor = found?.path?.point(at: found?.start ?? 0)
 		preview.anchorPoint = anchor
 		preview.anchorName = overlay.anchor
