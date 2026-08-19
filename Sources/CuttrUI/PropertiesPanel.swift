@@ -283,13 +283,14 @@ public final class PropertiesPanel: NSView {
 	// MARK: - timeline entry
 
 	private func entryForm(_ path: [Int], _ entry: TimelineEntry) {
-		let kinds = ["clip", "list", "query", "section"]
+		let kinds = ["clip", "list", "query", "card", "section"]
 		let current: Int
 		switch entry.source {
 		case .clip: current = 0
 		case .list: current = 1
 		case .query: current = 2
-		case .group: current = 3
+		case .card: current = 3
+		case .group: current = 4
 		}
 		section("what plays")
 		field("kind", [pop(kinds, selected: current) { [weak self] index in
@@ -354,6 +355,52 @@ public final class PropertiesPanel: NSView {
 				}
 				self.replace(path, replacement)
 			}], note: "#tag, take/#tag, take/*, with and / or / not between them")
+
+		case .card(let card):
+			// Everything a card has is here, because a card is a length and a
+			// colour and there is nothing else to know about it.
+			func change(_ edit: @escaping (inout Card) -> Void) {
+				var next = card
+				edit(&next)
+				self.replace(path, TimelineEntry(
+					card: next, transition: entry.transition, label: entry.label))
+			}
+			field("card", [text(Timecode.string(card.duration), width: 96,
+			                    placeholder: "00:04.000") { value in
+				guard let seconds = Timecode.parse(value) else { return }
+				change { $0.duration = max(0, seconds) }
+			}], note: "how long the programme sits on this — there is no take behind it")
+
+			let top: RGBA, bottom: RGBA, isGradient: Bool
+			switch card.fill {
+			case .solid(let colour): top = colour; bottom = colour; isGradient = false
+			case .gradient(let a, let b): top = a; bottom = b; isGradient = true
+			}
+			var fill: [NSView] = [
+				pop(["solid", "gradient"], selected: isGradient ? 1 : 0) { pick in
+					change { $0.fill = pick == 0 ? .solid(top) : .gradient(top: top, bottom: bottom) }
+				},
+				colour(top) { picked in
+					change { $0.fill = isGradient ? .gradient(top: picked, bottom: bottom) : .solid(picked) }
+				},
+			]
+			if isGradient {
+				fill.append(colour(bottom) { picked in
+					change { $0.fill = .gradient(top: top, bottom: picked) }
+				})
+				fill.append(label("top, bottom"))
+			}
+			field("fill", fill, note: isGradient
+				? "two stops down the frame — a flat colour reads as a fault, two stops read as a made thing"
+				: "black is the default, and the one fill the file leaves out")
+
+			field("as", [text(entry.label ?? "", width: 210, placeholder: "intro") { value in
+				let name = value.trimmingCharacters(in: .whitespaces)
+				self.replace(path, TimelineEntry(
+					card: card, transition: entry.transition,
+					label: name.isEmpty ? nil : Slug.make(from: name)))
+			}], note: "a card is usually there to be drawn on, and `@name` is how "
+				+ "an overlay finds it")
 
 		case .group(let name, let inner):
 			field("section", [text(name, width: 210, placeholder: "introduction") {
@@ -425,13 +472,22 @@ public final class PropertiesPanel: NSView {
 	}
 
 	private func changeKind(_ path: [Int], _ entry: TimelineEntry, to index: Int) {
-		let name = entry.source.description
+		// A card's description is a length rather than a name, and a length
+		// makes a nonsense slug — so leaving one asks for a clip to be named.
+		var name = entry.source.description
+		if case .card = entry.source { name = "clip" }
 		let replacement: TimelineEntry
 		switch index {
 		case 0: replacement = TimelineEntry(clip: ClipReference(name), transition: entry.transition)
 		case 1: replacement = TimelineEntry(list: [ClipReference(name)], transition: entry.transition)
 		case 2: replacement = (try? TimelineEntry(query: "#\(Slug.make(from: name))",
 		                                          transition: entry.transition)) ?? entry
+		case 3:
+			if case .card = entry.source { return }
+			// Four seconds of black, which is what somebody who has just asked
+			// for a card is about to put a title on.
+			replacement = TimelineEntry(card: Card(duration: 4), transition: entry.transition,
+			                            label: entry.label)
 		default:
 			if case .group = entry.source { return }
 			replacement = TimelineEntry(group: Slug.make(from: name), entries: [],

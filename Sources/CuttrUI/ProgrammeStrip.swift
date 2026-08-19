@@ -128,6 +128,33 @@ public final class ProgrammeStrip: NSView {
 			}
 		}
 
+		// The cards, on the same row as the clips because that is where they
+		// are: a stretch of programme like any other, in its own colour, with
+		// nothing behind it. Drawn in the fill it will actually be, which is
+		// the only thing there is to say about one.
+		for card in resolved.cards {
+			let a = x(for: card.start), b = x(for: card.end)
+			let rect = NSRect(x: a, y: top + 2, width: max(b - a - 1, 1), height: clipRowHeight - 4)
+			switch card.card.fill {
+			case .solid(let colour):
+				Self.colour(colour).setFill()
+				rect.fill()
+			case .gradient(let upper, let lower):
+				NSGradient(starting: Self.colour(lower), ending: Self.colour(upper))?
+					.draw(in: rect, angle: 90)
+			}
+			// A black card on a dark strip is nothing at all without an outline.
+			Theme.color(.card).setStroke()
+			NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5)).stroke()
+			let attributes: [NSAttributedString.Key: Any] = [
+				.font: Theme.monoSmall, .foregroundColor: Theme.color(.card),
+			]
+			if ("card" as NSString).size(withAttributes: attributes).width < rect.width - 8 {
+				("card" as NSString).draw(at: NSPoint(x: rect.minX + 4, y: rect.minY + 3),
+				                          withAttributes: attributes)
+			}
+		}
+
 		// The overlays, each on its own row under the clips, so a caption that
 		// spans three clips is visibly one thing rather than three.
 		var rows: [Double] = []
@@ -181,6 +208,10 @@ public final class ProgrammeStrip: NSView {
 		line.move(to: NSPoint(x: px, y: 0))
 		line.line(to: NSPoint(x: px, y: bounds.height))
 		line.stroke()
+	}
+
+	private static func colour(_ value: RGBA) -> NSColor {
+		NSColor(calibratedRed: value.r, green: value.g, blue: value.b, alpha: value.a)
 	}
 
 	private func drawRuler() {

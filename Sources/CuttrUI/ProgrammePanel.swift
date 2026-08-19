@@ -211,6 +211,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			button("plus", #selector(addClip), "Add a clip by slug, or a #tag query"),
 			button("folder.badge.plus", #selector(addGroup),
 			       "Add a named section overlays can be hung on"),
+			button("rectangle.fill", #selector(addCard),
+			       "Add a card: time on the programme with no take behind it"),
 			button("plus.square.on.square", #selector(duplicateEntry), "Another one just like it"),
 			button("arrow.up", #selector(moveEntryUp), "Earlier"),
 			button("arrow.down", #selector(moveEntryDown), "Later"),
@@ -224,6 +226,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	@objc private func addClip() { insert(TimelineEntry(clip: ClipReference("clip"))) }
 	@objc private func addGroup() { insert(TimelineEntry(group: "section", entries: [])) }
+	/// Four seconds of black, named — because a card is nearly always there to
+	/// have something drawn on it, and `@intro` is how the title finds it.
+	@objc private func addCard() {
+		insert(TimelineEntry(card: Card(duration: 4), label: "card"))
+	}
 
 	private func insert(_ entry: TimelineEntry) {
 		var next = project
@@ -563,6 +570,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			case .clip: kind = .clip
 			case .list: kind = .list
 			case .query: kind = .query
+			case .card: kind = .card
 			case .group: kind = .section
 			}
 			var x: CGFloat = 4
@@ -580,6 +588,22 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			if case .group = entry.source {
 				x = note("\(count) entr\(count == 1 ? "y" : "ies")", at: x) + 10
 			}
+			// A card's own colour, drawn. The row says `card 00:04.000`, which
+			// is how long it is and nothing about what anybody will see.
+			if case .card(let card) = entry.source {
+				let swatch = NSRect(x: x, y: bounds.height / 2 - 6, width: 18, height: 12)
+				switch card.fill {
+				case .solid(let colour):
+					Self.colour(colour).setFill()
+					swatch.fill()
+				case .gradient(let top, let bottom):
+					NSGradient(starting: Self.colour(bottom), ending: Self.colour(top))?
+						.draw(in: swatch, angle: 90)
+				}
+				Theme.rule.setStroke()
+				NSBezierPath(rect: swatch.insetBy(dx: 0.5, dy: 0.5)).stroke()
+				x += 26
+			}
 			// A trimmed placement looks exactly like an untrimmed one otherwise,
 			// and the same clip appearing twice in a section is usually two
 			// different lengths of it. Said here so the list is the truth about
@@ -592,6 +616,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			if let arrival = Self.arrival(entry) {
 				_ = note(arrival, at: x, colour: Theme.color(.section))
 			}
+		}
+
+		static func colour(_ value: RGBA) -> NSColor {
+			NSColor(calibratedRed: value.r, green: value.g, blue: value.b, alpha: value.a)
 		}
 
 		/// How this entry arrives from the one before, or nothing for a cut —
