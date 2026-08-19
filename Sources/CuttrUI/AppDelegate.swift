@@ -17,6 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// reloaded from disk, or edited in its own window.
 	private var scenes: [SceneWindowController] = []
 	private var sceneObservers: [ObjectIdentifier: NSObjectProtocol] = [:]
+	/// Which project each scene window belongs to. By identity rather than by
+	/// file, because two untitled projects have the same URL — none — and would
+	/// otherwise share one scene window between them.
+	private var sceneOwners: [ObjectIdentifier: ObjectIdentifier] = [:]
 
 	func applicationDidFinishLaunching(_ notification: Notification) {
 		NSApp.mainMenu = MainMenu.build()
@@ -32,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 						.removeValue(forKey: ObjectIdentifier(scene)) {
 						NotificationCenter.default.removeObserver(observer)
 					}
+					self?.sceneOwners.removeValue(forKey: ObjectIdentifier(scene))
 				}
 				self?.scenes.removeAll { $0.window === window }
 			}
@@ -159,7 +164,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// switches the window to it.
 	func showScene(for document: ComposeDocument, named name: String?) {
 		let chosen = name ?? document.project.scenes.keys.sorted().first
-		if let existing = scenes.first(where: { $0.projectURL == document.url }) {
+		if let existing = scenes.first(where: {
+			sceneOwners[ObjectIdentifier($0)] == ObjectIdentifier(document)
+		}) {
 			if let chosen { existing.sceneDocument.show(chosen) }
 			existing.window?.makeKeyAndOrderFront(nil)
 			return
@@ -188,6 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 			try? document.write()
 		}
 		let controller = SceneWindowController(document: scene, projectURL: document.url)
+		sceneOwners[ObjectIdentifier(controller)] = ObjectIdentifier(document)
 		sceneObservers[ObjectIdentifier(controller)] = NotificationCenter.default.addObserver(
 			forName: .cuttrProjectChanged, object: document, queue: .main
 		) { [weak controller, weak document] _ in

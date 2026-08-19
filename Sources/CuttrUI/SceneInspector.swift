@@ -62,6 +62,12 @@ public final class SceneInspector: NSView {
 		form.translatesAutoresizingMaskIntoConstraints = false
 
 		let scroll = TableScroll.wrap(form, horizontal: false)
+		// A clip view that counts from the top. Without it a form shorter than
+		// the pane sits at the *bottom* of it, under a field of empty card —
+		// which is what a scroll view does with an unflipped document view, and
+		// which looks exactly like a panel that failed to lay out.
+		scroll.contentView = FlippedClip()
+		scroll.documentView = form
 		scroll.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(scroll)
 		title.translatesAutoresizingMaskIntoConstraints = false
@@ -375,6 +381,10 @@ public final class SceneInspector: NSView {
 		return row
 	}
 
+	private final class FlippedClip: NSClipView {
+		override var isFlipped: Bool { true }
+	}
+
 	private final class WrappingLabel: NSTextField {
 		override func layout() {
 			if preferredMaxLayoutWidth != bounds.width {
@@ -492,6 +502,12 @@ public final class SceneInspector: NSView {
 		button.bezelStyle = .rounded
 		button.controlSize = .small
 		button.font = NSFont.systemFont(ofSize: 11)
+		// Wide enough to still be a button. Everything in this form gives up
+		// width before the pane does, and a one-character button that does so
+		// disappears entirely — which is what happened to the mark saying
+		// which key is being worked on.
+		button.translatesAutoresizingMaskIntoConstraints = false
+		button.widthAnchor.constraint(greaterThanOrEqualToConstant: 26).isActive = true
 		let sink = Sink { _ in onTap() }
 		sinks.append(sink)
 		button.target = sink

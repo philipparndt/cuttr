@@ -59,7 +59,9 @@ public final class SceneDocument {
 		self.baseURL = baseURL
 		self.name = name
 		let scene = project.scenes[name] ?? Scene()
-		self.length = playedFor ?? max(2, scene.lastKeyTime + 1)
+		// Never so short there is nothing to scrub: an overlay half a second
+		// long is a real thing, but a stage half a second wide is not.
+		self.length = max(0.5, playedFor ?? max(2, scene.lastKeyTime + 1))
 	}
 
 	public var scene: Scene { project.scenes[name] ?? Scene() }
