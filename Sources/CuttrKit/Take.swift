@@ -19,6 +19,11 @@ public struct Take: Sendable, Equatable {
 	/// The separately recorded audio, if there is one.
 	public var audio: AudioTrack?
 
+	/// Where the recording came from, when it was not recorded. See
+	/// ``TakeSource``: a downloaded meme is a take like any other, and this
+	/// block is the only thing about it that is not.
+	public var source: TakeSource?
+
 	/// What was measured about this recording: how loud it is, what colour it
 	/// is. Written by an analysis pass, not by hand — though correcting a number
 	/// by hand is exactly the sort of thing a text file should allow.
@@ -58,10 +63,11 @@ public struct Take: Sendable, Equatable {
 	public init(
 		video: String? = nil, audio: AudioTrack? = nil, clips: [Clip] = [],
 		anchors: [Anchor] = [], measured: Measured = Measured(), look: Look = .none,
-		unknownKeys: [String: Any] = [:]
+		source: TakeSource? = nil, unknownKeys: [String: Any] = [:]
 	) {
 		self.video = video
 		self.audio = audio
+		self.source = source
 		self.clips = clips
 		self.anchors = anchors
 		self.measured = measured
@@ -72,6 +78,7 @@ public struct Take: Sendable, Equatable {
 	public static func == (a: Take, b: Take) -> Bool {
 		a.video == b.video && a.audio == b.audio && a.clips == b.clips
 			&& a.anchors == b.anchors && a.measured == b.measured && a.look == b.look
+			&& a.source == b.source
 	}
 
 	/// Adds an anchor, with a name nothing else in this take has.

@@ -71,6 +71,23 @@ public enum TakeReader {
 
 		guard video != nil || audio != nil else { throw TakeError.missingMedia }
 
+		// Where it came from, when it came from anywhere. Read leniently — a
+		// block with no `provider:` is somebody's note to themselves rather
+		// than a fault worth refusing the whole file over.
+		var source: TakeSource?
+		if var m = root.removeValue(forKey: "source").flatMap(mapping),
+		   let provider = nonEmpty(m.removeValue(forKey: "provider") as? String ?? "") {
+			let id = nonEmpty(m.removeValue(forKey: "id") as? String ?? "") ?? ""
+			let page = nonEmpty(m.removeValue(forKey: "page") as? String ?? "")
+			let title = nonEmpty(m.removeValue(forKey: "title") as? String ?? "")
+			let attribution = nonEmpty(m.removeValue(forKey: "attribution") as? String ?? "")
+			// Whatever else the block held, kept as it was written.
+			var extra: [String: String] = [:]
+			for (key, value) in m { extra[key] = String(describing: value) }
+			source = TakeSource(provider: Slug.make(from: provider), id: id, page: page,
+			                    title: title, attribution: attribution, extra: extra)
+		}
+
 		var clips: [Clip] = []
 		var seen = Set<String>()
 		if let list = root.removeValue(forKey: "clips") as? [Any] {
@@ -155,7 +172,7 @@ public enum TakeReader {
 		}
 
 		return Take(video: video, audio: audio, clips: clips, anchors: anchors,
-		            measured: measured, look: look, unknownKeys: root)
+		            measured: measured, look: look, source: source, unknownKeys: root)
 	}
 
 	static func number(_ value: Any?) -> Double? {
@@ -220,6 +237,28 @@ public enum TakeWriter {
 				out += "  file:   \(scalar(audio.file))\n"
 				out += "  offset: \(Timecode.offsetString(audio.offset))"
 				out += "   # audio + offset = video clock\n"
+			}
+		}
+
+		// Where it came from. Directly under the media, because it is a fact
+		// about the media and not about the cut — and above everything else,
+		// because a person opening a take they did not record wants to know
+		// whose it is before they read what was done to it.
+		if let source = take.source {
+			out += "\nsource:\n"
+			out += "  provider:    \(scalar(source.provider))\n"
+			if !source.id.isEmpty { out += "  id:          \(scalar(source.id))\n" }
+			if let title = source.title { out += "  title:       \(scalar(title))\n" }
+			if let page = source.page { out += "  page:        \(scalar(page))\n" }
+			if let attribution = source.attribution {
+				out += "  attribution: \(scalar(attribution))"
+				out += "   # the service's terms ask for this to be shown\n"
+			}
+			// Sorted, because the order of a dictionary is not the order of a
+			// file: unsorted, re-saving an untouched take would shuffle these
+			// and every save would be a diff.
+			for key in source.extra.keys.sorted() {
+				out += "  \(key): \(scalar(source.extra[key]!))\n"
 			}
 		}
 
