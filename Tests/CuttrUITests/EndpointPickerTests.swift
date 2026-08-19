@@ -187,3 +187,46 @@ import Testing
 		                   eventNumber: 0, clickCount: 1, pressure: 1)!
 	}
 }
+
+/// The keyboard, in the dialog that has a text field in it.
+///
+/// A sheet hands its keyboard to the first text field it can find, and a field
+/// editor eats every key: space typed a space and `i` typed an `i`. What holds
+/// the keyboard is the timeline.
+@Suite @MainActor struct TrimKeysTests {
+
+	@Test func theTimelineTakesTheKeys() {
+		_ = NSApplication.shared
+		let timeline = TrimTimeline(frame: NSRect(x: 0, y: 0, width: 216, height: 56))
+		#expect(timeline.acceptsFirstResponder)
+		var pressed: [String] = []
+		timeline.onKey = { pressed.append($0); return $0 != "x" }
+		for key in [" ", "i", "o", "x"] { timeline.keyDown(with: press(key)) }
+		#expect(pressed == [" ", "i", "o", "x"])
+	}
+
+	/// And the dialog does something with each of them.
+	@Test func spaceAndTheMarksAreWired() {
+		_ = NSApplication.shared
+		var written: [(Double, Double)] = []
+		let dialog = TrimDialog(clip: "clip-4", video: nil, audio: nil, audioOffset: 0,
+		                        span: (start: 0, end: 8), trim: (0, 0), step: 1.0 / 25,
+		                        onDone: { written.append($0) })
+		dialog.loadView()
+		dialog.at = 2
+		dialog.keyed("i")
+		dialog.at = 6
+		dialog.keyed("o")
+		#expect(abs(dialog.chosen.head - 2) < 0.001)
+		#expect(abs(dialog.chosen.tail - 2) < 0.001)
+		#expect(dialog.keyed(" "))
+		#expect(dialog.keyed("q") == false)
+		#expect(written.isEmpty)
+	}
+
+	private func press(_ key: String) -> NSEvent {
+		NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+		                 windowNumber: 0, context: nil, characters: key,
+		                 charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0)!
+	}
+}

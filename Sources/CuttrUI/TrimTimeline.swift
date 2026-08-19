@@ -40,6 +40,34 @@ public final class TrimTimeline: NSView {
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
 
+	/// It takes the keyboard, and it is what the dialog opens with.
+	///
+	/// Not vanity: a sheet gives the keyboard to its first text field unless it
+	/// is told otherwise, and a field editor eats every key there is — so space
+	/// typed a space instead of playing, and `i` typed an `i`. The timeline is
+	/// the thing somebody is working on, so the timeline holds the keyboard and
+	/// the fields are visited deliberately.
+	public override var acceptsFirstResponder: Bool { true }
+
+	public override func becomeFirstResponder() -> Bool {
+		needsDisplay = true
+		return true
+	}
+
+	public override func resignFirstResponder() -> Bool {
+		needsDisplay = true
+		return true
+	}
+
+	/// Space, I and O — the cutting window's keys, on the view they are about.
+	public var onKey: ((String) -> Bool)?
+
+	public override func keyDown(with event: NSEvent) {
+		let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+		if onKey?(key) == true { return }
+		super.keyDown(with: event)
+	}
+
 	public override var intrinsicContentSize: NSSize {
 		NSSize(width: NSView.noIntrinsicMetric, height: 56)
 	}
@@ -83,6 +111,17 @@ public final class TrimTimeline: NSView {
 			NSRect(x: edge, y: band.minY, width: 3, height: band.height).fill()
 		}
 
+		// Where the keyboard is, said quietly. Space and I and O do something
+		// here and nothing in a text field, and a band with no mark on it is a
+		// band nobody can tell is listening.
+		if window?.firstResponder === self {
+			Theme.accent.withAlphaComponent(0.7).setStroke()
+			let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1),
+			                        xRadius: 4, yRadius: 4)
+			ring.lineWidth = 2
+			ring.stroke()
+		}
+
 		// The playhead, over everything.
 		Theme.playhead.setFill()
 		NSRect(x: x(playhead) - 0.5, y: band.minY - 3, width: 1, height: band.height + 6).fill()
@@ -113,6 +152,7 @@ public final class TrimTimeline: NSView {
 	}
 
 	public override func mouseDown(with event: NSEvent) {
+		window?.makeFirstResponder(self)
 		let place = convert(event.locationInWindow, from: nil)
 		let head = x(trim.head), tail = x(length - trim.tail)
 		if abs(place.x - head) <= slop { dragging = .head }

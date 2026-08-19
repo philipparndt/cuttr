@@ -98,6 +98,16 @@ public final class TrimDialog: NSViewController {
 		timeline.length = length
 		timeline.trim = trim
 		timeline.onScrub = { [weak self] at in self?.seek(to: at) }
+		timeline.onKey = { [weak self] key in
+			guard let self else { return false }
+			switch key {
+			case " ": self.togglePlay()
+			case "i": self.headHere()
+			case "o": self.tailHere()
+			default: return false
+			}
+			return true
+		}
 		timeline.onTrim = { [weak self] head, tail, _ in
 			guard let self else { return }
 			self.trim = (head, tail)
@@ -195,8 +205,16 @@ public final class TrimDialog: NSViewController {
 
 	public override func viewDidAppear() {
 		super.viewDidAppear()
-		// Space plays, the way it does in the cutting window; I and O put the
-		// marks where the playhead is.
+		// The timeline, not a text field. Both of these: the window picks an
+		// initial first responder of its own when the sheet is shown, and
+		// anything that steals it later — a click on a button, a field that has
+		// been typed into — has to give it back.
+		view.window?.initialFirstResponder = timeline
+		view.window?.makeFirstResponder(timeline)
+
+		// A backstop for the keys, for when the keyboard is somewhere that does
+		// not want it: a button that has just been clicked keeps focus, and
+		// space on a focused button presses it again.
 		keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
 			guard let self, event.window === self.view.window else { return event }
 			// Not while somebody is typing a timecode into a field.
@@ -263,6 +281,7 @@ public final class TrimDialog: NSViewController {
 	}
 
 	@objc func togglePlay() {
+		view.window?.makeFirstResponder(timeline)
 		if transport.isPlaying { transport.pause(); return }
 		// From where the playhead is to where this placement ends, so playing
 		// never runs into the next shot on the take.
@@ -272,6 +291,7 @@ public final class TrimDialog: NSViewController {
 	}
 
 	@objc func playAll() {
+		view.window?.makeFirstResponder(timeline)
 		transport.play(from: span.start + trim.head, to: span.end - trim.tail)
 	}
 
@@ -291,12 +311,14 @@ public final class TrimDialog: NSViewController {
 	}
 
 	@objc private func headTyped() {
+		defer { view.window?.makeFirstResponder(timeline) }
 		guard let seconds = Timecode.parse(headField.stringValue) else { return }
 		set(head: seconds, tail: trim.tail)
 		seek(to: trim.head)
 	}
 
 	@objc private func tailTyped() {
+		defer { view.window?.makeFirstResponder(timeline) }
 		guard let seconds = Timecode.parse(tailField.stringValue) else { return }
 		set(head: trim.head, tail: seconds)
 		seek(to: length - trim.tail)
@@ -319,11 +341,21 @@ public final class TrimDialog: NSViewController {
 
 	/// The mark goes where the picture is. The other way round — find the frame,
 	/// then read its time off, then type it — is what a dialog is for avoiding.
-	@objc func headHere() { set(head: timeline.playhead, tail: trim.tail) }
-	@objc func tailHere() { set(head: trim.head, tail: max(0, length - timeline.playhead)) }
+	@objc func headHere() {
+		view.window?.makeFirstResponder(timeline)
+		set(head: timeline.playhead, tail: trim.tail)
+	}
+
+	@objc func tailHere() {
+		view.window?.makeFirstResponder(timeline)
+		set(head: trim.head, tail: max(0, length - timeline.playhead))
+	}
 
 	/// The whole clip again, both ends at once.
-	@objc func resetTrim() { set(head: 0, tail: 0) }
+	@objc func resetTrim() {
+		view.window?.makeFirstResponder(timeline)
+		set(head: 0, tail: 0)
+	}
 
 	/// What the numbers say now.
 	private func tell() {
@@ -346,6 +378,10 @@ public final class TrimDialog: NSViewController {
 		window.sheetParent?.endSheet(window)
 		hosted = nil
 	}
+
+	/// For the tests: a key, as the timeline would deliver it.
+	@discardableResult
+	func keyed(_ key: String) -> Bool { timeline.onKey?(key) ?? false }
 
 	/// For the tests: what would be written if Done were pressed now.
 	var chosen: (head: Double, tail: Double) { trim }
