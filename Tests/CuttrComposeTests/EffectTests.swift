@@ -189,20 +189,64 @@ import Testing
 
 		// Nothing at the very start of a one-second fade, something in the
 		// middle of the span, nothing at the very end.
-		#expect(CaptionPainter.image(for: shown, project: project, size: size, at: 0) == nil)
-		#expect(CaptionPainter.image(for: shown, project: project, size: size, at: 2) != nil)
-		#expect(CaptionPainter.image(for: shown, project: project, size: size, at: 4) == nil)
+		#expect(OverlayPainter.image(for: shown, project: project, baseURL: URL(fileURLWithPath: "."), size: size, at: 0) == nil)
+		#expect(OverlayPainter.image(for: shown, project: project, baseURL: URL(fileURLWithPath: "."), size: size, at: 2) != nil)
+		#expect(OverlayPainter.image(for: shown, project: project, baseURL: URL(fileURLWithPath: "."), size: size, at: 4) == nil)
 	}
 
 	/// It lands where the style says, in the frame's own coordinates.
 	@Test func itIsWhereTheStyleSays() throws {
 		let shown = caption(behind: .people)
 		let size = CGSize(width: 640, height: 360)
-		let image = try #require(CaptionPainter.image(
-			for: shown, project: Project(), size: size, at: 2))
+		let image = try #require(OverlayPainter.image(
+			for: shown, project: Project(), baseURL: URL(fileURLWithPath: "."),
+			size: size, at: 2))
 		let style = TextStyle.lowerThird
 		// Left-aligned, so the left edge of the plate sits on the position.
 		#expect(abs(image.extent.minX - style.position.x * size.width) < 2)
 		#expect(image.extent.midY < size.height / 2)
+	}
+}
+
+/// A spinner and a scene can go behind somebody too, which means they are
+/// painted rather than laid over — and what is painted has to be there.
+@Suite struct PaintedOverlayTests {
+
+	private func shown(_ kind: Overlay.Kind) -> ResolvedOverlay {
+		ResolvedOverlay(
+			overlay: Overlay(kind: kind, span: .times(from: 0, to: 4),
+			                 arrival: .cut, departure: .cut, behind: .people),
+			source: 0, appearance: 0, start: 0, end: 4, path: nil)
+	}
+
+	@Test func aSpinnerIsPainted() throws {
+		let image = try #require(OverlayPainter.image(
+			for: shown(.spinner(Spinner(style: .bars, words: [SpinnerWord("working")]))),
+			project: Project(), baseURL: URL(fileURLWithPath: "."),
+			size: CGSize(width: 640, height: 360), at: 1))
+		#expect(image.extent.width > 10)
+		#expect(image.extent.height > 10)
+	}
+
+	@Test func aSceneIsPaintedTheSizeOfTheFrame() throws {
+		let scene = Scene(parts: [
+			.init(content: .text("{{title}}", style: nil),
+			      keys: [.init(t: 0, x: 0.5, y: 0.5, opacity: 1)]),
+		])
+		let project = Project(scenes: ["intro": scene])
+		let image = try #require(OverlayPainter.image(
+			for: shown(.scene("intro", with: ["title": "Folge 3"])),
+			project: project, baseURL: URL(fileURLWithPath: "."),
+			size: CGSize(width: 640, height: 360), at: 1))
+		#expect(image.extent.size == CGSize(width: 640, height: 360))
+	}
+
+	/// Nothing is laid over the frame when it is meant to be under somebody.
+	@Test func noneOfThemIsALayer() {
+		for kind in [Overlay.Kind.text("a", style: nil),
+		             .spinner(Spinner()),
+		             .scene("intro", with: [:])] {
+			#expect(!OverlayLayers.isLayered(shown(kind).overlay))
+		}
 	}
 }

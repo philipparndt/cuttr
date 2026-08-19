@@ -375,6 +375,12 @@ public struct TextStyle: Sendable, Equatable {
 
 	public static let lowerThird = TextStyle()
 
+	/// The same lower third, centred across the frame. Wanted often enough to
+	/// be worth not writing out: the only difference is where it sits and which
+	/// part of it sits there.
+	public static let lowerThirdCentred = TextStyle(
+		position: CGPoint(x: 0.5, y: 0.13), alignment: .centre)
+
 	public static let centred = TextStyle(
 		size: 0.075, position: CGPoint(x: 0.5, y: 0.5), alignment: .centre)
 
@@ -395,6 +401,8 @@ public struct TextStyle: Sendable, Equatable {
 	/// down: a project that redefines `lower-third` still gets the other two.
 	public static let builtIn: [String: TextStyle] = [
 		"lower-third": .lowerThird,
+		"lower-third-centre": .lowerThirdCentred,
+		"lower-third-center": .lowerThirdCentred,
 		"centre": .centred,
 		"center": .centred,
 		"title": .title,

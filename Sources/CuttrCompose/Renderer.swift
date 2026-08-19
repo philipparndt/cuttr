@@ -196,16 +196,15 @@ public enum Renderer {
 			// of the footage is the wrong place by exactly the scale factor.
 			let frame = image
 
-			// Captions that go behind somebody are painted here rather than laid
-			// over the finished frame, and the person goes over them.
+			// Anything that goes behind somebody is painted here rather than laid
+			// over the finished frame, and the person goes over it.
 			for shown in resolved.overlays
-			where shown.overlay.behind == .people && OverlayLayers.isLayered(shown.overlay) == false
-				&& time >= shown.start && time <= shown.end {
-				guard case .text = shown.overlay.kind,
-				      let caption = CaptionPainter.image(
-					      for: shown, project: resolved.project, size: size, at: time),
+			where shown.overlay.behind == .people && time >= shown.start && time <= shown.end {
+				guard let painted = OverlayPainter.image(
+					      for: shown, project: resolved.project, baseURL: resolved.baseURL,
+					      size: size, at: time),
 				      let mask = people?.mask(for: frame, at: time) else { continue }
-				image = caption.composited(over: image)
+				image = painted.composited(over: image)
 				image = frame.applyingFilter("CIBlendWithRedMask", parameters: [
 					"inputBackgroundImage": image,
 					"inputMaskImage": mask,

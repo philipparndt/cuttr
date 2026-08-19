@@ -12,7 +12,12 @@ import CuttrKit
 @MainActor
 public final class ProgrammeStrip: NSView {
 
-	public var resolved: ResolvedProject? { didSet { needsDisplay = true } }
+	public var resolved: ResolvedProject? {
+		didSet {
+			needsDisplay = true
+			window?.invalidateCursorRects(for: self)
+		}
+	}
 	/// What to say when there is nothing to draw.
 	public var emptyMessage: String? { didSet { needsDisplay = true } }
 	public var playhead: Double = 0 { didSet { needsDisplay = true } }
@@ -34,7 +39,11 @@ public final class ProgrammeStrip: NSView {
 	                       start: Double, end: Double)?
 
 	private let clipRowHeight: CGFloat = 34
-	private let overlayRowHeight: CGFloat = 16
+	/// Tall enough to be grabbed. A bar somebody is meant to drag has to be
+	/// worth aiming at, and sixteen points with two of border was a line.
+	private let overlayRowHeight: CGFloat = 22
+	/// How far either side of an edge counts as the edge.
+	private let grabSlop: CGFloat = 5
 	private let groupRowHeight: CGFloat = 15
 	private let rulerHeight: CGFloat = 16
 
@@ -138,6 +147,18 @@ public final class ProgrammeStrip: NSView {
 			colour.setStroke()
 			NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5)).stroke()
 
+			// Handles at both ends, always. On the cutting timeline these are
+			// drawn on the selected clip only, because every clip there has
+			// them and a row of grab bars would *be* the timeline; here there
+			// are a handful of bars and no other way to know they can be
+			// dragged at all.
+			if rect.width > 10 {
+				colour.setFill()
+				for edge in [rect.minX, rect.maxX - 3] {
+					NSRect(x: edge, y: rect.minY, width: 3, height: rect.height).fill()
+				}
+			}
+
 			let label: String
 			switch overlay.overlay.kind {
 			case .text(let text, _): label = text
@@ -184,6 +205,21 @@ public final class ProgrammeStrip: NSView {
 		return candidates.first { $0 >= target } ?? 600
 	}
 
+	public override func resetCursorRects() {
+		super.resetCursorRects()
+		for bar in bars {
+			// The ends resize, the middle moves. Saying which with the pointer
+			// is most of how anybody finds out that either is possible.
+			for edge in [bar.rect.minX, bar.rect.maxX] {
+				addCursorRect(NSRect(x: edge - grabSlop, y: bar.rect.minY,
+				                     width: grabSlop * 2, height: bar.rect.height),
+				              cursor: .resizeLeftRight)
+			}
+			let middle = bar.rect.insetBy(dx: grabSlop, dy: 0)
+			if middle.width > 2 { addCursorRect(middle, cursor: .openHand) }
+		}
+	}
+
 	public override func mouseDown(with event: NSEvent) {
 		let point = convert(event.locationInWindow, from: nil)
 		let t = time(forX: point.x)
@@ -192,9 +228,9 @@ public final class ProgrammeStrip: NSView {
 		// playhead, which is what a click on a timeline usually means.
 		if let bar = bars.last(where: { $0.rect.insetBy(dx: -3, dy: -2).contains(point) }) {
 			let grip: Grip
-			if abs(point.x - bar.rect.minX) < 5 {
+			if abs(point.x - bar.rect.minX) < grabSlop {
 				grip = .start
-			} else if abs(point.x - bar.rect.maxX) < 5 {
+			} else if abs(point.x - bar.rect.maxX) < grabSlop {
 				grip = .end
 			} else {
 				grip = .body(t - bar.start)
@@ -223,6 +259,7 @@ public final class ProgrammeStrip: NSView {
 			moving.end = moving.start + length
 		}
 		dragging = moving
+		window?.invalidateCursorRects(for: self)
 		// Shown while it is being dragged rather than only when it is let go,
 		// so the bar follows the pointer.
 		if let index = bars.firstIndex(where: {
