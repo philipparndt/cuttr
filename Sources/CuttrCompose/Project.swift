@@ -22,6 +22,9 @@ public struct Project: Sendable, Equatable {
 	/// Text and spinners laid over the cut.
 	public var overlays: [Overlay]
 
+	/// Music, atmospheres, stings: sound that is not from a take.
+	public var sounds: [Sound]
+
 	/// Named colour looks, referenced by a take's `look: {profile: …}`.
 	public var profiles: [String: Look]
 
@@ -41,6 +44,7 @@ public struct Project: Sendable, Equatable {
 		output: Output = Output(),
 		timeline: [TimelineEntry] = [],
 		overlays: [Overlay] = [],
+		sounds: [Sound] = [],
 		styles: [String: TextStyle] = [:],
 		profiles: [String: Look] = [:],
 		scenes: [String: Scene] = [:],
@@ -50,6 +54,7 @@ public struct Project: Sendable, Equatable {
 		self.output = output
 		self.timeline = timeline
 		self.overlays = overlays
+		self.sounds = sounds
 		self.styles = styles
 		self.profiles = profiles
 		self.scenes = scenes
@@ -63,7 +68,8 @@ public struct Project: Sendable, Equatable {
 
 	public static func == (a: Project, b: Project) -> Bool {
 		a.takes == b.takes && a.output == b.output && a.timeline == b.timeline
-			&& a.overlays == b.overlays && a.styles == b.styles && a.profiles == b.profiles
+			&& a.overlays == b.overlays && a.sounds == b.sounds
+			&& a.styles == b.styles && a.profiles == b.profiles
 			&& a.scenes == b.scenes
 	}
 
@@ -142,6 +148,13 @@ public struct TimelineEntry: Sendable, Equatable {
 		case list([ClipReference])
 		/// Every clip a query selects, sorted by each clip's own `order`.
 		case query(ClipQuery, source: String)
+		/// Time on the programme with no take behind it: a length and a fill.
+		///
+		/// The one entry that is not a reference. An intro screen is a stretch
+		/// of programme that exists to be drawn on, and making somebody shoot
+		/// four seconds of a blank wall to have somewhere to put a title is not
+		/// an assembly language.
+		case card(Card)
 		/// A named section of the programme.
 		///
 		/// Groups exist so that an overlay can be hung on a *section* rather
@@ -156,6 +169,7 @@ public struct TimelineEntry: Sendable, Equatable {
 			case .clip(let reference): return reference.description
 			case .list(let references): return references.map(\.description).joined(separator: ", ")
 			case .query(_, let source): return source
+			case .card(let card): return "card \(Timecode.string(card.duration))"
 			case .group(let name, _): return "@\(name)"
 			}
 		}
@@ -214,6 +228,12 @@ public struct TimelineEntry: Sendable, Equatable {
 	/// out the way it went in rather than re-printed from the parse tree.
 	public init(query: String, transition: Transition = .cut) throws {
 		self.init(source: .query(try QueryParser.parse(query), source: query), transition: transition)
+	}
+
+	/// A card, which takes a name for its placement like any other entry — and
+	/// wants one more than most, because `@intro` is how the title finds it.
+	public init(card: Card, transition: Transition = .cut, label: String? = nil) {
+		self.init(source: .card(card), transition: transition, label: label)
 	}
 
 	public init(group: String, entries: [TimelineEntry], transition: Transition = .cut) {

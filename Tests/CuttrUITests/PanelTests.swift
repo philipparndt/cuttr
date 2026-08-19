@@ -24,6 +24,8 @@ import Testing
 					try! TimelineEntry(query: "#b-roll"),
 				]),
 				TimelineEntry(list: [ClipReference("a"), ClipReference("b")], transition: 0.5),
+				TimelineEntry(card: Card(duration: 4, fill: .gradient(
+					top: RGBA(hex: "#202030")!, bottom: RGBA(hex: "#050508")!)), label: "titles"),
 			],
 			overlays: [
 				Overlay(kind: .text("Installing", style: "lower-third"),
@@ -31,6 +33,13 @@ import Testing
 				Overlay(kind: .spinner(Spinner(words: [SpinnerWord("one"), SpinnerWord("two", duration: 2)])),
 				        spans: [.times(from: 1, to: 4), .marks(from: .group("middle"), to: .group("middle"))],
 				        anchor: "mia-eye", offset: CGPoint(x: 0.02, y: -0.18)),
+			],
+			sounds: [
+				Sound(file: "music/opening.wav",
+				      span: .marks(from: .group("titles"), to: .group("titles")),
+				      gain: -6, arrival: .fade(over: 0.5), departure: .fade(over: 1.5),
+				      ducks: 8),
+				Sound(file: "sting.wav", span: .times(from: 12, to: 13)),
 			])
 	}
 
@@ -58,9 +67,9 @@ import Testing
 		let project = self.project()
 		let selections: [ProjectSelection] = [
 			.output, .entry([0]), .entry([1]), .entry([1, 0]), .entry([1, 1]), .entry([2]),
-			.overlay(0), .overlay(1), .output,
+			.entry([3]), .overlay(0), .overlay(1), .sound(0), .sound(1), .output,
 			// Gone: a selection that outlived the thing it named.
-			.entry([9]), .overlay(9),
+			.entry([9]), .overlay(9), .sound(9),
 		]
 		for selection in selections {
 			panel.reload(project, vocabulary: vocabulary(), selection: selection)

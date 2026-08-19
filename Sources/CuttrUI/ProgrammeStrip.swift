@@ -128,6 +128,33 @@ public final class ProgrammeStrip: NSView {
 			}
 		}
 
+		// The cards, on the same row as the clips because that is where they
+		// are: a stretch of programme like any other, in its own colour, with
+		// nothing behind it. Drawn in the fill it will actually be, which is
+		// the only thing there is to say about one.
+		for card in resolved.cards {
+			let a = x(for: card.start), b = x(for: card.end)
+			let rect = NSRect(x: a, y: top + 2, width: max(b - a - 1, 1), height: clipRowHeight - 4)
+			switch card.card.fill {
+			case .solid(let colour):
+				Self.colour(colour).setFill()
+				rect.fill()
+			case .gradient(let upper, let lower):
+				NSGradient(starting: Self.colour(lower), ending: Self.colour(upper))?
+					.draw(in: rect, angle: 90)
+			}
+			// A black card on a dark strip is nothing at all without an outline.
+			Theme.color(.card).setStroke()
+			NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5)).stroke()
+			let attributes: [NSAttributedString.Key: Any] = [
+				.font: Theme.monoSmall, .foregroundColor: Theme.color(.card),
+			]
+			if ("card" as NSString).size(withAttributes: attributes).width < rect.width - 8 {
+				("card" as NSString).draw(at: NSPoint(x: rect.minX + 4, y: rect.minY + 3),
+				                          withAttributes: attributes)
+			}
+		}
+
 		// The overlays, each on its own row under the clips, so a caption that
 		// spans three clips is visibly one thing rather than three.
 		var rows: [Double] = []
@@ -175,12 +202,44 @@ public final class ProgrammeStrip: NSView {
 			}
 		}
 
+		// The sounds, under the overlays, because that is where they are: laid
+		// beneath the programme rather than over it. Shown and not dragged —
+		// a sound is bound to a clip or a section like an overlay is, but there
+		// is no picture to place it against, so it is edited in the panel.
+		var soundRows: [Double] = []
+		let soundTop = top + clipRowHeight + CGFloat(rows.count) * overlayRowHeight + 2
+		for sound in resolved.sounds {
+			let row = soundRows.firstIndex { $0 <= sound.start + 1e-9 } ?? soundRows.count
+			if row < soundRows.count { soundRows[row] = sound.end } else { soundRows.append(sound.end) }
+			let a = x(for: sound.start), b = x(for: sound.end)
+			let y = soundTop + CGFloat(row) * overlayRowHeight
+			let rect = NSRect(x: a, y: y + 1, width: max(b - a - 1, 2), height: overlayRowHeight - 3)
+			let colour = Theme.color(.sound)
+			colour.withAlphaComponent(0.28).setFill()
+			rect.fill()
+			colour.setStroke()
+			NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5)).stroke()
+			var label = (sound.sound.file as NSString).lastPathComponent
+			if sound.sound.ducks != 0 { label += " ▼" }
+			let attributes: [NSAttributedString.Key: Any] = [
+				.font: Theme.monoSmall, .foregroundColor: Theme.text,
+			]
+			if (label as NSString).size(withAttributes: attributes).width < rect.width - 6 {
+				(label as NSString).draw(at: NSPoint(x: rect.minX + 3, y: rect.minY + 1),
+				                         withAttributes: attributes)
+			}
+		}
+
 		let px = x(for: playhead).rounded() + 0.5
 		Theme.playhead.setStroke()
 		let line = NSBezierPath()
 		line.move(to: NSPoint(x: px, y: 0))
 		line.line(to: NSPoint(x: px, y: bounds.height))
 		line.stroke()
+	}
+
+	private static func colour(_ value: RGBA) -> NSColor {
+		NSColor(calibratedRed: value.r, green: value.g, blue: value.b, alpha: value.a)
 	}
 
 	private func drawRuler() {

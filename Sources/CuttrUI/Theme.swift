@@ -71,7 +71,8 @@ public enum Theme {
 	/// properties. Colour is how somebody learns what `#` and `@` mean without
 	/// being told.
 	public enum Kind {
-		case clip, query, list, section, text, spinner, effect, scene, film, anchor, tag, take
+		case clip, query, list, section, card, sound, text, spinner, effect, scene, film,
+		     anchor, tag, take
 	}
 
 	public static func color(_ kind: Kind) -> NSColor {
@@ -86,6 +87,12 @@ public enum Theme {
 		case .film: return base(.amber)
 		case .scene: return base(.blue)
 		case .anchor: return base(.teal)
+		// A card is the absence of footage, and neutral grey is what that
+		// looks like beside six hues that all mean "something was shot".
+		case .card: return NSColor(calibratedWhite: 0.62, alpha: 1)
+		// The recorder's own amber, because a sound laid under the programme is
+		// the same kind of thing as the lane it would have been recorded on.
+		case .sound: return externalWave
 		}
 	}
 
@@ -113,6 +120,8 @@ public enum Theme {
 		case .film: name = "camera.filters"
 		case .scene: name = "rectangle.stack"
 		case .anchor: name = "scope"
+		case .card: name = "rectangle.fill"
+		case .sound: name = "waveform"
 		}
 		guard let image = NSImage(systemSymbolName: name, accessibilityDescription: name) else {
 			return nil

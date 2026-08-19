@@ -191,6 +191,13 @@ public final class PropertiesPanel: NSView {
 			}
 			title.stringValue = "TIMELINE ENTRY"
 			entryForm(path, entry)
+		case .sound(let index):
+			guard index < project.sounds.count else {
+				title.stringValue = "PROJECT"
+				return
+			}
+			title.stringValue = "SOUND"
+			soundForm(index, project.sounds[index])
 		case .overlay(let index):
 			guard index < project.overlays.count else {
 				title.stringValue = "PROJECT"
@@ -283,13 +290,14 @@ public final class PropertiesPanel: NSView {
 	// MARK: - timeline entry
 
 	private func entryForm(_ path: [Int], _ entry: TimelineEntry) {
-		let kinds = ["clip", "list", "query", "section"]
+		let kinds = ["clip", "list", "query", "card", "section"]
 		let current: Int
 		switch entry.source {
 		case .clip: current = 0
 		case .list: current = 1
 		case .query: current = 2
-		case .group: current = 3
+		case .card: current = 3
+		case .group: current = 4
 		}
 		section("what plays")
 		field("kind", [pop(kinds, selected: current) { [weak self] index in
@@ -354,6 +362,52 @@ public final class PropertiesPanel: NSView {
 				}
 				self.replace(path, replacement)
 			}], note: "#tag, take/#tag, take/*, with and / or / not between them")
+
+		case .card(let card):
+			// Everything a card has is here, because a card is a length and a
+			// colour and there is nothing else to know about it.
+			func change(_ edit: @escaping (inout Card) -> Void) {
+				var next = card
+				edit(&next)
+				self.replace(path, TimelineEntry(
+					card: next, transition: entry.transition, label: entry.label))
+			}
+			field("card", [text(Timecode.string(card.duration), width: 96,
+			                    placeholder: "00:04.000") { value in
+				guard let seconds = Timecode.parse(value) else { return }
+				change { $0.duration = max(0, seconds) }
+			}], note: "how long the programme sits on this — there is no take behind it")
+
+			let top: RGBA, bottom: RGBA, isGradient: Bool
+			switch card.fill {
+			case .solid(let colour): top = colour; bottom = colour; isGradient = false
+			case .gradient(let a, let b): top = a; bottom = b; isGradient = true
+			}
+			var fill: [NSView] = [
+				pop(["solid", "gradient"], selected: isGradient ? 1 : 0) { pick in
+					change { $0.fill = pick == 0 ? .solid(top) : .gradient(top: top, bottom: bottom) }
+				},
+				colour(top) { picked in
+					change { $0.fill = isGradient ? .gradient(top: picked, bottom: bottom) : .solid(picked) }
+				},
+			]
+			if isGradient {
+				fill.append(colour(bottom) { picked in
+					change { $0.fill = .gradient(top: top, bottom: picked) }
+				})
+				fill.append(label("top, bottom"))
+			}
+			field("fill", fill, note: isGradient
+				? "two stops down the frame — a flat colour reads as a fault, two stops read as a made thing"
+				: "black is the default, and the one fill the file leaves out")
+
+			field("as", [text(entry.label ?? "", width: 210, placeholder: "intro") { value in
+				let name = value.trimmingCharacters(in: .whitespaces)
+				self.replace(path, TimelineEntry(
+					card: card, transition: entry.transition,
+					label: name.isEmpty ? nil : Slug.make(from: name)))
+			}], note: "a card is usually there to be drawn on, and `@name` is how "
+				+ "an overlay finds it")
 
 		case .group(let name, let inner):
 			field("section", [text(name, width: 210, placeholder: "introduction") {
@@ -425,13 +479,22 @@ public final class PropertiesPanel: NSView {
 	}
 
 	private func changeKind(_ path: [Int], _ entry: TimelineEntry, to index: Int) {
-		let name = entry.source.description
+		// A card's description is a length rather than a name, and a length
+		// makes a nonsense slug — so leaving one asks for a clip to be named.
+		var name = entry.source.description
+		if case .card = entry.source { name = "clip" }
 		let replacement: TimelineEntry
 		switch index {
 		case 0: replacement = TimelineEntry(clip: ClipReference(name), transition: entry.transition)
 		case 1: replacement = TimelineEntry(list: [ClipReference(name)], transition: entry.transition)
 		case 2: replacement = (try? TimelineEntry(query: "#\(Slug.make(from: name))",
 		                                          transition: entry.transition)) ?? entry
+		case 3:
+			if case .card = entry.source { return }
+			// Four seconds of black, which is what somebody who has just asked
+			// for a card is about to put a title on.
+			replacement = TimelineEntry(card: Card(duration: 4), transition: entry.transition,
+			                            label: entry.label)
 		default:
 			if case .group = entry.source { return }
 			replacement = TimelineEntry(group: Slug.make(from: name), entries: [],
@@ -443,6 +506,139 @@ public final class PropertiesPanel: NSView {
 	private func replace(_ path: [Int], _ entry: TimelineEntry) {
 		var next = project
 		next.replaceEntry(at: path, with: entry)
+		commit(next)
+	}
+
+	// MARK: - sound
+
+	/// Everything a sound has: which file, when it plays, how loud, how it
+	/// arrives and goes, and what it does to the programme underneath it.
+	private func soundForm(_ index: Int, _ sound: Sound) {
+		func change(_ edit: @escaping (inout Sound) -> Void) {
+			var next = project
+			guard index < next.sounds.count else { return }
+			edit(&next.sounds[index])
+			commit(next)
+		}
+
+		section("what it is")
+		field("file", [
+			text(sound.file, width: 210, placeholder: "music/opening.wav") { value in
+				change { $0.file = value.trimmingCharacters(in: .whitespaces) }
+			},
+			ellipsis("choose a sound file") { [weak self] _ in self?.chooseSound(index) },
+		], note: "relative to the project file, the same as the takes")
+
+		section("when it plays")
+		// The same three ways an overlay says when, in the same order and with
+		// the same words, because it is the same question and the file spells
+		// it the same way.
+		let modes = ["whole clip", "inside a clip", "programme times"]
+		let mode: Int
+		switch sound.span {
+		case .marks: mode = 0
+		case .within: mode = 1
+		case .times: mode = 2
+		}
+		var controls: [NSView] = [pop(modes, selected: mode) { [weak self] pick in
+			guard let self, pick != mode else { return }
+			let converted = self.convert(sound.span, to: pick)
+			change { $0.span = converted }
+		}]
+		switch sound.span {
+		case .marks(let from, let to):
+			controls.append(endpoint(from) { value in
+				change { $0.span = .marks(from: .init(value), to: to) }
+			})
+			controls.append(endpoint(to) { value in
+				change { $0.span = .marks(from: from, to: .init(value)) }
+			})
+		case .within(let mark, let from, let to):
+			controls.append(endpoint(mark) { value in
+				change { $0.span = .within(.init(value), from: from, to: to) }
+			})
+			controls.append(text(Timecode.string(from), width: 90, placeholder: "00:00.000") { value in
+				guard let seconds = Timecode.parse(value) else { return }
+				change { $0.span = .within(mark, from: seconds, to: to) }
+			})
+			controls.append(text(Timecode.string(to), width: 90, placeholder: "00:05.000") { value in
+				guard let seconds = Timecode.parse(value) else { return }
+				change { $0.span = .within(mark, from: from, to: seconds) }
+			})
+		case .times(let from, let to):
+			controls.append(text(Timecode.string(from), width: 96, placeholder: "00:00.000") { value in
+				guard let seconds = Timecode.parse(value) else { return }
+				change { $0.span = .times(from: seconds, to: to) }
+			})
+			controls.append(text(Timecode.string(to), width: 96, placeholder: "00:30.000") { value in
+				guard let seconds = Timecode.parse(value) else { return }
+				change { $0.span = .times(from: from, to: seconds) }
+			})
+		}
+		let advice: String
+		switch sound.span {
+		case .marks: advice = "the whole of it, however long it turns out to be"
+		case .within: advice = "so many seconds into that clip — it travels with the clip"
+		case .times: advice = "the programme's own clock: moving anything leaves this behind"
+		}
+		field("when", controls, note: advice)
+		if let extent = extent(of: sound.span) {
+			field("", [label("\(Timecode.string(extent.0)) → \(Timecode.string(extent.1))"
+				+ "  ·  \(TakeWriter.number(extent.1 - extent.0, places: 2))s")],
+				note: "a sound shorter than that stops rather than starting again")
+		}
+
+		section("how it sounds")
+		field("gain", [number(sound.gain, width: 72) { value in
+			change { $0.gain = value }
+		}, label("dB")], note: "applied to the file as it is — nought leaves it alone")
+		fadeRow("in", sound.arrival) { transition in change { $0.arrival = transition } }
+		fadeRow("out", sound.departure) { transition in change { $0.departure = transition } }
+		field("ducks", [number(sound.ducks, width: 72) { value in
+			change { $0.ducks = max(0, value) }
+		}, label("dB")], note: sound.ducks > 0
+			? "the programme's own sound goes under this one by that much, and comes "
+				+ "back as it fades"
+			: "nought for not at all — a sting under a cut wants none, music over "
+				+ "somebody talking wants six or eight")
+	}
+
+	/// How a sound starts or stops. Only a fade means anything to a sound: it
+	/// cannot slide in from the left.
+	private func fadeRow(_ name: String, _ transition: Overlay.Transition,
+	                     _ set: @escaping (Overlay.Transition) -> Void) {
+		let fading: Bool
+		if case .fade = transition { fading = true } else { fading = false }
+		var controls: [NSView] = [pop(["straight in", "fade"], selected: fading ? 1 : 0) { pick in
+			set(pick == 0 ? .cut : .fade(over: max(0.1, transition.duration)))
+		}]
+		if fading {
+			controls.append(number(transition.duration, width: 60) { value in
+				set(value > 0 ? .fade(over: value) : .cut)
+			})
+			controls.append(label("seconds"))
+		}
+		field(name, controls)
+	}
+
+	/// A sound file, chosen rather than typed, and written down the way the
+	/// file wants it: relative to the project, because that is what lets a
+	/// project and its music travel as one folder.
+	private func chooseSound(_ index: Int) {
+		let panel = NSOpenPanel()
+		panel.canChooseFiles = true
+		panel.canChooseDirectories = false
+		panel.allowsMultipleSelection = false
+		panel.message = "The sound to lay under the programme"
+		guard panel.runModal() == .OK, let url = panel.url else { return }
+		let base = resolved?.baseURL.standardizedFileURL.path
+		var path = url.standardizedFileURL.path
+		if let base, path.hasPrefix(base + "/") {
+			path = String(path.dropFirst(base.count + 1))
+		}
+		var next = project
+		guard index < next.sounds.count else { return }
+		next.sounds[index].file = path
 		commit(next)
 	}
 

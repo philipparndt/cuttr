@@ -7,6 +7,7 @@ public enum ResolveError: LocalizedError {
 	case unknownClip(ClipReference)
 	case ambiguousClip(String, [String])
 	case missingMedia(ClipReference)
+	case missingSound(String)
 	case unknownAnchor(String)
 	case emptyQuery(String)
 	case emptyGroup(String)
@@ -26,6 +27,9 @@ public enum ResolveError: LocalizedError {
 				+ "Write it as `\(takes[0])/\(slug)`."
 		case .missingMedia(let reference):
 			return "The take that `\(reference)` comes from has no video or audio file."
+		case .missingSound(let path):
+			return "No sound file at `\(path)`. Paths under `sounds:` are relative to "
+				+ "the project file, the same as the takes."
 		case .unknownAnchor(let name):
 			return "No anchor called `\(name)` in any of this project's takes. "
 				+ "Anchors are marked in the cutting window, on the take."
@@ -97,6 +101,42 @@ public struct ResolvedClip: Sendable {
 	}
 }
 
+/// A card, placed on the programme's clock.
+///
+/// A type of its own rather than a widened ``ResolvedClip``, and the reason is
+/// what the fields of that one are: a reference, a take name, a clip, two media
+/// URLs, an audio offset, a measured gain and a grade. Every one of them is a
+/// fact about a recording, and a card has no recording. Widening would have
+/// made eight fields optional and pushed an `if let` into the trim dialog, the
+/// grade, the loudness pass and the anchor mapping — none of which can ever
+/// mean anything for a card — in exchange for one merged array. This way each
+/// type is entirely about one kind of thing, and the one place that genuinely
+/// wants them interleaved says so: ``ResolvedProject/programme``.
+public struct ResolvedCard: Sendable, Equatable {
+	public let card: Card
+	/// Which timeline entry put this here — a path, the same as a clip's.
+	public var entry: [Int] = []
+	public let start: Double
+	/// How long this overlaps what came before it, in seconds. A card can be
+	/// dissolved into exactly as a shot can.
+	public var transition: Double = 0
+	public var blend: Transition = .cut
+	public var duration: Double { card.duration }
+	public var end: Double { start + card.duration }
+}
+
+/// A sound, placed on the programme's clock with its file found.
+public struct ResolvedSound: Sendable {
+	public let sound: Sound
+	/// Which of the project's sounds this came from, for the panel.
+	public let source: Int
+	/// The file, already resolved against the project's own folder.
+	public let url: URL
+	public let start: Double
+	public let end: Double
+	public var duration: Double { end - start }
+}
+
 /// An overlay with its times worked out.
 public struct ResolvedOverlay: Sendable {
 	public let overlay: Overlay
@@ -157,11 +197,70 @@ public struct ResolvedProject: Sendable {
 	/// a logo, a badge, a texture.
 	public var baseURL: URL = URL(fileURLWithPath: ".")
 	public let clips: [ResolvedClip]
+	/// The stretches with no footage behind them, in the order they play.
+	public var cards: [ResolvedCard] = []
 	public let overlays: [ResolvedOverlay]
+	/// Music and the rest, in the order it starts.
+	public var sounds: [ResolvedSound] = []
 	public let groups: [ResolvedGroup]
 	/// Every anchor the takes brought, with its path on the programme's clock.
 	public let anchors: [(anchor: Anchor, path: AnchorPath?)]
-	public var duration: Double { clips.last?.end ?? 0 }
+	public var duration: Double { max(clips.last?.end ?? 0, cards.last?.end ?? 0) }
+
+	/// Everything that occupies time, in the order it plays.
+	///
+	/// The renderer's instruction list is a sequence of stretches of programme
+	/// and does not care which kind each one is; everything else — the grade,
+	/// the trim dialog, the strip's take names — wants one kind or the other.
+	/// So they are kept apart and put in order here, which is the only place
+	/// that needs them together.
+	public var programme: [Placement] {
+		(clips.map(Placement.clip) + cards.map(Placement.card))
+			.sorted { $0.start < $1.start }
+	}
+}
+
+/// One thing on the programme: a shot, or a card.
+public enum Placement: Sendable {
+	case clip(ResolvedClip)
+	case card(ResolvedCard)
+
+	public var start: Double {
+		switch self {
+		case .clip(let clip): return clip.start
+		case .card(let card): return card.start
+		}
+	}
+
+	public var duration: Double {
+		switch self {
+		case .clip(let clip): return clip.duration
+		case .card(let card): return card.duration
+		}
+	}
+
+	public var end: Double { start + duration }
+
+	/// How long this overlaps what came before it.
+	public var transition: Double {
+		switch self {
+		case .clip(let clip): return clip.transition
+		case .card(let card): return card.transition
+		}
+	}
+
+	public var blend: Transition {
+		switch self {
+		case .clip(let clip): return clip.blend
+		case .card(let card): return card.blend
+		}
+	}
+
+	/// The card's fill, for the one that has one.
+	public var fill: Card.Fill? {
+		if case .card(let card) = self { return card.card.fill }
+		return nil
+	}
 }
 
 public enum Resolver {
@@ -231,7 +330,15 @@ public enum Resolver {
 		}
 
 		var clips: [ResolvedClip] = []
+		var cards: [ResolvedCard] = []
 		var cursor = 0.0
+		/// How long the last thing laid down was, whatever kind it was.
+		///
+		/// A dissolve is never longer than half of either side, and "either
+		/// side" now includes a card — so the length has to be carried rather
+		/// than read off the end of the clip list, which no longer knows what
+		/// came immediately before.
+		var previousLength: Double?
 		/// Where each named section begins and ends, once its contents are laid
 		/// out. Recorded while flattening rather than computed afterwards,
 		/// because a group's extent is exactly what its entries produced — and
@@ -245,6 +352,17 @@ public enum Resolver {
 		/// it may be a section or a query: what dissolves is the first clip that
 		/// comes out of it, whatever that turns out to be.
 		var pending = Transition.cut
+
+		/// `as:` names this placement, and a named placement is a section of
+		/// one entry — the same thing an overlay hangs on, so nothing
+		/// downstream has to learn a new idea. A card wants one more than a
+		/// clip does: `@intro` is the only way a title finds it.
+		func name(_ label: String?, from: Double, to: Double, depth: Int) {
+			guard let label else { return }
+			let existing = groups[label]
+			groups[label] = (min(existing?.start ?? from, from), max(existing?.end ?? to, to))
+			groupDepth[label] = groupDepth[label] ?? depth
+		}
 
 		func lay(out entries: [TimelineEntry], depth: Int = 0, at prefix: [Int] = []) throws {
 			for (position, entry) in entries.enumerated() {
@@ -264,6 +382,28 @@ public enum Resolver {
 					continue
 				}
 
+				if case .card(let card) = entry.source {
+					// A card of no length is not a frame of nothing, it is
+					// nothing — the same rule a clip trimmed to nothing gets.
+					guard card.duration > 0 else { continue }
+					var overlap = 0.0
+					var blend = Transition.cut
+					if pending.duration > 0, let previousLength {
+						overlap = min(pending.duration, previousLength / 2, card.duration / 2)
+						blend = Transition(pending.kind, seconds: overlap, edge: pending.edge)
+						cursor -= overlap
+					}
+					pending = .cut
+					let placedAt = cursor
+					cards.append(ResolvedCard(
+						card: card, entry: path, start: cursor,
+						transition: overlap, blend: blend))
+					cursor += card.duration
+					previousLength = card.duration
+					name(entry.label, from: placedAt, to: cursor, depth: depth)
+					continue
+				}
+
 				let found: [(name: String, take: Take, directory: URL, clip: Clip)]
 				switch entry.source {
 				case .clip(let reference):
@@ -277,8 +417,8 @@ public enum Resolver {
 					// worst way to find that out.
 					guard !selected.isEmpty else { throw ResolveError.emptyQuery(source) }
 					found = selected
-				case .group:
-					continue   // handled above
+				case .group, .card:
+					continue   // both handled above
 				}
 
 				let trim = entry.trim
@@ -300,8 +440,8 @@ public enum Resolver {
 					// run past both.
 					var overlap = 0.0
 					var blend = Transition.cut
-					if pending.duration > 0, let last = clips.last {
-						overlap = min(pending.duration, last.duration / 2, clip.duration / 2)
+					if pending.duration > 0, let previousLength {
+						overlap = min(pending.duration, previousLength / 2, clip.duration / 2)
 						blend = Transition(pending.kind, seconds: overlap, edge: pending.edge)
 						cursor -= overlap
 					}
@@ -328,21 +468,16 @@ public enum Resolver {
 						transition: overlap,
 						blend: blend))
 					cursor += clip.duration
-					// `as:` names this placement, and a named placement is a
-					// section of one clip — the same thing an overlay hangs on,
-					// so nothing downstream has to learn a new idea.
-					if let label {
-						let existing = groups[label]
-						groups[label] = (min(existing?.start ?? placedAt, placedAt),
-						                 max(existing?.end ?? cursor, cursor))
-						groupDepth[label] = groupDepth[label] ?? depth
-					}
+					previousLength = clip.duration
+					name(label, from: placedAt, to: cursor, depth: depth)
 				}
 			}
 		}
 		guard !project.timeline.isEmpty else { throw ResolveError.nothingOnTheTimeline }
 		try lay(out: project.timeline)
-		guard !clips.isEmpty else { throw ResolveError.emptyProgramme }
+		// A programme of nothing but cards is a programme: an intro screen with
+		// a title over it and no footage at all is a thing somebody makes.
+		guard !clips.isEmpty || !cards.isEmpty else { throw ResolveError.emptyProgramme }
 
 		// Levels and grades.
 		//
@@ -426,6 +561,58 @@ public enum Resolver {
 			}
 		}
 
+		/// Where a mark is on the programme, once for each time it is there.
+		///
+		/// A clip used twice is two places, not one long one. Spanning from the
+		/// first to the last covered everything in between — which is why using
+		/// a clip twice was awkward: an overlay hung on it swallowed whatever
+		/// came between the two uses.
+		func places(_ endpoint: Overlay.Span.Endpoint) throws -> [(start: Double, end: Double)] {
+			switch endpoint {
+			case .clip(let reference):
+				let matching = clips.filter {
+					$0.reference.slug == reference.slug
+						&& (reference.take == nil || $0.takeName == reference.take)
+				}
+				guard !matching.isEmpty else { throw ResolveError.unknownClip(reference) }
+				return matching.map { ($0.start, $0.end) }
+			case .group(let name):
+				guard let range = groups[name] else { throw ResolveError.unknownGroup(name) }
+				return [range]
+			}
+		}
+
+		/// A written range, on the programme's clock — once for each time the
+		/// material it names is used. One function, because an overlay and a
+		/// sound say when they happen in the same words and must get the same
+		/// answer.
+		func when(_ span: Overlay.Span) throws -> [(start: Double, end: Double)] {
+			switch span {
+			case .times(let a, let b):
+				return [(a, b)]
+			case .within(let mark, let a, let b):
+				// Timed from where the clip or section starts, so it travels
+				// with it — and once for each time that clip is used.
+				return try places(mark).map { ($0.start + a, $0.start + b) }
+			case .marks(let from, let to):
+				// Mark-bound, which is the point: the caption belongs to a
+				// section of the programme, so re-cutting the takes moves it.
+				let heads = try places(from)
+				let tails = try places(to)
+				if from == to { return heads }
+				// From the first time the head is used to the first end of the
+				// tail after it, so a range across the programme is one range
+				// rather than every combination.
+				var spans: [(start: Double, end: Double)] = []
+				for head in heads {
+					guard let tail = tails.first(where: { $0.end >= head.end })
+						?? tails.last else { continue }
+					spans.append((head.start, max(tail.end, head.end)))
+				}
+				return spans
+			}
+		}
+
 		var overlays: [ResolvedOverlay] = []
 		for (index, overlay) in project.overlays.enumerated() {
 			if let name = overlay.anchor, anchorsByName[name] == nil {
@@ -436,56 +623,7 @@ public enum Resolver {
 			// that is on from one moment to another, so an overlay that is on
 			// three times is three of those and nothing else changes.
 			for (position, appearance) in overlay.appearances.enumerated() {
-				/// Where a mark is on the programme, once for each time it is
-				/// there.
-				///
-				/// A clip used twice is two places, not one long one. Spanning
-				/// from the first to the last covered everything in between —
-				/// which is why using a clip twice was awkward: an overlay hung
-				/// on it swallowed whatever came between the two uses.
-				func places(_ endpoint: Overlay.Span.Endpoint) throws -> [(start: Double, end: Double)] {
-					switch endpoint {
-					case .clip(let reference):
-						let matching = clips.filter {
-							$0.reference.slug == reference.slug
-								&& (reference.take == nil || $0.takeName == reference.take)
-						}
-						guard !matching.isEmpty else { throw ResolveError.unknownClip(reference) }
-						return matching.map { ($0.start, $0.end) }
-					case .group(let name):
-						guard let range = groups[name] else { throw ResolveError.unknownGroup(name) }
-						return [range]
-					}
-				}
-
-				var spans: [(start: Double, end: Double)] = []
-				switch appearance.span {
-				case .times(let a, let b):
-					spans = [(a, b)]
-				case .within(let mark, let a, let b):
-					// Timed from where the clip or section starts, so it travels
-					// with it — and once for each time that clip is used.
-					spans = try places(mark).map { ($0.start + a, $0.start + b) }
-				case .marks(let from, let to):
-					// Mark-bound, which is the point: the caption belongs to a
-					// section of the programme, so re-cutting the takes moves it.
-					let heads = try places(from)
-					let tails = try places(to)
-					if from == to {
-						spans = heads
-					} else {
-						// From the first time the head is used to the first end
-						// of the tail after it, so a range across the programme
-						// is one range rather than every combination.
-						for head in heads {
-							guard let tail = tails.first(where: { $0.end >= head.end })
-								?? tails.last else { continue }
-							spans.append((head.start, max(tail.end, head.end)))
-						}
-					}
-				}
-
-				for span in spans where span.end > span.start {
+				for span in try when(appearance.span) where span.end > span.start {
 					// What it says *here*: a spinner that comes back saying
 					// something else is one overlay with two appearances, and by
 					// the time it reaches the layer tree it is simply two
@@ -509,10 +647,32 @@ public enum Resolver {
 			a.depth == b.depth ? a.start < b.start : a.depth < b.depth
 		}
 
+		// The sounds, on the same clock and out of the same folder as everything
+		// else the project names. A sound that is on twice is two of these, the
+		// same way an overlay is.
+		var sounds: [ResolvedSound] = []
+		for (index, sound) in project.sounds.enumerated() {
+			let url = URL(fileURLWithPath: sound.file, relativeTo: baseURL).standardizedFileURL
+			// Said now rather than discovered as a silent track. A missing
+			// recording is named when a take is resolved, and a missing piece of
+			// music should be named the same way — the commonest thing to go
+			// wrong with a path is that it is wrong.
+			guard FileManager.default.fileExists(atPath: url.path) else {
+				throw ResolveError.missingSound(sound.file)
+			}
+			for span in try when(sound.span) where span.end > span.start {
+				sounds.append(ResolvedSound(
+					sound: sound, source: index, url: url,
+					start: span.start, end: span.end))
+			}
+		}
+		sounds.sort { $0.start < $1.start }
+
 		let resolvedAnchors = anchorsByName.keys.sorted().map {
 			(anchor: anchorsByName[$0]!, path: paths[$0])
 		}
-		return ResolvedProject(project: project, baseURL: baseURL, clips: clips, overlays: overlays,
-		                       groups: resolvedGroups, anchors: resolvedAnchors)
+		return ResolvedProject(project: project, baseURL: baseURL, clips: clips, cards: cards,
+		                       overlays: overlays, sounds: sounds, groups: resolvedGroups,
+		                       anchors: resolvedAnchors)
 	}
 }

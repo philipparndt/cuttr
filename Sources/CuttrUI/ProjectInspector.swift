@@ -209,6 +209,8 @@ public final class ProjectInspector: NSView {
 		switch selection {
 		case .overlay(let index) where index < project.overlays.count:
 			yaml.string = ProjectWriter.fragment(for: project.overlays[index])
+		case .sound(let index) where index < project.sounds.count:
+			yaml.string = ProjectWriter.fragment(for: project.sounds[index])
 		case .entry(let path):
 			yaml.string = project.entry(at: path).map { ProjectWriter.fragment(for: $0) } ?? ""
 		default:

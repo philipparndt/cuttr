@@ -105,7 +105,13 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 		// of a programme that is only being cut should be the frames that were
 		// shot. This is what keeps a cut exact and pays the conversion only
 		// where something is actually being drawn.
-		if instruction.outgoing == nil, instruction.incomingLook == .none,
+		//
+		// `outgoingFill` is checked as well as `outgoing`, and the render that
+		// found out why shows it plainly: a shot dissolving out of a card has
+		// no outgoing *track*, so this took the shot's own frame and handed it
+		// back — the dissolve snapped, from the card to the shot, in one frame.
+		if instruction.outgoing == nil, instruction.outgoingFill == nil,
+		   instruction.incomingLook == .none,
 		   !work.busy(at: time), let track = instruction.incoming,
 		   let buffer = request.sourceFrame(byTrackID: track),
 		   CVPixelBufferGetWidth(buffer) == Int(size.width),
@@ -127,8 +133,14 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 		// The two shots, each graded as its own clip asks — a dissolve between a
 		// warm shot and a cold one has to be warm at one end and cold at the
 		// other, which means grading before blending rather than after.
+		//
+		// A card has no track and is painted instead. Everything after this
+		// point — the blend, the film, the overlays — cannot tell the
+		// difference, which is the point: a card is the picture underneath.
 		let incoming = source(instruction.incoming, look: instruction.incomingLook)
+			?? instruction.incomingFill?.image(size: size)
 		let outgoing = source(instruction.outgoing, look: instruction.outgoingLook)
+			?? instruction.outgoingFill?.image(size: size)
 
 		var image: CIImage
 		switch (outgoing, incoming) {
@@ -178,6 +190,10 @@ final class ProgrammeInstruction: NSObject, AVVideoCompositionInstructionProtoco
 	let incoming: CMPersistentTrackID?
 	let outgoingLook: Look
 	let incomingLook: Look
+	/// The colour to paint on either side, for a card — which is a stretch of
+	/// programme with no track behind it.
+	let outgoingFill: Card.Fill?
+	let incomingFill: Card.Fill?
 	/// What to draw while they overlap.
 	let blend: Transition
 	let session: UUID
@@ -185,6 +201,7 @@ final class ProgrammeInstruction: NSObject, AVVideoCompositionInstructionProtoco
 	init(
 		timeRange: CMTimeRange, outgoing: CMPersistentTrackID?, incoming: CMPersistentTrackID?,
 		outgoingLook: Look = .none, incomingLook: Look = .none,
+		outgoingFill: Card.Fill? = nil, incomingFill: Card.Fill? = nil,
 		blend: Transition = .cut, session: UUID
 	) {
 		self.timeRange = timeRange
@@ -192,9 +209,19 @@ final class ProgrammeInstruction: NSObject, AVVideoCompositionInstructionProtoco
 		self.incoming = incoming
 		self.outgoingLook = outgoingLook
 		self.incomingLook = incomingLook
+		self.outgoingFill = outgoingFill
+		self.incomingFill = incomingFill
 		self.blend = blend
 		self.session = session
-		self.containsTweening = outgoing != nil && incoming != nil
-		self.requiredSourceTrackIDs = [outgoing, incoming].compactMap { $0 }.map { NSNumber(value: $0) }
+		// Tweening is about whether there are two pictures here, not two
+		// tracks: a shot dissolving into a card is a dissolve.
+		self.containsTweening = (outgoing != nil || outgoingFill != nil)
+			&& (incoming != nil || incomingFill != nil)
+		let tracks = [outgoing, incoming].compactMap { $0 }
+		// `nil` means "every track", which is what a card wants: it needs none
+		// of them, and an empty list is read as an instruction that has nothing
+		// to do rather than as one that needs nothing.
+		self.requiredSourceTrackIDs = tracks.isEmpty
+			? nil : tracks.map { NSNumber(value: $0) }
 	}
 }
