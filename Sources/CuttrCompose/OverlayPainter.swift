@@ -333,10 +333,19 @@ public enum OverlayPainter {
 				let url = URL(fileURLWithPath: file, relativeTo: baseURL)
 				if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
 				   let picture = CGImageSourceCreateImageAtIndex(source, 0, nil) {
-					let width = (key.width ?? 0.2) * size.width
-					let height = (key.height ?? 0.2) * size.height
+					// Fitted inside the box rather than stretched to it, which
+					// is what the layer path has always done — a logo came out
+					// squashed here and correct in the export, and the two are
+					// meant to be the same picture.
+					let box = CGSize(width: (key.width ?? 0.2) * size.width,
+					                 height: (key.height ?? 0.2) * size.height)
+					let fit = min(box.width / CGFloat(picture.width),
+					              box.height / CGFloat(picture.height))
+					let drawn = CGSize(width: CGFloat(picture.width) * fit,
+					                   height: CGFloat(picture.height) * fit)
 					context.draw(picture, in: CGRect(
-						x: -width / 2, y: -height / 2, width: width, height: height))
+						x: -drawn.width / 2, y: -drawn.height / 2,
+						width: drawn.width, height: drawn.height))
 				}
 			case .background:
 				break   // dealt with above, before the transform
