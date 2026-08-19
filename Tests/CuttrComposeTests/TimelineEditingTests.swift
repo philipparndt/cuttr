@@ -130,3 +130,69 @@ import Testing
 		#expect(back.rows.map(\.entry.source.description) == p.rows.map(\.entry.source.description))
 	}
 }
+
+/// Dragging more than one entry at a time.
+///
+/// One at a time does not work: every move re-numbers the paths of the ones
+/// still waiting, which is the same shifting that makes a single move
+/// difficult, only worse.
+@Suite struct MovingSeveralTests {
+
+	private func programme() -> Project {
+		Project(timeline: [
+			TimelineEntry(clip: ClipReference("a")),
+			TimelineEntry(clip: ClipReference("b")),
+			TimelineEntry(clip: ClipReference("c")),
+			TimelineEntry(group: "end", entries: [
+				TimelineEntry(clip: ClipReference("d")),
+			]),
+		])
+	}
+
+	private func names(_ project: Project) -> [String] {
+		project.timeline.map { entry in
+			if case .group(let name, let inner) = entry.source {
+				return "@\(name)[" + inner.map { $0.source.description }.joined(separator: " ") + "]"
+			}
+			return entry.source.description
+		}
+	}
+
+	@Test func twoEntriesKeepTheirOrder() {
+		var project = programme()
+		// `a` and `c` to the end of the top level.
+		project.moveEntries(at: [[0], [2]], toParent: [], index: 4)
+		#expect(names(project) == ["b", "@end[d]", "a", "c"])
+	}
+
+	@Test func theyCanGoIntoASection() {
+		var project = programme()
+		project.moveEntries(at: [[0], [1]], toParent: [3], index: 0)
+		#expect(names(project) == ["c", "@end[a b d]"])
+	}
+
+	/// Moving up the list is the case where the destination shifts underneath
+	/// the removals, and the one a naive loop gets wrong.
+	@Test func movingUpwardsLandsWhereItWasAimed() {
+		var project = programme()
+		project.moveEntries(at: [[1], [2]], toParent: [], index: 0)
+		#expect(names(project) == ["b", "c", "a", "@end[d]"])
+	}
+
+	/// A section and something inside it means the section: putting the child
+	/// beside it would take it out of what it is being dragged with.
+	@Test func aChildOfSomethingBeingMovedIsLeftInIt() {
+		var project = programme()
+		project.moveEntries(at: [[3], [3, 0]], toParent: [], index: 0)
+		#expect(names(project) == ["@end[d]", "a", "b", "c"])
+	}
+
+	/// And a section cannot be dropped into itself — nothing moves at all,
+	/// rather than half of it.
+	@Test func aSectionCannotSwallowItself() {
+		var project = programme()
+		let before = names(project)
+		project.moveEntries(at: [[3], [0]], toParent: [3], index: 0)
+		#expect(names(project) == before)
+	}
+}

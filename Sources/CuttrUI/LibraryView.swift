@@ -73,6 +73,9 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 
 		table.dataSource = self
 		table.delegate = self
+		// Several clips dragged onto the programme at once, in the order they
+		// are listed — which is how a section gets filled.
+		table.allowsMultipleSelection = true
 		table.onMenu = { [weak self] event in self?.rowMenu(for: event) }
 		table.rowHeight = 30
 		table.backgroundColor = Theme.panel

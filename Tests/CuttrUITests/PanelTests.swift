@@ -533,3 +533,64 @@ import Testing
 		#expect(asked == "middle")
 	}
 }
+
+/// Which overlays have anything to do with what is selected.
+@Suite @MainActor struct OverlayFilterTests {
+
+	/// Two clips, and three overlays: one on the first, one on the second, one
+	/// written in programme times that covers both.
+	private func panel() -> ProgrammePanel {
+		_ = NSApplication.shared
+		var project = Project(timeline: [
+			TimelineEntry(source: .card(Card(duration: 2)), label: "one"),
+			TimelineEntry(source: .card(Card(duration: 2)), label: "two"),
+		])
+		project.overlays = [
+			Overlay(kind: .text("first", style: nil),
+			        span: .marks(from: .group("one"), to: .group("one"))),
+			Overlay(kind: .text("second", style: nil),
+			        span: .marks(from: .group("two"), to: .group("two"))),
+			Overlay(kind: .text("all through", style: nil), span: .times(from: 0, to: 4)),
+		]
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 500))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary())
+		panel.resolved = try? Resolver.resolve(
+			project, baseURL: URL(fileURLWithPath: NSTemporaryDirectory()))
+		return panel
+	}
+
+	@Test func onlyTheOnesOnOverTheSelectionPlayARole() {
+		let panel = self.panel()
+		#expect(panel.resolved != nil)
+
+		// The first card: its own overlay and the one across the whole thing.
+		#expect(panel.overlaysOver(.entry([0])) == [0, 2])
+		// The second card: the other two.
+		#expect(panel.overlaysOver(.entry([1])) == [1, 2])
+		// Nothing selected is nothing to be over.
+		#expect(panel.overlaysOver(.output).isEmpty)
+	}
+
+	/// A section counts everything inside it, however deeply.
+	@Test func aSectionCoversWhatIsInIt() {
+		_ = NSApplication.shared
+		var project = Project(timeline: [
+			TimelineEntry(group: "part", entries: [
+				TimelineEntry(source: .card(Card(duration: 1)), label: "a"),
+				TimelineEntry(source: .card(Card(duration: 1)), label: "b"),
+			]),
+			TimelineEntry(source: .card(Card(duration: 1)), label: "after"),
+		])
+		project.overlays = [
+			Overlay(kind: .text("on b", style: nil),
+			        span: .marks(from: .group("b"), to: .group("b"))),
+			Overlay(kind: .text("after", style: nil),
+			        span: .marks(from: .group("after"), to: .group("after"))),
+		]
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 500))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary())
+		panel.resolved = try? Resolver.resolve(
+			project, baseURL: URL(fileURLWithPath: NSTemporaryDirectory()))
+		#expect(panel.overlaysOver(.entry([0])) == [0])
+	}
+}

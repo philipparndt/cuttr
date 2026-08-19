@@ -63,6 +63,7 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		table.gridStyleMask = []
 		table.target = self
 		table.doubleAction = #selector(doubleClicked)
+		table.allowsMultipleSelection = true
 		// A scene can be dragged from here onto the programme, the same as from
 		// the library — this is a list of what the project is made of, and
 		// dragging from it is how material gets used.
@@ -247,6 +248,14 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 	}
 
 	@objc private func removeSelected() {
+		// Several at once, taking the takes out by path and the scenes by name
+		// so neither is addressed by a row number that the other has shifted.
+		let rows = table.selectedRowIndexes
+		if rows.count > 1 {
+			for path in rows.compactMap({ take($0)?.path }) { onRemove?(path) }
+			for name in rows.compactMap({ sceneName($0) }) { onRemoveScene?(name) }
+			return
+		}
 		if let entry = take(table.selectedRow) {
 			// The file is not deleted, only the reference: a take belongs to
 			// whoever recorded it, not to this project.
@@ -267,6 +276,37 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		return item
 	}
 
+	/// A name with the symbol for what it is beside it.
+	///
+	/// A cell rather than an attributed string: the symbol has to keep its own
+	/// shape and sit on the text's centre line, and a text attachment does
+	/// neither reliably at two sizes of row.
+	final class NamedRow: NSTableCellView {
+		let field = NSTextField()
+		var symbol: NSImage?
+
+		override init(frame: NSRect) {
+			super.init(frame: frame)
+			field.isBordered = false
+			field.drawsBackground = false
+			field.lineBreakMode = .byTruncatingTail
+			field.translatesAutoresizingMaskIntoConstraints = false
+			addSubview(field)
+			NSLayoutConstraint.activate([
+				field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+				field.trailingAnchor.constraint(equalTo: trailingAnchor),
+				field.centerYAnchor.constraint(equalTo: centerYAnchor),
+			])
+		}
+
+		@available(*, unavailable) required init?(coder: NSCoder) { nil }
+
+		override func draw(_ dirtyRect: NSRect) {
+			guard let symbol else { return }
+			Theme.draw(symbol, in: NSRect(x: 2, y: bounds.height / 2 - 8, width: 17, height: 16))
+		}
+	}
+
 	// MARK: - Data source
 
 	public func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -285,6 +325,31 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		field.font = Theme.mono
 		field.target = self
 		field.action = #selector(nameCommitted(_:))
+
+		// The name column carries the symbol for what the row is, the way every
+		// other list in this program does. Without it a scene and a take are
+		// two words in the same column and nothing says which is which.
+		if tableColumn.identifier.rawValue == "take" {
+			let kind: Theme.Kind = sceneName(row) != nil ? .scene : .take
+			let cell = (tableView.makeView(withIdentifier: .init("named"), owner: self) as? NamedRow)
+				?? { let made = NamedRow(); made.identifier = .init("named"); return made }()
+			cell.symbol = Theme.symbol(kind, size: 12)
+			cell.field.font = Theme.mono
+			cell.field.target = self
+			cell.field.action = #selector(nameCommitted(_:))
+			switch rows[row] {
+			case .take(let entry):
+				cell.field.isEditable = entry.path == renaming
+				cell.field.stringValue = entry.name
+				cell.field.textColor = entry.problem == nil ? Theme.clipStroke(.green) : Theme.playhead
+			case .scene(let name, _):
+				cell.field.isEditable = false
+				cell.field.stringValue = name
+				cell.field.textColor = Theme.color(.scene)
+			}
+			cell.needsDisplay = true
+			return cell
+		}
 
 		switch rows[row] {
 		case .take(let entry):

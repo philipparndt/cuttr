@@ -28,7 +28,12 @@ public final class ProjectInspector: NSView {
 	/// belong to the window — this panel only passes them to the properties,
 	/// which is where a picture of the overlay is worth having.
 	public var resolved: ResolvedProject? {
-		didSet { properties.resolved = resolved }
+		didSet {
+			properties.resolved = resolved
+			// The programme list needs it too: which overlays are on over what
+			// is selected is a question about the clock, not about the names.
+			programme.resolved = resolved
+		}
 	}
 	public var poster: ((Double, @escaping (NSImage?) -> Void) -> Void)? {
 		didSet { properties.poster = poster }

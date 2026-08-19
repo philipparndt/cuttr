@@ -232,3 +232,43 @@ import Testing
 		#expect(written == nil)
 	}
 }
+
+/// Dragging more than one thing at a time.
+@Suite @MainActor struct MultipleDragTests {
+
+	private func panel(_ project: Project) -> ProgrammePanel {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary())
+		return panel
+	}
+
+	/// Two clips from the library land in the order they were listed, not on
+	/// top of each other.
+	@Test func severalReferencesLandInOrder() {
+		let panel = self.panel(Project(timeline: [TimelineEntry(clip: ClipReference("first"))]))
+		var written: Project?
+		panel.onChange = { written = $0 }
+
+		let board = NSPasteboard(name: .init("multiple-drag-test"))
+		board.clearContents()
+		board.writeObjects(["one", "two"].map { reference -> NSPasteboardItem in
+			let item = NSPasteboardItem()
+			item.setString(reference, forType: .string)
+			return item
+		})
+		#expect(panel.dropItems(from: board, into: [], at: 1))
+		#expect(written?.timeline.map { $0.source.description } == ["first", "one", "two"])
+	}
+
+	/// And the selection ends on the last of them rather than nowhere.
+	@Test func aDropOfNothingUsableChangesNothing() {
+		let panel = self.panel(Project(timeline: [TimelineEntry(clip: ClipReference("first"))]))
+		var written: Project?
+		panel.onChange = { written = $0 }
+		let board = NSPasteboard(name: .init("multiple-drag-empty"))
+		board.clearContents()
+		#expect(panel.dropItems(from: board, into: [], at: 0) == false)
+		#expect(written == nil)
+	}
+}

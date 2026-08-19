@@ -43,6 +43,19 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	private var collapsed: Set<String> = []
 
 	private let outline = MenuOutline()
+	/// The programme as it resolved, for deciding which overlays are on over
+	/// what is selected. Set by the window; nothing here needs it to draw.
+	public var resolved: ResolvedProject? {
+		didSet { overlayTable.reloadData() }
+	}
+	/// Only the overlays that are on over what is selected.
+	private var filtering = false
+	/// Which overlay each row of the table is, which stops being the identity
+	/// the moment the list is filtered. Everything that acts on a row goes
+	/// through this — a duplicate or a delete addressed by row number would
+	/// otherwise take the wrong overlay off.
+	private var overlayRows: [Int] = []
+
 	private let overlayTable = KeyTable()
 	private let soundTable = KeyTable()
 	/// What to do when there is nothing there yet. An empty list that says
@@ -175,6 +188,29 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// acts on — and when the pane narrows they truncate, so the row ends up
 	/// saying "..." and "+ Spinner". A symbol is the same instruction in a
 	/// quarter of the room, and the words are still there on hover.
+	/// Show only the overlays that are on over what is selected.
+	///
+	/// A programme with twenty overlays on it is a list nobody can read while
+	/// working on one shot. The bar down the side of a row says which ones have
+	/// something to do with the selection; this hides the rest.
+	private lazy var filterButton: NSButton = {
+		let button = self.button("line.3.horizontal.decrease.circle", #selector(toggleFilter),
+		                         "Only the overlays that are on over what is selected")
+		return button
+	}()
+
+	@objc private func toggleFilter() {
+		filtering.toggle()
+		filterButton.image = NSImage(
+			systemSymbolName: filtering
+				? "line.3.horizontal.decrease.circle.fill"
+				: "line.3.horizontal.decrease.circle",
+			accessibilityDescription: "filter")?
+			.withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+		filterButton.contentTintColor = filtering ? Theme.accent : nil
+		overlayTable.reloadData()
+	}
+
 	/// The kinds an overlay can be, behind one `+`.
 	///
 	/// A pull-down, so the face of it stays `+` rather than becoming whatever
@@ -270,6 +306,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 		// Dropped on from the library, and dragged about within itself.
 		outline.registerForDraggedTypes([.string, Self.entryType, Self.sceneType])
+		// Several at once: a programme is re-ordered in handfuls more often
+		// than one at a time, and delete on four selected rows should take four
+		// off rather than the last one clicked.
+		outline.allowsMultipleSelection = true
 		outline.setDraggingSourceOperationMask(.move, forLocal: true)
 
 		let scroll = TableScroll.fitting(outline)
@@ -325,6 +365,53 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		}
 	}
 
+	/// Which overlay a row of the table is.
+	///
+	/// The identity until the list is filtered, and never again after that.
+	/// Everything that acts on the selected row asks this rather than using the
+	/// row number, because a duplicate or a delete addressed by row would take
+	/// the wrong overlay off a filtered list.
+	private func overlay(at row: Int) -> Int? {
+		guard row >= 0, row < overlayRows.count else { return nil }
+		let index = overlayRows[row]
+		return index < project.overlays.count ? index : nil
+	}
+
+	/// Which overlays are on over what is selected on the programme.
+	///
+	/// Measured on the clock rather than guessed from the names: an overlay
+	/// written as `times:` has no name in it at all, and one hung on a section
+	/// covers every clip in that section. What somebody means by "does this
+	/// overlay play a role here" is "is it on while this is on screen", and the
+	/// resolved programme is the only thing that knows.
+	func overlaysOver(_ selection: ProjectSelection) -> Set<Int> {
+		guard let resolved, case .entry(let path) = selection else { return [] }
+		guard let span = span(of: path, in: resolved) else { return [] }
+		var found: Set<Int> = []
+		for shown in resolved.overlays
+		where shown.start < span.end - 1e-6 && shown.end > span.start + 1e-6 {
+			found.insert(shown.source)
+		}
+		return found
+	}
+
+	/// Where an entry sits on the programme's clock — a clip, a card, or a
+	/// section with everything inside it.
+	private func span(of path: [Int], in resolved: ResolvedProject) -> (start: Double, end: Double)? {
+		if let clip = resolved.clips.first(where: { $0.entry == path }) {
+			return (clip.start, clip.end)
+		}
+		if let card = resolved.cards.first(where: { $0.entry == path }) {
+			return (card.start, card.end)
+		}
+		// A section: from the first thing inside it to the last, whatever those
+		// are and however deeply they nest.
+		let inside = resolved.clips.filter { $0.entry.starts(with: path) }.map { ($0.start, $0.end) }
+			+ resolved.cards.filter { $0.entry.starts(with: path) }.map { ($0.start, $0.end) }
+		guard let first = inside.map(\.0).min(), let last = inside.map(\.1).max() else { return nil }
+		return (first, last)
+	}
+
 	/// For the tests: click a row without a mouse.
 	func selectRow(_ row: Int) {
 		guard row >= 0, row < outline.numberOfRows else { return }
@@ -333,6 +420,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	private var selectedPath: [Int]? {
 		(outline.item(atRow: outline.selectedRow) as? Node)?.path
+	}
+
+	/// Every entry selected, in the order they appear.
+	private var selectedPaths: [[Int]] {
+		outline.selectedRowIndexes.compactMap { (outline.item(atRow: $0) as? Node)?.path }
 	}
 
 	@objc private func addClip() { insert(TimelineEntry(clip: ClipReference("clip"))) }
@@ -375,6 +467,21 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	}
 
 	@objc private func removeEntry() {
+		// All of them, deepest and last first so each removal leaves the paths
+		// of the rest where they were.
+		let paths = selectedPaths
+		if paths.count > 1 {
+			var next = project
+			for path in paths.sorted(by: { a, b in
+				for (x, y) in zip(a, b) where x != y { return x > y }
+				return a.count > b.count
+			}) {
+				next.removeEntry(at: path)
+			}
+			pending = .output
+			onChange?(next)
+			return
+		}
 		guard let path = selectedPath else { return }
 		var next = project
 		next.removeEntry(at: path)
@@ -401,6 +508,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	private func buildOverlays() -> NSView {
 		overlayTable.dataSource = self
 		overlayTable.delegate = self
+		overlayTable.allowsMultipleSelection = true
 		overlayTable.onKey = { [weak self] event in
 			guard let self, isDelete(event), self.overlayTable.selectedRow >= 0 else { return false }
 			self.removeOverlay()
@@ -425,6 +533,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			// Another four buttons was not the answer to that.
 			addMenu(),
 			button("plus.square.on.square", #selector(duplicateOverlay), "Another one just like it"),
+			filterButton,
 			button("arrow.up", #selector(moveOverlayUp), "Draw it earlier — under the one above"),
 			button("arrow.down", #selector(moveOverlayDown), "Draw it later — over the one below"),
 			button("minus", #selector(removeOverlay), "Take it off"),
@@ -434,6 +543,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	private func buildSounds() -> NSView {
 		soundTable.dataSource = self
 		soundTable.delegate = self
+		soundTable.allowsMultipleSelection = true
 		soundTable.onKey = { [weak self] event in
 			guard let self, isDelete(event), self.soundTable.selectedRow >= 0 else { return false }
 			self.removeSound()
@@ -479,6 +589,14 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	}
 
 	@objc private func removeSound() {
+		let chosen = soundTable.selectedRowIndexes.filter { $0 < project.sounds.count }
+		if chosen.count > 1 {
+			var next = project
+			for row in chosen.sorted(by: >) { next.sounds.remove(at: row) }
+			pending = .output
+			onChange?(next)
+			return
+		}
 		let row = soundTable.selectedRow
 		guard row >= 0, row < project.sounds.count else { return }
 		var next = project
@@ -497,12 +615,14 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	@objc private func moveOverlayDown() { moveOverlay(by: 1) }
 
 	private func moveOverlay(by offset: Int) {
-		let row = overlayTable.selectedRow
-		let landing = row + offset
-		guard row >= 0, row < project.overlays.count,
-		      landing >= 0, landing < project.overlays.count else { return }
+		// Moved in the *project*, not in the list: with a filter on, the row
+		// below may be five overlays further down, and what "under the one
+		// above" means is the order they are drawn in.
+		guard let index = overlay(at: overlayTable.selectedRow) else { return }
+		let landing = index + offset
+		guard landing >= 0, landing < project.overlays.count else { return }
 		var next = project
-		next.overlays.swapAt(row, landing)
+		next.overlays.swapAt(index, landing)
 		pending = .overlay(landing)
 		onChange?(next)
 	}
@@ -590,19 +710,25 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	}
 
 	@objc private func duplicateOverlay() {
-		let row = overlayTable.selectedRow
-		guard row >= 0, row < project.overlays.count else { return }
+		guard let index = overlay(at: overlayTable.selectedRow) else { return }
 		var next = project
-		next.overlays.insert(project.overlays[row], at: row + 1)
-		pending = .overlay(row + 1)
+		next.overlays.insert(project.overlays[index], at: index + 1)
+		pending = .overlay(index + 1)
 		onChange?(next)
 	}
 
 	@objc private func removeOverlay() {
-		let row = overlayTable.selectedRow
-		guard row >= 0, row < project.overlays.count else { return }
+		let chosen = overlayTable.selectedRowIndexes.compactMap { overlay(at: $0) }
+		if chosen.count > 1 {
+			var next = project
+			for index in chosen.sorted(by: >) { next.overlays.remove(at: index) }
+			pending = .output
+			onChange?(next)
+			return
+		}
+		guard let index = overlay(at: overlayTable.selectedRow) else { return }
 		var next = project
-		next.overlays.remove(at: row)
+		next.overlays.remove(at: index)
 		pending = .output
 		onChange?(next)
 	}
@@ -742,16 +868,26 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	public func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo,
 	                        item: Any?, childIndex index: Int) -> Bool {
-		let parent = (item as? Node)?.path ?? []
-		let board = info.draggingPasteboard
+		dropItems(from: info.draggingPasteboard, into: (item as? Node)?.path ?? [], at: index)
+	}
+
+	/// What a drop does, without an `NSDraggingInfo` to make one.
+	@discardableResult
+	func dropItems(from board: NSPasteboard, into parent: [Int], at index: Int) -> Bool {
 		var next = project
 
-		if let moved = board.string(forType: Self.entryType) {
-			let from = moved.split(separator: ".").compactMap { Int($0) }
-			// The arithmetic lives with the timeline, where it is tested. A drop
-			// is a parent and an index; everything that shifts underneath it is
-			// that method's business.
-			pending = .entry(next.moveEntry(at: from, toParent: parent, index: index))
+		// Every entry on the pasteboard, because a drag of four rows writes four
+		// items. The arithmetic lives with the timeline, where it is tested: a
+		// drop is a parent and an index, and everything that shifts underneath
+		// it — including the other entries coming out — is that method's
+		// business.
+		let dragged = (board.pasteboardItems ?? []).compactMap { item in
+			item.string(forType: Self.entryType)?
+				.split(separator: ".").compactMap { Int($0) }
+		}
+		if !dragged.isEmpty {
+			let landed = next.moveEntries(at: dragged, toParent: parent, index: index)
+			pending = landed.last.map { ProjectSelection.entry($0) } ?? .output
 			onChange?(next)
 			return true
 		}
@@ -760,9 +896,18 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			return drop(scene: scene, into: parent, at: index, of: &next)
 		}
 
-		guard let text = board.string(forType: .string),
-		      let entry = try? TimelineEntry(text: text) else { return false }
-		pending = .entry(next.insertEntry(entry, into: parent, at: index < 0 ? Int.max : index))
+		// Several clips dragged from the library arrive as several items, and
+		// they go on in the order they were listed rather than all on top of
+		// each other.
+		let references = (board.pasteboardItems ?? []).compactMap { $0.string(forType: .string) }
+		let entries = references.compactMap { try? TimelineEntry(text: $0) }
+		guard !entries.isEmpty else { return false }
+		var landed: [Int] = []
+		for (offset, entry) in entries.enumerated() {
+			landed = next.insertEntry(entry, into: parent,
+			                          at: index < 0 ? Int.max : index + offset)
+		}
+		pending = .entry(landed)
 		onChange?(next)
 		return true
 	}
@@ -829,7 +974,20 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	// MARK: - Overlay list
 
 	public func numberOfRows(in tableView: NSTableView) -> Int {
-		tableView === soundTable ? project.sounds.count : project.overlays.count
+		if tableView === soundTable { return project.sounds.count }
+		overlayRows = shownOverlays()
+		return overlayRows.count
+	}
+
+	/// The overlays to list: all of them, or only the ones on over what is
+	/// selected when the filter is on.
+	private func shownOverlays() -> [Int] {
+		let all = Array(project.overlays.indices)
+		guard filtering else { return all }
+		let playing = overlaysOver(selection)
+		// Nothing selected, or a selection nothing is over: show everything
+		// rather than an empty list, which reads as "there are no overlays".
+		return playing.isEmpty ? all : all.filter { playing.contains($0) }
 	}
 
 	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -841,11 +999,17 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			view.needsDisplay = true
 			return view
 		}
-		guard row < project.overlays.count else { return nil }
+		guard row < overlayRows.count else { return nil }
+		let index = overlayRows[row]
+		guard index < project.overlays.count else { return nil }
 		let view = (tableView.makeView(withIdentifier: .init("overlay"), owner: self) as? OverlayRow)
 			?? { let view = OverlayRow(); view.identifier = .init("overlay"); return view }()
-		view.overlay = project.overlays[row]
-		view.stack = OverlayRow.standsOn(row, in: project.overlays)
+		view.overlay = project.overlays[index]
+		view.stack = OverlayRow.standsOn(index, in: project.overlays)
+		// A bar down the left edge for the ones that are on over what is
+		// selected: with twenty overlays on a programme, which of them this
+		// clip has to do with is the question being asked.
+		view.plays = overlaysOver(selection).contains(index)
 		view.needsDisplay = true
 		return view
 	}
@@ -857,6 +1021,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		if overlayTable.selectedRow >= 0 { overlayTable.deselectAll(nil) }
 		if soundTable.selectedRow >= 0 { soundTable.deselectAll(nil) }
 		selection = .entry(path)
+		// The bars down the side are about what is selected, so they change
+		// when it does — and so does the list itself when the filter is on.
+		overlayTable.reloadData()
 		onSelect?(selection)
 	}
 
@@ -869,10 +1036,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			if overlayTable.selectedRow >= 0 { overlayTable.deselectAll(nil) }
 			selection = .sound(row)
 		} else {
-			guard row >= 0, row < project.overlays.count else { return }
+			guard let index = overlay(at: row) else { return }
 			if outline.selectedRow >= 0 { outline.deselectAll(nil) }
 			if soundTable.selectedRow >= 0 { soundTable.deselectAll(nil) }
-			selection = .overlay(row)
+			selection = .overlay(index)
 		}
 		onSelect?(selection)
 	}
@@ -1085,6 +1252,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		/// Where this one comes in the stack, in words. Worked out by the panel,
 		/// which is the only thing that can see the rest of the list.
 		var stack = ""
+		/// On over whatever is selected on the programme.
+		var plays = false
 
 		/// What an overlay is drawn on top of.
 		///
@@ -1119,6 +1288,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		}
 
 		override func draw(_ dirtyRect: NSRect) {
+			// The bar first, so everything else is drawn over it: it is the
+			// edge of the row rather than a thing in it.
+			if plays {
+				Theme.accent.setFill()
+				NSRect(x: 0, y: 1, width: 3, height: bounds.height - 2).fill()
+			}
 			let kind: Theme.Kind
 			let title: String
 			switch overlay.kind {
