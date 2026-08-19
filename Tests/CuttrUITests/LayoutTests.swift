@@ -315,3 +315,56 @@ import Testing
 		#expect(shown(ComposeWindowController.asShown(frame)) == 125)
 	}
 }
+
+/// A pane that folds away to its heading.
+@Suite @MainActor struct FoldingPaneTests {
+
+	private func pane() -> FoldingPane {
+		_ = NSApplication.shared
+		let content = NSView()
+		content.translatesAutoresizingMaskIntoConstraints = false
+		content.heightAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
+		return FoldingPane("clips", content: content)
+	}
+
+	@Test func foldingLeavesTheHeadingAndNothingElse() {
+		let pane = self.pane()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 400),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = pane
+		pane.layoutSubtreeIfNeeded()
+		#expect(pane.frame.height > 120)
+		#expect(pane.content.isHidden == false)
+
+		pane.fold(true)
+		pane.layoutSubtreeIfNeeded()
+		#expect(pane.content.isHidden)
+		#expect(pane.frame.height == FoldingPane.headHeight)
+
+		pane.fold(false)
+		pane.layoutSubtreeIfNeeded()
+		#expect(pane.content.isHidden == false)
+		#expect(pane.frame.height > 120)
+	}
+
+	/// A click on the heading folds it; a click in the content does not.
+	@Test func theHeadingIsWhatFolds() {
+		let pane = self.pane()
+		pane.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+		pane.layoutSubtreeIfNeeded()
+		var told: [Bool] = []
+		pane.onFold = { told.append($0) }
+
+		func click(at point: NSPoint) -> NSEvent {
+			NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
+			                   timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+			                   clickCount: 1, pressure: 1)!
+		}
+		// The heading is at the top of the pane, which in AppKit's coordinates
+		// is the highest y.
+		pane.mouseDown(with: click(at: NSPoint(x: 40, y: pane.bounds.maxY - 8)))
+		#expect(told == [true])
+		pane.mouseDown(with: click(at: NSPoint(x: 40, y: 40)))
+		#expect(told == [true], "a click in the content should not fold it")
+	}
+}

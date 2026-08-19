@@ -22,6 +22,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	private let clipTable = ClipTable()
 	private let anchorTable = AnchorTable()
 	private let lookPanel = LookPanel()
+	private var clipPane: FoldingPane?
+	private var anchorPane: FoldingPane?
+	private var lookPane: FoldingPane?
 	/// A drag on a slider is sixty changes and one undo step: the first one
 	/// registers the undo, and the rest are folded into it.
 	private var gradingSince: Take?
@@ -104,14 +107,22 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		// The clips above, the anchors below. Both are lists of things the take
 		// contains and both are referenced by name from a project, so they
 		// belong side by side rather than one being a menu.
+		// Three things about the take, each behind a heading that folds it: the
+		// clips, the faces being followed, and the grade. Only one of them is
+		// usually the thing being worked on — a grade is decided once and left
+		// alone — and folding gives the list the room without anybody dragging
+		// dividers about.
+		clipPane = FoldingPane("clips", content: clipTable)
+		anchorPane = FoldingPane("anchors", content: anchorTable)
+		lookPane = FoldingPane("look", content: lookPanel, accessory: lookPanel.detachedHead())
+
 		let lists = NSSplitView()
 		lists.isVertical = false
 		lists.dividerStyle = .thin
-		lists.addArrangedSubview(clipTable)
-		lists.addArrangedSubview(anchorTable)
-		// The grade goes beside the picture rather than behind a menu, because
-		// it is decided by looking at the picture while it moves.
-		lists.addArrangedSubview(lookPanel)
+		for pane in [clipPane!, anchorPane!, lookPane!] {
+			lists.addArrangedSubview(pane)
+			pane.onFold = { [weak lists] _ in lists?.adjustSubviews() }
+		}
 
 		let top = NSSplitView()
 		top.isVertical = true
@@ -168,10 +179,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		let sizes: [(NSLayoutConstraint, NSLayoutConstraint)] = [
 			(lists.widthAnchor.constraint(equalToConstant: 430),
 			 lists.widthAnchor.constraint(greaterThanOrEqualToConstant: 260)),
-			(anchorTable.heightAnchor.constraint(equalToConstant: 150),
-			 anchorTable.heightAnchor.constraint(greaterThanOrEqualToConstant: 60)),
-			(lookPanel.heightAnchor.constraint(equalToConstant: 210),
-			 lookPanel.heightAnchor.constraint(greaterThanOrEqualToConstant: 120)),
+			(anchorPane!.heightAnchor.constraint(equalToConstant: 170),
+			 anchorPane!.heightAnchor.constraint(greaterThanOrEqualToConstant: 84)),
+			(lookPane!.heightAnchor.constraint(equalToConstant: 230),
+			 lookPane!.heightAnchor.constraint(greaterThanOrEqualToConstant: 144)),
 			(timeline.heightAnchor.constraint(equalToConstant: 280),
 			 timeline.heightAnchor.constraint(greaterThanOrEqualToConstant: 140)),
 			(picture.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),

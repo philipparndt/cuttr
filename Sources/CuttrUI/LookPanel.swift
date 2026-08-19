@@ -53,7 +53,7 @@ public final class LookPanel: NSView {
 	private var readouts: [NSTextField] = []
 	private let profileField = NSTextField()
 	private let matchLabel = NSTextField(labelWithString: "")
-	private let title = NSTextField(labelWithString: "LOOK")
+	private let resetButton = NSButton()
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
@@ -86,24 +86,32 @@ public final class LookPanel: NSView {
 
 	// MARK: - Building it
 
-	private func build() {
-		title.font = Theme.heading
-		title.textColor = Theme.faintText
+	/// The heading's furniture, for the pane that provides the heading.
+	///
+	/// The title and the fold arrow belong to the pane, so this panel does not
+	/// draw a second one underneath them — but what has been *measured* and the
+	/// way back to nothing both belong up there beside the title, where they
+	/// can be read and reached while the sliders are folded away.
+	public func detachedHead() -> NSView {
+		let row = NSStackView(views: [matchLabel, resetButton])
+		row.orientation = .horizontal
+		row.spacing = 8
+		row.alignment = .centerY
+		return row
+	}
 
-		let reset = NSButton(title: "Reset", target: self, action: #selector(reset))
-		reset.bezelStyle = .rounded
-		reset.controlSize = .small
-		reset.toolTip = "the footage as it was shot"
+	private func build() {
+		resetButton.title = "Reset"
+		resetButton.bezelStyle = .rounded
+		resetButton.controlSize = .small
+		resetButton.target = self
+		resetButton.action = #selector(reset)
+		resetButton.toolTip = "the footage as it was shot"
 
 		matchLabel.font = Theme.monoSmall
 		matchLabel.textColor = Theme.dimText
 
-		let head = NSStackView(views: [title, matchLabel, NSView(), reset])
-		head.orientation = .horizontal
-		head.spacing = 8
-		head.alignment = .centerY
-
-		var rows: [NSView] = [head]
+		var rows: [NSView] = []
 		for (index, dial) in Self.dials.enumerated() {
 			let name = NSTextField(labelWithString: dial.name)
 			name.font = Theme.mono
@@ -173,17 +181,15 @@ public final class LookPanel: NSView {
 		stack.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(stack)
 		NSLayoutConstraint.activate([
-			stack.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+			stack.topAnchor.constraint(equalTo: topAnchor, constant: 8),
 			stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
 			stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
 			stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -8),
 		])
-		for row in rows.dropFirst() {
+		for row in rows {
 			row.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
 			row.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
 		}
-		head.leadingAnchor.constraint(equalTo: stack.leadingAnchor).isActive = true
-		head.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
 	}
 
 	// MARK: - Changing it
