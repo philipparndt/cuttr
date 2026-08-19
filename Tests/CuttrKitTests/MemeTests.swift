@@ -303,23 +303,22 @@ import Testing
 		#expect(abs(take.clips[0].end - 1.0) < 0.1)
 	}
 
-	@Test func aSilentMemeGetsATrackOfSilence() async throws {
-		// The exporter refuses a composition whose audio track never had
-		// anything put in it, so a programme of nothing but memes would not
-		// render at all. This is the step that stops that being a thing
-		// somebody discovers at the end of an edit.
+	/// A meme is kept exactly as the service served it.
+	///
+	/// It used to have a track of silence stitched under it, because the
+	/// exporter refused a composition whose audio track never had anything put
+	/// in it. That was a bug in the renderer and it has been fixed, so the
+	/// workaround is gone: no re-muxing, and the file keeps the extension it
+	/// arrived with.
+	@Test func aSilentMemeIsLeftAsItIs() async throws {
 		let root = URL(fileURLWithPath: NSTemporaryDirectory())
 			.appendingPathComponent("cuttr-silence-\(UUID().uuidString)", isDirectory: true)
 		defer { try? FileManager.default.removeItem(at: root) }
 		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 		let silent = try makeMovie(in: root)
-		#expect(try await MediaProbe.probe(silent).hasAudio == false)
-
-		let quiet = try await MemeDownload.withSilence(silent, duration: 1)
-		let info = try await MediaProbe.probe(quiet)
-		#expect(info.hasAudio)
+		let info = try await MediaProbe.probe(silent)
 		#expect(info.hasVideo)
-		#expect(abs(info.duration - 1) < 0.1)
+		#expect(info.hasAudio == false)
 	}
 
 	@Test func theSameMemeTwiceIsTwoFiles() async throws {

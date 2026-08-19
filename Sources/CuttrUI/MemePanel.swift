@@ -100,6 +100,12 @@ public final class MemePanel: NSViewController {
 
 		grid.onSelect = { [weak self] _ in self?.updateButtons() }
 		grid.onChoose = { [weak self] _ in self?.add() }
+		// The grid is placed by constraints, not by its own frame — without
+		// this the width constraint below is fighting the autoresizing mask and
+		// loses: the grid stayed the width it was born with, so it worked out
+		// that it had room for one column and the scroll view had nothing to
+		// scroll.
+		grid.translatesAutoresizingMaskIntoConstraints = false
 		let scroll = TableScroll.wrap(grid, horizontal: false)
 		scroll.drawsBackground = true
 		scroll.backgroundColor = Theme.background
@@ -254,8 +260,11 @@ public final class MemePanel: NSViewController {
 		if found.isEmpty {
 			say("\(provider.displayName) has nothing for \(query.debugDescription).")
 		} else {
+			// Said once, here, because it is the first thing somebody notices
+			// after adding one: a meme from a GIF search has no sound. Both
+			// services serve them as silent mp4s — they are GIFs underneath.
 			say("\(found.count) from \(provider.displayName). "
-				+ "Double-click one, or choose it and press Add.")
+				+ "Double-click one, or choose it and press Add. These are GIFs: no sound.")
 			view.window?.makeFirstResponder(grid)
 		}
 	}
@@ -326,6 +335,9 @@ public final class MemePanel: NSViewController {
 	var message: String { messageLabel.stringValue }
 	var attribution: String { attributionLabel.stringValue }
 	func present(_ found: [MemeResult]) { finished(found, query: "test") }
+	/// For the tests: what the grid has picked, and where a tile is.
+	var chosenForTesting: MemeResult? { grid.chosen }
+	func tileFrameForTesting(_ index: Int) -> NSRect { grid.tileFrame(index) }
 	func choose(_ index: Int) { grid.select(index); updateButtons() }
 	var canAdd: Bool { addButton.isEnabled }
 }
@@ -402,6 +414,9 @@ final class MemeGrid: NSView {
 	// MARK: - Where things go
 
 	private var columns: Int { max(1, Int((bounds.width - gap) / (tile.width + gap))) }
+
+	/// For the tests: where a tile is, without reaching into the layout.
+	func tileFrame(_ index: Int) -> NSRect { frame(of: index) }
 
 	private func frame(of index: Int) -> NSRect {
 		let column = index % columns, row = index / columns

@@ -145,20 +145,21 @@ public enum MemeDownload {
 			try? FileManager.default.removeItem(at: video)
 			throw MemeError.noVideo(result.title)
 		}
-		// A meme is usually silent, and AVFoundation's exporter refuses a
-		// composition whose audio track never had anything put in it — so a
-		// programme made only of memes would not export at all. Measured: a
-		// project of one silent clip fails with "Operation Stopped", and the
-		// same project with one clip that has sound in front of it renders. The
-		// download gives it a track of its own silence so that a meme is a clip
-		// like any other from the moment it lands, which is the whole point of
-		// making it a take.
-		if !info.hasAudio, let quiet = try? await withSilence(video, duration: info.duration) {
-			try? FileManager.default.removeItem(at: video)
-			video = quiet
-			info = (try? await MediaProbe.probe(video)) ?? info
-		}
-
+		// The file is kept as it came.
+		//
+		// It used to get a track of its own silence stitched under it, because
+		// AVFoundation's exporter refused a composition whose audio track never
+		// had anything put in it — a programme of one silent meme would not
+		// export at all. That was a bug in the renderer, and it has been fixed:
+		// empty tracks are dropped before the export sees them, and a hole in a
+		// lane is heard as silence rather than pulling the next shot's sound
+		// forward. So a meme is now the file the service served, with the
+		// extension it came with, and no re-muxing on the way in.
+		//
+		// What it does *not* have is sound: a meme from a GIF search never did.
+		// Both services serve these as silent mp4s because they are GIFs
+		// underneath, and Giphy's Clips — the ones with audio — are behind an
+		// endpoint that answers 403 to an ordinary key.
 		let takeURL = takes.appendingPathComponent(slug).appendingPathExtension("cuttr")
 		let take = take(for: result, video: relativePath(from: takeURL, to: video),
 		                duration: info.duration, slug: slug)

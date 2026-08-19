@@ -170,3 +170,66 @@ import Testing
 		#expect(table.selectedRow == 4)
 	}
 }
+
+/// The grid of results: how big it is, and clicking one.
+@Suite @MainActor struct MemeGridTests {
+
+	private func panel() -> MemePanel {
+		_ = NSApplication.shared
+		let panel = MemePanel(download: { _ in "" }, onAdded: { _ in })
+		panel.loadView()
+		panel.view.frame = NSRect(x: 0, y: 0, width: 900, height: 600)
+		panel.present((0 ..< 9).map { index in
+			MemeResult(provider: .giphy, id: "\(index)", title: "meme \(index)", page: nil,
+			           video: URL(fileURLWithPath: "/tmp/x.mp4"), preview: nil,
+			           size: CGSize(width: 480, height: 360))
+		})
+		panel.view.layoutSubtreeIfNeeded()
+		return panel
+	}
+
+	private func scroll(in view: NSView) -> NSScrollView? {
+		for subview in view.subviews {
+			if let found = subview as? NSScrollView { return found }
+			if let found = scroll(in: subview) { return found }
+		}
+		return nil
+	}
+
+	/// The grid is as wide as the pane and as tall as its contents.
+	///
+	/// It was neither: the document view was still on its autoresizing mask, so
+	/// the width constraint lost, the grid stayed the width it was born with —
+	/// one column — and the scroll view had nothing to scroll, which is why
+	/// there was no scrollbar.
+	@Test func theGridFillsThePaneAndOverflowsIt() {
+		let panel = self.panel()
+		guard let scroll = scroll(in: panel.view), let grid = scroll.documentView else {
+			Issue.record("no grid")
+			return
+		}
+		#expect(grid.translatesAutoresizingMaskIntoConstraints == false)
+		#expect(abs(grid.frame.width - scroll.contentView.frame.width) < 1,
+		        "grid \(grid.frame.width) against pane \(scroll.contentView.frame.width)")
+		// Nine results at that width are more than three rows, which is more
+		// than the pane can show — so there is something to scroll.
+		#expect(grid.frame.height > scroll.contentView.frame.height)
+	}
+
+	/// And a click picks the one under the pointer.
+	@Test func aClickChoosesTheOneUnderIt() {
+		let panel = self.panel()
+		guard let grid = scroll(in: panel.view)?.documentView else { return }
+		// The first is picked when results arrive, so that pressing Add without
+		// touching anything does the obvious thing.
+		#expect(panel.chosenForTesting?.id == "0")
+
+		// The middle of the fourth tile, asked of the grid rather than guessed.
+		let point = NSPoint(x: panel.tileFrameForTesting(3).midX,
+		                    y: panel.tileFrameForTesting(3).midY)
+		grid.mouseDown(with: NSEvent.mouseEvent(
+			with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
+			windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+		#expect(panel.chosenForTesting?.id == "3")
+	}
+}

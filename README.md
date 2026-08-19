@@ -604,6 +604,8 @@ movement a sample and quiet ones fell below the 0.006 threshold.
 
 ### Memes as material
 
+A meme from either service has **no sound**: both serve them as silent mp4s, because they are GIFs underneath. Giphy's Clips — the ones with audio — are behind an endpoint that answers 403 to an ordinary key.
+
 **File ▸ Find a Meme…** (⇧⌘M, or the button in the library) searches GIPHY or
 Tenor and downloads the one you pick. Both serve an `.mp4` of everything they
 hold, which is the reason those two: AVFoundation will not open a GIF as a
