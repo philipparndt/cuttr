@@ -257,6 +257,24 @@ import Testing
 			to: project.appendingPathComponent("memes/facepalm.mp4")) == "memes/facepalm.mp4")
 	}
 
+	@Test func theMediaExistingAndTheTakeNotYetDoesNotMakeThePathAbsolute() throws {
+		// The bug this is here for, found on the first real download: the media
+		// is written before the take, and `standardizedFileURL` consults the
+		// file system — so under `/tmp`, which is a symlink, the file that
+		// existed standardized to `/tmp/…` and the file that did not stayed
+		// `/private/tmp/…`. Two paths with nothing in common, and an absolute
+		// path in the take.
+		let root = URL(fileURLWithPath: "/tmp")
+			.appendingPathComponent("cuttr-relative-\(UUID().uuidString)", isDirectory: true)
+		defer { try? FileManager.default.removeItem(at: root) }
+		let memes = root.appendingPathComponent("memes", isDirectory: true)
+		try FileManager.default.createDirectory(at: memes, withIntermediateDirectories: true)
+		let video = memes.appendingPathComponent("facepalm.mp4")
+		try Data("not really a movie".utf8).write(to: video)
+		let take = root.appendingPathComponent("takes/facepalm.cuttr")
+		#expect(MemeDownload.relativePath(from: take, to: video) == "../memes/facepalm.mp4")
+	}
+
 	@Test func downloadingWritesTheMediaAndTheTakeWhereTheyBelong() async throws {
 		// The bytes come from a closure rather than from GIPHY, so the shape of
 		// what lands on the disk is checked without a network: a real mp4 in
@@ -283,6 +301,25 @@ import Testing
 		#expect(take.source?.isMeme == true)
 		#expect(take.clips.count == 1)
 		#expect(abs(take.clips[0].end - 1.0) < 0.1)
+	}
+
+	@Test func aSilentMemeGetsATrackOfSilence() async throws {
+		// The exporter refuses a composition whose audio track never had
+		// anything put in it, so a programme of nothing but memes would not
+		// render at all. This is the step that stops that being a thing
+		// somebody discovers at the end of an edit.
+		let root = URL(fileURLWithPath: NSTemporaryDirectory())
+			.appendingPathComponent("cuttr-silence-\(UUID().uuidString)", isDirectory: true)
+		defer { try? FileManager.default.removeItem(at: root) }
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		let silent = try makeMovie(in: root)
+		#expect(try await MediaProbe.probe(silent).hasAudio == false)
+
+		let quiet = try await MemeDownload.withSilence(silent, duration: 1)
+		let info = try await MediaProbe.probe(quiet)
+		#expect(info.hasAudio)
+		#expect(info.hasVideo)
+		#expect(abs(info.duration - 1) < 0.1)
 	}
 
 	/// A second of green, written with AVFoundation so the test needs no

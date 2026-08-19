@@ -96,9 +96,18 @@ public enum MemeDownload {
 	/// copy to another disk. A take in `takes/` pointing at media in `memes/`
 	/// therefore writes `../memes/…`, and works out that way rather than being
 	/// spelled out, so moving either folder does not need this code changed.
+	///
+	/// `standardized` and deliberately not `standardizedFileURL`, which is the
+	/// one that consults the file system — and which produced an absolute path
+	/// here on the first real download. The media had just been written and the
+	/// take file had not, so the same folder standardized to `/tmp/…` for the
+	/// one that existed and stayed `/private/tmp/…` for the one that did not:
+	/// two paths with nothing in common, and no relative path between them.
+	/// Comparing them as text is both correct and the only thing that can be
+	/// correct, since one of the two files is always about to be created.
 	public static func relativePath(from base: URL, to target: URL) -> String {
-		let baseParts = base.standardizedFileURL.deletingLastPathComponent().pathComponents
-		let targetParts = target.standardizedFileURL.pathComponents
+		let baseParts = base.standardized.deletingLastPathComponent().pathComponents
+		let targetParts = target.standardized.pathComponents
 		var shared = 0
 		while shared < baseParts.count, shared < targetParts.count,
 		      baseParts[shared] == targetParts[shared] { shared += 1 }
@@ -221,16 +230,29 @@ public enum MemeDownload {
 	}
 
 	/// A WAV of nothing, for as long as the picture runs.
+	///
+	/// The buffer is made in the file's own `processingFormat` rather than in
+	/// the format the file is written in, and that is not a detail: an
+	/// `AVAudioFile` converts on the way out, and handing it a buffer in the
+	/// on-disk format instead fails with `ExtAudioFileWrite` −50, which is what
+	/// this did on the first attempt.
 	static func writeSilence(to url: URL, seconds: Double) throws {
-		guard let format = AVAudioFormat(
-			commonFormat: .pcmFormatInt16, sampleRate: 48000, channels: 2, interleaved: true),
-			let buffer = AVAudioPCMBuffer(
-				pcmFormat: format, frameCapacity: AVAudioFrameCount(48000 * seconds))
+		let file = try AVAudioFile(forWriting: url, settings: [
+			AVFormatIDKey: kAudioFormatLinearPCM,
+			AVSampleRateKey: 48000.0,
+			AVNumberOfChannelsKey: 2,
+			AVLinearPCMBitDepthKey: 16,
+			AVLinearPCMIsFloatKey: false,
+			AVLinearPCMIsBigEndianKey: false,
+			AVLinearPCMIsNonInterleaved: false,
+		])
+		guard let buffer = AVAudioPCMBuffer(
+			pcmFormat: file.processingFormat,
+			frameCapacity: AVAudioFrameCount(file.processingFormat.sampleRate * seconds))
 		else { throw MemeError.noVideo(url.lastPathComponent) }
 		// Zeroes, which is what a fresh buffer already holds. Saying so because
 		// the absence of a fill loop here looks like an omission and is not.
 		buffer.frameLength = buffer.frameCapacity
-		let file = try AVAudioFile(forWriting: url, settings: format.settings)
 		try file.write(from: buffer)
 	}
 }
