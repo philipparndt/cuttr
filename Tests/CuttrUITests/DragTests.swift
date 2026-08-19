@@ -115,3 +115,36 @@ import Testing
 		#expect(project.overlays[0].spans.count >= 1)
 	}
 }
+
+/// Which range is being worked on survives the form being rebuilt.
+///
+/// The form is rebuilt whenever the project comes back, which is after every
+/// edit. A rebuilt strip that selects its first range again is what "click the
+/// second one and it jumps back to the first" is, from the inside.
+@Suite @MainActor struct SpanSelectionTests {
+
+	private func find<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
+		view.subviews.flatMap { subview -> [T] in
+			((subview as? T).map { [$0] } ?? []) + find(type, in: subview)
+		}
+	}
+
+	@Test func theSelectedRangeStaysSelected() {
+		_ = NSApplication.shared
+		let panel = PropertiesPanel()
+		let project = Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"))],
+			overlays: [Overlay(kind: .spinner(Spinner()),
+			                   spans: [.times(from: 0, to: 4), .times(from: 5, to: 9)])])
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(0))
+
+		find(SpanStrip.self, in: panel).first?.onSelect?(1)
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(0))
+		#expect(find(SpanStrip.self, in: panel).first?.selected == 1)
+
+		// A different overlay starts again at its own first range.
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .output)
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(0))
+		#expect(find(SpanStrip.self, in: panel).first?.selected == 0)
+	}
+}

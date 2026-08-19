@@ -52,7 +52,16 @@ public final class PropertiesPanel: NSView {
 	private var generation = 0
 	/// The picture the range strip scrubs, and when it last asked for a frame.
 	private weak var currentPreview: FramePreview?
+	private weak var currentStrip: SpanStrip?
 	private var lastScrub: CFTimeInterval = 0
+	/// Which range is being worked on, and whether the strip had the keyboard.
+	///
+	/// The form is rebuilt whenever the project comes back — which is after
+	/// every edit — and a rebuilt strip would otherwise select its first range
+	/// again. Clicking the second one and watching it jump back to the first is
+	/// what that looks like from the outside.
+	private var selectedSpan = 0
+	private var stripHadFocus = false
 
 	final class Sink: NSObject {
 		let run: (NSControl) -> Void
@@ -153,6 +162,8 @@ public final class PropertiesPanel: NSView {
 	}
 
 	private func rebuild() {
+		// A different thing selected is a different set of ranges.
+		if built != selection { selectedSpan = 0; stripHadFocus = false }
 		mine = false
 		sinks.removeAll()
 		generation += 1
@@ -180,6 +191,11 @@ public final class PropertiesPanel: NSView {
 			}
 			title.stringValue = "OVERLAY"
 			overlayForm(index, project.overlays[index])
+			// Whoever was placing ranges keeps the keyboard, or the delete key
+			// stops working after the first thing it deletes.
+			if stripHadFocus, let strip = currentStrip {
+				window?.makeFirstResponder(strip)
+			}
 		}
 	}
 
@@ -598,6 +614,7 @@ public final class PropertiesPanel: NSView {
 	/// The programme with this overlay's ranges lying over it, draggable.
 	private func strip(_ index: Int, _ overlay: Overlay) -> NSView {
 		let strip = SpanStrip()
+		currentStrip = strip
 		strip.duration = resolved?.duration ?? 0
 		strip.blocks = (resolved?.clips ?? []).map {
 			SpanStrip.Block(start: $0.start, end: $0.end, name: $0.clip.slug)
@@ -605,6 +622,11 @@ public final class PropertiesPanel: NSView {
 		strip.ranges = overlay.spans.map { span in
 			let extent = self.extent(of: span) ?? (0, 0)
 			return SpanStrip.Range(start: extent.0, end: extent.1, movable: movable(span))
+		}
+		strip.selected = min(max(0, selectedSpan), max(0, overlay.spans.count - 1))
+		strip.onSelect = { [weak self] position in
+			self?.selectedSpan = position
+			self?.stripHadFocus = true
 		}
 		strip.onDelete = { [weak self] position in
 			self?.editOverlay(index) { overlay in
@@ -614,9 +636,13 @@ public final class PropertiesPanel: NSView {
 				overlay.spans.remove(at: position)
 			}
 		}
-		strip.onScrub = { [weak self] time in self?.scrub(to: time) }
+		strip.onScrub = { [weak self] time in
+			self?.stripHadFocus = true
+			self?.scrub(to: time)
+		}
 		strip.onDrag = { [weak self] position, start, end in
 			guard let self, position < overlay.spans.count else { return }
+			self.selectedSpan = position
 			self.setSpan(index, position,
 			             self.span(from: overlay.spans[position], start: start, end: end))
 		}
