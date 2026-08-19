@@ -53,7 +53,6 @@ public final class PropertiesPanel: NSView {
 	/// The picture the range strip scrubs, and when it last asked for a frame.
 	private weak var currentPreview: FramePreview?
 	private weak var currentStrip: SpanStrip?
-	private weak var currentTrim: TrimStrip?
 	private var lastScrub: CFTimeInterval = 0
 	/// Which range is being worked on, and whether the strip had the keyboard.
 	///
@@ -321,8 +320,11 @@ public final class PropertiesPanel: NSView {
 						clip: reference, transition: entry.transition, label: entry.label,
 						trim: (entry.trim.head, max(0, seconds))))
 				},
-			], note: "off the head and off the tail, here only — the take keeps its own marks")
-			full(trimStrip(path, reference, entry))
+				ellipsis("trim") { [weak self] button in
+					self?.openTrim(path, reference, entry, from: button)
+				},
+			], note: "off the head and off the tail, here only — the take keeps its own marks; "
+				+ "the dialog shows the frames")
 
 		case .list(let references):
 			field("list", [text(references.map(\.description).joined(separator: ", "),
@@ -857,52 +859,39 @@ public final class PropertiesPanel: NSView {
 		}
 	}
 
-	/// The first and last frames this placement shows, and a drag on either to
-	/// move that end.
-	private func trimStrip(
-		_ path: [Int], _ reference: ClipReference, _ entry: TimelineEntry
-	) -> NSView {
-		let strip = TrimStrip()
-		strip.trim = entry.trim
-		currentTrim = strip
+	/// The trim dialog, on the placement this row is about.
+	///
+	/// The frames used to be in the form, under the two fields. They were the
+	/// right idea at the wrong size: at the width of a form field a frame says
+	/// somebody is in shot and nothing finer, and finer is the whole question.
+	/// A dialog has room for the pictures, for stepping a frame at a time, and
+	/// for saying how long what is left is.
+	private func openTrim(
+		_ path: [Int], _ reference: ClipReference, _ entry: TimelineEntry, from view: NSView
+	) {
+		// Which placement this is: the same clip used twice is two of them, and
+		// the frames must be the ones this use shows.
+		let placed = resolved?.clips.first { $0.entry == path }
+		let length = (placed?.duration ?? 0) + entry.trim.head + entry.trim.tail
+		// Programme time of this placement's untrimmed head, so the dialog can
+		// ask for a frame by how far into the clip it is and nothing downstream
+		// has to know about trims.
+		let base = (placed?.start ?? 0) - entry.trim.head
+		let poster = self.poster
+		let generation = self.generation
 
-		// Which placement this row is: the same clip used twice is two of them,
-		// and the frames must be the ones this use shows.
-		guard let placed = resolved?.clips.first(where: { $0.entry == path }) else { return strip }
-		strip.length = placed.duration + entry.trim.head + entry.trim.tail
-
-		// A hair inside each end, because a frame exactly on a cut is the one
-		// nobody can tell apart from its neighbour.
-		func show(_ head: Double, _ tail: Double) {
-			let generation = self.generation
-			let start = placed.start + (head - entry.trim.head) + 0.04
-			let end = placed.end - (tail - entry.trim.tail) - 0.04
-			poster?(start) { [weak self, weak strip] image in
+		TrimDialog.present(
+			over: view, clip: reference.description, length: length, trim: entry.trim,
+			step: 1.0 / max(1, project.output.framesPerSecond),
+			poster: placed == nil ? nil : { [weak self] into, back in
 				guard let self, self.generation == generation else { return }
-				strip?.head = image
-			}
-			poster?(max(start, end)) { [weak self, weak strip] image in
-				guard let self, self.generation == generation else { return }
-				strip?.tail = image
-			}
-		}
-		show(entry.trim.head, entry.trim.tail)
-
-		strip.onScrub = { [weak self] head, tail in
-			// While the drag is running the project has not changed, so the
-			// frames come from where those ends *would* be.
-			guard let self else { return }
-			let now = CACurrentMediaTime()
-			guard now - self.lastScrub > 0.1 else { return }
-			self.lastScrub = now
-			show(head, tail)
-		}
-		strip.onTrim = { [weak self] head, tail in
-			self?.replace(path, TimelineEntry(
-				clip: reference, transition: entry.transition, label: entry.label,
-				trim: (head, tail)))
-		}
-		return strip
+				poster?(base + into, back)
+			},
+			onDone: { [weak self] head, tail in
+				self?.replace(path, TimelineEntry(
+					clip: reference, transition: entry.transition, label: entry.label,
+					trim: (head, tail)))
+			})
 	}
 
 	private func setSpan(_ index: Int, _ position: Int, _ span: Overlay.Span) {
@@ -1334,14 +1323,17 @@ public final class PropertiesPanel: NSView {
 	                      onPick: @escaping (String) -> Void) -> NSButton {
 		let catalogue = EndpointCatalogue(vocabulary)
 		let button = NSButton()
-		let kind: Theme.Kind
-		if case .group = mark { kind = .section } else { kind = .clip }
-		button.image = Theme.symbol(kind, size: 11)
-		button.imagePosition = .imageLeading
+		// The ellipsis is a picture on the trailing edge rather than three dots
+		// on the end of the name — which is what a truncated name looks like,
+		// and a control whose value might be cut off is one nobody trusts.
+		button.image = NSImage(systemSymbolName: "ellipsis",
+		                       accessibilityDescription: "choose")?
+			.withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+		button.imagePosition = .imageTrailing
 		button.bezelStyle = .rounded
 		button.controlSize = .small
 		button.attributedTitle = NSAttributedString(
-			string: " " + catalogue.path(for: mark) + "…",
+			string: catalogue.path(for: mark) + " ",
 			attributes: [
 				.font: Theme.mono,
 				// A name that is not in the project is said so in red rather
@@ -1354,6 +1346,27 @@ public final class PropertiesPanel: NSView {
 			guard let button else { return }
 			EndpointPicker.present(over: button, catalogue: catalogue,
 			                       current: mark.description, onChoose: onPick)
+		}
+		sinks.append(sink)
+		button.target = sink
+		button.action = #selector(Sink.fire(_:))
+		return squeezable(button)
+	}
+
+	/// The button that opens a dialog. One shape for all of them, so `…` means
+	/// the same thing everywhere in this panel.
+	private func ellipsis(_ what: String, onTap: @escaping (NSView) -> Void) -> NSButton {
+		let button = NSButton()
+		button.image = NSImage(systemSymbolName: "ellipsis",
+		                       accessibilityDescription: "choose")?
+			.withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+		button.imagePosition = .imageOnly
+		button.bezelStyle = .rounded
+		button.controlSize = .small
+		button.toolTip = what
+		let sink = Sink { [weak button] _ in
+			guard let button else { return }
+			onTap(button)
 		}
 		sinks.append(sink)
 		button.target = sink

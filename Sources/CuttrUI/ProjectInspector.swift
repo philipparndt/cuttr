@@ -100,7 +100,15 @@ public final class ProjectInspector: NSView {
 		split.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(split)
 
-		let wide = programme.widthAnchor.constraint(equalToConstant: 620)
+		// The programme takes what it needs and the properties get the rest.
+		//
+		// It used to be the other way about, and the split opened with the tree
+		// twice as wide as the panel. But a timeline entry is a slug and a badge
+		// — a narrow thing, and no wider for being given room — while the panel
+		// is rows of a key and its controls, which is what actually runs out of
+		// width: a `when:` row is a mode, two addresses and their labels, and at
+		// 320 points it wrapped or truncated every one of them.
+		let wide = programme.widthAnchor.constraint(equalToConstant: 360)
 		wide.priority = NSLayoutConstraint.Priority(250)
 		wide.isActive = true
 		NSLayoutConstraint.activate([
@@ -108,8 +116,8 @@ public final class ProjectInspector: NSView {
 			split.bottomAnchor.constraint(equalTo: bottomAnchor),
 			split.leadingAnchor.constraint(equalTo: leadingAnchor),
 			split.trailingAnchor.constraint(equalTo: trailingAnchor),
-			programme.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
-			column.widthAnchor.constraint(greaterThanOrEqualToConstant: 300),
+			programme.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
+			column.widthAnchor.constraint(greaterThanOrEqualToConstant: 380),
 		])
 	}
 

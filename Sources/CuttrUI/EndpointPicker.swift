@@ -82,8 +82,14 @@ public struct EndpointCatalogue: Sendable {
 	}
 
 	/// Whether what the file says is something that is actually there.
+	///
+	/// Compared as addresses, not as references: `mia-take-1/clip-4` and
+	/// `clip-4` are the same clip written two ways, and a project is free to
+	/// spell it either. Comparing the written forms said a perfectly good
+	/// `when:` was missing.
 	public func knows(_ endpoint: Overlay.Span.Endpoint) -> Bool {
-		entries.contains { $0.reference == endpoint.description }
+		let address = path(for: endpoint)
+		return entries.contains { $0.path == address || $0.reference == endpoint.description }
 	}
 
 	/// Everything whose address or name contains what was typed, word by word,

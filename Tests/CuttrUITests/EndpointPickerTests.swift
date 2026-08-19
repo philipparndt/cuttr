@@ -42,6 +42,11 @@ import Testing
 		// A slug that is not there is shown as the file has it, not invented.
 		#expect(catalogue.path(for: .clip(ClipReference("gone"))) == "gone")
 		#expect(catalogue.knows(.clip(ClipReference("gone"))) == false)
+		// Either spelling of a clip that is there is a clip that is there: a
+		// project may write the take on the front whether or not it has to.
+		#expect(catalogue.knows(.clip(ClipReference("mia-take-1/intro"))))
+		#expect(catalogue.knows(.clip(ClipReference("intro"))))
+		#expect(catalogue.knows(.clip(ClipReference("mia-take-2/clip-4"))))
 		#expect(catalogue.knows(.group("question1")))
 	}
 
@@ -69,5 +74,51 @@ import Testing
 		#expect(picker.chosen?.reference == "@question1")
 		picker.confirm()
 		#expect(chosen == "@question1")
+	}
+}
+
+/// Where the ends of a placement are decided.
+@Suite @MainActor struct TrimDialogTests {
+
+	private func dialog(length: Double = 5, trim: (Double, Double) = (0, 0),
+	                    onDone: @escaping ((Double, Double)) -> Void = { _ in }) -> TrimDialog {
+		_ = NSApplication.shared
+		let made = TrimDialog(clip: "mia-take-1/clip-4", length: length, trim: trim,
+		                      step: 1.0 / 25, poster: nil, onDone: onDone)
+		made.loadView()
+		return made
+	}
+
+	@Test func aFrameAtATime() {
+		let dialog = self.dialog(trim: (0.5, 0))
+		dialog.stepHead(by: 1)
+		#expect(abs(dialog.chosen.head - 0.54) < 0.001)
+		dialog.stepHead(by: -1)
+		dialog.stepHead(by: -1)
+		#expect(abs(dialog.chosen.head - 0.46) < 0.001)
+	}
+
+	/// Neither end may eat the other, however hard it is pushed.
+	@Test func theEndsCannotCross() {
+		let dialog = self.dialog(length: 2, trim: (1.5, 0.4))
+		dialog.set(head: 5, tail: 0.4)
+		#expect(dialog.chosen.head + dialog.chosen.tail <= 1.951)
+		#expect(dialog.chosen.tail == 0.4)
+		dialog.set(head: 0, tail: -3)
+		#expect(dialog.chosen.tail == 0)
+	}
+
+	/// Nothing is written until Done, so a search for the right frame is one
+	/// change to the project rather than forty.
+	@Test func itWritesOnceAtTheEnd() {
+		var written: [(Double, Double)] = []
+		let dialog = self.dialog(trim: (0, 0)) { written.append($0) }
+		dialog.set(head: 0.2, tail: 0)
+		dialog.set(head: 0.4, tail: 0.1)
+		#expect(written.isEmpty)
+		dialog.done()
+		#expect(written.count == 1)
+		#expect(abs(written[0].0 - 0.4) < 0.001)
+		#expect(abs(written[0].1 - 0.1) < 0.001)
 	}
 }

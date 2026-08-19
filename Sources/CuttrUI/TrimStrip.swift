@@ -39,8 +39,14 @@ public final class TrimStrip: NSView {
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
 
+	/// How tall it wants to be. Small in a form, large in the dialog, where
+	/// the frames are what somebody is actually looking at.
+	public var preferredHeight: CGFloat = 116 {
+		didSet { invalidateIntrinsicContentSize() }
+	}
+
 	public override var intrinsicContentSize: NSSize {
-		NSSize(width: NSView.noIntrinsicMetric, height: 116)
+		NSSize(width: NSView.noIntrinsicMetric, height: preferredHeight)
 	}
 
 	private var frames: (head: NSRect, tail: NSRect) {
