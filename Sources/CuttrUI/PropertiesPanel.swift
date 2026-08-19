@@ -1,3 +1,4 @@
+@preconcurrency import AVFoundation
 import AppKit
 import QuartzCore
 import CuttrCompose
@@ -31,6 +32,12 @@ public final class PropertiesPanel: NSView {
 	/// A frame of the programme at a time, if one can be had. Asked for
 	/// asynchronously; the window has the composition, not this panel.
 	public var poster: ((Double, @escaping (NSImage?) -> Void) -> Void)?
+	/// The programme as the preview plays it, for the dialogs that set a moment
+	/// against it. Built by the window; this panel only borrows it.
+	public var programme: (() -> (composition: AVComposition,
+	                              videoComposition: AVVideoComposition?,
+	                              audioMix: AVAudioMix?,
+	                              duration: Double)?)?
 	/// Somebody is placing a range at this moment on the programme. The window
 	/// takes the preview there, so the picture and the panel agree.
 	public var onScrub: ((Double) -> Void)?
@@ -629,6 +636,15 @@ public final class PropertiesPanel: NSView {
 					guard let seconds = Timecode.parse(value) else { return }
 					self?.setSpan(index, position, .within(mark, from: from, to: seconds))
 				})
+				controls.append(ellipsis("when it is on") { [weak self] button in
+					self?.openWithin(index, position, mark, from: from, to: to, from: button)
+				})
+				controls.append(revert("the whole of that clip") { [weak self] in
+					guard let self,
+					      let where_ = self.extent(of: .marks(from: mark, to: mark)) else { return }
+					self.setSpan(index, position,
+					             .within(mark, from: 0, to: max(0, where_.1 - where_.0)))
+				})
 			case .marks(let from, let to):
 				controls.append(endpoint(from) { [weak self] value in
 					self?.setSpan(index, position, .marks(from: .init(value), to: to))
@@ -646,6 +662,22 @@ public final class PropertiesPanel: NSView {
 					[weak self] value in
 					guard let seconds = Timecode.parse(value) else { return }
 					self?.setSpan(index, position, .times(from: from, to: seconds))
+				})
+				// The same dialog, over the whole programme, because the
+				// programme's clock is what these two numbers are on.
+				controls.append(ellipsis("when it is on") { [weak self] button in
+					guard let self, let programme = self.programme?() else { return }
+					TrimDialog.present(
+						over: button, clip: "the programme",
+						source: .programme(programme.composition, programme.videoComposition,
+						                   programme.audioMix, duration: programme.duration),
+						marks: .range, span: (start: 0, end: programme.duration),
+						trim: (head: max(0, from), tail: max(0, programme.duration - to)),
+						step: 1.0 / max(1, self.project.output.framesPerSecond),
+						onDone: { [weak self] head, tail in
+							self?.setSpan(index, position, .times(
+								from: head, to: max(head, programme.duration - tail)))
+						})
 				})
 			}
 			let advice: String
@@ -879,13 +911,44 @@ public final class PropertiesPanel: NSView {
 
 		TrimDialog.present(
 			over: view, clip: reference.description,
-			video: placed.videoURL, audio: placed.audioURL, audioOffset: placed.audioOffset,
+			source: .media(video: placed.videoURL, audio: placed.audioURL,
+			               offset: placed.audioOffset),
 			span: span, trim: entry.trim,
 			step: 1.0 / max(1, project.output.framesPerSecond),
 			onDone: { [weak self] head, tail in
 				self?.replace(path, TimelineEntry(
 					clip: reference, transition: entry.transition, label: entry.label,
 					trim: (head, tail)))
+			})
+	}
+
+	/// The same dialog as a trim, over the programme rather than over a take.
+	///
+	/// A `when:` written as `within` is two marks inside one stretch of the
+	/// programme, which is exactly what the trim dialog sets — so it is the
+	/// same dialog, told that the marks are called `from` and `to` and that the
+	/// picture comes from the cut programme. Set against the programme on
+	/// purpose: an overlay's moment is a moment with the other overlays and the
+	/// dissolves in it, and against the bare take it would be guesswork again.
+	private func openWithin(
+		_ index: Int, _ position: Int, _ mark: Overlay.Span.Endpoint,
+		from: Double, to: Double, from view: NSView
+	) {
+		guard let where_ = extent(of: .marks(from: mark, to: mark)),
+		      let programme = self.programme?() else { return }
+		let length = max(0.001, where_.1 - where_.0)
+
+		TrimDialog.present(
+			over: view, clip: mark.description,
+			source: .programme(programme.composition, programme.videoComposition,
+			                   programme.audioMix, duration: programme.duration),
+			marks: .range, span: (start: where_.0, end: where_.1),
+			// Held as offcuts by the dialog: how far in from each end.
+			trim: (head: max(0, from), tail: max(0, length - to)),
+			step: 1.0 / max(1, project.output.framesPerSecond),
+			onDone: { [weak self] head, tail in
+				self?.setSpan(index, position,
+				              .within(mark, from: head, to: max(head, length - tail)))
 			})
 	}
 
@@ -1342,6 +1405,24 @@ public final class PropertiesPanel: NSView {
 			EndpointPicker.present(over: button, catalogue: catalogue,
 			                       current: mark.description, onChoose: onPick)
 		}
+		sinks.append(sink)
+		button.target = sink
+		button.action = #selector(Sink.fire(_:))
+		return squeezable(button)
+	}
+
+	/// Put it back the way it was. Marked with the system's own undo arrow, so
+	/// it is not read as a button that deletes something.
+	private func revert(_ what: String, onTap: @escaping () -> Void) -> NSButton {
+		let button = NSButton()
+		button.image = NSImage(systemSymbolName: "arrow.uturn.backward",
+		                       accessibilityDescription: "reset")?
+			.withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+		button.imagePosition = .imageOnly
+		button.bezelStyle = .rounded
+		button.controlSize = .small
+		button.toolTip = what
+		let sink = Sink { _ in onTap() }
 		sinks.append(sink)
 		button.target = sink
 		button.action = #selector(Sink.fire(_:))

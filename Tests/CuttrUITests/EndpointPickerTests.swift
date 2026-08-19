@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import CuttrCompose
 import CuttrKit
@@ -85,7 +86,8 @@ import Testing
 		_ = NSApplication.shared
 		// No media: what is under test is the arithmetic of the two ends, and
 		// the player is the cutting window's, tested where it lives.
-		let made = TrimDialog(clip: "mia-take-1/clip-4", video: nil, audio: nil, audioOffset: 0,
+		let made = TrimDialog(clip: "mia-take-1/clip-4",
+		                      source: .media(video: nil, audio: nil, offset: 0),
 		                      span: (start: 10, end: 10 + length), trim: trim,
 		                      step: 1.0 / 25, onDone: onDone)
 		made.loadView()
@@ -209,7 +211,7 @@ import Testing
 	@Test func spaceAndTheMarksAreWired() {
 		_ = NSApplication.shared
 		var written: [(Double, Double)] = []
-		let dialog = TrimDialog(clip: "clip-4", video: nil, audio: nil, audioOffset: 0,
+		let dialog = TrimDialog(clip: "clip-4", source: .media(video: nil, audio: nil, offset: 0),
 		                        span: (start: 0, end: 8), trim: (0, 0), step: 1.0 / 25,
 		                        onDone: { written.append($0) })
 		dialog.loadView()
@@ -228,5 +230,51 @@ import Testing
 		NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
 		                 windowNumber: 0, context: nil, characters: key,
 		                 charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0)!
+	}
+}
+
+/// The same dialog, set against the programme, with the marks called what they
+/// are called in a `when:`.
+@Suite @MainActor struct WithinDialogTests {
+
+	private func dialog(length: Double = 10, from: Double, to: Double,
+	                    onDone: @escaping ((Double, Double)) -> Void = { _ in }) -> TrimDialog {
+		_ = NSApplication.shared
+		let made = TrimDialog(
+			clip: "@question1",
+			source: .programme(AVMutableComposition(), nil, nil, duration: 60),
+			marks: .range, span: (start: 20, end: 20 + length),
+			trim: (head: from, tail: max(0, length - to)), step: 1.0 / 25, onDone: onDone)
+		made.loadView()
+		return made
+	}
+
+	/// What goes back to the panel is still two offcuts, whatever they are
+	/// called on screen — so `from` 2 and `to` 7 of ten seconds is (2, 3).
+	@Test func aRangeIsTwoOffcuts() {
+		var written: [(Double, Double)] = []
+		let dialog = self.dialog(from: 2, to: 7) { written.append($0) }
+		#expect(abs(dialog.chosen.head - 2) < 0.001)
+		#expect(abs(dialog.chosen.tail - 3) < 0.001)
+		dialog.at = 4
+		dialog.keyed("i")
+		dialog.at = 9
+		dialog.keyed("o")
+		dialog.done()
+		#expect(written.count == 1)
+		#expect(abs(written[0].0 - 4) < 0.001)
+		#expect(abs(written[0].1 - 1) < 0.001)
+	}
+
+	/// `+1` moves a mark forwards whichever end it is, because that is what the
+	/// number beside it says.
+	@Test func steppingFollowsTheNumberShown() {
+		let dialog = self.dialog(from: 1, to: 5)
+		dialog.stepTail(by: 1)
+		// `to` moved from 5 to 5.04, so the offcut shrank.
+		#expect(abs(dialog.chosen.tail - (10 - 5.04)) < 0.001)
+		dialog.resetTrim()
+		#expect(dialog.chosen.head == 0)
+		#expect(dialog.chosen.tail == 0)
 	}
 }

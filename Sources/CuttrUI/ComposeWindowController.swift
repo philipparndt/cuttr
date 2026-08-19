@@ -59,6 +59,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private var builtSession: UUID?
 	private var builtComposition: AVComposition?
 	private var builtVideoComposition: AVVideoComposition?
+	private var builtAudioMix: AVAudioMix?
+	private var builtDuration: Double = 0
 	private var itemStatus: NSKeyValueObservation?
 	private var buildTask: Task<Void, Never>?
 
@@ -324,6 +326,13 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// will be rendered under.
 		inspector.onScrub = { [weak self] time in self?.seek(to: time) }
 
+		// The dialogs that set a moment against the programme play the same
+		// thing the preview plays, rather than building a second one.
+		inspector.playable = { [weak self] in
+			guard let self, let composition = self.builtComposition else { return nil }
+			return (composition, self.builtVideoComposition, self.builtAudioMix,
+			        self.builtDuration)
+		}
 		inspector.poster = { [weak self] time, done in
 			guard let self, let composition = self.builtComposition else { return done(nil) }
 			let generator = AVAssetImageGenerator(asset: composition)
@@ -418,6 +427,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			self.builtSession = built.session
 			self.builtComposition = built.composition
 			self.builtVideoComposition = built.videoComposition
+			self.builtAudioMix = built.audioMix
+			self.builtDuration = resolved.duration
 			self.transport.present(built.composition,
 			                       videoComposition: built.videoComposition,
 			                       audioMix: built.audioMix,

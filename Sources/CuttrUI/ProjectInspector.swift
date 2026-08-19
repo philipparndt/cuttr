@@ -1,3 +1,4 @@
+@preconcurrency import AVFoundation
 import AppKit
 import CuttrCompose
 import CuttrKit
@@ -31,6 +32,14 @@ public final class ProjectInspector: NSView {
 	}
 	public var poster: ((Double, @escaping (NSImage?) -> Void) -> Void)? {
 		didSet { properties.poster = poster }
+	}
+	/// The programme as the preview plays it, for the dialogs that set a moment
+	/// against it.
+	public var playable: (() -> (composition: AVComposition,
+	                             videoComposition: AVVideoComposition?,
+	                             audioMix: AVAudioMix?,
+	                             duration: Double)?)? {
+		didSet { properties.programme = playable }
 	}
 	/// Somebody is placing a range at this moment. The window takes the preview
 	/// there, so what plays and what is being edited are the same moment.

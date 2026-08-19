@@ -23,10 +23,36 @@ import CuttrKit
 @MainActor
 public final class TrimDialog: NSViewController {
 
+	/// What the picture comes from.
+	///
+	/// Two, because the same two marks are set against two different things. A
+	/// trim is about one shot as the take has it — camera and recorder, nothing
+	/// cut, nothing over the top — so it plays the take's media. A `when:` is
+	/// about a moment in the *programme*, overlays and dissolves and all, so it
+	/// plays what the preview plays. Neither would do for the other.
+	public enum Source {
+		case media(video: URL?, audio: URL?, offset: Double)
+		case programme(AVComposition, AVVideoComposition?, AVAudioMix?, duration: Double)
+	}
+
+	/// What the two marks are called, which is what they are.
+	public enum Marks {
+		/// Taken off the ends: `head` and `tail`, counted inwards from each.
+		case offCuts
+		/// A stretch inside: `from` and `to`, both counted from the start.
+		case range
+
+		var names: (String, String) {
+			switch self {
+			case .offCuts: return ("head", "tail")
+			case .range: return ("from", "to")
+			}
+		}
+	}
+
 	private let clip: String
-	private let video: URL?
-	private let audio: URL?
-	private let audioOffset: Double
+	private let source: Source
+	private let marks: Marks
 	/// The placement on the take's clock, before anything is taken off.
 	private let span: (start: Double, end: Double)
 	private let step: Double
@@ -45,13 +71,12 @@ public final class TrimDialog: NSViewController {
 	private var hosted: NSWindow?
 	private var keys: Any?
 
-	public init(clip: String, video: URL?, audio: URL?, audioOffset: Double,
+	public init(clip: String, source: Source, marks: Marks = .offCuts,
 	            span: (start: Double, end: Double), trim: (head: Double, tail: Double),
 	            step: Double, onDone: @escaping ((Double, Double)) -> Void) {
 		self.clip = clip
-		self.video = video
-		self.audio = audio
-		self.audioOffset = audioOffset
+		self.source = source
+		self.marks = marks
 		self.span = span
 		self.trim = trim
 		self.step = step > 0 ? step : 1.0 / 25
@@ -62,13 +87,13 @@ public final class TrimDialog: NSViewController {
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
 
 	public static func present(
-		over view: NSView, clip: String, video: URL?, audio: URL?, audioOffset: Double,
+		over view: NSView, clip: String, source: Source, marks: Marks = .offCuts,
 		span: (start: Double, end: Double), trim: (head: Double, tail: Double),
 		step: Double, onDone: @escaping ((Double, Double)) -> Void
 	) {
 		guard let parent = view.window else { return }
-		let dialog = TrimDialog(clip: clip, video: video, audio: audio, audioOffset: audioOffset,
-		                        span: span, trim: trim, step: step, onDone: onDone)
+		let dialog = TrimDialog(clip: clip, source: source, marks: marks, span: span,
+		                        trim: trim, step: step, onDone: onDone)
 		parent.beginSheet(dialog.sheet()) { _ in }
 	}
 
@@ -76,7 +101,7 @@ public final class TrimDialog: NSViewController {
 		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 620),
 		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
 		window.contentViewController = self
-		window.title = "Trim \(clip)"
+		window.title = marks == .offCuts ? "Trim \(clip)" : "When it is on: \(clip)"
 		window.isReleasedWhenClosed = false
 		window.minSize = NSSize(width: 560, height: 420)
 		hosted = window
@@ -131,19 +156,20 @@ public final class TrimDialog: NSViewController {
 		transportRow.alignment = .centerY
 
 		let rows = NSStackView(views: [
-			end("head", headField, #selector(headTyped), #selector(headBack), #selector(headOn),
-			    #selector(headHere)),
-			end("tail", tailField, #selector(tailTyped), #selector(tailBack), #selector(tailOn),
-			    #selector(tailHere)),
+			end(marks.names.0, headField, #selector(headTyped), #selector(headBack),
+			    #selector(headOn), #selector(headHere)),
+			end(marks.names.1, tailField, #selector(tailTyped), #selector(tailBack),
+			    #selector(tailOn), #selector(tailHere)),
 		])
 		rows.orientation = .vertical
 		rows.alignment = .leading
 		rows.spacing = 6
 
-		let reset = NSButton(title: "Reset trim", target: self, action: #selector(resetTrim))
+		let reset = NSButton(title: marks == .offCuts ? "Reset trim" : "Reset to the whole of it",
+		                     target: self, action: #selector(resetTrim))
 		reset.bezelStyle = .rounded
 		reset.controlSize = .small
-		reset.toolTip = "the whole clip again, both ends"
+		reset.toolTip = "both marks back where they started, at the ends"
 		let done = NSButton(title: "Done", target: self, action: #selector(finish))
 		done.bezelStyle = .rounded
 		done.keyEquivalent = "\r"
@@ -194,11 +220,20 @@ public final class TrimDialog: NSViewController {
 				systemSymbolName: rate == 0 ? "play.fill" : "pause.fill",
 				accessibilityDescription: rate == 0 ? "play" : "pause")
 		}
-		// The take's own media, the camera and the recorder together, so what
-		// is heard while trimming is what will be rendered.
-		transport.load(video: video, audio: audio, offset: audioOffset) { [weak self] in
-			guard let self else { return }
-			self.seek(to: self.trim.head)
+		switch source {
+		case .media(let video, let audio, let offset):
+			// The take's own media, the camera and the recorder together, so
+			// what is heard while trimming is what will be rendered.
+			transport.load(video: video, audio: audio, offset: offset) { [weak self] in
+				guard let self else { return }
+				self.seek(to: self.trim.head)
+			}
+		case .programme(let composition, let videoComposition, let audioMix, let duration):
+			// What the preview plays, which is what the range is being set
+			// against: an overlay's moment is a moment in the cut programme.
+			transport.present(composition, videoComposition: videoComposition,
+			                  audioMix: audioMix, duration: duration)
+			seek(to: trim.head)
 		}
 		tell()
 	}
@@ -310,17 +345,29 @@ public final class TrimDialog: NSViewController {
 		tell()
 	}
 
+	/// A mark, as this dialog spells it: from the head either way, or in from
+	/// the tail when they are offcuts.
+	private func shown(_ value: Double, at end: Int) -> Double {
+		guard marks == .range, end == 1 else { return value }
+		return max(0, length - value)
+	}
+
+	private func typed(_ value: Double, at end: Int) -> Double {
+		guard marks == .range, end == 1 else { return value }
+		return max(0, length - value)
+	}
+
 	@objc private func headTyped() {
 		defer { view.window?.makeFirstResponder(timeline) }
 		guard let seconds = Timecode.parse(headField.stringValue) else { return }
-		set(head: seconds, tail: trim.tail)
+		set(head: typed(seconds, at: 0), tail: trim.tail)
 		seek(to: trim.head)
 	}
 
 	@objc private func tailTyped() {
 		defer { view.window?.makeFirstResponder(timeline) }
 		guard let seconds = Timecode.parse(tailField.stringValue) else { return }
-		set(head: trim.head, tail: seconds)
+		set(head: trim.head, tail: typed(seconds, at: 1))
 		seek(to: length - trim.tail)
 	}
 
@@ -335,7 +382,10 @@ public final class TrimDialog: NSViewController {
 	}
 
 	func stepTail(by frames: Int) {
-		set(head: trim.head, tail: trim.tail + Double(frames) * step)
+		// `+1` moves the mark forwards in both spellings: later in the clip when
+		// it is a `to`, further in from the end when it is a tail.
+		let direction = marks == .range ? -1.0 : 1.0
+		set(head: trim.head, tail: trim.tail + direction * Double(frames) * step)
 		seek(to: length - trim.tail)
 	}
 
@@ -358,9 +408,12 @@ public final class TrimDialog: NSViewController {
 	}
 
 	/// What the numbers say now.
+	///
+	/// Held as offcuts either way — how far in from each end — because that is
+	/// what both marks are, and shown as whatever this dialog calls them.
 	private func tell() {
-		headField.stringValue = Timecode.string(trim.head)
-		tailField.stringValue = Timecode.string(trim.tail)
+		headField.stringValue = Timecode.string(shown(trim.head, at: 0))
+		tailField.stringValue = Timecode.string(shown(trim.tail, at: 1))
 		let left = max(0, length - trim.head - trim.tail)
 		lengthLabel.stringValue = "\(Timecode.string(left)) of \(Timecode.string(length))"
 	}
