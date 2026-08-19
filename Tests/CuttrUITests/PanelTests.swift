@@ -167,3 +167,23 @@ import Testing
 		#expect(clips.hasKeyboard)
 	}
 }
+
+/// What a row on the programme says about itself.
+@Suite @MainActor struct EntryRowTests {
+
+	/// A trimmed placement and a whole one look the same otherwise, and the
+	/// same clip twice in a section is usually two different lengths of it.
+	@Test func aTrimmedPlacementSaysSo() {
+		let whole = TimelineEntry(clip: ClipReference("clip-4"))
+		#expect(ProgrammePanel.EntryRow.trimmed(whole) == nil)
+
+		let head = TimelineEntry(clip: ClipReference("clip-4"), trim: (1.5, 0))
+		#expect(ProgrammePanel.EntryRow.trimmed(head) == "head −00:01.500")
+
+		let tail = TimelineEntry(clip: ClipReference("clip-4"), trim: (0, 0.4))
+		#expect(ProgrammePanel.EntryRow.trimmed(tail) == "tail −00:00.400")
+
+		let both = TimelineEntry(clip: ClipReference("clip-4"), trim: (1.5, 0.4))
+		#expect(ProgrammePanel.EntryRow.trimmed(both) == "head −00:01.500  tail −00:00.400")
+	}
+}

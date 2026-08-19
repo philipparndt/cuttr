@@ -545,7 +545,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	/// One entry, drawn: what kind of thing it is, what it names, and how it
 	/// arrives.
-	fileprivate final class EntryRow: NSTableCellView {
+	final class EntryRow: NSTableCellView {
 		var entry = TimelineEntry(clip: ClipReference(""))
 		var count = 0
 
@@ -570,7 +570,14 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				.size(withAttributes: [.font: Theme.bodyStrong]).width + 10
 
 			if case .group = entry.source {
-				_ = note("\(count) entr\(count == 1 ? "y" : "ies")", at: x)
+				x = note("\(count) entr\(count == 1 ? "y" : "ies")", at: x) + 10
+			}
+			// A trimmed placement looks exactly like an untrimmed one otherwise,
+			// and the same clip appearing twice in a section is usually two
+			// different lengths of it. Said here so the list is the truth about
+			// what is on the programme rather than about what was referenced.
+			if let trimmed = Self.trimmed(entry) {
+				_ = note(trimmed, at: x)
 			}
 			if entry.transition.duration > 0 {
 				let text = "⤫ \(entry.transition.kind.title) "
@@ -578,6 +585,16 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				let size = (text as NSString).size(withAttributes: [.font: Theme.monoSmall])
 				_ = note(text, at: bounds.width - size.width - 10)
 			}
+		}
+
+		/// What is taken off this placement, or nothing when it is whole. Only
+		/// the ends that are actually trimmed, because `tail 00:00.000` is a
+		/// column of noughts that says nothing.
+		static func trimmed(_ entry: TimelineEntry) -> String? {
+			var parts: [String] = []
+			if entry.trim.head > 0 { parts.append("head −\(Timecode.string(entry.trim.head))") }
+			if entry.trim.tail > 0 { parts.append("tail −\(Timecode.string(entry.trim.tail))") }
+			return parts.isEmpty ? nil : parts.joined(separator: "  ")
 		}
 
 		@discardableResult
