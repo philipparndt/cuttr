@@ -33,6 +33,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private var mode: Mode = .edit
 	/// Whether the window is showing the picture and nothing else.
 	private var presenting = false
+	/// The bar that comes back when the mouse moves in full screen.
+	private let controls = PlaybackControls()
+	private var pointerWatch: Any?
 
 	/// Opening a take is the application's business, not this window's: it may
 	/// already be open in another tab.
@@ -113,6 +116,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		bar.onReload = { [weak self] in self?.composeDocument.reload() }
 		bar.onMode = { [weak self] index in self?.show(Mode(rawValue: index) ?? .edit) }
 		bar.onFullScreen = { [weak self] in self?.toggleFullScreenPreview(nil) }
+		controls.onPlayPause = { [weak self] in self?.togglePlay(nil) }
+		controls.onScrub = { [weak self] time in self?.seek(to: time) }
 		bar.onAnchors = { [weak self] shown in
 			// The markers are for placing an overlay against a face, and once it
 			// is placed they are in the way of seeing the thing they placed.
@@ -175,6 +180,16 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 				view.trailingAnchor.constraint(equalTo: picture.trailingAnchor),
 			])
 		}
+		// The full-screen controls: along the bottom of the picture, over
+		// everything, invisible until somebody moves the mouse.
+		controls.translatesAutoresizingMaskIntoConstraints = false
+		picture.addSubview(controls)
+		NSLayoutConstraint.activate([
+			controls.leadingAnchor.constraint(equalTo: picture.leadingAnchor),
+			controls.trailingAnchor.constraint(equalTo: picture.trailingAnchor),
+			controls.bottomAnchor.constraint(equalTo: picture.bottomAnchor),
+			controls.heightAnchor.constraint(equalToConstant: 76),
+		])
 
 		let split = NSSplitView()
 		split.isVertical = false
@@ -434,6 +449,20 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			// moment as the picture, exactly, every tick.
 			self.overlayLayer?.timeOffset = time
 			self.bar.setStatus(Timecode.string(time))
+			// The full-screen bar shows the same clock, and only while it is
+			// the thing on screen.
+			if self.presenting {
+				self.controls.playhead = time
+				self.controls.duration = self.composeDocument.resolved?.duration ?? 0
+				self.controls.isPlaying = self.transport.isPlaying
+			}
+		}
+		transport.onRateChange = { [weak self] rate in
+			guard let self, self.presenting else { return }
+			self.controls.isPlaying = rate != 0
+			// Pausing is a reason to see the controls: somebody has just
+			// reached for them.
+			if rate == 0 { self.controls.wake(for: 4) }
 		}
 	}
 
@@ -620,11 +649,40 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		bar.isHidden = presenting
 		strip.isHidden = presenting
 		window.toggleFullScreen(nil)
+		if presenting { watchThePointer() } else { stopWatchingThePointer() }
+	}
+
+	/// The controls come back when the mouse moves, and go away when it stops.
+	///
+	/// A local monitor rather than a tracking area: full screen has one view
+	/// worth pointing at and the whole screen to move in, and a tracking area
+	/// on a view that is itself invisible half the time is a way of missing
+	/// the movement that was meant to bring it back.
+	private func watchThePointer() {
+		controls.playhead = playhead
+		controls.duration = composeDocument.resolved?.duration ?? 0
+		controls.isPlaying = transport.isPlaying
+		controls.wake()
+		pointerWatch = NSEvent.addLocalMonitorForEvents(
+			matching: [.mouseMoved, .leftMouseDragged]
+		) { [weak self] event in
+			self?.controls.wake()
+			return event
+		}
+		window?.acceptsMouseMovedEvents = true
+	}
+
+	private func stopWatchingThePointer() {
+		if let pointerWatch { NSEvent.removeMonitor(pointerWatch) }
+		pointerWatch = nil
+		controls.sleep()
+		window?.acceptsMouseMovedEvents = false
 	}
 
 	public func windowDidExitFullScreen(_ notification: Notification) {
 		guard presenting else { return }
 		presenting = false
+		stopWatchingThePointer()
 		bar.isHidden = false
 		strip.isHidden = false
 	}

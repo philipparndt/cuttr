@@ -400,3 +400,59 @@ import Testing
 		}
 	}
 }
+
+/// The controls that come back in full screen.
+@Suite @MainActor struct PlaybackControlsTests {
+
+	private func controls() -> PlaybackControls {
+		_ = NSApplication.shared
+		let bar = PlaybackControls(frame: NSRect(x: 0, y: 0, width: 1000, height: 76))
+		bar.duration = 100
+		bar.playhead = 25
+		return bar
+	}
+
+	/// Invisible until something happens, and gone again after it stops.
+	@Test func itIsInvisibleUntilTheMouseMoves() {
+		let bar = controls()
+		#expect(bar.alphaValue == 0)
+		bar.wake(for: 0.05)
+		#expect(bar.alphaValue == 1)
+		bar.sleep()
+		#expect(bar.alphaValue == 0)
+	}
+
+	/// A click on the left is play/pause; anywhere on the track is a scrub to
+	/// that moment.
+	@Test func theTrackScrubsAndTheCornerPlays() {
+		let bar = controls()
+		var played = 0
+		var scrubbed: [Double] = []
+		bar.onPlayPause = { played += 1 }
+		bar.onScrub = { scrubbed.append($0) }
+
+		func click(at x: CGFloat) -> NSEvent {
+			NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: x, y: 38),
+			                   modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+			                   eventNumber: 0, clickCount: 1, pressure: 1)!
+		}
+		bar.mouseDown(with: click(at: 40))
+		#expect(played == 1)
+		#expect(scrubbed.isEmpty)
+
+		// The track runs from 92 to width − 150; halfway along it is halfway
+		// through the programme.
+		let middle: CGFloat = 92 + (1000 - 92 - 150) / 2
+		bar.mouseDown(with: click(at: middle))
+		bar.mouseUp(with: click(at: middle))
+		#expect(scrubbed.count == 1)
+		#expect(abs((scrubbed.first ?? 0) - 50) < 1)
+	}
+
+	/// And a scrub is clamped to the programme rather than running off it.
+	@Test func aScrubStaysInsideTheProgramme() {
+		let bar = controls()
+		#expect(bar.timeForTesting(at: CGFloat(-500)) == 0)
+		#expect(bar.timeForTesting(at: CGFloat(5000)) == 100)
+	}
+}
