@@ -322,6 +322,30 @@ import Testing
 		#expect(abs(info.duration - 1) < 0.1)
 	}
 
+	@Test func theSameMemeTwiceIsTwoFiles() async throws {
+		// Somebody downloading the same facepalm again, or two different ones
+		// that GIPHY calls the same thing. The second must not land on top of
+		// the first — which it did, because the names already in use were being
+		// collected as absolute paths and matched against a slug.
+		let root = URL(fileURLWithPath: NSTemporaryDirectory())
+			.appendingPathComponent("cuttr-twice-\(UUID().uuidString)", isDirectory: true)
+		defer { try? FileManager.default.removeItem(at: root) }
+		try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+		let bytes = try Data(contentsOf: try makeMovie(in: root))
+		let takes = root.appendingPathComponent("takes", isDirectory: true)
+
+		let first = try await MemeDownload.fetch(
+			result(title: "Facepalm GIF"), project: root, takes: takes, fetch: { _ in bytes })
+		let second = try await MemeDownload.fetch(
+			result(title: "Facepalm GIF", id: "def456"), project: root, takes: takes,
+			fetch: { _ in bytes })
+		#expect(first.slug == "facepalm")
+		#expect(second.slug == "facepalm-2")
+		#expect(first.video != second.video)
+		#expect(FileManager.default.fileExists(atPath: first.video.path))
+		#expect(FileManager.default.fileExists(atPath: second.take.path))
+	}
+
 	/// A second of green, written with AVFoundation so the test needs no
 	/// fixture on disk and no ffmpeg on the machine.
 	private func makeMovie(in folder: URL) throws -> URL {

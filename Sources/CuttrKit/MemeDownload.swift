@@ -172,7 +172,12 @@ public enum MemeDownload {
 		let manager = FileManager.default
 		let listed = (try? manager.contentsOfDirectory(atPath: memes.path)) ?? []
 		let existing = (try? manager.contentsOfDirectory(atPath: takes.path)) ?? []
-		return Set((listed + existing).map { URL(fileURLWithPath: $0).deletingPathExtension().path })
+		// The names as the folder gives them, without their extensions, and as
+		// text: `URL(fileURLWithPath:)` on a bare name resolves it against the
+		// working directory, so this was a set of absolute paths that no slug
+		// could ever match — and the second facepalm quietly overwrote the
+		// first.
+		return Set((listed + existing).map { ($0 as NSString).deletingPathExtension })
 	}
 
 	/// The same picture with a silent audio track under it.
