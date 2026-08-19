@@ -324,7 +324,7 @@ public final class PropertiesPanel: NSView {
 					self?.openTrim(path, reference, entry, from: button)
 				},
 			], note: "off the head and off the tail, here only — the take keeps its own marks; "
-				+ "the dialog shows the frames")
+				+ "`…` plays the clip and puts the marks on it")
 
 		case .list(let references):
 			field("list", [text(references.map(\.description).joined(separator: ", "),
@@ -861,32 +861,27 @@ public final class PropertiesPanel: NSView {
 
 	/// The trim dialog, on the placement this row is about.
 	///
-	/// The frames used to be in the form, under the two fields. They were the
-	/// right idea at the wrong size: at the width of a form field a frame says
-	/// somebody is in shot and nothing finer, and finer is the whole question.
-	/// A dialog has room for the pictures, for stepping a frame at a time, and
-	/// for saying how long what is left is.
+	/// The frames used to be in the form, under the two fields. Wrong twice:
+	/// at that size a frame says somebody is in shot and nothing finer, and a
+	/// cut is not found by looking at stills anyway — it is found by watching
+	/// the second before the mark with the sound on. So the dialog gets the
+	/// take's own media and plays it.
 	private func openTrim(
 		_ path: [Int], _ reference: ClipReference, _ entry: TimelineEntry, from view: NSView
 	) {
 		// Which placement this is: the same clip used twice is two of them, and
-		// the frames must be the ones this use shows.
-		let placed = resolved?.clips.first { $0.entry == path }
-		let length = (placed?.duration ?? 0) + entry.trim.head + entry.trim.tail
-		// Programme time of this placement's untrimmed head, so the dialog can
-		// ask for a frame by how far into the clip it is and nothing downstream
-		// has to know about trims.
-		let base = (placed?.start ?? 0) - entry.trim.head
-		let poster = self.poster
-		let generation = self.generation
+		// the media and the marks must be the ones this use shows.
+		guard let placed = resolved?.clips.first(where: { $0.entry == path }) else { return }
+		// The clip as the take has it, before this placement's trim — which is
+		// what the dialog lets somebody move about inside.
+		let span = (start: placed.clip.start - entry.trim.head,
+		            end: placed.clip.end + entry.trim.tail)
 
 		TrimDialog.present(
-			over: view, clip: reference.description, length: length, trim: entry.trim,
+			over: view, clip: reference.description,
+			video: placed.videoURL, audio: placed.audioURL, audioOffset: placed.audioOffset,
+			span: span, trim: entry.trim,
 			step: 1.0 / max(1, project.output.framesPerSecond),
-			poster: placed == nil ? nil : { [weak self] into, back in
-				guard let self, self.generation == generation else { return }
-				poster?(base + into, back)
-			},
 			onDone: { [weak self] head, tail in
 				self?.replace(path, TimelineEntry(
 					clip: reference, transition: entry.transition, label: entry.label,

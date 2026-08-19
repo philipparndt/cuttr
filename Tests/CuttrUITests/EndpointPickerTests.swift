@@ -83,8 +83,11 @@ import Testing
 	private func dialog(length: Double = 5, trim: (Double, Double) = (0, 0),
 	                    onDone: @escaping ((Double, Double)) -> Void = { _ in }) -> TrimDialog {
 		_ = NSApplication.shared
-		let made = TrimDialog(clip: "mia-take-1/clip-4", length: length, trim: trim,
-		                      step: 1.0 / 25, poster: nil, onDone: onDone)
+		// No media: what is under test is the arithmetic of the two ends, and
+		// the player is the cutting window's, tested where it lives.
+		let made = TrimDialog(clip: "mia-take-1/clip-4", video: nil, audio: nil, audioOffset: 0,
+		                      span: (start: 10, end: 10 + length), trim: trim,
+		                      step: 1.0 / 25, onDone: onDone)
 		made.loadView()
 		return made
 	}
@@ -108,6 +111,20 @@ import Testing
 		#expect(dialog.chosen.tail == 0)
 	}
 
+	/// The mark goes where the picture is, both ends, and both ends come back.
+	@Test func theMarksFollowThePlayheadAndReset() {
+		let dialog = self.dialog(length: 8, trim: (0, 0))
+		dialog.at = 2.5
+		dialog.headHere()
+		#expect(abs(dialog.chosen.head - 2.5) < 0.001)
+		dialog.at = 6
+		dialog.tailHere()
+		#expect(abs(dialog.chosen.tail - 2) < 0.001)
+		dialog.resetTrim()
+		#expect(dialog.chosen.head == 0)
+		#expect(dialog.chosen.tail == 0)
+	}
+
 	/// Nothing is written until Done, so a search for the right frame is one
 	/// change to the project rather than forty.
 	@Test func itWritesOnceAtTheEnd() {
@@ -120,5 +137,53 @@ import Testing
 		#expect(written.count == 1)
 		#expect(abs(written[0].0 - 0.4) < 0.001)
 		#expect(abs(written[0].1 - 0.1) < 0.001)
+	}
+}
+
+/// The band under the picture: what it keeps, and what a drag on it does.
+@Suite @MainActor struct TrimTimelineTests {
+
+	@Test func aHandleDragMovesOneEndOnly() {
+		_ = NSApplication.shared
+		let timeline = TrimTimeline(frame: NSRect(x: 0, y: 0, width: 216, height: 56))
+		timeline.length = 10
+		timeline.trim = (0, 0)
+		var reported: [(Double, Double, Bool)] = []
+		timeline.onTrim = { reported.append(($0, $1, $2)) }
+
+		// The band is inset by 8 either side, so 200 points is ten seconds.
+		func drag(from: CGFloat, to: CGFloat) {
+			timeline.mouseDown(with: click(at: from))
+			timeline.mouseDragged(with: click(at: to))
+			timeline.mouseUp(with: click(at: to))
+		}
+		drag(from: 8, to: 48)
+		#expect(abs(timeline.trim.head - 2) < 0.05)
+		#expect(timeline.trim.tail == 0)
+		// Live during the drag, and once more when it is let go.
+		#expect(reported.last?.2 == true)
+
+		drag(from: 208, to: 168)
+		#expect(abs(timeline.trim.tail - 2) < 0.05)
+		#expect(abs(timeline.trim.head - 2) < 0.05)
+	}
+
+	/// A click anywhere else is a scrub, not a trim.
+	@Test func clickingTheMiddleScrubs() {
+		_ = NSApplication.shared
+		let timeline = TrimTimeline(frame: NSRect(x: 0, y: 0, width: 216, height: 56))
+		timeline.length = 10
+		var scrubbed: Double?
+		timeline.onScrub = { scrubbed = $0 }
+		timeline.onTrim = { _, _, _ in Issue.record("a click in the middle trimmed") }
+		timeline.mouseDown(with: click(at: 108))
+		timeline.mouseUp(with: click(at: 108))
+		#expect(abs((scrubbed ?? 0) - 5) < 0.05)
+	}
+
+	private func click(at x: CGFloat) -> NSEvent {
+		NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: x, y: 30),
+		                   modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+		                   eventNumber: 0, clickCount: 1, pressure: 1)!
 	}
 }
