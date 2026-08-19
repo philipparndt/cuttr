@@ -17,11 +17,14 @@ public final class ComposeBar: NSView {
 	public var onMode: ((Int) -> Void)?
 	/// Whether the anchor markers are drawn over the picture.
 	public var onAnchors: ((Bool) -> Void)?
+	/// The picture, and nothing else.
+	public var onFullScreen: (() -> Void)?
 
 	private let renderButton = NSButton()
 	private let reloadButton = NSButton()
 	private let modes = NSSegmentedControl()
 	private let anchors = NSButton(checkboxWithTitle: "Anchors", target: nil, action: nil)
+	private let fullScreen = NSButton()
 	private let statusLabel = NSTextField(labelWithString: "")
 	private let progress = NSProgressIndicator()
 
@@ -78,7 +81,21 @@ public final class ComposeBar: NSView {
 		anchors.toolTip = "Show where the tracked faces are. They are for placing an overlay, "
 			+ "and in the way once it is placed."
 
-		let navigation = row([modes, anchors])
+		fullScreen.bezelStyle = .rounded
+		fullScreen.controlSize = .small
+		fullScreen.imagePosition = .imageOnly
+		fullScreen.image = NSImage(
+			systemSymbolName: "arrow.up.left.and.arrow.down.right",
+			accessibilityDescription: "full screen")?
+			.withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+		fullScreen.target = self
+		fullScreen.action = #selector(fullScreenTapped)
+		fullScreen.toolTip = "Watch it full screen — the picture and nothing else"
+		fullScreen.isHidden = true
+		fullScreen.translatesAutoresizingMaskIntoConstraints = false
+		fullScreen.widthAnchor.constraint(equalToConstant: 26).isActive = true
+
+		let navigation = row([modes, anchors, fullScreen])
 		let middle = row([progress, statusLabel])
 		let actions = row([renderButton, reloadButton])
 		for stack in [navigation, middle, actions] { addSubview(stack) }
@@ -132,6 +149,7 @@ public final class ComposeBar: NSView {
 	@objc private func reload() { onReload?() }
 	@objc private func modeChanged() { onMode?(modes.selectedSegment) }
 	@objc private func anchorsChanged() { onAnchors?(anchors.state == .on) }
+	@objc private func fullScreenTapped() { onFullScreen?() }
 
 	public func setMode(_ index: Int) {
 		modes.selectedSegment = index
@@ -139,6 +157,7 @@ public final class ComposeBar: NSView {
 		// picture is. On the editor and the file it is a control for something
 		// nobody can see.
 		anchors.isHidden = index != 2
+		fullScreen.isHidden = index != 2
 	}
 
 	// MARK: - State in

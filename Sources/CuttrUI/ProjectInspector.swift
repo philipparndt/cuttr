@@ -41,7 +41,14 @@ public final class ProjectInspector: NSView {
 	private let programme = ProgrammePanel()
 	private let properties = PropertiesPanel()
 	private let yaml = NSTextView()
-	private let writesTitle = NSTextField(labelWithString: "WHAT THIS WRITES")
+	private let writesTitle = NSButton()
+	/// Folded away to begin with.
+	///
+	/// It is a teaching pane and a checking pane, not a working one: somebody
+	/// who wants to see what a control writes opens it, and everybody else gets
+	/// the height back. The panel above it is where the work happens.
+	private var showingWrites = false
+	private var writesHeight: NSLayoutConstraint?
 
 	private var project = Project()
 	private var selection: ProjectSelection = .output
@@ -82,7 +89,7 @@ public final class ProjectInspector: NSView {
 			writes.leadingAnchor.constraint(equalTo: column.leadingAnchor),
 			writes.trailingAnchor.constraint(equalTo: column.trailingAnchor),
 			writes.bottomAnchor.constraint(equalTo: column.bottomAnchor),
-			writes.heightAnchor.constraint(equalToConstant: 168),
+			writes.heightAnchor.constraint(greaterThanOrEqualToConstant: 30),
 		])
 
 		let split = NSSplitView()
@@ -113,8 +120,12 @@ public final class ProjectInspector: NSView {
 	// MARK: - what this writes
 
 	private func writes() -> NSView {
-		writesTitle.font = Theme.heading
-		writesTitle.textColor = Theme.faintText
+		writesTitle.bezelStyle = .inline
+		writesTitle.isBordered = false
+		writesTitle.target = self
+		writesTitle.action = #selector(toggleWrites)
+		writesTitle.contentTintColor = Theme.faintText
+		setWritesTitle()
 
 		yaml.isEditable = false
 		yaml.drawsBackground = true
@@ -136,21 +147,44 @@ public final class ProjectInspector: NSView {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			holder.addSubview(view)
 		}
+		let height = scroll.heightAnchor.constraint(equalToConstant: 0)
+		height.isActive = true
+		writesHeight = height
 		NSLayoutConstraint.activate([
-			writesTitle.topAnchor.constraint(equalTo: holder.topAnchor, constant: 10),
-			writesTitle.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: 14),
+			writesTitle.topAnchor.constraint(equalTo: holder.topAnchor, constant: 6),
+			writesTitle.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: 10),
 
 			scroll.topAnchor.constraint(equalTo: writesTitle.bottomAnchor, constant: 6),
 			scroll.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: 14),
 			scroll.trailingAnchor.constraint(equalTo: holder.trailingAnchor, constant: -14),
-			scroll.bottomAnchor.constraint(equalTo: holder.bottomAnchor, constant: -12),
+			scroll.bottomAnchor.constraint(equalTo: holder.bottomAnchor, constant: -10),
 		])
 		return holder
+	}
+
+	@objc private func toggleWrites() {
+		showingWrites.toggle()
+		writesHeight?.constant = showingWrites ? 150 : 0
+		setWritesTitle()
+		showWhatItWrites()
+	}
+
+	private func setWritesTitle() {
+		let chevron = NSImage(
+			systemSymbolName: showingWrites ? "chevron.down" : "chevron.right",
+			accessibilityDescription: showingWrites ? "open" : "folded")?
+			.withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+		writesTitle.image = chevron
+		writesTitle.imagePosition = .imageLeading
+		writesTitle.attributedTitle = NSAttributedString(
+			string: " WHAT THIS WRITES",
+			attributes: [.font: Theme.heading, .foregroundColor: Theme.faintText])
 	}
 
 	/// Straight out of the emitter that writes the file, so what is shown here
 	/// is what will be on disk — not a paraphrase of it.
 	private func showWhatItWrites() {
+		guard showingWrites else { return }
 		switch selection {
 		case .overlay(let index) where index < project.overlays.count:
 			yaml.string = ProjectWriter.fragment(for: project.overlays[index])

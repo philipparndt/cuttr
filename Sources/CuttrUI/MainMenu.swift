@@ -144,6 +144,9 @@ enum MainMenu {
 		view.addItem(command("Editor", #selector(ComposeWindowController.showEditor(_:)), "1"))
 		view.addItem(command("Project File", #selector(ComposeWindowController.showText(_:)), "2"))
 		view.addItem(command("Preview", #selector(ComposeWindowController.showPreview(_:)), "3"))
+		view.addItem(command("Full-Screen Preview",
+		                     #selector(ComposeWindowController.toggleFullScreenPreview(_:)),
+		                     "f", [.command, .control]))
 		view.addItem(.separator())
 		view.addItem(command("Zoom In", #selector(MainWindowController.zoomIn(_:)), "+"))
 		view.addItem(command("Zoom Out", #selector(MainWindowController.zoomOut(_:)), "-"))

@@ -53,6 +53,7 @@ public final class PropertiesPanel: NSView {
 	/// The picture the range strip scrubs, and when it last asked for a frame.
 	private weak var currentPreview: FramePreview?
 	private weak var currentStrip: SpanStrip?
+	private weak var currentTrim: TrimStrip?
 	private var lastScrub: CFTimeInterval = 0
 	/// Which range is being worked on, and whether the strip had the keyboard.
 	///
@@ -321,6 +322,7 @@ public final class PropertiesPanel: NSView {
 						trim: (entry.trim.head, max(0, seconds))))
 				},
 			], note: "off the head and off the tail, here only — the take keeps its own marks")
+			full(trimStrip(path, reference, entry))
 
 		case .list(let references):
 			field("list", [text(references.map(\.description).joined(separator: ", "),
@@ -583,7 +585,6 @@ public final class PropertiesPanel: NSView {
 
 		section("when it is on")
 		full(strip(index, overlay))
-		let endpoints = vocabulary.items.map(\.reference) + vocabulary.groups.map { "@\($0)" }
 
 		// One range at a time: the strip above is the list, and what is under it
 		// is whichever range is selected there. Every range laid out at once was
@@ -613,8 +614,7 @@ public final class PropertiesPanel: NSView {
 
 			switch span {
 			case .within(let mark, let from, let to):
-				controls.append(combo(mark.description, values: endpoints, width: 150) {
-					[weak self] value in
+				controls.append(endpoint(mark) { [weak self] value in
 					self?.setSpan(index, position, .within(.init(value), from: from, to: to))
 				})
 				controls.append(text(Timecode.string(from), width: 90, placeholder: "00:00.000") {
@@ -628,12 +628,10 @@ public final class PropertiesPanel: NSView {
 					self?.setSpan(index, position, .within(mark, from: from, to: seconds))
 				})
 			case .marks(let from, let to):
-				controls.append(combo(from.description, values: endpoints, width: 150) {
-					[weak self] value in
+				controls.append(endpoint(from) { [weak self] value in
 					self?.setSpan(index, position, .marks(from: .init(value), to: to))
 				})
-				controls.append(combo(to.description, values: endpoints, width: 150) {
-					[weak self] value in
+				controls.append(endpoint(to) { [weak self] value in
 					self?.setSpan(index, position, .marks(from: from, to: .init(value)))
 				})
 			case .times(let from, let to):
@@ -857,6 +855,54 @@ public final class PropertiesPanel: NSView {
 		default:
 			return .times(from: extent.0, to: extent.1)
 		}
+	}
+
+	/// The first and last frames this placement shows, and a drag on either to
+	/// move that end.
+	private func trimStrip(
+		_ path: [Int], _ reference: ClipReference, _ entry: TimelineEntry
+	) -> NSView {
+		let strip = TrimStrip()
+		strip.trim = entry.trim
+		currentTrim = strip
+
+		// Which placement this row is: the same clip used twice is two of them,
+		// and the frames must be the ones this use shows.
+		guard let placed = resolved?.clips.first(where: { $0.entry == path }) else { return strip }
+		strip.length = placed.duration + entry.trim.head + entry.trim.tail
+
+		// A hair inside each end, because a frame exactly on a cut is the one
+		// nobody can tell apart from its neighbour.
+		func show(_ head: Double, _ tail: Double) {
+			let generation = self.generation
+			let start = placed.start + (head - entry.trim.head) + 0.04
+			let end = placed.end - (tail - entry.trim.tail) - 0.04
+			poster?(start) { [weak self, weak strip] image in
+				guard let self, self.generation == generation else { return }
+				strip?.head = image
+			}
+			poster?(max(start, end)) { [weak self, weak strip] image in
+				guard let self, self.generation == generation else { return }
+				strip?.tail = image
+			}
+		}
+		show(entry.trim.head, entry.trim.tail)
+
+		strip.onScrub = { [weak self] head, tail in
+			// While the drag is running the project has not changed, so the
+			// frames come from where those ends *would* be.
+			guard let self else { return }
+			let now = CACurrentMediaTime()
+			guard now - self.lastScrub > 0.1 else { return }
+			self.lastScrub = now
+			show(head, tail)
+		}
+		strip.onTrim = { [weak self] head, tail in
+			self?.replace(path, TimelineEntry(
+				clip: reference, transition: entry.transition, label: entry.label,
+				trim: (head, tail)))
+		}
+		return strip
 	}
 
 	private func setSpan(_ index: Int, _ position: Int, _ span: Overlay.Span) {
@@ -1273,6 +1319,46 @@ public final class PropertiesPanel: NSView {
 		box.target = sink
 		box.action = #selector(Sink.fire(_:))
 		return box
+	}
+
+	/// What an overlay hangs on, shown whole and changed in a dialog.
+	///
+	/// It was a combo box, which had two faults that came from the same place:
+	/// it showed `clip-4` — the short form the file writes — so with several
+	/// takes open there was no telling which `clip-4` it meant, and its menu
+	/// listed the clips and the sections but not the placements somebody had
+	/// named with `as:`, which are exactly the things a second use of one shot
+	/// needs to point at. Both are the picker's problem now; this is the button
+	/// that opens it, showing take and clip whatever the file says.
+	private func endpoint(_ mark: Overlay.Span.Endpoint,
+	                      onPick: @escaping (String) -> Void) -> NSButton {
+		let catalogue = EndpointCatalogue(vocabulary)
+		let button = NSButton()
+		let kind: Theme.Kind
+		if case .group = mark { kind = .section } else { kind = .clip }
+		button.image = Theme.symbol(kind, size: 11)
+		button.imagePosition = .imageLeading
+		button.bezelStyle = .rounded
+		button.controlSize = .small
+		button.attributedTitle = NSAttributedString(
+			string: " " + catalogue.path(for: mark) + "…",
+			attributes: [
+				.font: Theme.mono,
+				// A name that is not in the project is said so in red rather
+				// than shown as if it were fine: a renamed slug is the
+				// commonest thing to go wrong with a `when:`.
+				.foregroundColor: catalogue.knows(mark) ? Theme.text : Theme.playhead,
+			])
+		button.lineBreakMode = .byTruncatingHead
+		let sink = Sink { [weak button] _ in
+			guard let button else { return }
+			EndpointPicker.present(over: button, catalogue: catalogue,
+			                       current: mark.description, onChoose: onPick)
+		}
+		sinks.append(sink)
+		button.target = sink
+		button.action = #selector(Sink.fire(_:))
+		return squeezable(button)
 	}
 
 	private func pop(_ titles: [String], selected: Int,

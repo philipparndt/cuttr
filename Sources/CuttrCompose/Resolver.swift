@@ -69,6 +69,12 @@ public struct ResolvedClip: Sendable {
 	/// uses it, without anybody re-exporting anything.
 	public let audioOffset: Double
 	/// Where this clip sits in the finished programme.
+	/// Which timeline entry put this clip here.
+	///
+	/// A path rather than a name, because that is what the panel has when
+	/// somebody selects a row — and it is the only way to tell one placement of
+	/// a clip from another when the same clip is used twice.
+	public var entry: [Int] = []
 	public let start: Double
 	/// How long this clip overlaps the one before it — a dissolve, in seconds,
 	/// nought for a cut. The programme's clock already has it: the clip starts
@@ -102,6 +108,12 @@ public struct ResolvedOverlay: Sendable {
 	/// Which of that overlay's appearances — a caption on twice is two of
 	/// these, and a drag on the second bar moves the second one.
 	public let appearance: Int
+	/// Which timeline entry put this clip here.
+	///
+	/// A path rather than a name, because that is what the panel has when
+	/// somebody selects a row — and it is the only way to tell one placement of
+	/// a clip from another when the same clip is used twice.
+	public var entry: [Int] = []
 	public let start: Double
 	/// How long this clip overlaps the one before it — a dissolve, in seconds,
 	/// nought for a cut. The programme's clock already has it: the clip starts
@@ -118,6 +130,12 @@ public struct ResolvedOverlay: Sendable {
 /// A named section of the programme, once its contents are laid out.
 public struct ResolvedGroup: Sendable, Equatable {
 	public let name: String
+	/// Which timeline entry put this clip here.
+	///
+	/// A path rather than a name, because that is what the panel has when
+	/// somebody selects a row — and it is the only way to tell one placement of
+	/// a clip from another when the same clip is used twice.
+	public var entry: [Int] = []
 	public let start: Double
 	/// How long this clip overlaps the one before it — a dissolve, in seconds,
 	/// nought for a cut. The programme's clock already has it: the clip starts
@@ -225,12 +243,13 @@ public enum Resolver {
 		/// comes out of it, whatever that turns out to be.
 		var pending = 0.0
 
-		func lay(out entries: [TimelineEntry], depth: Int = 0) throws {
-			for entry in entries {
+		func lay(out entries: [TimelineEntry], depth: Int = 0, at prefix: [Int] = []) throws {
+			for (position, entry) in entries.enumerated() {
+				let path = prefix + [position]
 				if entry.transition > 0 { pending = entry.transition }
 				if case .group(let name, let inner) = entry.source {
 					let start = cursor
-					try lay(out: inner, depth: depth + 1)
+					try lay(out: inner, depth: depth + 1, at: path)
 					guard cursor > start else { throw ResolveError.emptyGroup(name) }
 					// A name used twice extends the first one rather than
 					// replacing it: two `@interview` sections are one section
@@ -299,6 +318,7 @@ public enum Resolver {
 						videoURL: video,
 						audioURL: audio,
 						audioOffset: entry.take.audio?.offset ?? 0,
+						entry: path,
 						start: cursor,
 						transition: overlap))
 					cursor += clip.duration

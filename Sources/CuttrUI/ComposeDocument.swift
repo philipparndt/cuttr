@@ -182,6 +182,11 @@ public final class ComposeDocument {
 		public var tags: [String] = []
 		public var anchors: [String] = []
 		public var groups: [String] = []
+		/// The placements somebody named with `as:`. A section of one clip as
+		/// far as everything downstream is concerned — but kept apart here,
+		/// because in a list of things to hang an overlay on it matters whether
+		/// a name means a stretch of programme or one shot in it.
+		public var labels: [String] = []
 		/// Every clip with what it is, take by take. The flat lists above are
 		/// what a combo box offers; this is what a library shows.
 		public var items: [Item] = []
@@ -223,6 +228,13 @@ public final class ComposeDocument {
 				return [name] + names(inner)
 			}
 		}
+		func labels(_ entries: [TimelineEntry]) -> [String] {
+			entries.flatMap { entry -> [String] in
+				var found = entry.label.map { [$0] } ?? []
+				if case .group(_, let inner) = entry.source { found += labels(inner) }
+				return found
+			}
+		}
 		var items: [Vocabulary.Item] = []
 		var takeNames: [String] = []
 		var anchorTakes: [String: String] = [:]
@@ -252,6 +264,7 @@ public final class ComposeDocument {
 		found.tags = tags.sorted()
 		found.anchors = anchors.sorted()
 		found.groups = Array(Set(names(project.timeline))).sorted()
+		found.labels = Array(Set(labels(project.timeline))).sorted()
 		return found
 	}
 

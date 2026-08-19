@@ -31,6 +31,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// Which of the three is showing.
 	public enum Mode: Int { case edit, text, preview }
 	private var mode: Mode = .edit
+	/// Whether the window is showing the picture and nothing else.
+	private var presenting = false
 
 	/// Opening a take is the application's business, not this window's: it may
 	/// already be open in another tab.
@@ -103,6 +105,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		bar.onRender = { [weak self] in self?.render(nil) }
 		bar.onReload = { [weak self] in self?.composeDocument.reload() }
 		bar.onMode = { [weak self] index in self?.show(Mode(rawValue: index) ?? .edit) }
+		bar.onFullScreen = { [weak self] in self?.toggleFullScreenPreview(nil) }
 		bar.onAnchors = { [weak self] shown in
 			// The markers are for placing an overlay against a face, and once it
 			// is placed they are in the way of seeing the thing they placed.
@@ -505,6 +508,28 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	@objc public func showEditor(_ sender: Any?) { show(.edit) }
 	@objc public func showText(_ sender: Any?) { show(.text) }
 	@objc public func showPreview(_ sender: Any?) { show(.preview) }
+
+	/// The picture, and nothing else.
+	///
+	/// Not the window's own full screen, which would show the bar and the
+	/// programme strip at the size of a wall. Watching is a different job from
+	/// editing: the furniture goes, the picture takes the screen, and escape or
+	/// the same key brings it back.
+	@objc public func toggleFullScreenPreview(_ sender: Any?) {
+		guard let window else { return }
+		presenting.toggle()
+		if presenting { show(.preview) }
+		bar.isHidden = presenting
+		strip.isHidden = presenting
+		window.toggleFullScreen(nil)
+	}
+
+	public func windowDidExitFullScreen(_ notification: Notification) {
+		guard presenting else { return }
+		presenting = false
+		bar.isHidden = false
+		strip.isHidden = false
+	}
 
 	/// The file as it stands, for the text view.
 	private var sourceText: String {

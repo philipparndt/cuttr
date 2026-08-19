@@ -182,3 +182,43 @@ import Testing
 		#expect(button?.isHidden == true)
 	}
 }
+
+/// The file fragment is a teaching pane, not a working one.
+@Suite @MainActor struct WritesPaneTests {
+
+	@Test func itStartsFoldedAndOpensWhenAsked() {
+		_ = NSApplication.shared
+		let inspector = ProjectInspector()
+		inspector.reload(Project(timeline: [TimelineEntry(clip: ClipReference("intro"))]),
+		                 vocabulary: ComposeDocument.Vocabulary())
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = inspector
+		inspector.layoutSubtreeIfNeeded()
+
+		func text(in view: NSView) -> NSTextView? {
+			for subview in view.subviews {
+				if let found = subview as? NSTextView { return found }
+				if let found = text(in: subview) { return found }
+			}
+			return nil
+		}
+		func button(in view: NSView) -> NSButton? {
+			for subview in view.subviews {
+				if let found = subview as? NSButton,
+				   found.attributedTitle.string.contains("WHAT THIS WRITES") { return found }
+				if let found = button(in: subview) { return found }
+			}
+			return nil
+		}
+
+		let fragment = text(in: inspector)
+		#expect(fragment != nil)
+		let folded = fragment?.enclosingScrollView?.frame.height ?? 0
+		#expect(folded < 4, "the fragment pane is open to begin with: \(folded)")
+
+		button(in: inspector)?.performClick(nil)
+		inspector.layoutSubtreeIfNeeded()
+		#expect((fragment?.enclosingScrollView?.frame.height ?? 0) > 100)
+	}
+}
