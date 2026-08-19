@@ -453,3 +453,48 @@ import Testing
 		#expect(throws: (any Error).self) { try ProjectReader.read(text) }
 	}
 }
+
+/// Film mode, in the file.
+@Suite struct FilmFileTests {
+
+	@Test func itRoundTripsAndOnlySaysWhatIsNotUsual() throws {
+		var project = Project(timeline: [TimelineEntry(clip: ClipReference("intro"))])
+		project.overlays = [
+			Overlay(kind: .film(Film()), span: .clips(from: ClipReference("intro"),
+			                                          to: ClipReference("intro"))),
+			Overlay(kind: .film(Film(ratio: Film.Ratio(2.39, 1), tint: .noir,
+			                         strength: 1, grain: 0.8, vignette: 0)),
+			        span: .times(from: 2, to: 6),
+			        arrival: .fade(over: 1), departure: .fade(over: 1)),
+		]
+		let text = ProjectWriter.write(project)
+		// The stock is the key, and a film left as it comes says nothing else.
+		#expect(text.contains("- film:    warm"))
+		#expect(text.contains("- film:    noir"))
+		#expect(text.contains("ratio:   \"2.39:1\"") || text.contains("ratio:   2.39:1"))
+
+		let back = try ProjectReader.read(text)
+		#expect(back.overlays.count == 2)
+		#expect(back.overlays[0].kind == .film(Film()))
+		guard case .film(let second) = back.overlays[1].kind else {
+			Issue.record("the second overlay came back as something else")
+			return
+		}
+		#expect(second.tint == .noir)
+		#expect(second.ratio == Film.Ratio(2.39, 1))
+		#expect(second.grain == 0.8)
+		#expect(second.vignette == 0)
+		// And saving what was read changes nothing.
+		#expect(ProjectWriter.write(back) == text)
+	}
+
+	@Test func aRatioIsWrittenTheWayItWasMeant() {
+		#expect(Film.Ratio("16:9")?.written == "16:9")
+		#expect(Film.Ratio("2.39:1")?.written == "2.39:1")
+		// A bare number is that against one, which is how somebody says 2.39.
+		#expect(Film.Ratio("1.85")?.written == "1.85:1")
+		#expect(Film.Ratio("nonsense") == nil)
+		#expect(Film.Ratio("0:9") == nil)
+		#expect(abs((Film.Ratio("16:9")?.value ?? 0) - 16.0 / 9) < 0.0001)
+	}
+}

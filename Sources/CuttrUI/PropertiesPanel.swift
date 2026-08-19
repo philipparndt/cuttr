@@ -452,20 +452,31 @@ public final class PropertiesPanel: NSView {
 		// An effect and a scene have no position of their own, so there is
 		// nothing to drag them to: their parts carry their own.
 		switch overlay.kind {
-		case .effect, .scene: break
+		case .effect, .scene, .film: break
 		default: full(placement(index, overlay))
 		}
 
 		section("what it is")
-		let kinds = ["text", "spinner", "effect", "scene"]
+		let kinds = ["text", "spinner", "effect", "scene", "film"]
 		let current: Int
 		switch overlay.kind {
 		case .text: current = 0
 		case .spinner: current = 1
 		case .effect: current = 2
 		case .scene: current = 3
+		case .film: current = 4
 		}
 		let firstScene = project.scenes.keys.sorted().first ?? "intro"
+		// The shape a new film overlay closes to.
+		//
+		// Bars only appear where the programme is taller than what is asked
+		// for, so offering 16:9 to a programme that already is 16:9 would be
+		// offering nothing happening. A programme wider than that gets the
+		// cinema shape; a taller one — anything cut for a phone — gets 16:9,
+		// which is what "it goes to film" looks like there.
+		let output = project.output.size
+		let firstRatio = output.height > 0 && output.width / output.height >= 16.0 / 9
+			? Film.Ratio(2.39, 1) : Film.Ratio(16, 9)
 		field("kind", [pop(kinds, selected: current) { [weak self] pick in
 			self?.editOverlay(index) { overlay in
 				switch (pick, overlay.kind) {
@@ -484,12 +495,55 @@ public final class PropertiesPanel: NSView {
 					overlay.departure = .fall(over: 1.5)
 				case (3, _):
 					overlay.kind = .scene(firstScene, with: [:])
+				case (4, _):
+					// The bars have to close on something narrower than the
+					// programme or nothing happens, so the first choice is made
+					// against what this programme actually is.
+					overlay.kind = .film(Film(ratio: firstRatio))
+					// It goes *to* film and comes back, which is a fade at each
+					// end and is the whole point of the effect.
+					overlay.arrival = .fade(over: 1)
+					overlay.departure = .fade(over: 1)
 				default: break
 				}
 			}
 		}])
 
 		switch overlay.kind {
+		case .film(let film):
+			func change(_ edit: @escaping (inout Film) -> Void) {
+				self.editOverlay(index) { overlay in
+					guard case .film(var film) = overlay.kind else { return }
+					edit(&film)
+					overlay.kind = .film(film)
+				}
+			}
+			let ratios = Film.Ratio.offered
+			let known = ratios.firstIndex { $0 == film.ratio }
+			field("ratio", [combo(film.ratio.written, values: ratios.map { $0.written }, width: 120) {
+				[weak self] value in
+				guard let ratio = Film.Ratio(value.trimmingCharacters(in: .whitespaces)) else {
+					self?.rebuild()   // unreadable: put it back
+					return
+				}
+				change { $0.ratio = ratio }
+			}], note: known == nil
+				? "w:h — the bars close in to this shape"
+				: "the bars close in to this shape, and open again on the way out")
+			field("film", [pop(Film.Tint.allCases.map { $0.rawValue },
+			                   selected: Film.Tint.allCases.firstIndex(of: film.tint) ?? 0) { pick in
+				change { $0.tint = Film.Tint.allCases[pick] }
+			}], note: "the stock: what the colour goes to")
+			field("strength", [number(film.strength, width: 72) { value in
+				change { $0.strength = max(0, min(1, value)) }
+			}], note: "how much of it, 0 to 1 — the grade is mixed in, not switched on")
+			field("grain", [number(film.grain, width: 72) { value in
+				change { $0.grain = max(0, min(1, value)) }
+			}], note: "0 to 1, and it moves — grain that sits still is dirt on the lens")
+			field("vignette", [number(film.vignette, width: 72) { value in
+				change { $0.vignette = max(0, min(1, value)) }
+			}], note: "how far the corners go down")
+
 		case .scene(let name, let parameters):
 			let names = project.scenes.keys.sorted()
 			field("scene", [combo(name, values: names, width: 210) { [weak self] value in
@@ -735,6 +789,8 @@ public final class PropertiesPanel: NSView {
 			switch overlay.kind {
 			case .effect:
 				saysControls.append(label("an effect says nothing"))
+			case .film:
+				saysControls.append(label("film mode says nothing"))
 			case .scene:
 				saysControls.append(label("a scene says what its parameters say"))
 			case .text(let content, _):
@@ -1136,8 +1192,8 @@ public final class PropertiesPanel: NSView {
 		preview.anchorName = overlay.anchor
 
 		switch overlay.kind {
-		case .effect, .scene:
-			// Never reached: neither has a placement picture at all.
+		case .effect, .scene, .film:
+			// Never reached: none of them has a placement picture at all.
 			preview.content = .caption("", TextStyle.caption)
 		case .text(let content, let style):
 			preview.content = .caption(content, project.style(named: style))

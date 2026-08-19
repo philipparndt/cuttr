@@ -311,6 +311,9 @@ if describe {
 			what = "scene \(name)" + (parameters.isEmpty ? "" : " \(parameters)")
 		case .effect(let effect):
 			what = "effect \(effect.style.rawValue) ×\(effect.count) seed \(effect.seed)"
+		case .film(let film):
+			what = "film \(film.tint.rawValue) \(film.ratio.written)"
+				+ " grain \(film.grain) vignette \(film.vignette)"
 		case .text(let text, let style):
 			what = "text \(text.debugDescription) style \(style ?? "lower-third")"
 		case .spinner(let spinner):

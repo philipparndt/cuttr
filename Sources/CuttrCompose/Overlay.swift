@@ -20,6 +20,9 @@ public struct Overlay: Sendable, Equatable {
 		/// A scene the project defines: parts moved by keyframes, with the
 		/// parameters this use of it fills in.
 		case scene(String, with: [String: String])
+		/// The picture itself, taken to film for a while: bars, a stock, grain.
+		/// The one kind that goes *under* everything else rather than over it.
+		case film(Film)
 	}
 
 	public var kind: Kind
@@ -77,9 +80,10 @@ public struct Overlay: Sendable, Equatable {
 		case .spinner(var spinner):
 			if let words = appearance.words { spinner.words = words }
 			out.kind = .spinner(spinner)
-		case .effect, .scene:
-			// Neither says anything of its own at an appearance: an effect is
-			// simply on twice, and a scene says what its parameters say.
+		case .effect, .scene, .film:
+			// None of them says anything of its own at an appearance: an effect
+			// is simply on twice, a scene says what its parameters say, and
+			// film mode says nothing at all.
 			break
 		}
 		return out

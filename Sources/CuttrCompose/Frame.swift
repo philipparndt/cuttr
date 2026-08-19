@@ -16,6 +16,17 @@ enum Frame {
 		work: ProgrammeCompositor.Work
 	) -> CIImage {
 		var image = picture
+
+		// Film mode first, because it is the picture rather than something over
+		// it: the bars are the edge of the frame, the grain is in the emulsion,
+		// and a caption laid over the top afterwards is a caption on the
+		// programme rather than one that has been developed with it.
+		for shown in work.overlays where time >= shown.start && time <= shown.end {
+			guard case .film(let film) = shown.overlay.kind else { continue }
+			image = Filming.applied(film, to: image, intensity: fade(shown, at: time),
+			                        size: size, time: time)
+		}
+
 		let frame = image
 
 		// Anything that goes behind somebody: painted in, then the person over
@@ -73,7 +84,10 @@ enum Frame {
 	///
 	/// Only a fade fades. An effect cannot slide — it is the whole frame — so
 	/// anything else simply starts, which for confetti means the first pieces
-	/// arriving over the top edge.
+	/// arriving over the top edge. For film mode this number is not an opacity
+	/// but how far into the mode the programme is: the bars close, the colour
+	/// arrives and the grain comes up together, which is what makes going to
+	/// film a move rather than a switch.
 	static func fade(_ shown: ResolvedOverlay, at time: Double) -> Double {
 		let span = max(shown.duration, 0.0001)
 		let arrive = min(shown.overlay.arrival.duration, span / 2)

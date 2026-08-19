@@ -166,6 +166,7 @@ public final class ProgrammeStrip: NSView {
 			case .text(let text, _): label = text
 			case .spinner(let spinner): label = spinner.words.first?.text ?? "spinner"
 			case .effect(let effect): label = effect.style.rawValue
+			case .film(let film): label = "film · \(film.tint.rawValue) \(film.ratio.written)"
 			case .scene(let name, _): label = name
 			}
 			let attributes: [NSAttributedString.Key: Any] = [.font: Theme.monoSmall, .foregroundColor: Theme.text]

@@ -71,7 +71,7 @@ public enum Theme {
 	/// properties. Colour is how somebody learns what `#` and `@` mean without
 	/// being told.
 	public enum Kind {
-		case clip, query, list, section, text, spinner, effect, scene, anchor, tag, take
+		case clip, query, list, section, text, spinner, effect, scene, film, anchor, tag, take
 	}
 
 	public static func color(_ kind: Kind) -> NSColor {
@@ -83,6 +83,7 @@ public enum Theme {
 		case .text: return NSColor(calibratedWhite: 0.85, alpha: 1)
 		case .spinner: return base(.rose)
 		case .effect: return base(.violet)
+		case .film: return base(.amber)
 		case .scene: return base(.blue)
 		case .anchor: return base(.teal)
 		}
@@ -109,6 +110,7 @@ public enum Theme {
 		case .text: name = "textformat"
 		case .spinner: name = "circle.dotted"
 		case .effect: name = "sparkles"
+		case .film: name = "camera.filters"
 		case .scene: name = "rectangle.stack"
 		case .anchor: name = "scope"
 		}

@@ -436,6 +436,35 @@ Round trip, on real footage: target −20 LUFS in, render out, measure the rende
 Known limit: a recording with several audio tracks is measured and rendered from
 the first one only.
 
+### Film mode
+
+An overlay that is the picture rather than something over it: the bars close in
+to a wider shape, the colour goes to a stock, the grain arrives, and all three
+move together with the fade at each end. A shot can go to film and come back
+inside its own length, and nothing else in the project has to know.
+
+```yaml
+overlays:
+  - film:     warm       # none · warm · cool · sepia · noir · bleach
+    ratio:    "2.39:1"
+    grain:    0.5
+    vignette: 0.35
+    from:     the-build
+    to:       the-build
+    in:       {fade: true, over: 1}
+    out:      {fade: true, over: 1}
+```
+
+`ratio` is the shape the bars close to — `2.39:1` over a 16:9 programme, or
+`16:9` over one cut for a phone, which is where it reads most like the cinema.
+A shape the programme already is costs nothing and shows nothing. `strength`
+mixes the stock in rather than switching it on, so half is half way there.
+
+The grain moves from frame to frame; grain that sits still is dirt on the lens
+and the eye finds it in about two seconds. At the start and end of the fade
+nothing at all is applied — the frames on either side of a film sequence go
+through no filter, which is what keeps the rest of the cut exact.
+
 ### Naming clips after whoever is talking
 
 **An anchor is a person.** Rename a tracked face to `mia` and clips she speaks

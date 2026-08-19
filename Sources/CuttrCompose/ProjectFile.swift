@@ -206,6 +206,16 @@ public enum ProjectReader {
 					for (name, value) in given { parameters[name] = "\(value)" }
 				}
 				kind = .scene(scene, with: parameters)
+			} else if let stock = (m["film"] as? String).flatMap(nonEmpty) {
+				// `film: warm`, and the rest only if it is not the usual.
+				var film = Film()
+				film.tint = Film.Tint(rawValue: stock.lowercased()) ?? .warm
+				if let ratio = (m["ratio"] as? String).flatMap(Film.Ratio.init) { film.ratio = ratio }
+				else if let ratio = number(m["ratio"]) { film.ratio = Film.Ratio(ratio, 1) }
+				if let strength = number(m["strength"]) { film.strength = strength }
+				if let grain = number(m["grain"]) { film.grain = grain }
+				if let vignette = number(m["vignette"]) { film.vignette = vignette }
+				kind = .film(film)
 			} else if let named = (m["effect"] as? String).flatMap(nonEmpty) {
 				var effect = Effect(style: Effect.Style(rawValue: named.lowercased()) ?? .confetti)
 				if let finish = (m["finish"] as? String).flatMap({ Effect.Finish(rawValue: $0) }) {

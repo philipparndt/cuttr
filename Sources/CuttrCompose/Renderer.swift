@@ -186,7 +186,12 @@ public enum Renderer {
 		// Anything that goes behind somebody is painted into the frame, which
 		// is the filter pass's job — so there *is* something for it to do.
 		let painted = resolved.overlays.contains { $0.overlay.behind == .people }
-		if !graded, effects.isEmpty, !painted, !dissolves {
+		// Film mode is the picture, changed. Without this the programme would
+		// take the exact path — which is the one that does nothing at all.
+		let filmed = resolved.overlays.contains {
+			if case .film = $0.overlay.kind { return true } else { return false }
+		}
+		if !graded, effects.isEmpty, !painted, !dissolves, !filmed {
 			let plainComposition = AVMutableVideoComposition(propertiesOf: composition)
 			plainComposition.renderSize = size
 			plainComposition.frameDuration = CMTime(

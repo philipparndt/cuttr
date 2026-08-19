@@ -279,6 +279,16 @@ public enum ProjectWriter {
 						out += "    palette: ["
 							+ effect.palette.map { scalar($0.hex) }.joined(separator: ", ") + "]\n"
 					}
+				case .film(let film):
+					// The stock is the thing, so it is the key. Everything else
+					// is written only when it is not what a film overlay is
+					// without it.
+					let plain = Film()
+					out += "  - film:    \(film.tint.rawValue)\n"
+					if film.ratio != plain.ratio { out += "    ratio:   \(scalar(film.ratio.written))\n" }
+					if film.strength != plain.strength { out += "    strength: \(trim(film.strength))\n" }
+					if film.grain != plain.grain { out += "    grain:   \(trim(film.grain))\n" }
+					if film.vignette != plain.vignette { out += "    vignette: \(trim(film.vignette))\n" }
 				case .spinner(let spinner):
 					out += "  - spinner: \(spinner.style.rawValue)\n"
 					if spinner.size != Spinner().size { out += "    size:    \(trim(spinner.size))\n" }

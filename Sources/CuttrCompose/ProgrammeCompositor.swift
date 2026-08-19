@@ -38,8 +38,13 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 			if effects.contains(where: { time >= $0.overlay.start && time <= $0.overlay.end }) {
 				return true
 			}
-			return overlays.contains {
-				$0.overlay.behind == .people && time >= $0.start && time <= $0.end
+			return overlays.contains { shown in
+				guard time >= shown.start, time <= shown.end else { return false }
+				if shown.overlay.behind == .people { return true }
+				// Film mode changes the frame itself, so a frame it is on is a
+				// frame that cannot be handed back as it came.
+				if case .film = shown.overlay.kind { return true }
+				return false
 			}
 		}
 	}
