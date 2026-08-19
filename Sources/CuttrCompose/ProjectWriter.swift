@@ -289,6 +289,33 @@ public enum ProjectWriter {
 					if film.strength != plain.strength { out += "    strength: \(trim(film.strength))\n" }
 					if film.grain != plain.grain { out += "    grain:   \(trim(film.grain))\n" }
 					if film.vignette != plain.vignette { out += "    vignette: \(trim(film.vignette))\n" }
+				case .aberration(let aberration):
+					let plain = Aberration()
+					out += "  - aberration: \(aberration.kind.rawValue)\n"
+					if aberration.amount != plain.amount {
+						out += "    amount:  \(trim(aberration.amount))\n"
+					}
+					// Only the linear kind has one, and nought is straight to
+					// the right, so a radial aberration never writes it.
+					if aberration.kind == .linear, aberration.angle != plain.angle {
+						out += "    angle:   \(trim(aberration.angle))\n"
+					}
+				case .tape(let tape):
+					// The condition is the thing, so it is the key, and each
+					// knob is written only where it is no longer what the
+					// condition means by it.
+					let plain = Tape(tape.condition)
+					out += "  - tape:    \(tape.condition.rawValue)\n"
+					if tape.jitter != plain.jitter { out += "    jitter:  \(trim(tape.jitter))\n" }
+					if tape.band != plain.band { out += "    band:    \(trim(tape.band))\n" }
+					if tape.chroma != plain.chroma { out += "    chroma:  \(trim(tape.chroma))\n" }
+					if tape.scanlines != plain.scanlines {
+						out += "    scanlines: \(trim(tape.scanlines))\n"
+					}
+					if tape.dropouts != plain.dropouts {
+						out += "    dropouts: \(trim(tape.dropouts))\n"
+					}
+					if tape.seed != plain.seed { out += "    seed:    \(tape.seed)\n" }
 				case .spinner(let spinner):
 					out += "  - spinner: \(spinner.style.rawValue)\n"
 					if spinner.size != Spinner().size { out += "    size:    \(trim(spinner.size))\n" }

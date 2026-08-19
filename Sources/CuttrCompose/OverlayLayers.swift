@@ -44,12 +44,16 @@ public enum OverlayLayers {
 	///
 	/// Effects are not: they are geometry with light on it, rendered into the
 	/// frame itself, and a layer tree has nothing to say about them.
-	static func isLayered(_ overlay: Overlay) -> Bool {
+	/// Public because the panel has to be able to say which of the two passes a
+	/// row is drawn in — the ordering in `overlays:` decides the frame pass,
+	/// and a layer is always over all of it.
+	public static func isLayered(_ overlay: Overlay) -> Bool {
 		if case .effect = overlay.kind { return false }
-		// Film mode is the picture, not something laid over it: it is applied
-		// in the frame pass with the effects, and a second pass that drew it
-		// as a layer would letterbox the letterbox.
-		if case .film = overlay.kind { return false }
+		// Film mode, the aberration and the tape *are* the picture rather than
+		// something laid over it: they are applied in the frame pass with the
+		// effects, and a second pass that drew film mode as a layer would
+		// letterbox the letterbox.
+		if overlay.kind.changesTheFrame { return false }
 		// Anything that goes behind somebody is drawn into the frame instead:
 		// the mask that knows where they are lives in the pass that has the
 		// pixels, and a layer laid over the finished frame is by definition in
@@ -101,7 +105,7 @@ public enum OverlayLayers {
 		case .text(let text, let styleName):
 			let style = project.style(named: styleName)
 			(content, contentSize) = textLayer(text, style: style, size: size)
-		case .effect, .film:
+		case .effect, .film, .aberration, .tape:
 			// Drawn into the frame, not over it. Nothing here.
 			return placer
 		case .scene(let name, let parameters):

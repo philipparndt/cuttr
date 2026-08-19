@@ -314,6 +314,13 @@ if describe {
 		case .film(let film):
 			what = "film \(film.tint.rawValue) \(film.ratio.written)"
 				+ " grain \(film.grain) vignette \(film.vignette)"
+		case .aberration(let aberration):
+			what = "aberration \(aberration.kind.rawValue) amount \(aberration.amount)"
+				+ (aberration.kind == .linear ? " angle \(aberration.angle)" : "")
+		case .tape(let tape):
+			what = "tape \(tape.condition.rawValue) jitter \(tape.jitter) band \(tape.band)"
+				+ " chroma \(tape.chroma) scanlines \(tape.scanlines)"
+				+ " dropouts \(tape.dropouts) seed \(tape.seed)"
 		case .text(let text, let style):
 			what = "text \(text.debugDescription) style \(style ?? "lower-third")"
 		case .spinner(let spinner):

@@ -21,8 +21,27 @@ public struct Overlay: Sendable, Equatable {
 		/// parameters this use of it fills in.
 		case scene(String, with: [String: String])
 		/// The picture itself, taken to film for a while: bars, a stock, grain.
-		/// The one kind that goes *under* everything else rather than over it.
 		case film(Film)
+		/// The lens giving up on one colour at a time.
+		case aberration(Aberration)
+		/// The picture played off a worn tape: tracking, noise, lines.
+		case tape(Tape)
+
+		/// Whether this kind *is* the frame rather than something laid over it.
+		///
+		/// Film mode, the aberration and the tape all take a picture and hand
+		/// back another picture, so where they come in the list matters to
+		/// everything after them: an aberration written before a film overlay
+		/// is a lens on the footage and leaves the bars clean, and the same one
+		/// written after it bends the bars too. ``Frame`` draws them in the
+		/// order the file lists them, and this is how it knows which ones those
+		/// are.
+		public var changesTheFrame: Bool {
+			switch self {
+			case .film, .aberration, .tape: return true
+			case .text, .spinner, .effect, .scene: return false
+			}
+		}
 	}
 
 	public var kind: Kind
@@ -80,10 +99,10 @@ public struct Overlay: Sendable, Equatable {
 		case .spinner(var spinner):
 			if let words = appearance.words { spinner.words = words }
 			out.kind = .spinner(spinner)
-		case .effect, .scene, .film:
+		case .effect, .scene, .film, .aberration, .tape:
 			// None of them says anything of its own at an appearance: an effect
 			// is simply on twice, a scene says what its parameters say, and
-			// film mode says nothing at all.
+			// the three that are the frame itself say nothing at all.
 			break
 		}
 		return out
