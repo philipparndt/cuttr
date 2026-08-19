@@ -25,6 +25,10 @@ public struct Project: Sendable, Equatable {
 	/// Named colour looks, referenced by a take's `look: {profile: …}`.
 	public var profiles: [String: Look]
 
+	/// Scenes this project defines: titles, plates, anything made of parts and
+	/// keyframes. Named, so an overlay can use one and fill in its parameters.
+	public var scenes: [String: Scene]
+
 	/// Named text looks. The built-in ones are merged under whatever the file
 	/// defines, so a project can override `lower-third` without redefining the
 	/// two it did not touch.
@@ -39,6 +43,7 @@ public struct Project: Sendable, Equatable {
 		overlays: [Overlay] = [],
 		styles: [String: TextStyle] = [:],
 		profiles: [String: Look] = [:],
+		scenes: [String: Scene] = [:],
 		unknownKeys: [String: Any] = [:]
 	) {
 		self.takes = takes
@@ -47,6 +52,7 @@ public struct Project: Sendable, Equatable {
 		self.overlays = overlays
 		self.styles = styles
 		self.profiles = profiles
+		self.scenes = scenes
 		self.unknown = UnknownProjectKeys(storage: unknownKeys)
 	}
 
@@ -58,6 +64,7 @@ public struct Project: Sendable, Equatable {
 	public static func == (a: Project, b: Project) -> Bool {
 		a.takes == b.takes && a.output == b.output && a.timeline == b.timeline
 			&& a.overlays == b.overlays && a.styles == b.styles && a.profiles == b.profiles
+			&& a.scenes == b.scenes
 	}
 
 	/// The style a name refers to, falling back through the built-ins.

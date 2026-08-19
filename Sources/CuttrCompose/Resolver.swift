@@ -117,6 +117,9 @@ public struct ResolvedGroup: Sendable, Equatable {
 /// A project with every reference followed and every time worked out.
 public struct ResolvedProject: Sendable {
 	public let project: Project
+	/// The folder the project file is in, for the things a scene may name —
+	/// a logo, a badge, a texture.
+	public var baseURL: URL = URL(fileURLWithPath: ".")
 	public let clips: [ResolvedClip]
 	public let overlays: [ResolvedOverlay]
 	public let groups: [ResolvedGroup]
@@ -421,7 +424,7 @@ public enum Resolver {
 		let resolvedAnchors = anchorsByName.keys.sorted().map {
 			(anchor: anchorsByName[$0]!, path: paths[$0])
 		}
-		return ResolvedProject(project: project, clips: clips, overlays: overlays,
+		return ResolvedProject(project: project, baseURL: baseURL, clips: clips, overlays: overlays,
 		                       groups: resolvedGroups, anchors: resolvedAnchors)
 	}
 }

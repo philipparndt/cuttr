@@ -363,17 +363,23 @@ public final class PropertiesPanel: NSView {
 	// MARK: - overlay
 
 	private func overlayForm(_ index: Int, _ overlay: Overlay) {
-		// An effect has no position, so there is nothing to drag it to.
-		if case .effect = overlay.kind {} else { full(placement(index, overlay)) }
+		// An effect and a scene have no position of their own, so there is
+		// nothing to drag them to: their parts carry their own.
+		switch overlay.kind {
+		case .effect, .scene: break
+		default: full(placement(index, overlay))
+		}
 
 		section("what it is")
-		let kinds = ["text", "spinner", "effect"]
+		let kinds = ["text", "spinner", "effect", "scene"]
 		let current: Int
 		switch overlay.kind {
 		case .text: current = 0
 		case .spinner: current = 1
 		case .effect: current = 2
+		case .scene: current = 3
 		}
+		let firstScene = project.scenes.keys.sorted().first ?? "intro"
 		field("kind", [pop(kinds, selected: current) { [weak self] pick in
 			self?.editOverlay(index) { overlay in
 				switch (pick, overlay.kind) {
@@ -385,17 +391,51 @@ public final class PropertiesPanel: NSView {
 					overlay.kind = .spinner(Spinner(words: text.isEmpty ? [] : [SpinnerWord(text)]))
 				case (1, .effect):
 					overlay.kind = .spinner(Spinner())
-				case (2, .text), (2, .spinner):
+				case (2, .text), (2, .spinner), (2, .scene):
 					overlay.kind = .effect(Effect())
 					// It arrives by falling into the frame, not by fading up.
 					overlay.arrival = .cut
 					overlay.departure = .fall(over: 1.5)
+				case (3, _):
+					overlay.kind = .scene(firstScene, with: [:])
 				default: break
 				}
 			}
 		}])
 
 		switch overlay.kind {
+		case .scene(let name, let parameters):
+			let names = project.scenes.keys.sorted()
+			field("scene", [combo(name, values: names, width: 210) { [weak self] value in
+				self?.editOverlay(index) { $0.kind = .scene(Slug.make(from: value), with: parameters) }
+			}], note: names.isEmpty
+				? "no scenes yet — write one under `scenes:` in the text editor"
+				: "parts moved by keyframes, defined once and used with different words")
+			// The parameters this use fills in. One row each, and a blank one to
+			// add another, so a scene's `{{title}}` is filled in without leaving
+			// the panel.
+			for name in parameters.keys.sorted() {
+				field(name, [text(parameters[name] ?? "", width: 210, placeholder: "") {
+					[weak self] value in
+					self?.editOverlay(index) { overlay in
+						guard case .scene(let scene, var given) = overlay.kind else { return }
+						given[name] = value
+						overlay.kind = .scene(scene, with: given)
+					}
+				}])
+			}
+			let newName = NSTextField(string: "")
+			field("with", [text("", width: 120, placeholder: "name") { [weak self] value in
+				let key = value.trimmingCharacters(in: .whitespaces)
+				guard !key.isEmpty else { return }
+				self?.editOverlay(index) { overlay in
+					guard case .scene(let scene, var given) = overlay.kind else { return }
+					given[key] = ""
+					overlay.kind = .scene(scene, with: given)
+				}
+			}], note: "a parameter the scene asks for: `{{name}}` in one of its parts")
+			_ = newName
+
 		case .effect(let effect):
 			field("effect", [pop(Effect.Style.allCases.map(\.rawValue),
 			                     selected: Effect.Style.allCases.firstIndex(of: effect.style) ?? 0) {
@@ -588,6 +628,8 @@ public final class PropertiesPanel: NSView {
 			switch overlay.kind {
 			case .effect:
 				saysControls.append(label("an effect says nothing"))
+			case .scene:
+				saysControls.append(label("a scene says what its parameters say"))
 			case .text(let content, _):
 				saysControls.append(text(appearance.text ?? "", width: 220,
 				                         placeholder: content.isEmpty ? "text" : content) {
@@ -918,8 +960,8 @@ public final class PropertiesPanel: NSView {
 		preview.anchorName = overlay.anchor
 
 		switch overlay.kind {
-		case .effect:
-			// Never reached: an effect has no placement picture at all.
+		case .effect, .scene:
+			// Never reached: neither has a placement picture at all.
 			preview.content = .caption("", TextStyle.caption)
 		case .text(let content, let style):
 			preview.content = .caption(content, project.style(named: style))

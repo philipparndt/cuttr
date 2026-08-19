@@ -105,6 +105,16 @@ public enum ProjectReader {
 			}
 		}
 
+		// Scenes: parts, and the keys that move them.
+		var scenes: [String: Scene] = [:]
+		if let m = root.removeValue(forKey: "scenes").flatMap(mapping) {
+			for (name, value) in m {
+				guard let fields = mapping(value),
+				      let parts = fields["parts"] as? [Any] else { continue }
+				scenes[Slug.make(from: name)] = Scene(parts: parts.compactMap(readPart))
+			}
+		}
+
 		// Anchors used to be here. They live in the take now — where somebody's
 		// eye is in a recording is a fact about the recording — so an `anchors:`
 		// block in a project is read and kept as an unknown key rather than
@@ -177,6 +187,12 @@ public enum ProjectReader {
 					}
 				}
 				kind = .spinner(spinner)
+			} else if let scene = (m["scene"] as? String).flatMap(nonEmpty) {
+				var parameters: [String: String] = [:]
+				if let given = mapping(m["with"]) {
+					for (name, value) in given { parameters[name] = "\(value)" }
+				}
+				kind = .scene(scene, with: parameters)
 			} else if let named = (m["effect"] as? String).flatMap(nonEmpty) {
 				var effect = Effect(style: Effect.Style(rawValue: named.lowercased()) ?? .confetti)
 				if let finish = (m["finish"] as? String).flatMap({ Effect.Finish(rawValue: $0) }) {
@@ -268,7 +284,7 @@ public enum ProjectReader {
 
 		return Project(takes: takes, output: output, timeline: timeline,
 		               overlays: overlays, styles: styles, profiles: profiles,
-		               unknownKeys: root)
+		               scenes: scenes, unknownKeys: root)
 	}
 
 	/// One rule for "what does this string mean", shared with the panel.
@@ -300,6 +316,34 @@ public enum ProjectReader {
 	}
 
 	/// `{slide: left, over: 0.4}`, `{fade: 0.3}`, or `cut`.
+	/// One part of a scene: what it is, and where it is at each of its keys.
+	private static func readPart(_ value: Any) -> Scene.Part? {
+		guard let fields = mapping(value) else { return nil }
+		let content: Scene.Part.Content
+		if let text = fields["text"] as? String {
+			content = .text(text, style: (fields["style"] as? String).flatMap(nonEmpty))
+		} else if let fill = (fields["shape"] as? String).flatMap(RGBA.init(hex:)) {
+			content = .shape(fill: fill, corner: number(fields["corner"]) ?? 0)
+		} else if let file = (fields["image"] as? String).flatMap(nonEmpty) {
+			content = .image(file)
+		} else {
+			return nil
+		}
+
+		let keys = (fields["keys"] as? [Any] ?? []).compactMap { entry -> Scene.Key? in
+			guard let key = mapping(entry) else { return nil }
+			return Scene.Key(
+				t: number(key["t"]) ?? 0,
+				x: number(key["x"]), y: number(key["y"]),
+				opacity: number(key["opacity"]), scale: number(key["scale"]),
+				rotation: number(key["rotation"]),
+				width: number(key["width"]), height: number(key["height"]),
+				ease: (key["ease"] as? String).flatMap(Scene.Ease.init(rawValue:)) ?? .inOut)
+		}
+		guard !keys.isEmpty else { return nil }
+		return Scene.Part(content: content, keys: keys)
+	}
+
 	private static func transition(_ value: Any?, key: String) throws -> Overlay.Transition? {
 		guard let value else { return nil }
 		if let text = value as? String {

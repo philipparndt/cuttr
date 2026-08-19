@@ -581,6 +581,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			case .effect(let effect):
 				kind = .effect
 				title = "\(effect.style.rawValue) ×\(effect.count)"
+			case .scene(let name, let parameters):
+				kind = .scene
+				title = parameters.isEmpty ? name
+					: "\(name) — \(parameters.values.sorted().joined(separator: ", "))"
 			case .text(let text, _):
 				kind = .text
 				title = "“\(text)”"

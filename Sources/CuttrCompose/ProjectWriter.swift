@@ -11,6 +11,46 @@ import Yams
 /// entries, quoting only where a bare value would be read as something else.
 public enum ProjectWriter {
 
+	/// The scenes a project defines: parts, and the keys that move them.
+	///
+	/// Written in the order the parts are in, and each key on one line, because
+	/// a keyframe is a row of numbers and a row of numbers belongs on a line.
+	private static func scenes(_ scenes: [String: Scene]) -> String {
+		guard !scenes.isEmpty else { return "" }
+		var out = "\nscenes:\n"
+		for name in scenes.keys.sorted() {
+			guard let scene = scenes[name] else { continue }
+			out += "  \(name):\n"
+			out += "    parts:\n"
+			for part in scene.parts {
+				switch part.content {
+				case .text(let text, let style):
+					out += "      - text:  \(scalar(text))\n"
+					if let style { out += "        style: \(scalar(style))\n" }
+				case .shape(let fill, let corner):
+					out += "      - shape: \(scalar(fill.hex))\n"
+					if corner != 0 { out += "        corner: \(trim(corner))\n" }
+				case .image(let file):
+					out += "      - image: \(scalar(file))\n"
+				}
+				out += "        keys:\n"
+				for key in part.keys {
+					var fields = ["t: \(trim(key.t))"]
+					if let x = key.x { fields.append("x: \(trim(x))") }
+					if let y = key.y { fields.append("y: \(trim(y))") }
+					if let opacity = key.opacity { fields.append("opacity: \(trim(opacity))") }
+					if let scale = key.scale { fields.append("scale: \(trim(scale))") }
+					if let rotation = key.rotation { fields.append("rotation: \(trim(rotation))") }
+					if let width = key.width { fields.append("width: \(trim(width))") }
+					if let height = key.height { fields.append("height: \(trim(height))") }
+					if key.ease != .inOut { fields.append("ease: \(key.ease.rawValue)") }
+					out += "          - {" + fields.joined(separator: ", ") + "}\n"
+				}
+			}
+		}
+		return out
+	}
+
 	public static func write(_ project: Project) -> String {
 		var out = "# cuttr project — the assembly. Clips are referenced by slug.\n"
 		out += "cuttr-project: \(ProjectReader.formatVersion)\n\n"
@@ -76,6 +116,8 @@ public enum ProjectWriter {
 			out += "\noverlays:\n"
 			out += overlays(project.overlays)
 		}
+
+		out += scenes(project.scenes)
 
 		if !project.unknownKeys.isEmpty {
 			out += "\n"
@@ -181,6 +223,12 @@ public enum ProjectWriter {
 				case .text(let text, let style):
 					out += "  - text:   \(scalar(text))\n"
 					if let style { out += "    style:  \(scalar(style))\n" }
+				case .scene(let name, let parameters):
+					out += "  - scene:   \(scalar(name))\n"
+					if !parameters.isEmpty {
+						let pairs = parameters.keys.sorted().map { "\($0): \(scalar(parameters[$0] ?? ""))" }
+						out += "    with:    {" + pairs.joined(separator: ", ") + "}\n"
+					}
 				case .effect(let effect):
 					out += "  - effect:  \(effect.style.rawValue)\n"
 					if effect.finish != .matte { out += "    finish:  \(effect.finish.rawValue)\n" }

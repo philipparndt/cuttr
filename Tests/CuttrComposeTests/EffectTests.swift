@@ -35,7 +35,9 @@ import Testing
 		print("coverage at 0s:", atStart.covered, "1.5s:", soon.covered, "4s:", full.covered)
 		#expect(atStart.covered < 0.005, "the frame is already full at zero: \(atStart.covered)")
 		#expect(soon.covered > atStart.covered)
-		#expect(full.covered > 0.02, "it never fills: \(full.covered)")
+		// A fiftieth of the frame is a lot of confetti: the pieces are small,
+		// and the ones at the back of the cloud are smaller still.
+		#expect(full.covered > 0.01, "it never fills: \(full.covered)")
 	}
 }
 
@@ -78,5 +80,29 @@ import Testing
 		#expect(keptGoing > ranOut, "the cloud did not empty: \(keptGoing) then \(ranOut)")
 		#expect(showing(at: 2, spawningUntil: 3) == showing(at: 2, spawningUntil: .infinity),
 		        "it emptied before the cut-off")
+	}
+}
+
+/// Depth: what is further back is smaller, darker and slower.
+///
+/// A cloud of confetti all one size at all one speed reads as a sheet of
+/// stickers moving down the screen; the depth is what makes it a shower.
+@Suite struct EffectDepthTests {
+
+	@Test func theBackOfTheCloudIsSmallerAndSlower() throws {
+		let renderer = try #require(EffectRenderer(
+			Effect(style: .confetti, density: 1, seed: 2), size: CGSize(width: 320, height: 180)))
+		let sizes = renderer.depths
+		#expect(sizes.count > 20)
+
+		// Sorted by how far back they are: the near half is bigger than the far
+		// half, and falls further in the same time.
+		let sorted = sizes.sorted { $0.depth < $1.depth }
+		let near = sorted.prefix(sorted.count / 2)
+		let far = sorted.suffix(sorted.count / 2)
+		#expect(near.map(\.size).reduce(0, +) / Double(near.count)
+			> far.map(\.size).reduce(0, +) / Double(far.count))
+		#expect(near.map(\.fall).reduce(0, +) / Double(near.count)
+			> far.map(\.fall).reduce(0, +) / Double(far.count))
 	}
 }

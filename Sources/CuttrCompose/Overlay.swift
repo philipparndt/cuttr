@@ -17,6 +17,9 @@ public struct Overlay: Sendable, Equatable {
 		case spinner(Spinner)
 		/// Confetti, snow, sparks: the whole frame, for a moment.
 		case effect(Effect)
+		/// A scene the project defines: parts moved by keyframes, with the
+		/// parameters this use of it fills in.
+		case scene(String, with: [String: String])
 	}
 
 	public var kind: Kind
@@ -74,9 +77,9 @@ public struct Overlay: Sendable, Equatable {
 		case .spinner(var spinner):
 			if let words = appearance.words { spinner.words = words }
 			out.kind = .spinner(spinner)
-		case .effect:
-			// An effect says nothing, so an appearance has nothing to say for
-			// it. It is simply on, twice.
+		case .effect, .scene:
+			// Neither says anything of its own at an appearance: an effect is
+			// simply on twice, and a scene says what its parameters say.
 			break
 		}
 		return out

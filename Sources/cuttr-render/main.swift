@@ -307,6 +307,8 @@ if describe {
 	for shown in resolved.overlays {
 		let what: String
 		switch shown.overlay.kind {
+		case .scene(let name, let parameters):
+			what = "scene \(name)" + (parameters.isEmpty ? "" : " \(parameters)")
 		case .effect(let effect):
 			what = "effect \(effect.style.rawValue) ×\(effect.count) seed \(effect.seed)"
 		case .text(let text, let style):

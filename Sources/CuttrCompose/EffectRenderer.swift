@@ -24,6 +24,9 @@ final class EffectRenderer: @unchecked Sendable {
 		let node: SCNNode
 		/// Where it starts, how fast it falls, and how it turns.
 		let x: Float, z: Float, phase: Float
+		/// Nought at the front of the cloud, one at the back. Everything about
+		/// a piece that says "further away" comes from this.
+		let depth: Float
 		let fall: Float, sway: Float, swayRate: Float
 		let spinX: Float, spinY: Float, spinZ: Float
 		let lift: Float
@@ -112,19 +115,26 @@ final class EffectRenderer: @unchecked Sendable {
 		var pieces: [Piece] = []
 		for index in 0..<effect.count {
 			let colour = colours[index % colours.count]
+			// Where in the cloud this piece is. Drawn before anything that uses
+			// it so the same seed gives the same arrangement.
+			let depth = Float(random.value(0...1))
 			let piece = Piece(
-				node: Self.node(for: effect, colour: colour, random: &random),
+				node: Self.node(for: effect, colour: colour, depth: depth, random: &random),
 				x: Float(random.value(-1...1)) * world * aspect / 2 * 1.1,
-				z: Float(random.value(-3...3)),
+				// Further back is further from the camera, so the near ones
+				// pass in front of the far ones.
+				z: 3 - depth * 6,
 				phase: Float(random.value(0...(2 * .pi))),
-				fall: Float(random.value(Self.fall(effect))),
+				depth: depth,
+				// Further away falls slower, the way distance flattens speed.
+				fall: Float(random.value(Self.fall(effect))) * (1 - depth * 0.45),
 				sway: Float(random.value(Self.sway(effect))),
 				swayRate: Float(random.value(0.6...2.2)),
 				spinX: Float(random.value(-2.5...2.5)),
 				spinY: Float(random.value(-3...3)),
 				spinZ: Float(random.value(-1.5...1.5)),
 				lift: Float(random.value(Self.lift(effect))),
-				size: Float(random.value(0.75...1.35)))
+				size: Float(random.value(0.75...1.35)) * (1 - depth * 0.45))
 			scene.rootNode.addChildNode(piece.node)
 			pieces.append(piece)
 		}
@@ -162,7 +172,9 @@ final class EffectRenderer: @unchecked Sendable {
 		}
 	}
 
-	private static func node(for effect: Effect, colour: RGBA, random: inout Seeded) -> SCNNode {
+	private static func node(
+		for effect: Effect, colour: RGBA, depth: Float, random: inout Seeded
+	) -> SCNNode {
 		let geometry: SCNGeometry
 		let small: CGFloat = effect.finish == .glitter ? 0.45 : 1
 		switch effect.style {
@@ -180,8 +192,11 @@ final class EffectRenderer: @unchecked Sendable {
 
 		let material = geometry.firstMaterial ?? SCNMaterial()
 		material.lightingModel = .physicallyBased
+		// Darker further back. Cheaper than fog and exact: the piece's colour is
+		// its own, dimmed once, rather than a shader deciding every frame.
+		let shade = Double(1 - depth * 0.5)
 		material.diffuse.contents = CGColor(
-			srgbRed: colour.r, green: colour.g, blue: colour.b, alpha: 1)
+			srgbRed: colour.r * shade, green: colour.g * shade, blue: colour.b * shade, alpha: 1)
 		// Foil is a coloured mirror, so it needs something to reflect: without
 		// a lighting environment a metal is simply black, which is the usual
 		// way a first attempt at metallic confetti goes wrong.
@@ -212,6 +227,12 @@ final class EffectRenderer: @unchecked Sendable {
 	/// How many pieces are in the air, for the test that says a fall-out empties
 	/// the frame.
 	var showing: Int { pieces.filter { !$0.node.isHidden }.count }
+
+	/// How far back each piece is, how big, and how fast — for the test that
+	/// says the back of the cloud is smaller and slower.
+	var depths: [(depth: Double, size: Double, fall: Double)] {
+		pieces.map { (Double($0.depth), Double($0.size), Double($0.fall)) }
+	}
 
 	var positions: [Double] {
 		pieces.flatMap { piece in

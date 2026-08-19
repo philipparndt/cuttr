@@ -58,7 +58,8 @@ public enum OverlayLayers {
 		root.isGeometryFlipped = false
 
 		for resolvedOverlay in resolved.overlays {
-			guard let layer = layer(for: resolvedOverlay, project: resolved.project, size: size, host: host)
+			guard let layer = layer(for: resolvedOverlay, project: resolved.project,
+			                        baseURL: resolved.baseURL, size: size, host: host)
 			else { continue }
 			root.addSublayer(layer)
 		}
@@ -68,7 +69,7 @@ public enum OverlayLayers {
 	// MARK: - One overlay
 
 	private static func layer(
-		for resolved: ResolvedOverlay, project: Project, size: CGSize, host: Host
+		for resolved: ResolvedOverlay, project: Project, baseURL: URL, size: CGSize, host: Host
 	) -> CALayer? {
 		let overlay = resolved.overlay
 
@@ -93,6 +94,13 @@ public enum OverlayLayers {
 		case .effect:
 			// Drawn into the frame, not over it. Nothing here.
 			return placer
+		case .scene(let name, let parameters):
+			// A scene is its own little tree, laid over the whole frame: its
+			// parts carry their own positions, so nothing about the overlay's
+			// anchor or style applies to it.
+			guard let scene = project.scenes[name] else { return placer }
+			return sceneLayer(scene, with: parameters, project: project, baseURL: baseURL,
+			                  size: size, resolved: resolved, host: host)
 		case .spinner(let spinner):
 			let built = spinnerLayer(
 				spinner, style: project.style(named: spinner.wordStyle ?? "caption"),
@@ -588,6 +596,99 @@ public enum OverlayLayers {
 		addWords(wordLayers, schedule: schedule, to: container, spinnerDiameter: diameter,
 		         box: box, resolved: resolved, host: host)
 		return (container, box, spinnerAnchor(diameter: diameter, box: box))
+	}
+
+	// MARK: - Scenes
+
+	/// A scene: every part, with its keys as animations.
+	///
+	/// One layer per part and one keyframe animation per property, all on the
+	/// composition's own clock — so the export and the preview run the same
+	/// tree, and a scene scrubs frame by frame like everything else here.
+	private static func sceneLayer(
+		_ scene: Scene, with parameters: [String: String], project: Project, baseURL: URL,
+		size: CGSize, resolved: ResolvedOverlay, host: Host
+	) -> CALayer {
+		let root = CALayer()
+		root.frame = CGRect(origin: .zero, size: size)
+		root.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+		root.position = CGPoint(x: size.width / 2, y: size.height / 2)
+
+		for part in scene.parts {
+			let keys = Scene.filled(part.keys)
+			guard let first = keys.first else { continue }
+
+			let layer: CALayer
+			var natural = CGSize(
+				width: (first.width ?? 0.2) * size.width,
+				height: (first.height ?? 0.02) * size.height)
+			switch part.content {
+			case .text(let text, let styleName):
+				let style = project.style(named: styleName)
+				let built = textLayer(Scene.fill(text, with: parameters), style: style, size: size)
+				layer = built.0
+				natural = built.1
+			case .shape(let fill, let corner):
+				let shape = CALayer()
+				shape.backgroundColor = cgColor(fill)
+				shape.cornerRadius = corner * size.height
+				layer = shape
+			case .image(let file):
+				let picture = CALayer()
+				let url = URL(fileURLWithPath: file, relativeTo: baseURL)
+				if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+				   let image = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+					picture.contents = image
+					picture.contentsGravity = .resizeAspect
+				}
+				layer = picture
+			}
+
+			layer.frame = CGRect(origin: .zero, size: natural)
+			layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+			layer.position = CGPoint(x: (first.x ?? 0.5) * size.width,
+			                         y: (first.y ?? 0.5) * size.height)
+			layer.opacity = Float(first.opacity ?? 1)
+
+			let span = max(resolved.duration, 0.0001)
+			func animate(_ path: String, _ values: [Any]) {
+				let animation = CAKeyframeAnimation(keyPath: path)
+				animation.values = values
+				animation.keyTimes = keys.map { NSNumber(value: min(1, max(0, $0.t / span))) }
+				animation.timingFunctions = keys.dropFirst().map { timing($0.ease) }
+				animation.beginTime = host.beginTime(resolved.start)
+				animation.duration = span
+				animation.fillMode = .both
+				animation.isRemovedOnCompletion = false
+				layer.add(animation, forKey: path)
+			}
+			animate("position", keys.map {
+				NSValue(point: NSPoint(x: ($0.x ?? 0.5) * size.width,
+				                       y: ($0.y ?? 0.5) * size.height))
+			})
+			animate("opacity", keys.map { $0.opacity ?? 1 })
+			animate("transform.scale", keys.map { $0.scale ?? 1 })
+			animate("transform.rotation.z", keys.map { ($0.rotation ?? 0) * .pi / 180 })
+			// A shape's size is its own, and animating bounds is how a rule
+			// draws itself across the screen.
+			if case .text = part.content {} else {
+				animate("bounds.size", keys.map {
+					NSValue(size: NSSize(width: ($0.width ?? 0.2) * size.width,
+					                     height: ($0.height ?? 0.02) * size.height))
+				})
+			}
+			root.addSublayer(layer)
+		}
+		return root
+	}
+
+	private static func timing(_ ease: Scene.Ease) -> CAMediaTimingFunction {
+		switch ease {
+		case .linear: return CAMediaTimingFunction(name: .linear)
+		case .in: return CAMediaTimingFunction(name: .easeIn)
+		case .out: return CAMediaTimingFunction(name: .easeOut)
+		case .inOut: return CAMediaTimingFunction(name: .easeInEaseOut)
+		}
 	}
 
 	/// The middle of the spinner, in the container's unit coordinates.
