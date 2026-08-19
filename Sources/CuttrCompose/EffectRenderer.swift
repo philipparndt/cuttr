@@ -82,21 +82,21 @@ final class EffectRenderer: @unchecked Sendable {
 		let key = SCNNode()
 		key.light = SCNLight()
 		key.light?.type = .directional
-		key.light?.intensity = 1500
+		key.light?.intensity = effect.finish == .matte ? 1500 : 2400
 		key.eulerAngles = SCNVector3(-0.5, 0.6, 0)
 		scene.rootNode.addChildNode(key)
 
 		let rim = SCNNode()
 		rim.light = SCNLight()
 		rim.light?.type = .directional
-		rim.light?.intensity = 600
+		rim.light?.intensity = effect.finish == .matte ? 600 : 1100
 		rim.eulerAngles = SCNVector3(0.7, -0.9, 0)
 		scene.rootNode.addChildNode(rim)
 
 		let ambient = SCNNode()
 		ambient.light = SCNLight()
 		ambient.light?.type = .ambient
-		ambient.light?.intensity = effect.finish == .matte ? 380 : 220
+		ambient.light?.intensity = effect.finish == .matte ? 380 : 500
 		scene.rootNode.addChildNode(ambient)
 
 		if effect.finish != .matte {
@@ -104,7 +104,7 @@ final class EffectRenderer: @unchecked Sendable {
 			// turning through the light goes from a flare to nothing the way
 			// foil does.
 			scene.lightingEnvironment.contents = Self.sky()
-			scene.lightingEnvironment.intensity = effect.finish == .glitter ? 2.6 : 1.8
+			scene.lightingEnvironment.intensity = effect.finish == .glitter ? 4.0 : 3.2
 		}
 
 		var random = Seeded(effect.seed)
@@ -190,13 +190,17 @@ final class EffectRenderer: @unchecked Sendable {
 			material.metalness.contents = effect.style == .snow ? 0.0 : 0.15
 			material.roughness.contents = effect.style == .snow ? 0.9 : Double(random.value(0.5...0.8))
 		case .metallic:
-			material.metalness.contents = 1.0
-			material.roughness.contents = Double(random.value(0.12...0.28))
+			// Not a pure mirror: a piece at metalness one has no colour of its
+			// own at all — it is whatever it reflects, and against a sky that
+			// is mostly not the sun, that reads as dark grey confetti. Leaving
+			// a fifth of the diffuse keeps the colour in it.
+			material.metalness.contents = 0.8
+			material.roughness.contents = Double(random.value(0.1...0.22))
 		case .glitter:
 			// Every piece polished differently: the catches come and go one at
 			// a time rather than the whole cloud flashing together.
-			material.metalness.contents = 1.0
-			material.roughness.contents = Double(random.value(0.02...0.18))
+			material.metalness.contents = 0.85
+			material.roughness.contents = Double(random.value(0.02...0.14))
 		}
 		material.isDoubleSided = true
 		geometry.materials = [material]
@@ -224,9 +228,9 @@ final class EffectRenderer: @unchecked Sendable {
 		image.lockFocus()
 		NSGradient(colors: [
 			NSColor(calibratedWhite: 1.0, alpha: 1),
-			NSColor(calibratedWhite: 0.85, alpha: 1),
+			NSColor(calibratedWhite: 0.92, alpha: 1),
+			NSColor(calibratedWhite: 0.7, alpha: 1),
 			NSColor(calibratedWhite: 0.45, alpha: 1),
-			NSColor(calibratedWhite: 0.12, alpha: 1),
 		])?.draw(in: NSRect(origin: .zero, size: size), angle: -90)
 		image.unlockFocus()
 		return image
