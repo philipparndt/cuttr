@@ -387,11 +387,28 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			// frame by frame through a slide.
 			overlays.speed = 0
 			overlays.timeOffset = resumeAt
-			self.playerView.layer?.addSublayer(overlays)
 			self.overlayLayer = overlays
-			self.layoutOverlays()
+			self.attachOverlays()
 			self.seek(to: resumeAt)
 		}
+	}
+
+	/// Puts the overlay tree over the picture, whenever there is a picture to
+	/// put it over.
+	///
+	/// Not only when it is built. A tab view keeps just the selected item's view
+	/// in the window, so a tree built while the editor was showing had nowhere
+	/// to go — `playerView.layer` did not exist yet — and the preview played
+	/// with no captions and no spinners on it until something happened to
+	/// rebuild the project. Attaching is idempotent and cheap, so it is done
+	/// whenever the preview comes to the front as well.
+	private func attachOverlays() {
+		guard let overlayLayer, let host = playerView.layer else { return }
+		if overlayLayer.superlayer !== host {
+			overlayLayer.removeFromSuperlayer()
+			host.addSublayer(overlayLayer)
+		}
+		layoutOverlays()
 	}
 
 	/// Keeps the overlay tree exactly over the picture.
@@ -423,6 +440,11 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		self.mode = mode
 		modes.selectTabViewItem(at: mode.rawValue)
 		bar.setMode(mode.rawValue)
+		if mode == .preview {
+			// Now that the picture is in the window it has a layer to sit on.
+			attachOverlays()
+			Task { @MainActor [weak self] in self?.attachOverlays() }
+		}
 		if mode == .text { source.show(sourceText) }
 		// Nothing plays behind a view that is not the picture: a project window
 		// left on the editor should not keep decoding.

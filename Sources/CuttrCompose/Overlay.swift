@@ -19,20 +19,61 @@ public struct Overlay: Sendable, Equatable {
 
 	public var kind: Kind
 
-	/// When it is on screen, expressed against the programme.
+	/// Each time it is on screen, and what it says while it is.
 	///
-	/// A list, because one caption is often wanted in three places — a spinner
+	/// A list, because one overlay is often wanted in three places — a spinner
 	/// that comes back every time the same thing is happening, a title that
 	/// returns for the reprise. Written as a list only when there is more than
 	/// one of them, so the ordinary overlay stays the four lines it always was.
-	public var spans: [Span]
+	public var appearances: [Appearance]
+
+	/// One time it is on, with what it says then.
+	///
+	/// The words belong to the appearance rather than to the overlay because
+	/// that is what a spinner over a long take is for: "Thinking" the first
+	/// time, "Still thinking" the second. Saying it twice as two overlays with
+	/// the same anchor, size, colour, arrival and departure is four lines of
+	/// duplication that then have to be kept in step by hand.
+	public struct Appearance: Sendable, Equatable {
+		public var span: Span
+		/// What a caption says here, when that differs from the overlay's own.
+		public var text: String?
+		/// What a spinner says here, likewise.
+		public var words: [SpinnerWord]?
+
+		public init(_ span: Span, text: String? = nil, words: [SpinnerWord]? = nil) {
+			self.span = span
+			self.text = text
+			self.words = words
+		}
+
+		public var says: Bool { text != nil || words != nil }
+	}
+
+	/// The ranges alone, which is what most of this program cares about.
+	public var spans: [Span] { appearances.map(\.span) }
 
 	/// The first range, which for most overlays is the only one.
 	public var span: Span {
-		get { spans.first ?? .times(from: 0, to: 0) }
+		get { appearances.first?.span ?? .times(from: 0, to: 0) }
 		set {
-			if spans.isEmpty { spans = [newValue] } else { spans[0] = newValue }
+			if appearances.isEmpty { appearances = [Appearance(newValue)] }
+			else { appearances[0].span = newValue }
 		}
+	}
+
+	/// The overlay as it is at one of its appearances: what it says there,
+	/// rather than what it says by default.
+	public func shown(at appearance: Appearance) -> Overlay {
+		var out = self
+		switch kind {
+		case .text(let text, let style):
+			out.kind = .text(appearance.text ?? text, style: style)
+		case .spinner(var spinner):
+			if let words = appearance.words { spinner.words = words }
+			out.kind = .spinner(spinner)
+		}
+		return out
 	}
 
 	/// How it arrives and how it leaves.
@@ -49,21 +90,21 @@ public struct Overlay: Sendable, Equatable {
 
 	public init(
 		kind: Kind,
-		spans: [Span],
+		appearances: [Appearance],
 		arrival: Transition = .slide(.left, over: 0.4),
 		departure: Transition = .slide(.right, over: 0.4),
 		anchor: String? = nil,
 		offset: CGPoint = .zero
 	) {
 		self.kind = kind
-		self.spans = spans
+		self.appearances = appearances
 		self.arrival = arrival
 		self.departure = departure
 		self.anchor = anchor
 		self.offset = offset
 	}
 
-	/// The overlay most projects write: on over one range.
+	/// The overlay most projects write: on over one range, saying one thing.
 	public init(
 		kind: Kind,
 		span: Span,
@@ -72,8 +113,21 @@ public struct Overlay: Sendable, Equatable {
 		anchor: String? = nil,
 		offset: CGPoint = .zero
 	) {
-		self.init(kind: kind, spans: [span], arrival: arrival, departure: departure,
-		          anchor: anchor, offset: offset)
+		self.init(kind: kind, appearances: [Appearance(span)], arrival: arrival,
+		          departure: departure, anchor: anchor, offset: offset)
+	}
+
+	/// Several ranges, all saying the same thing.
+	public init(
+		kind: Kind,
+		spans: [Span],
+		arrival: Transition = .slide(.left, over: 0.4),
+		departure: Transition = .slide(.right, over: 0.4),
+		anchor: String? = nil,
+		offset: CGPoint = .zero
+	) {
+		self.init(kind: kind, appearances: spans.map { Appearance($0) }, arrival: arrival,
+		          departure: departure, anchor: anchor, offset: offset)
 	}
 
 	/// Where an overlay lives on the programme's clock.

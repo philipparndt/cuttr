@@ -161,6 +161,54 @@ import Testing
 		#expect(ProjectWriter.write(back) == text)
 	}
 
+	/// A spinner that comes back saying something else: one overlay, two
+	/// appearances, each with its own words.
+	@Test func whatItSaysAtEachAppearanceSurvivesTheFile() throws {
+		let overlay = Overlay(
+			kind: .spinner(Spinner(words: [SpinnerWord("Thinking")])),
+			appearances: [
+				.init(.times(from: 0, to: 8)),
+				.init(.times(from: 10, to: 18), words: [SpinnerWord("Still thinking"),
+				                                        SpinnerWord("Nearly", duration: 2)]),
+			],
+			anchor: "mia-eye")
+		let project = Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"))], overlays: [overlay])
+
+		let text = ProjectWriter.write(project)
+		let back = try ProjectReader.read(text)
+		#expect(back.overlays == project.overlays)
+		#expect(ProjectWriter.write(back) == text)
+
+		// The first says the overlay's words, the second says its own.
+		#expect(back.overlays[0].shown(at: back.overlays[0].appearances[0]).kind
+			== .spinner(Spinner(words: [SpinnerWord("Thinking")])))
+		if case .spinner(let spinner) = back.overlays[0]
+			.shown(at: back.overlays[0].appearances[1]).kind {
+			#expect(spinner.words.map(\.text) == ["Still thinking", "Nearly"])
+			#expect(spinner.words[1].duration == 2)
+		} else {
+			Issue.record("the second appearance is not a spinner")
+		}
+	}
+
+	/// A caption that says something else the second time it is on.
+	@Test func aCaptionCanSaySomethingElseAtOneAppearance() throws {
+		let overlay = Overlay(
+			kind: .text("Installing", style: nil),
+			appearances: [
+				.init(.clips(from: ClipReference("intro"), to: ClipReference("intro"))),
+				.init(.clips(from: ClipReference("outro"), to: ClipReference("outro")),
+				      text: "Installed"),
+			])
+		let project = Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"))], overlays: [overlay])
+		let back = try ProjectReader.read(ProjectWriter.write(project))
+		#expect(back.overlays == project.overlays)
+		#expect(back.overlays[0].shown(at: back.overlays[0].appearances[1]).kind
+			== .text("Installed", style: nil))
+	}
+
 	/// One range still writes the way it always did — a project nobody has
 	/// touched must not come out rewritten.
 	@Test func oneRangeIsStillWrittenInLine() {

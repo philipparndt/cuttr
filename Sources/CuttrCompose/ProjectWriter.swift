@@ -147,6 +147,15 @@ public enum ProjectWriter {
 			+ "\(indent)  transition: \(trim(transition))\n"
 	}
 
+	/// What a spinner says at one appearance, in the flow form the `when:` list
+	/// uses.
+	private static func words(_ words: [SpinnerWord]) -> String {
+		"[" + words.map { word in
+			word.duration.map { "{text: \(scalar(word.text)), for: \(trim($0))}" }
+				?? scalar(word.text)
+		}.joined(separator: ", ") + "]"
+	}
+
 	/// When an overlay is on, as the file says it.
 	private static func range(_ span: Overlay.Span, indent: String) -> String {
 		switch span {
@@ -185,16 +194,28 @@ public enum ProjectWriter {
 						}
 					}
 				}
-				// One range keeps the shape every project already has; several
-				// go under `when:`, which is the same keys in a list.
-				if overlay.spans.count == 1 {
-					out += range(overlay.spans[0], indent: "    ")
+				// One range that says nothing of its own keeps the shape every
+				// project already has; anything else goes under `when:`, which
+				// is the same keys in a list.
+				if overlay.appearances.count == 1, !overlay.appearances[0].says {
+					out += range(overlay.appearances[0].span, indent: "    ")
 				} else {
 					out += "    when:\n"
-					for span in overlay.spans {
-						let lines = range(span, indent: "").split(separator: "\n")
-							.map { $0.trimmingCharacters(in: .whitespaces) }
-						out += "      - {" + lines.joined(separator: ", ") + "}\n"
+					for appearance in overlay.appearances {
+						// The block form aligns its values in a column; the flow
+						// form has no column to align to, so the padding goes.
+						var fields = range(appearance.span, indent: "").split(separator: "\n")
+							.map { line -> String in
+								let parts = line.split(separator: ":", maxSplits: 1)
+								guard parts.count == 2 else {
+									return line.trimmingCharacters(in: .whitespaces)
+								}
+								return parts[0].trimmingCharacters(in: .whitespaces) + ": "
+									+ parts[1].trimmingCharacters(in: .whitespaces)
+							}
+						if let text = appearance.text { fields.append("text: \(scalar(text))") }
+						if let said = appearance.words { fields.append("words: \(words(said))") }
+						out += "      - {" + fields.joined(separator: ", ") + "}\n"
 					}
 				}
 				if let anchor = overlay.anchor {

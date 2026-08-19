@@ -497,29 +497,67 @@ public final class PropertiesPanel: NSView {
 			if overlay.spans.count > 1 {
 				controls.append(small("−") { [weak self] in
 					self?.editOverlay(index) {
-						guard position < $0.spans.count else { return }
-						$0.spans.remove(at: position)
+						guard position < $0.appearances.count else { return }
+						$0.appearances.remove(at: position)
 					}
 				})
 			}
 			// Each range says which one it is. Two rows of identical controls
 			// with one label between them is a form nobody can point at.
+			var saysControls: [NSView] = []
+			// What it says *here*. Blank means what the overlay says everywhere,
+			// which is shown as the placeholder so the difference is visible.
+			let appearance = overlay.appearances[position]
+			switch overlay.kind {
+			case .text(let content, _):
+				saysControls.append(text(appearance.text ?? "", width: 150,
+				                     placeholder: content.isEmpty ? "text" : content) {
+					[weak self] value in
+					self?.editOverlay(index) {
+						guard position < $0.appearances.count else { return }
+						$0.appearances[position].text = value.isEmpty ? nil : value
+					}
+				})
+			case .spinner(let spinner):
+				let mine = appearance.words ?? []
+				saysControls.append(text(mine.map(\.text).joined(separator: ", "), width: 150,
+				                     placeholder: spinner.words.isEmpty
+					                     ? "words" : spinner.words.map(\.text).joined(separator: ", ")) {
+					[weak self] value in
+					let said = value.split(separator: ",")
+						.map { SpinnerWord($0.trimmingCharacters(in: .whitespaces)) }
+						.filter { !$0.text.isEmpty }
+					self?.editOverlay(index) {
+						guard position < $0.appearances.count else { return }
+						$0.appearances[position].words = said.isEmpty ? nil : said
+					}
+				})
+			}
+
 			field(overlay.spans.count == 1 ? "when" : "when[\(position)]", controls,
 			      note: position == 0
 				? "bound to clips it survives a re-cut; the same mark twice is one clip, or one whole section"
+				: nil)
+			// What it says *here*, on a line of its own. Blank means what the
+			// overlay says everywhere, which is the placeholder, so the two are
+			// told apart by reading rather than by remembering.
+			field(overlay.spans.count == 1 ? "says" : "says[\(position)]", saysControls,
+			      note: position == 0 && overlay.spans.count > 1
+				? "blank says what the overlay says; a spinner that comes back usually says something else"
 				: nil)
 		}
 		field("", [small("+ range") { [weak self] in
 			self?.editOverlay(index) { overlay in
 				// On again later: the last range repeated, moved along by its
 				// own length when it is a time, ready to be pointed somewhere
-				// else when it is a mark.
-				guard let last = overlay.spans.last else { return }
-				switch last {
+				// else when it is a mark. What it says is not copied — a second
+				// appearance usually exists because it says something else.
+				guard let last = overlay.appearances.last else { return }
+				switch last.span {
 				case .times(let from, let to):
-					overlay.spans.append(.times(from: to, to: to + (to - from)))
+					overlay.appearances.append(.init(.times(from: to, to: to + (to - from))))
 				case .marks:
-					overlay.spans.append(last)
+					overlay.appearances.append(.init(last.span))
 				}
 			}
 		}], note: "the same overlay, on over another stretch of the programme")
@@ -604,8 +642,8 @@ public final class PropertiesPanel: NSView {
 
 	private func setSpan(_ index: Int, _ position: Int, _ span: Overlay.Span) {
 		editOverlay(index) { overlay in
-			guard position < overlay.spans.count else { return }
-			overlay.spans[position] = span
+			guard position < overlay.appearances.count else { return }
+			overlay.appearances[position].span = span
 		}
 	}
 
@@ -619,9 +657,10 @@ public final class PropertiesPanel: NSView {
 		strip.blocks = (resolved?.clips ?? []).map {
 			SpanStrip.Block(start: $0.start, end: $0.end, name: $0.clip.slug)
 		}
-		strip.ranges = overlay.spans.map { span in
-			let extent = self.extent(of: span) ?? (0, 0)
-			return SpanStrip.Range(start: extent.0, end: extent.1, movable: movable(span))
+		strip.ranges = overlay.appearances.map { appearance in
+			let extent = self.extent(of: appearance.span) ?? (0, 0)
+			return SpanStrip.Range(start: extent.0, end: extent.1,
+			                       movable: movable(appearance.span))
 		}
 		strip.selected = min(max(0, selectedSpan), max(0, overlay.spans.count - 1))
 		strip.onSelect = { [weak self] position in
@@ -632,8 +671,9 @@ public final class PropertiesPanel: NSView {
 			self?.editOverlay(index) { overlay in
 				// The last one is not deleted: an overlay that is on over
 				// nothing is not an overlay, it is a puzzle.
-				guard overlay.spans.count > 1, position < overlay.spans.count else { return }
-				overlay.spans.remove(at: position)
+				guard overlay.appearances.count > 1,
+				      position < overlay.appearances.count else { return }
+				overlay.appearances.remove(at: position)
 			}
 		}
 		strip.onScrub = { [weak self] time in
@@ -644,7 +684,7 @@ public final class PropertiesPanel: NSView {
 			guard let self, position < overlay.spans.count else { return }
 			self.selectedSpan = position
 			self.setSpan(index, position,
-			             self.span(from: overlay.spans[position], start: start, end: end))
+			             self.span(from: overlay.appearances[position].span, start: start, end: end))
 		}
 		return strip
 	}

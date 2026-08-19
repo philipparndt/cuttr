@@ -209,17 +209,34 @@ public enum ProjectReader {
 				return nil
 			}
 
-			var spans: [Overlay.Span] = []
-			if let list = m["when"] as? [Any] {
-				spans = list.compactMap { mapping($0).flatMap(range) }
-			} else if let span = range(m) {
-				spans = [span]
+			// What an appearance says, when it says something of its own.
+			func said(_ fields: [String: Any]) -> [SpinnerWord]? {
+				guard let list = fields["words"] as? [Any] else { return nil }
+				return list.compactMap { word in
+					if let text = word as? String { return SpinnerWord(text) }
+					if let inner = mapping(word), let text = inner["text"] as? String {
+						return SpinnerWord(text, duration: number(inner["for"]))
+					}
+					return nil
+				}
 			}
-			guard !spans.isEmpty else { continue }
+
+			var appearances: [Overlay.Appearance] = []
+			if let list = m["when"] as? [Any] {
+				appearances = list.compactMap { entry in
+					guard let fields = mapping(entry), let span = range(fields) else { return nil }
+					return Overlay.Appearance(
+						span, text: (fields["text"] as? String).flatMap(nonEmpty),
+						words: said(fields))
+				}
+			} else if let span = range(m) {
+				appearances = [Overlay.Appearance(span)]
+			}
+			guard !appearances.isEmpty else { continue }
 
 			overlays.append(Overlay(
 				kind: kind,
-				spans: spans,
+				appearances: appearances,
 				arrival: try transition(m["in"], key: "in") ?? .slide(.left, over: 0.4),
 				departure: try transition(m["out"], key: "out") ?? .slide(.right, over: 0.4),
 				anchor: (m["anchor"] as? String).flatMap(nonEmpty),

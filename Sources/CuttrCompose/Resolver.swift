@@ -343,10 +343,10 @@ public enum Resolver {
 			// tree, the transitions, the anchor following — is about a thing
 			// that is on from one moment to another, so an overlay that is on
 			// three times is three of those and nothing else changes.
-			for span in overlay.spans {
+			for appearance in overlay.appearances {
 				let start: Double
 				let end: Double
-				switch span {
+				switch appearance.span {
 				case .times(let a, let b):
 					start = a
 					end = b
@@ -371,8 +371,12 @@ public enum Resolver {
 					end = max(b.end, a.end)
 				}
 				guard end > start else { continue }
+				// What it says *here*: a spinner that comes back saying
+				// something else is one overlay with two appearances, and by
+				// the time it reaches the layer tree it is simply two overlays
+				// that happen to agree about everything but their words.
 				overlays.append(ResolvedOverlay(
-					overlay: overlay, start: start, end: end,
+					overlay: overlay.shown(at: appearance), start: start, end: end,
 					path: overlay.anchor.flatMap { paths[$0] }))
 			}
 		}
