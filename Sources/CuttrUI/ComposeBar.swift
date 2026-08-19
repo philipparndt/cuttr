@@ -69,6 +69,7 @@ public final class ComposeBar: NSView {
 		statusLabel.alignment = .center
 
 		anchors.state = .on
+		anchors.isHidden = true
 		anchors.font = NSFont.systemFont(ofSize: 11)
 		anchors.target = self
 		anchors.action = #selector(anchorsChanged)
@@ -130,7 +131,13 @@ public final class ComposeBar: NSView {
 	@objc private func modeChanged() { onMode?(modes.selectedSegment) }
 	@objc private func anchorsChanged() { onAnchors?(anchors.state == .on) }
 
-	public func setMode(_ index: Int) { modes.selectedSegment = index }
+	public func setMode(_ index: Int) {
+		modes.selectedSegment = index
+		// The anchors switch is about the picture, so it is there when the
+		// picture is. On the editor and the file it is a control for something
+		// nobody can see.
+		anchors.isHidden = index != 2
+	}
 
 	// MARK: - State in
 

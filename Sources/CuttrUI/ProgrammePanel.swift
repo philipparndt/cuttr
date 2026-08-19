@@ -150,20 +150,27 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		])
 	}
 
-	private func button(_ title: String, _ action: Selector, _ tip: String) -> NSButton {
+	/// A button with a symbol on it and its words in the tooltip.
+	///
+	/// Six titled buttons over a list is a row of words wider than the thing it
+	/// acts on — and when the pane narrows they truncate, so the row ends up
+	/// saying "..." and "+ Spinner". A symbol is the same instruction in a
+	/// quarter of the room, and the words are still there on hover.
+	private func button(_ symbol: String, _ action: Selector, _ tip: String) -> NSButton {
 		let button = NSButton()
-		button.title = title
 		button.bezelStyle = .rounded
 		button.controlSize = .small
-		button.font = NSFont.systemFont(ofSize: 11)
 		button.target = self
 		button.action = action
 		button.toolTip = tip
-		// A row of six buttons must not decide how narrow the pane may be: they
-		// give up their titles' width before the pane gives up any of its own.
+		button.imagePosition = .imageOnly
+		button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)?
+			.withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+		button.imageScaling = .scaleProportionallyDown
+		button.translatesAutoresizingMaskIntoConstraints = false
+		button.widthAnchor.constraint(equalToConstant: 26).isActive = true
 		button.setContentCompressionResistancePriority(
 			NSLayoutConstraint.Priority(1), for: .horizontal)
-		button.lineBreakMode = .byTruncatingTail
 		return button
 	}
 
@@ -193,12 +200,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		let scroll = TableScroll.fitting(outline)
 		over(scroll, programmeHint)
 		return pane("programme", scroll, [
-			button("+ Clip", #selector(addClip), "A clip by slug, or a #tag query"),
-			button("+ Section", #selector(addGroup), "A named section overlays can be hung on"),
-			button("Duplicate", #selector(duplicateEntry), "Another one just like it"),
-			button("↑", #selector(moveEntryUp), "Earlier"),
-			button("↓", #selector(moveEntryDown), "Later"),
-			button("Remove", #selector(removeEntry), "Take it off the programme"),
+			button("plus", #selector(addClip), "Add a clip by slug, or a #tag query"),
+			button("folder.badge.plus", #selector(addGroup),
+			       "Add a named section overlays can be hung on"),
+			button("plus.square.on.square", #selector(duplicateEntry), "Another one just like it"),
+			button("arrow.up", #selector(moveEntryUp), "Earlier"),
+			button("arrow.down", #selector(moveEntryDown), "Later"),
+			button("minus", #selector(removeEntry), "Take it off the programme"),
 		])
 	}
 
@@ -269,10 +277,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		let scroll = TableScroll.fitting(overlayTable)
 		over(scroll, overlayHint)
 		return pane("overlays", scroll, [
-			button("+ Text", #selector(addText), "A caption, bound to what is selected"),
-			button("+ Spinner", #selector(addSpinner), "A spinner; give it an anchor to pin it to a face"),
-			button("Duplicate", #selector(duplicateOverlay), "Another one just like it"),
-			button("Remove", #selector(removeOverlay), "Take it off"),
+			button("textformat", #selector(addText), "Add a caption, bound to what is selected"),
+			button("circle.dotted", #selector(addSpinner),
+			       "Add a spinner; give it an anchor to pin it to a face"),
+			button("sparkles", #selector(addEffect), "Add confetti, sparks or snow"),
+			button("plus.square.on.square", #selector(duplicateOverlay), "Another one just like it"),
+			button("minus", #selector(removeOverlay), "Take it off"),
 		])
 	}
 
@@ -302,6 +312,15 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		next.overlays.append(Overlay(
 			kind: .spinner(Spinner(words: [SpinnerWord("Working")])), span: spanForNewOverlay,
 			arrival: .fade(over: 0.3), departure: .fade(over: 0.3)))
+		pending = .overlay(next.overlays.count - 1)
+		onChange?(next)
+	}
+
+	@objc private func addEffect() {
+		var next = project
+		next.overlays.append(Overlay(
+			kind: .effect(Effect()), span: spanForNewOverlay,
+			arrival: .cut, departure: .fall(over: 1.5)))
 		pending = .overlay(next.overlays.count - 1)
 		onChange?(next)
 	}

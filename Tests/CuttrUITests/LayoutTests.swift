@@ -158,3 +158,27 @@ import Testing
 		#expect(clockFrame.maxX < renderFrame.minX)
 	}
 }
+
+/// The anchors switch belongs to the picture.
+@Suite @MainActor struct AnchorSwitchTests {
+
+	@Test func itIsOnlyThereOnThePreview() {
+		_ = NSApplication.shared
+		let bar = ComposeBar()
+		func anchors(in view: NSView) -> NSButton? {
+			for subview in view.subviews {
+				if let button = subview as? NSButton, button.title == "Anchors" { return button }
+				if let found = anchors(in: subview) { return found }
+			}
+			return nil
+		}
+		let button = anchors(in: bar)
+		#expect(button != nil)
+		bar.setMode(0)
+		#expect(button?.isHidden == true, "the editor has no picture to put markers on")
+		bar.setMode(2)
+		#expect(button?.isHidden == false)
+		bar.setMode(1)
+		#expect(button?.isHidden == true)
+	}
+}

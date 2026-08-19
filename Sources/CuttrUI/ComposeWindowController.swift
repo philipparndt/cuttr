@@ -327,6 +327,12 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
 			guard let self, event.window === self.window else { return event }
 			if self.window?.firstResponder is NSTextView { return event }
+			// A list has its own use for the arrows and the space bar: moving
+			// the selection, folding a section, acting on a row. The window's
+			// own shortcuts are for when nothing is being navigated — otherwise
+			// this monitor eats the keys on their way to the list and the
+			// keyboard silently does nothing there.
+			if self.window?.firstResponder is NSTableView { return event }
 			if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) { return event }
 			switch event.keyCode {
 			case 49: self.togglePlay(nil); return nil                       // space
