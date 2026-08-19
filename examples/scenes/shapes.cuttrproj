@@ -1,0 +1,102 @@
+# Shapes, moving.
+#
+# A scene's parts are text, shapes, images and a background, and every one of
+# them is placed by keyframes: position, size, scale, rotation, opacity and
+# colour. Nothing here is footage — three cards are the whole programme — so
+# this renders anywhere with `cuttr-render examples/scenes/shapes.cuttrproj`.
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: shapes.mov
+
+timeline:
+  - card:  00:02.000
+    as:    bars
+  - card:  00:02.000
+    as:    rule
+    transition: {dissolve: true, over: 0.5}
+  - card:  00:02.400
+    as:    turn
+    transition: {wipe: left, over: 0.6}
+
+overlays:
+  - scene: bars
+    from:  "@bars"
+    in:    {fade: true, over: 0.3}
+    out:   {fade: true, over: 0.3}
+  - scene: rule
+    from:  "@rule"
+    in:    {fade: true, over: 0.3}
+    out:   {fade: true, over: 0.3}
+  - scene: turning
+    from:  "@turn"
+    in:    {fade: true, over: 0.3}
+    out:   {fade: true, over: 0.3}
+
+scenes:
+  # Four bars growing out of nothing, each a little after the one before.
+  # A shape's `width` and `height` are fractions of the frame, and animating
+  # them is how a bar draws itself rather than appearing.
+  bars:
+    parts:
+      - background: "#0b1220"
+        keys:
+          - {t: 0}
+      - shape: "#ff375f"
+        keys:
+          - {t: 0.0, x: 0.5, y: 0.66, width: 0.0, height: 0.035}
+          - {t: 0.7, width: 0.52, ease: out}
+      - shape: "#ffd60a"
+        keys:
+          - {t: 0.2, x: 0.5, y: 0.58, width: 0.0, height: 0.035}
+          - {t: 0.9, width: 0.40, ease: out}
+      - shape: "#30d158"
+        keys:
+          - {t: 0.4, x: 0.5, y: 0.50, width: 0.0, height: 0.035}
+          - {t: 1.1, width: 0.28, ease: out}
+      - shape: "#0a84ff"
+        keys:
+          - {t: 0.6, x: 0.5, y: 0.42, width: 0.0, height: 0.035}
+          - {t: 1.3, width: 0.16, ease: out}
+      - text:  "four bars"
+        style: title
+        keys:
+          - {t: 1.0, x: 0.5, y: 0.26, opacity: 0}
+          - {t: 1.6, opacity: 1, ease: out}
+
+  # A rule that draws itself across the frame, and a word that arrives with it.
+  rule:
+    parts:
+      - background: {from: "#111111", to: "#2b2b2b", angle: 90}
+        keys:
+          - {t: 0}
+      - shape: "#ffffff"
+        keys:
+          - {t: 0.1, x: 0.5, y: 0.5, width: 0.0, height: 0.004}
+          - {t: 1.0, width: 0.7, ease: out}
+      - text:  "one clock"
+        style: title
+        tracking: 0.14
+        keys:
+          - {t: 0.5, x: 0.5, y: 0.58, opacity: 0, scale: 0.96}
+          - {t: 1.3, opacity: 1, scale: 1, ease: out}
+
+  # Rotation and colour: a square turning forty-five degrees while it changes
+  # from one colour to another. `color` on a key is what makes the ink move.
+  turning:
+    parts:
+      - background: "#05070d"
+        keys:
+          - {t: 0}
+      - shape: "#0a84ff"
+        keys:
+          - {t: 0.0, x: 0.5, y: 0.52, width: 0.10, height: 0.18, rotation: 0, color: "#0a84ff"}
+          - {t: 1.2, rotation: 45, scale: 1.35, color: "#bf5af2", ease: inOut}
+          - {t: 2.0, rotation: 90, scale: 1, color: "#30d158", ease: inOut}
+      - text:  "and it turns"
+        style: caption
+        keys:
+          - {t: 1.0, x: 0.5, y: 0.24, opacity: 0}
+          - {t: 1.6, opacity: 1, ease: out}

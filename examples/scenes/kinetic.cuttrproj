@@ -1,0 +1,96 @@
+# An intro that moves: one word at a time, pushed along.
+#
+# The movement is inside the scenes: a word slides up as a block wipes past it,
+# and the next card takes over on a cut.
+#
+# Cuts on purpose. A scene is drawn *over* the composed frame rather than into
+# it, so it does not travel with a dissolve or a push: during an overlap both
+# scenes are on at once and the later one simply covers the earlier. Between
+# two shots a push reads beautifully; between two cards with scenes on them it
+# reads as the second one arriving early. Cut between scenes, and save the
+# programme's own transitions for the footage.
+#
+# Nothing but cards, so it renders anywhere:
+#   cuttr-render examples/scenes/kinetic.cuttrproj
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: kinetic.mov
+
+timeline:
+  - card:  00:01.400
+    as:    one
+  - card:  00:01.400
+    as:    two
+  - card:  00:02.000
+    as:    three
+
+overlays:
+  - scene: word
+    with:  {word: "cut", under: "mark it and move on"}
+    from:  "@one"
+    in:    {fade: true, over: 0.25}
+    out:   {fade: true, over: 0.25}
+  - scene: word
+    with:  {word: "compose", under: "clips are named, never timed"}
+    from:  "@two"
+    in:    {fade: true, over: 0.25}
+    out:   {fade: true, over: 0.25}
+  - scene: sign
+    with:  {word: "cuttr", under: "editing as text"}
+    from:  "@three"
+    in:    {fade: true, over: 0.25}
+    out:   {fade: true, over: 0.4}
+
+scenes:
+  # One word, arriving from under a block that sweeps off it. The block and the
+  # word share the same moment: the block leaves as the word settles.
+  word:
+    parts:
+      - background: {from: "#07090f", to: "#141a2b", angle: 90}
+        keys:
+          - {t: 0}
+      - text:  "{{word}}"
+        style: title
+        tracking: 0.06
+        keys:
+          - {t: 0.15, x: 0.5, y: 0.46, opacity: 0, scale: 1.08}
+          - {t: 0.75, y: 0.5, opacity: 1, scale: 1, ease: out}
+      - shape: "#ff375f"
+        keys:
+          - {t: 0.1,  x: 0.5,  y: 0.5, width: 0.62, height: 0.13}
+          - {t: 0.75, x: 1.35, ease: in}
+      - text:  "{{under}}"
+        style: caption
+        keys:
+          - {t: 0.8, x: 0.5, y: 0.38, opacity: 0}
+          - {t: 1.2, opacity: 1, ease: out}
+
+  # The last card holds still: a mark, a rule under it, and the line that says
+  # what the thing is.
+  sign:
+    parts:
+      - background: {from: "#0b1220", to: "#1d3557", angle: 90}
+        keys:
+          - {t: 0}
+      - shape: "#30d158"
+        keys:
+          - {t: 0.0, x: 0.5, y: 0.62, width: 0.03, height: 0.055, rotation: 0, scale: 0.4}
+          - {t: 0.6, rotation: 45, scale: 1, ease: out}
+      - text:  "{{word}}"
+        style: title
+        tracking: 0.1
+        keys:
+          - {t: 0.4, x: 0.5, y: 0.44, opacity: 0, scale: 0.94}
+          - {t: 1.1, opacity: 1, scale: 1, ease: out}
+      - shape: "#ffffff"
+        keys:
+          - {t: 0.9, x: 0.5, y: 0.36, width: 0.0,  height: 0.003}
+          - {t: 1.5, width: 0.24, ease: out}
+      - text:  "{{under}}"
+        style: caption
+        keys:
+          - {t: 1.2, x: 0.5, y: 0.29, opacity: 0}
+          - {t: 1.7, opacity: 1, ease: out}

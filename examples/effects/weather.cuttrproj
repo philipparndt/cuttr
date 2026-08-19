@@ -1,0 +1,84 @@
+# Rain, snow and sparks — the same machinery with different numbers.
+#
+# Every one of these is lit 3-D geometry rather than flat shapes: pieces tumble
+# and catch the key light as they turn, and `depth` is why the ones at the back
+# are smaller, dimmer and slower. That is the whole difference between an effect
+# somebody enjoys and one that looks like a screensaver.
+#
+#   cuttr-render examples/effects/weather.cuttrproj
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: weather.mov
+
+timeline:
+  - card:  00:03.000
+    as:    downpour
+    fill:  ["#1b2430", "#070a10"]
+  - card:  00:03.000
+    as:    still
+    fill:  ["#0d1520", "#04060a"]
+  - card:  00:02.500
+    as:    spark
+    fill:  ["#12060c", "#05020a"]
+
+overlays:
+  # Rain leans by exactly the speed it is carried at, so every streak keeps the
+  # same slant — `wind` is what makes it weather rather than a screensaver.
+  - effect:  rain
+    density: 1.8
+    speed:   1.3
+    wind:    0.5
+    from:    "@downpour"
+    in:      {fade: true, over: 0.5}
+    out:     {fade: true, over: 0.5}
+  - scene: label
+    with:  {word: "rain"}
+    from:  "@downpour"
+    in:    {fade: true, over: 0.4}
+    out:   {fade: true, over: 0.4}
+
+  # Snow takes the wind too, and going slower makes it read as heavier air.
+  - effect:  snow
+    density: 1.4
+    speed:   0.6
+    wind:    -0.25
+    size:    1.2
+    from:    "@still"
+    in:      {fade: true, over: 0.6}
+    out:     {fade: true, over: 0.6}
+  - scene: label
+    with:  {word: "snow"}
+    from:  "@still"
+    in:    {fade: true, over: 0.4}
+    out:   {fade: true, over: 0.4}
+
+  # Sparks are a burst rather than a fall: thrown up and falling back, and they
+  # run out rather than being switched off — that is what `fall` on the way out
+  # means.
+  - effect:  sparkle
+    finish:  glitter
+    density: 2
+    speed:   1.2
+    from:    "@spark"
+    in:      {fade: true, over: 0.2}
+    out:     {fall: true, over: 1}
+  - scene: label
+    with:  {word: "sparks"}
+    from:  "@spark"
+    in:    {fade: true, over: 0.4}
+    out:   {fade: true, over: 0.4}
+
+scenes:
+  # Words only — the ground belongs to the card, or the effects would be behind
+  # it. A scene is a layer over the finished picture; an effect is in it.
+  label:
+    parts:
+      - text:  "{{word}}"
+        style: title
+        tracking: 0.2
+        keys:
+          - {t: 0.3, x: 0.5, y: 0.14, opacity: 0}
+          - {t: 1.0, opacity: 1, ease: out}

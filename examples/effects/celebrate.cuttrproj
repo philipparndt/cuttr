@@ -1,0 +1,81 @@
+# Confetti, over a card.
+#
+# Effects are usually thrown over footage — that is what they are for — but
+# they go over anything, and a title card with confetti on it is an opening
+# somebody actually wants. This renders with no media at all:
+#   cuttr-render examples/effects/celebrate.cuttrproj
+#
+# An effect is the whole frame for as long as it lasts. `density`, `speed` and
+# `size` are against the style's own idea of enough; `finish` is what the pieces
+# are made of, and `seed` is why the same project gives the same shower every
+# time — a director who liked the third take has to be able to get it back.
+#
+# **The colour is on the card, not in the scene, and that is the lesson here.**
+# Effects are drawn into the picture; a scene is drawn over it, as a layer, in
+# a second pass. So a scene with a full-frame background hides everything the
+# effects did — the confetti was there and simply could not be seen. Put the
+# ground on the card, where the pixels are, and leave the scene the words.
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: celebrate.mov
+
+timeline:
+  - card:  00:03.000
+    as:    party
+    fill:  ["#26304d", "#0a0d18"]
+  - card:  00:03.000
+    as:    quiet
+    fill:  ["#1a2433", "#05070c"]
+
+overlays:
+  - scene: plate
+    with:  {title: "one hundred", under: "episodes"}
+    from:  "@party"
+    in:    {fade: true, over: 0.4}
+    out:   {fade: true, over: 0.4}
+
+  # Foil rather than card: a metallic piece flares white as it turns through
+  # the light and goes dark as it turns away, which is most of why real confetti
+  # reads as expensive.
+  - effect:  confetti
+    finish:  metallic
+    density: 1.6
+    size:    1.1
+    seed:    7
+    from:    "@party"
+    in:      {fade: true, over: 0.2}
+    out:     {fall: true, over: 1.2}
+
+  - scene: plate
+    with:  {title: "and now", under: "the weather"}
+    from:  "@quiet"
+    in:    {fade: true, over: 0.4}
+    out:   {fade: true, over: 0.4}
+
+  # Snow is the same machinery with different numbers: slower, smaller, going
+  # almost straight down.
+  - effect:  snow
+    density: 1.2
+    speed:   0.7
+    from:    "@quiet"
+    in:      {fade: true, over: 0.6}
+    out:     {fade: true, over: 0.6}
+
+scenes:
+  # Words only. The ground is the card's.
+  plate:
+    parts:
+      - text:  "{{title}}"
+        style: title
+        tracking: 0.06
+        keys:
+          - {t: 0.2, x: 0.5, y: 0.54, opacity: 0, scale: 0.95}
+          - {t: 1.0, opacity: 1, scale: 1, ease: out}
+      - text:  "{{under}}"
+        style: caption
+        keys:
+          - {t: 0.6, x: 0.5, y: 0.42, opacity: 0}
+          - {t: 1.2, opacity: 1, ease: out}

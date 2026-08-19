@@ -1,0 +1,54 @@
+# The look family: film mode, the tape, and chromatic aberration.
+#
+# **This one needs footage of your own.** The three effects here work on the
+# picture — bars closing in, a stock, grain, a tracking wobble, red and blue
+# pulled apart from green — and over a flat card there is almost nothing for
+# them to do. Point `takes:` at a take you have cut and it renders:
+#
+#   takes:
+#     - ../../takes/my-take.cuttr
+#
+# The order of `overlays:` is the order they are drawn, and that is the whole
+# control over what sits on top of what. An aberration written *before* the film
+# overlay is under its letterbox, so the bars stay clean; written after it, the
+# bars are bent along with everything else. Move a row in the panel to change it.
+cuttr-project: 1
+
+takes:
+  - my-take.cuttr
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: looks.mov
+
+timeline:
+  - clip: clip-1
+    as:   shot
+
+overlays:
+  # Under the film: the fringing is on the picture, and the bars that close over
+  # it are untouched.
+  - aberration: radial
+    amount:     0.8
+    from:       "@shot"
+    in:         {fade: true, over: 0.6}
+    out:        {fade: true, over: 0.6}
+
+  - film:     warm        # none · warm · cool · sepia · noir · bleach
+    ratio:    "2.39:1"
+    strength: 0.8
+    grain:    0.45
+    vignette: 0.35
+    from:     "@shot"
+    in:       {fade: true, over: 1}
+    out:      {fade: true, over: 1}
+
+  # Over the film: the tape disturbs the bars as well, because a tape is the
+  # whole picture including its edges. Write it above the film for that, below
+  # for a clean letterbox around a worn picture.
+  - tape:  chewed         # clean · worn · chewed
+    seed:  3
+    from:  "@shot"
+    in:    {fade: true, over: 0.3}
+    out:   {fade: true, over: 0.3}
