@@ -242,39 +242,6 @@ public enum ProjectReader {
 			// One range, or several under `when:`. The plural is a list of the
 			// singular — the same three keys, in a list — so learning the one
 			// teaches the other.
-			func range(_ fields: [String: Any]) -> Overlay.Span? {
-				// A stretch of one clip, timed from where that clip starts —
-				// which is what makes it survive the clip being moved.
-				if let mark = (fields["within"] as? String).flatMap(nonEmpty) {
-					let from = (fields["from"] as? String).flatMap(Timecode.parse)
-						?? (try? time(fields["from"], key: "from")) as? Double ?? 0
-					let to = (fields["to"] as? String).flatMap(Timecode.parse)
-						?? (try? time(fields["to"], key: "to")) as? Double ?? 0
-					return .within(.init(mark), from: from, to: max(from, to))
-				}
-				// `group: introduction` is the same as `from: @introduction`,
-				// and is worth its own key because hanging a caption on a whole
-				// section is the commonest thing anybody wants to do with one.
-				if let group = (fields["group"] as? String).flatMap(nonEmpty) {
-					let endpoint = Overlay.Span.Endpoint.group(Slug.make(from: group))
-					return .marks(from: endpoint, to: endpoint)
-				}
-				if let from = fields["from"] as? String,
-				   let to = (fields["to"] as? String) ?? (fields["from"] as? String) {
-					// A time written where a clip goes is a time. `00:05.000` is
-					// not a slug and a slug is not a timecode, so there is
-					// nothing to disambiguate.
-					if let a = Timecode.parse(from), let b = Timecode.parse(to), from.contains(":") {
-						return .times(from: a, to: b)
-					}
-					return .marks(from: .init(from), to: .init(to))
-				}
-				if let a = (try? time(fields["from"], key: "from")) ?? nil,
-				   let b = (try? time(fields["to"], key: "to")) ?? nil {
-					return .times(from: a, to: b)
-				}
-				return nil
-			}
 
 			// What an appearance says, when it says something of its own.
 			func said(_ fields: [String: Any]) -> [SpinnerWord]? {
@@ -291,12 +258,12 @@ public enum ProjectReader {
 			var appearances: [Overlay.Appearance] = []
 			if let list = m["when"] as? [Any] {
 				appearances = list.compactMap { entry in
-					guard let fields = mapping(entry), let span = range(fields) else { return nil }
+					guard let fields = mapping(entry), let span = span(fields) else { return nil }
 					return Overlay.Appearance(
 						span, text: (fields["text"] as? String).flatMap(nonEmpty),
 						words: said(fields))
 				}
-			} else if let span = range(m) {
+			} else if let span = span(m) {
 				appearances = [Overlay.Appearance(span)]
 			}
 			guard !appearances.isEmpty else { continue }
@@ -312,9 +279,31 @@ public enum ProjectReader {
 			))
 		}
 
+		// Sound that is not from a take: music, an atmosphere, a sting. When it
+		// plays is read by the same function an overlay's range is, because it
+		// is the same question.
+		var sounds: [Sound] = []
+		for entry in list(root.removeValue(forKey: "sounds")) {
+			guard let m = mapping(entry),
+			      let file = (m["file"] as? String).flatMap(nonEmpty) else { continue }
+			// A `when:` list is read as its first range. A second stretch of the
+			// same music is a second entry under `sounds:` — a lane is a lane,
+			// and repeating four lines is cheaper than a grammar that hides how
+			// many of them there are.
+			let where_ = span(m) ?? (m["when"] as? [Any])?.compactMap(mapping).compactMap(span).first
+			guard let where_ else { continue }
+			sounds.append(Sound(
+				file: file,
+				span: where_,
+				gain: number(m["gain"]) ?? 0,
+				arrival: try fade(m["in"], key: "in"),
+				departure: try fade(m["out"], key: "out"),
+				ducks: number(m["ducks"]) ?? 0))
+		}
+
 		return Project(takes: takes, output: output, timeline: timeline,
-		               overlays: overlays, styles: styles, profiles: profiles,
-		               scenes: scenes, unknownKeys: root)
+		               overlays: overlays, sounds: sounds, styles: styles,
+		               profiles: profiles, scenes: scenes, unknownKeys: root)
 	}
 
 	/// One rule for "what does this string mean", shared with the panel.
@@ -445,6 +434,72 @@ public enum ProjectReader {
 		// A shower that runs out rather than one somebody switched off.
 		if m["fall"] != nil { return .fall(over: number(m["over"]) ?? 1.5) }
 		return .cut
+	}
+
+	/// When something is on: `within:` a clip, over a `group:`, between two
+	/// marks, or between two times.
+	///
+	/// One function, because overlays and sounds ask the same question and the
+	/// answer has to mean the same thing. A second grammar for "when does this
+	/// happen" would be a second thing to learn and a second thing to get
+	/// wrong.
+	static func span(_ fields: [String: Any]) -> Overlay.Span? {
+		// A stretch of one clip, timed from where that clip starts —
+		// which is what makes it survive the clip being moved.
+		if let mark = (fields["within"] as? String).flatMap(nonEmpty) {
+			let from = (fields["from"] as? String).flatMap(Timecode.parse)
+				?? (try? time(fields["from"], key: "from")) as? Double ?? 0
+			let to = (fields["to"] as? String).flatMap(Timecode.parse)
+				?? (try? time(fields["to"], key: "to")) as? Double ?? 0
+			return .within(.init(mark), from: from, to: max(from, to))
+		}
+		// `group: introduction` is the same as `from: @introduction`,
+		// and is worth its own key because hanging a caption on a whole
+		// section is the commonest thing anybody wants to do with one.
+		if let group = (fields["group"] as? String).flatMap(nonEmpty) {
+			let endpoint = Overlay.Span.Endpoint.group(Slug.make(from: group))
+			return .marks(from: endpoint, to: endpoint)
+		}
+		if let from = fields["from"] as? String,
+		   let to = (fields["to"] as? String) ?? (fields["from"] as? String) {
+			// A time written where a clip goes is a time. `00:05.000` is
+			// not a slug and a slug is not a timecode, so there is
+			// nothing to disambiguate.
+			if let a = Timecode.parse(from), let b = Timecode.parse(to), from.contains(":") {
+				return .times(from: a, to: b)
+			}
+			return .marks(from: .init(from), to: .init(to))
+		}
+		if let a = (try? time(fields["from"], key: "from")) ?? nil,
+		   let b = (try? time(fields["to"], key: "to")) ?? nil {
+			return .times(from: a, to: b)
+		}
+		return nil
+	}
+
+	/// How a sound starts or stops.
+	///
+	/// Only a fade means anything to a sound — it cannot slide in from the left
+	/// — so this reads the fade spellings and nothing else: `{fade: true, over:
+	/// 0.5}`, a bare number of seconds, the word `fade`, and nothing at all for
+	/// a hard start.
+	private static func fade(_ value: Any?, key: String) throws -> Overlay.Transition {
+		guard let value else { return .cut }
+		// The mapping first, because a mapping is not a time and asking for one
+		// throws rather than falling through.
+		if let m = mapping(value) {
+			guard m["fade"] != nil || m["over"] != nil else { return .cut }
+			return .fade(over: number(m["over"]) ?? number(m["fade"]) ?? 0.5)
+		}
+		if let text = value as? String {
+			switch text.lowercased() {
+			case "fade": return .fade(over: 0.5)
+			case "cut", "none": return .cut
+			default: break   // a number or a timecode, or an error from `time`
+			}
+		}
+		guard let seconds = try time(value, key: key) else { return .cut }
+		return seconds > 0 ? .fade(over: seconds) : .cut
 	}
 
 	/// What a card is made of: one colour, or two read down the page.

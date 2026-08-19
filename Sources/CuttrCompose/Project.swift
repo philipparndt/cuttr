@@ -22,6 +22,9 @@ public struct Project: Sendable, Equatable {
 	/// Text and spinners laid over the cut.
 	public var overlays: [Overlay]
 
+	/// Music, atmospheres, stings: sound that is not from a take.
+	public var sounds: [Sound]
+
 	/// Named colour looks, referenced by a take's `look: {profile: …}`.
 	public var profiles: [String: Look]
 
@@ -41,6 +44,7 @@ public struct Project: Sendable, Equatable {
 		output: Output = Output(),
 		timeline: [TimelineEntry] = [],
 		overlays: [Overlay] = [],
+		sounds: [Sound] = [],
 		styles: [String: TextStyle] = [:],
 		profiles: [String: Look] = [:],
 		scenes: [String: Scene] = [:],
@@ -50,6 +54,7 @@ public struct Project: Sendable, Equatable {
 		self.output = output
 		self.timeline = timeline
 		self.overlays = overlays
+		self.sounds = sounds
 		self.styles = styles
 		self.profiles = profiles
 		self.scenes = scenes
@@ -63,7 +68,8 @@ public struct Project: Sendable, Equatable {
 
 	public static func == (a: Project, b: Project) -> Bool {
 		a.takes == b.takes && a.output == b.output && a.timeline == b.timeline
-			&& a.overlays == b.overlays && a.styles == b.styles && a.profiles == b.profiles
+			&& a.overlays == b.overlays && a.sounds == b.sounds
+			&& a.styles == b.styles && a.profiles == b.profiles
 			&& a.scenes == b.scenes
 	}
 

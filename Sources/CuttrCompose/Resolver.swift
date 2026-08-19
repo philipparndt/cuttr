@@ -7,6 +7,7 @@ public enum ResolveError: LocalizedError {
 	case unknownClip(ClipReference)
 	case ambiguousClip(String, [String])
 	case missingMedia(ClipReference)
+	case missingSound(String)
 	case unknownAnchor(String)
 	case emptyQuery(String)
 	case emptyGroup(String)
@@ -26,6 +27,9 @@ public enum ResolveError: LocalizedError {
 				+ "Write it as `\(takes[0])/\(slug)`."
 		case .missingMedia(let reference):
 			return "The take that `\(reference)` comes from has no video or audio file."
+		case .missingSound(let path):
+			return "No sound file at `\(path)`. Paths under `sounds:` are relative to "
+				+ "the project file, the same as the takes."
 		case .unknownAnchor(let name):
 			return "No anchor called `\(name)` in any of this project's takes. "
 				+ "Anchors are marked in the cutting window, on the take."
@@ -121,6 +125,18 @@ public struct ResolvedCard: Sendable, Equatable {
 	public var end: Double { start + card.duration }
 }
 
+/// A sound, placed on the programme's clock with its file found.
+public struct ResolvedSound: Sendable {
+	public let sound: Sound
+	/// Which of the project's sounds this came from, for the panel.
+	public let source: Int
+	/// The file, already resolved against the project's own folder.
+	public let url: URL
+	public let start: Double
+	public let end: Double
+	public var duration: Double { end - start }
+}
+
 /// An overlay with its times worked out.
 public struct ResolvedOverlay: Sendable {
 	public let overlay: Overlay
@@ -184,6 +200,8 @@ public struct ResolvedProject: Sendable {
 	/// The stretches with no footage behind them, in the order they play.
 	public var cards: [ResolvedCard] = []
 	public let overlays: [ResolvedOverlay]
+	/// Music and the rest, in the order it starts.
+	public var sounds: [ResolvedSound] = []
 	public let groups: [ResolvedGroup]
 	/// Every anchor the takes brought, with its path on the programme's clock.
 	public let anchors: [(anchor: Anchor, path: AnchorPath?)]
@@ -543,6 +561,58 @@ public enum Resolver {
 			}
 		}
 
+		/// Where a mark is on the programme, once for each time it is there.
+		///
+		/// A clip used twice is two places, not one long one. Spanning from the
+		/// first to the last covered everything in between — which is why using
+		/// a clip twice was awkward: an overlay hung on it swallowed whatever
+		/// came between the two uses.
+		func places(_ endpoint: Overlay.Span.Endpoint) throws -> [(start: Double, end: Double)] {
+			switch endpoint {
+			case .clip(let reference):
+				let matching = clips.filter {
+					$0.reference.slug == reference.slug
+						&& (reference.take == nil || $0.takeName == reference.take)
+				}
+				guard !matching.isEmpty else { throw ResolveError.unknownClip(reference) }
+				return matching.map { ($0.start, $0.end) }
+			case .group(let name):
+				guard let range = groups[name] else { throw ResolveError.unknownGroup(name) }
+				return [range]
+			}
+		}
+
+		/// A written range, on the programme's clock — once for each time the
+		/// material it names is used. One function, because an overlay and a
+		/// sound say when they happen in the same words and must get the same
+		/// answer.
+		func when(_ span: Overlay.Span) throws -> [(start: Double, end: Double)] {
+			switch span {
+			case .times(let a, let b):
+				return [(a, b)]
+			case .within(let mark, let a, let b):
+				// Timed from where the clip or section starts, so it travels
+				// with it — and once for each time that clip is used.
+				return try places(mark).map { ($0.start + a, $0.start + b) }
+			case .marks(let from, let to):
+				// Mark-bound, which is the point: the caption belongs to a
+				// section of the programme, so re-cutting the takes moves it.
+				let heads = try places(from)
+				let tails = try places(to)
+				if from == to { return heads }
+				// From the first time the head is used to the first end of the
+				// tail after it, so a range across the programme is one range
+				// rather than every combination.
+				var spans: [(start: Double, end: Double)] = []
+				for head in heads {
+					guard let tail = tails.first(where: { $0.end >= head.end })
+						?? tails.last else { continue }
+					spans.append((head.start, max(tail.end, head.end)))
+				}
+				return spans
+			}
+		}
+
 		var overlays: [ResolvedOverlay] = []
 		for (index, overlay) in project.overlays.enumerated() {
 			if let name = overlay.anchor, anchorsByName[name] == nil {
@@ -553,56 +623,7 @@ public enum Resolver {
 			// that is on from one moment to another, so an overlay that is on
 			// three times is three of those and nothing else changes.
 			for (position, appearance) in overlay.appearances.enumerated() {
-				/// Where a mark is on the programme, once for each time it is
-				/// there.
-				///
-				/// A clip used twice is two places, not one long one. Spanning
-				/// from the first to the last covered everything in between —
-				/// which is why using a clip twice was awkward: an overlay hung
-				/// on it swallowed whatever came between the two uses.
-				func places(_ endpoint: Overlay.Span.Endpoint) throws -> [(start: Double, end: Double)] {
-					switch endpoint {
-					case .clip(let reference):
-						let matching = clips.filter {
-							$0.reference.slug == reference.slug
-								&& (reference.take == nil || $0.takeName == reference.take)
-						}
-						guard !matching.isEmpty else { throw ResolveError.unknownClip(reference) }
-						return matching.map { ($0.start, $0.end) }
-					case .group(let name):
-						guard let range = groups[name] else { throw ResolveError.unknownGroup(name) }
-						return [range]
-					}
-				}
-
-				var spans: [(start: Double, end: Double)] = []
-				switch appearance.span {
-				case .times(let a, let b):
-					spans = [(a, b)]
-				case .within(let mark, let a, let b):
-					// Timed from where the clip or section starts, so it travels
-					// with it — and once for each time that clip is used.
-					spans = try places(mark).map { ($0.start + a, $0.start + b) }
-				case .marks(let from, let to):
-					// Mark-bound, which is the point: the caption belongs to a
-					// section of the programme, so re-cutting the takes moves it.
-					let heads = try places(from)
-					let tails = try places(to)
-					if from == to {
-						spans = heads
-					} else {
-						// From the first time the head is used to the first end
-						// of the tail after it, so a range across the programme
-						// is one range rather than every combination.
-						for head in heads {
-							guard let tail = tails.first(where: { $0.end >= head.end })
-								?? tails.last else { continue }
-							spans.append((head.start, max(tail.end, head.end)))
-						}
-					}
-				}
-
-				for span in spans where span.end > span.start {
+				for span in try when(appearance.span) where span.end > span.start {
 					// What it says *here*: a spinner that comes back saying
 					// something else is one overlay with two appearances, and by
 					// the time it reaches the layer tree it is simply two
@@ -626,10 +647,32 @@ public enum Resolver {
 			a.depth == b.depth ? a.start < b.start : a.depth < b.depth
 		}
 
+		// The sounds, on the same clock and out of the same folder as everything
+		// else the project names. A sound that is on twice is two of these, the
+		// same way an overlay is.
+		var sounds: [ResolvedSound] = []
+		for (index, sound) in project.sounds.enumerated() {
+			let url = URL(fileURLWithPath: sound.file, relativeTo: baseURL).standardizedFileURL
+			// Said now rather than discovered as a silent track. A missing
+			// recording is named when a take is resolved, and a missing piece of
+			// music should be named the same way — the commonest thing to go
+			// wrong with a path is that it is wrong.
+			guard FileManager.default.fileExists(atPath: url.path) else {
+				throw ResolveError.missingSound(sound.file)
+			}
+			for span in try when(sound.span) where span.end > span.start {
+				sounds.append(ResolvedSound(
+					sound: sound, source: index, url: url,
+					start: span.start, end: span.end))
+			}
+		}
+		sounds.sort { $0.start < $1.start }
+
 		let resolvedAnchors = anchorsByName.keys.sorted().map {
 			(anchor: anchorsByName[$0]!, path: paths[$0])
 		}
 		return ResolvedProject(project: project, baseURL: baseURL, clips: clips, cards: cards,
-		                       overlays: overlays, groups: resolvedGroups, anchors: resolvedAnchors)
+		                       overlays: overlays, sounds: sounds, groups: resolvedGroups,
+		                       anchors: resolvedAnchors)
 	}
 }

@@ -117,6 +117,11 @@ public enum ProjectWriter {
 			out += overlays(project.overlays)
 		}
 
+		if !project.sounds.isEmpty {
+			out += "\nsounds:\n"
+			out += sounds(project.sounds)
+		}
+
 		out += scenes(project.scenes)
 
 		if !project.unknownKeys.isEmpty {
@@ -141,6 +146,10 @@ public enum ProjectWriter {
 
 	public static func fragment(for overlay: Overlay) -> String {
 		"overlays:\n" + overlays([overlay])
+	}
+
+	public static func fragment(for sound: Sound) -> String {
+		"sounds:\n" + sounds([sound])
 	}
 
 	public static func fragment(for output: Output) -> String {
@@ -274,21 +283,54 @@ public enum ProjectWriter {
 		}.joined(separator: ", ") + "]"
 	}
 
-	/// When an overlay is on, as the file says it.
-	private static func range(_ span: Overlay.Span, indent: String) -> String {
+	/// When an overlay or a sound is on, as the file says it.
+	///
+	/// `column` is where the values line up, which differs between the two only
+	/// because the widest key differs: an overlay's block has `spinner:` and a
+	/// sound's has `ducks:`.
+	private static func range(_ span: Overlay.Span, indent: String, column: Int = 8) -> String {
+		func key(_ name: String) -> String {
+			indent + (name + ":").padding(toLength: column, withPad: " ", startingAt: 0)
+		}
 		switch span {
 		case .within(let mark, let from, let to):
-			return "\(indent)within: \(scalar(mark.description))\n"
-				+ "\(indent)from:   \(Timecode.string(from))\n"
-				+ "\(indent)to:     \(Timecode.string(to))\n"
+			return "\(key("within"))\(scalar(mark.description))\n"
+				+ "\(key("from"))\(Timecode.string(from))\n"
+				+ "\(key("to"))\(Timecode.string(to))\n"
 		case .marks(let from, let to):
-			var out = "\(indent)from:   \(scalar(from.description))\n"
-			if to != from { out += "\(indent)to:     \(scalar(to.description))\n" }
+			var out = "\(key("from"))\(scalar(from.description))\n"
+			if to != from { out += "\(key("to"))\(scalar(to.description))\n" }
 			return out
 		case .times(let from, let to):
-			return "\(indent)from:   \(Timecode.string(from))\n"
-				+ "\(indent)to:     \(Timecode.string(to))\n"
+			return "\(key("from"))\(Timecode.string(from))\n"
+				+ "\(key("to"))\(Timecode.string(to))\n"
 		}
+	}
+
+	/// The sounds laid under the programme.
+	///
+	/// The same shape as an overlay and for the same reason: what a thing is on
+	/// the first line, when it is on under that, and how it arrives and leaves
+	/// at the bottom. Anything that is what a sound is without it — no gain, no
+	/// fades, no ducking — is left out.
+	private static func sounds(_ list: [Sound]) -> String {
+		var out = ""
+		for (index, sound) in list.enumerated() {
+			if index > 0 { out += "\n" }
+			out += "  - file:  \(scalar(sound.file))\n"
+			out += range(sound.span, indent: "    ", column: 7)
+			if sound.gain != 0 { out += "    gain:  \(trim(sound.gain))\n" }
+			if case .fade(let over) = sound.arrival {
+				out += "    in:    {fade: true, over: \(trim(over))}\n"
+			}
+			if case .fade(let over) = sound.departure {
+				out += "    out:   {fade: true, over: \(trim(over))}\n"
+			}
+			if sound.ducks != 0 {
+				out += "    ducks: \(trim(sound.ducks))   # dB off the programme's own sound\n"
+			}
+		}
+		return out
 	}
 
 	private static func overlays(_ list: [Overlay]) -> String {
