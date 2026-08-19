@@ -307,7 +307,7 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 
 		private func mark(_ kind: Theme.Kind) {
 			guard let image = Theme.symbol(kind) else { return }
-			Theme.draw(image, in: NSRect(x: 5, y: bounds.height / 2 - 8, width: 15, height: 16))
+			Theme.draw(image, in: NSRect(x: 3, y: bounds.height / 2 - 8, width: 19, height: 16))
 		}
 
 		private func primary(_ text: String, x: CGFloat, y: CGFloat) {

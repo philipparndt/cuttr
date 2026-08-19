@@ -567,7 +567,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			}
 			var x: CGFloat = 4
 			if let image = Theme.symbol(kind, size: 13) {
-				Theme.draw(image, in: NSRect(x: x, y: bounds.height / 2 - 8, width: 17, height: 16))
+				Theme.draw(image, in: NSRect(x: x, y: bounds.height / 2 - 8, width: 20, height: 16))
 			}
 			x += 22
 
@@ -650,7 +650,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			}
 
 			if let image = Theme.symbol(kind, size: 13) {
-				Theme.draw(image, in: NSRect(x: 5, y: bounds.height / 2 - 8, width: 17, height: 16))
+				Theme.draw(image, in: NSRect(x: 3, y: bounds.height / 2 - 8, width: 20, height: 16))
 			}
 
 			// Measured from the middle outwards, so the two lines keep clear of

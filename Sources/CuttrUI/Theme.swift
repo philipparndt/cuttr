@@ -120,17 +120,23 @@ public enum Theme {
 		return image.withSymbolConfiguration(configuration)
 	}
 
-	/// The rectangle a picture of this size fills inside a slot, without being
-	/// stretched to fit it.
+	/// Where a picture of this size sits inside a slot: its own shape, its own
+	/// size, in the middle of the room it is given.
 	///
 	/// Every symbol in this program was being drawn into a rectangle somebody
 	/// picked by eye — 17 by 16, 13 by 12 — and a symbol is not those
 	/// proportions. A folder came out wider than it is, and a chevron came out
-	/// squashed. The slot says how much room there is; the picture keeps its
-	/// own shape inside it.
+	/// squashed.
+	///
+	/// Never enlarged, either, and that is the second half of the same
+	/// mistake. `chevron.right` is tall and narrow where `chevron.down` is wide
+	/// and short, so filling one slot with each made the closed one half again
+	/// the size of the open one — two states of one control at two different
+	/// sizes. A symbol already has a size: it was asked for at a point size,
+	/// and that is the size it should be. The slot only says where.
 	public static func fit(_ size: NSSize, in slot: NSRect) -> NSRect {
 		guard size.width > 0, size.height > 0 else { return slot }
-		let scale = min(slot.width / size.width, slot.height / size.height)
+		let scale = min(1, min(slot.width / size.width, slot.height / size.height))
 		let fitted = NSSize(width: size.width * scale, height: size.height * scale)
 		return NSRect(x: slot.midX - fitted.width / 2, y: slot.midY - fitted.height / 2,
 		              width: fitted.width, height: fitted.height)

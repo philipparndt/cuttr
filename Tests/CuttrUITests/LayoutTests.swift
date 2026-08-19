@@ -240,10 +240,22 @@ import Testing
 	}
 
 	@Test func aTallPictureFitsTheOtherWay() {
-		let fitted = Theme.fit(NSSize(width: 10, height: 40),
+		let fitted = Theme.fit(NSSize(width: 20, height: 80),
 		                       in: NSRect(x: 0, y: 0, width: 20, height: 20))
 		#expect(fitted.height == 20)
 		#expect(fitted.width == 5)
+	}
+
+	/// A small picture is left the size it is. Two states of one control —
+	/// `chevron.right` is tall and narrow, `chevron.down` wide and short — must
+	/// not come out at two sizes because each filled the slot its own way.
+	@Test func aSmallPictureIsNotBlownUp() {
+		let slot = NSRect(x: 0, y: 0, width: 20, height: 20)
+		let narrow = Theme.fit(NSSize(width: 5, height: 9), in: slot)
+		let wide = Theme.fit(NSSize(width: 9, height: 5), in: slot)
+		#expect(narrow.size == NSSize(width: 5, height: 9))
+		#expect(wide.size == NSSize(width: 9, height: 5))
+		#expect(narrow.midX == slot.midX && wide.midY == slot.midY)
 	}
 
 	/// A picture with no size cannot be fitted, and stretching nothing is not
