@@ -17,12 +17,19 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 	public var onInsert: ((String) -> Void)?
 
 	fileprivate enum Row {
-		case header(String, Theme.Kind?)
+		case header(String, Theme.Kind?, collapsed: Bool)
 		case clip(ComposeDocument.Vocabulary.Item)
 		case tag(String, Int)
 		case anchor(String, String)
 
 		/// What a project writes to mean it.
+		/// The section this row belongs to, for the keyboard: left arrow on an
+		/// item goes to its heading, and collapses it from there.
+		var isHeader: Bool {
+			if case .header = self { return true }
+			return false
+		}
+
 		var reference: String? {
 			switch self {
 			case .header: return nil
@@ -35,7 +42,9 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 
 	private var vocabulary = ComposeDocument.Vocabulary()
 	private var rows: [Row] = []
-	private let table = NSTableView()
+	/// Sections somebody has folded away, by their heading.
+	private var collapsed: Set<String> = []
+	private let table = KeyTable()
 	private let search = NSSearchField()
 
 	public override init(frame: NSRect) {
@@ -58,7 +67,9 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 		table.headerView = nil
 		table.selectionHighlightStyle = .regular
 		table.doubleAction = #selector(insertSelected)
+		table.action = #selector(clicked)
 		table.target = self
+		table.onKey = { [weak self] event in self?.handle(event) ?? false }
 		table.intercellSpacing = NSSize(width: 0, height: 0)
 		let column = NSTableColumn(identifier: .init("item"))
 		column.width = 240
@@ -104,28 +115,26 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 		}
 
 		var out: [Row] = []
+		func section(_ title: String, _ kind: Theme.Kind?, _ items: [Row]) {
+			guard !items.isEmpty else { return }
+			let folded = collapsed.contains(title)
+			out.append(.header(title, kind, collapsed: folded))
+			if !folded { out += items }
+		}
+
 		for take in vocabulary.takeNames {
 			let clips = vocabulary.items.filter {
 				$0.take == take && matches($0.slug, $0.name, $0.tags.joined(separator: " "), take)
 			}
-			guard !clips.isEmpty else { continue }
-			out.append(.header(take, .take))
-			out.append(contentsOf: clips.map { Row.clip($0) })
+			section(take, .take, clips.map { Row.clip($0) })
 		}
 
-		let tags = vocabulary.tags.filter { matches($0) }
-		if !tags.isEmpty {
-			out.append(.header("tags", nil))
-			out += tags.map { tag in
-				.tag(tag, vocabulary.items.filter { $0.tags.contains(tag) }.count)
-			}
-		}
-
-		let anchors = vocabulary.anchors.filter { matches($0) }
-		if !anchors.isEmpty {
-			out.append(.header("anchors", nil))
-			out += anchors.map { .anchor($0, vocabulary.anchorTakes[$0] ?? "") }
-		}
+		section("tags", nil, vocabulary.tags.filter { matches($0) }.map { tag in
+			.tag(tag, vocabulary.items.filter { $0.tags.contains(tag) }.count)
+		})
+		section("anchors", nil, vocabulary.anchors.filter { matches($0) }.map {
+			.anchor($0, vocabulary.anchorTakes[$0] ?? "")
+		})
 
 		rows = out
 		table.reloadData()
@@ -133,8 +142,46 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 
 	@objc private func insertSelected() {
 		let row = table.selectedRow
-		guard row >= 0, row < rows.count, let reference = rows[row].reference else { return }
+		guard row >= 0, row < rows.count else { return }
+		if case .header(let title, _, _) = rows[row] { return toggle(title) }
+		guard let reference = rows[row].reference else { return }
 		onInsert?(reference)
+	}
+
+	/// One click on a heading folds it, because a heading with a chevron on it
+	/// is a thing people click.
+	@objc private func clicked() {
+		let row = table.clickedRow
+		guard row >= 0, row < rows.count, case .header(let title, _, _) = rows[row] else { return }
+		toggle(title)
+	}
+
+	/// The arrows, on a list of sections: right opens, left closes — and left on
+	/// something inside a section goes to its heading first, the way a source
+	/// list behaves everywhere else on the machine.
+	fileprivate func handle(_ event: NSEvent) -> Bool {
+		let row = table.selectedRow
+		guard row >= 0, row < rows.count else { return false }
+		switch event.keyCode {
+		case 124:   // right
+			if case .header(let title, _, true) = rows[row] { toggle(title); return true }
+			return false
+		case 123:   // left
+			if case .header(let title, _, false) = rows[row] { toggle(title); return true }
+			if case .header = rows[row] { return true }
+			// Inside a section: go up to its heading.
+			if let heading = (0..<row).reversed().first(where: { rows[$0].isHeader }) {
+				table.selectRowIndexes([heading], byExtendingSelection: false)
+				table.scrollRowToVisible(heading)
+				return true
+			}
+			return false
+		case 36, 49:   // return, space
+			insertSelected()
+			return true
+		default:
+			return false
+		}
 	}
 
 	// MARK: - Table
@@ -147,7 +194,24 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 	}
 
 	public func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-		rows[row].reference != nil
+		// Headings are selectable too, or there is no way to fold one from the
+		// keyboard.
+		true
+	}
+
+	/// Folds a section away, or opens it, by name — the same thing the chevron
+	/// does. Public for the test that says it does.
+	public func fold(_ title: String) { toggle(title) }
+
+	/// Folds a section away, or opens it. The row stays put: what somebody
+	/// clicked is still under the pointer afterwards.
+	private func toggle(_ title: String) {
+		if collapsed.contains(title) { collapsed.remove(title) } else { collapsed.insert(title) }
+		let row = table.selectedRow
+		rebuild()
+		if row >= 0, row < rows.count {
+			table.selectRowIndexes([row], byExtendingSelection: false)
+		}
 	}
 
 	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -174,16 +238,38 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 	/// called, and its tags — and stacked text fields would spend most of the
 	/// width on the gaps between them.
 	fileprivate final class LibraryRow: NSTableCellView {
-		var row: Row = .header("", nil)
+		var row: Row = .header("", nil, collapsed: false)
+
+		/// Redrawn when it changes width.
+		///
+		/// A cell view is resized by the table as the column changes, and a
+		/// layer-backed one keeps whatever it drew at its old width until
+		/// something else marks it dirty — which is why the rule under a
+		/// heading stopped short until the window was resized.
+		override func setFrameSize(_ newSize: NSSize) {
+			super.setFrameSize(newSize)
+			needsDisplay = true
+		}
 
 		override func draw(_ dirtyRect: NSRect) {
 			let bounds = self.bounds
 			switch row {
-			case .header(let title, let kind):
+			case .header(let title, let kind, let folded):
 				let attributes: [NSAttributedString.Key: Any] = [
 					.font: Theme.heading, .foregroundColor: Theme.faintText,
 				]
 				var x: CGFloat = 4
+				// The chevron says the section can be folded, and which way it
+				// is now. Without it nothing on screen says either.
+				if let chevron = NSImage(
+					systemSymbolName: folded ? "chevron.right" : "chevron.down",
+					accessibilityDescription: folded ? "folded" : "open") {
+					let configuration = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+						.applying(NSImage.SymbolConfiguration(paletteColors: [Theme.dimText]))
+					chevron.withSymbolConfiguration(configuration)?
+						.draw(in: NSRect(x: x, y: bounds.height - 15, width: 11, height: 10))
+				}
+				x += 14
 				if let kind, let image = Theme.symbol(kind, size: 10, colour: Theme.faintText) {
 					image.draw(in: NSRect(x: x, y: bounds.height - 16, width: 13, height: 12))
 					x += 17

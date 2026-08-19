@@ -93,3 +93,44 @@ import Testing
 		inspector.layoutSubtreeIfNeeded()
 	}
 }
+
+/// The library folds its sections away.
+@Suite @MainActor struct LibraryFoldingTests {
+
+	private func vocabulary() -> ComposeDocument.Vocabulary {
+		var found = ComposeDocument.Vocabulary()
+		found.takeNames = ["take-01"]
+		found.tags = ["b-roll"]
+		found.anchors = ["mia-eye"]
+		found.items = [
+			.init(take: "take-01", slug: "intro", name: "Intro", tags: ["b-roll"],
+			      length: 4, reference: "intro"),
+			.init(take: "take-01", slug: "demo", name: "Demo", tags: [],
+			      length: 9, reference: "demo"),
+		]
+		return found
+	}
+
+	private func table(in view: NSView) -> NSTableView? {
+		for subview in view.subviews {
+			if let table = subview as? NSTableView { return table }
+			if let found = table(in: subview) { return found }
+		}
+		return nil
+	}
+
+	@Test func foldingAHeadingHidesWhatIsUnderIt() throws {
+		_ = NSApplication.shared
+		let library = LibraryView()
+		library.reload(vocabulary())
+		let table = try #require(self.table(in: library))
+		let all = table.numberOfRows
+
+		// The take's heading is the first row; folding it takes its clips away
+		// and leaves everything else.
+		library.fold("take-01")
+		#expect(table.numberOfRows == all - 2)
+		library.fold("take-01")
+		#expect(table.numberOfRows == all)
+	}
+}

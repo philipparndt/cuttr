@@ -726,7 +726,9 @@ public final class PropertiesPanel: NSView {
 	}
 
 	private var styleNames: [String] {
-		Array(Set(project.styles.keys).union(TextStyle.builtIn.keys)).sorted()
+		// What the project defines, and the built-ins under the one spelling
+		// each — `builtIn` answers to more than it offers.
+		Array(Set(project.styles.keys).union(TextStyle.offered)).sorted()
 	}
 
 	private func transitionRow(_ name: String, _ transition: Overlay.Transition,

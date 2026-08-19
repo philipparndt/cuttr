@@ -100,3 +100,21 @@ import Testing
 		                        to: .clip(ClipReference("second"))))
 	}
 }
+
+/// Styles are read under more names than they are offered under.
+@Suite struct StyleNameTests {
+
+	@Test func bothSpellingsAreRead() {
+		#expect(TextStyle.builtIn["lower-third-centre"] == TextStyle.builtIn["lower-third-center"])
+		#expect(TextStyle.builtIn["centre"] == TextStyle.builtIn["center"])
+	}
+
+	/// …and each is offered once, in one spelling.
+	@Test func eachIsOfferedOnce() {
+		#expect(Set(TextStyle.offered).count == TextStyle.offered.count)
+		for name in TextStyle.offered {
+			#expect(TextStyle.builtIn[name] != nil, "\(name) is offered but not defined")
+			#expect(!name.contains("center"), "\(name) is offered in the other spelling")
+		}
+	}
+}

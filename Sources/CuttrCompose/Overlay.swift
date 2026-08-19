@@ -397,8 +397,16 @@ public struct TextStyle: Sendable, Equatable {
 		background: RGBA(r: 0, g: 0, b: 0, a: 0),
 		position: CGPoint(x: 0.5, y: 0.52), alignment: .centre)
 
+	/// The names worth offering, in the spelling this program uses.
+	///
+	/// `builtIn` also answers to the American spellings, because a file that
+	/// says `center` should work — but a menu that lists a style twice under
+	/// two spellings is a menu that makes somebody wonder what the difference
+	/// is. They are read, not offered.
+	public static let offered = ["lower-third", "lower-third-centre", "centre", "title", "caption"]
+
 	/// Available without being written down, and overridable by writing one
-	/// down: a project that redefines `lower-third` still gets the other two.
+	/// down: a project that redefines `lower-third` still gets the others.
 	public static let builtIn: [String: TextStyle] = [
 		"lower-third": .lowerThird,
 		"lower-third-centre": .lowerThirdCentred,
