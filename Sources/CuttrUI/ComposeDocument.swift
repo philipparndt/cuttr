@@ -2,6 +2,12 @@ import AppKit
 import CuttrCompose
 import CuttrKit
 
+public extension Notification.Name {
+	/// A project changed — read, reloaded, or edited. The `object` is the
+	/// ``ComposeDocument`` it happened to.
+	static let cuttrProjectChanged = Notification.Name("de.rnd7.cuttr.projectChanged")
+}
+
 /// The project being composed, and everything derived from it.
 ///
 /// Deliberately thinner than ``TakeDocument``. The project file is the
@@ -123,6 +129,10 @@ public final class ComposeDocument {
 			problem = error.localizedDescription
 		}
 		onChange?()
+		// Anything else showing this project — a scene window, say — hears
+		// about it here. A notification rather than a second `onChange`,
+		// because there can be several listeners and only one of that.
+		NotificationCenter.default.post(name: .cuttrProjectChanged, object: self)
 	}
 
 	// MARK: - Watching
@@ -182,6 +192,10 @@ public final class ComposeDocument {
 		public var tags: [String] = []
 		public var anchors: [String] = []
 		public var groups: [String] = []
+		/// The scenes this project defines. Not drawn from the takes like the
+		/// rest of the vocabulary — a scene is the project's own — but listed
+		/// with them because it is one more name the file refers to by name.
+		public var scenes: [String] = []
 		/// The placements somebody named with `as:`. A section of one clip as
 		/// far as everything downstream is concerned — but kept apart here,
 		/// because in a list of things to hang an overlay on it matters whether
@@ -263,6 +277,7 @@ public final class ComposeDocument {
 		found.clips = clips.sorted()
 		found.tags = tags.sorted()
 		found.anchors = anchors.sorted()
+		found.scenes = project.scenes.keys.sorted()
 		found.groups = Array(Set(names(project.timeline))).sorted()
 		found.labels = Array(Set(labels(project.timeline))).sorted()
 		return found

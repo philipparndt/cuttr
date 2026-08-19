@@ -43,6 +43,11 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// Whether a take already has a tab of its own. Renaming one that is open
 	/// would leave that tab writing to a file that no longer exists.
 	public var isTakeOpen: ((URL) -> Bool)?
+	/// Open a scene of this project in the scene editor. A scene is a window's
+	/// worth of editing — parts, keyframes, a stage — and putting that inside
+	/// one field of the properties panel is what this callback exists to avoid.
+	/// `nil` means "whichever one, or a new one".
+	public var onEditScene: ((ComposeDocument, String?) -> Void)?
 	private let bar = ComposeBar()
 	private let problemLabel = NSTextField(labelWithString: "")
 
@@ -347,6 +352,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			}
 		}
 		library.onInsert = { [weak self] reference in self?.inspector.insert(reference: reference) }
+		library.onEditScene = { [weak self] name in
+			guard let self else { return }
+			self.onEditScene?(self.composeDocument, name)
+		}
 
 		// The same arrangement as the cutting window, for the same reason: the
 		// keys have to work wherever the focus happens to be.
@@ -746,12 +755,23 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 	@objc public func reloadProject(_ sender: Any?) { composeDocument.reload() }
 
+	/// Opens the scene editor on this project.
+	///
+	/// On a scene of it when one is chosen in the library; otherwise on the
+	/// first it has, and on an empty editor offering to make one when it has
+	/// none. The scene window edits `scenes:` and hands the project back — the
+	/// document here still owns the file.
+	@objc public func editScene(_ sender: Any?) {
+		onEditScene?(composeDocument, nil)
+	}
+
 	@objc public func togglePlay(_ sender: Any?) { transport.togglePlay() }
 
 	public func validateMenuItem(_ item: NSMenuItem) -> Bool {
 		switch item.action {
 		case #selector(render(_:)): return composeDocument.resolved != nil
 		case #selector(exportProject(_:)): return !composeDocument.project.takes.isEmpty
+		case #selector(editScene(_:)): return onEditScene != nil
 		default: return true
 		}
 	}

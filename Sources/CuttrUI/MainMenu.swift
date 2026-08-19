@@ -54,6 +54,8 @@ enum MainMenu {
 		                     #selector(ComposeWindowController.addTake(_:)), "a", [.command, .shift]))
 		file.addItem(command("New Take in Project…",
 		                     #selector(ComposeWindowController.newTake(_:)), "t", [.command, .shift]))
+		file.addItem(command("New Scene…", #selector(AppDelegate.newScene(_:)), "s",
+		                     [.command, .control]))
 		file.addItem(command("Export Project to Folder…",
 		                     #selector(ComposeWindowController.exportProject(_:)), "E", [.command, .shift]))
 		file.addItem(.separator())
@@ -190,6 +192,12 @@ enum MainMenu {
 		// would be matched before any text field in the program ever saw one.
 		// The composing window takes space through its own key monitor.
 		compose.addItem(command("Play / Pause", #selector(ComposeWindowController.togglePlay(_:)), ""))
+		compose.addItem(.separator())
+		// The scene editor. In this menu because it is a thing done to a
+		// project, and reachable from the library beside the programme as well
+		// — a scene there is double-clicked like anything else in the list.
+		compose.addItem(command("Edit Scenes…", #selector(ComposeWindowController.editScene(_:)),
+		                        "k", [.command, .shift]))
 		composeItem.submenu = compose
 		main.addItem(composeItem)
 
