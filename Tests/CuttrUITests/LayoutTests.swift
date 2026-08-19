@@ -277,3 +277,41 @@ import Testing
 		}
 	}
 }
+
+/// A still keeps the numbers the footage has.
+///
+/// The image generator tags its frames `CoreMedia709`, and AppKit does what a
+/// tag asks for: on a flat grey the file says 125 and the panel drew 136.
+@Suite @MainActor struct PosterColourTests {
+
+	@Test func aStillIsShownWithItsOwnNumbers() throws {
+		// A frame whose bytes *are* 125, labelled the way the generator labels
+		// one. Built from the bytes rather than filled with a colour, because a
+		// fill is itself a conversion and this test is about conversions.
+		// The space the image generator actually hands back, which is not the
+		// same as `itur_709` and does not move the numbers the same way.
+		let space = try #require(CGColorSpace(name: "kCGColorSpaceCoreMedia709" as CFString))
+		let bytes = [UInt8](repeating: 125, count: 4 * 4 * 4)
+		let provider = try #require(CGDataProvider(data: Data(bytes) as CFData))
+		let frame = try #require(CGImage(
+			width: 4, height: 4, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 16,
+			space: space, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+			provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+
+		/// What lands on an sRGB screen.
+		func shown(_ image: CGImage) -> UInt8 {
+			let screen = CGColorSpace(name: CGColorSpace.sRGB)!
+			let out = CGContext(data: nil, width: 4, height: 4, bitsPerComponent: 8,
+			                    bytesPerRow: 16, space: screen,
+			                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+			out.draw(image, in: CGRect(x: 0, y: 0, width: 4, height: 4))
+			return out.data!.assumingMemoryBound(to: UInt8.self)[0]
+		}
+
+		// Left as it is, the tag moves it on the way to the screen.
+		let asTagged = shown(frame)
+		#expect(asTagged > 125, "the tag should lift it; it drew \(asTagged)")
+		// Re-labelled, the same bytes arrive as themselves.
+		#expect(shown(ComposeWindowController.asShown(frame)) == 125)
+	}
+}

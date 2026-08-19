@@ -342,7 +342,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			generator.generateCGImageAsynchronously(
 				for: CMTime(seconds: max(0, time), preferredTimescale: 600)
 			) { image, _, _ in
-				let picture = image.map { NSImage(cgImage: $0, size: .zero) }
+				let picture = image.map { NSImage(cgImage: Self.asShown($0), size: .zero) }
 				Task { @MainActor in done(picture) }
 			}
 		}
@@ -456,6 +456,25 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			self.attachOverlays()
 			self.seek(to: resumeAt)
 		}
+	}
+
+	/// A still, with its numbers left alone.
+	///
+	/// The generator hands back a frame tagged `CoreMedia709`, which is honest
+	/// about what the footage is — and then AppKit does what a colour tag asks
+	/// for and converts it to the screen's space. Measured on a flat grey: the
+	/// file says 125, the panel drew 136. Eleven levels, which is exactly the
+	/// "washed out" this program has already chased through the renderer twice.
+	///
+	/// So the tag is changed, not the pixels. `copy(colorSpace:)` re-labels the
+	/// same bytes as sRGB, nothing is converted on the way to the screen, and
+	/// the still shows what the footage holds — which is the rule everywhere
+	/// else in here, and what the player beside it is showing.
+	static func asShown(_ image: CGImage) -> CGImage {
+		guard let sRGB = CGColorSpace(name: CGColorSpace.sRGB),
+		      let retagged = image.copy(colorSpace: sRGB)
+		else { return image }
+		return retagged
 	}
 
 	/// Puts the overlay tree over the picture, whenever there is a picture to
