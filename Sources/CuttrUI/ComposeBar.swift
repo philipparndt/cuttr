@@ -41,8 +41,10 @@ public final class ComposeBar: NSView {
 		progress.isHidden = true
 		progress.controlSize = .small
 
-		statusLabel.font = Theme.mono
-		statusLabel.textColor = Theme.dimText
+		// The same size as the cutting window's clock. It is the number somebody
+		// reads while watching, from across the desk.
+		statusLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 17, weight: .medium)
+		statusLabel.textColor = Theme.text
 		statusLabel.lineBreakMode = .byTruncatingTail
 
 		// Three views, one at a time, each with the whole window.

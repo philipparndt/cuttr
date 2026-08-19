@@ -118,3 +118,21 @@ import Testing
 		}
 	}
 }
+
+/// An overlay that starts at zero is the one that goes wrong.
+///
+/// Core Animation reads a `beginTime` of nought as "now" — in an export that
+/// is whenever the encoder reached it, in a paused preview tree it is whenever
+/// the tree was attached. Either way the caption on the first clip appeared
+/// wherever the playhead happened to be, and every overlay with a later start
+/// behaved perfectly, which is what made it hard to see.
+@Suite struct BeginTimeTests {
+
+	@Test func zeroIsNeverZero() {
+		for host in [OverlayLayers.Host.preview, .export] {
+			#expect(host.beginTime(0) > 0, "\(host) starts an overlay at now")
+			// And anything with a real start is left exactly as it is.
+			#expect(host.beginTime(12.5) == 12.5)
+		}
+	}
+}

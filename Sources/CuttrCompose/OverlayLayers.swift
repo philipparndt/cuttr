@@ -25,16 +25,17 @@ public enum OverlayLayers {
 		/// Handed to `AVVideoCompositionCoreAnimationTool`.
 		case export
 
-		/// Core Animation reads a `beginTime` of 0 as "now", which during an
-		/// export means "whenever the encoder got here" — so the animation tool
-		/// has a sentinel for the beginning of the composition instead. It is
-		/// 1e-100, and forgetting it is the classic way to export a video whose
-		/// overlays all appear in the first frame.
+		/// Core Animation reads a `beginTime` of 0 as "now" — during an export
+		/// that means "whenever the encoder got here", and in a paused preview
+		/// tree it means "whenever this was attached". Either way an overlay
+		/// that starts at zero is the one that goes wrong, and it goes wrong
+		/// invisibly: everything with a later start behaves.
+		///
+		/// So zero is never zero. The animation tool's own sentinel for the
+		/// beginning of a composition is 1e-100, and it does just as well for a
+		/// tree being scrubbed by `timeOffset`.
 		func beginTime(_ seconds: Double) -> CFTimeInterval {
-			switch self {
-			case .preview: return seconds
-			case .export: return max(seconds, AVCoreAnimationBeginTimeAtZero)
-			}
+			max(seconds, AVCoreAnimationBeginTimeAtZero)
 		}
 	}
 
