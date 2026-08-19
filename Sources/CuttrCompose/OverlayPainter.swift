@@ -40,8 +40,9 @@ public enum OverlayPainter {
 
 		case .spinner(let spinner):
 			let wordStyle = spinner.wordStyle.map { project.style(named: $0) } ?? TextStyle.caption
-			guard let drawn = spinnerImage(spinner, words: wordStyle, resolved: resolved,
-			                               size: size, at: time) else { return nil }
+			guard let drawn = spinnerImage(spinner, words: wordStyle, size: size,
+			                               elapsed: time - resolved.start,
+			                               span: resolved.duration) else { return nil }
 			return placed(drawn.image, plate: drawn.size, anchor: drawn.anchor,
 			              home: home(resolved, style: wordStyle, size: size),
 			              resolved: resolved, size: size, opacity: opacity, at: time)
@@ -127,18 +128,21 @@ public enum OverlayPainter {
 	/// The same proportions as the layer version — they come from `SpinnerLook`
 	/// so there is one spinner and not two — turned by however far it has got:
 	/// `speed` turns a second, clockwise, from the moment it appeared.
+	/// Timed from when the spinner appeared rather than from the programme,
+	/// because a spinner in a scene has no overlay start to subtract — the
+	/// scene's own clock is the only one it knows.
 	private static func spinnerImage(
-		_ spinner: Spinner, words style: TextStyle, resolved: ResolvedOverlay,
-		size: CGSize, at time: Double
+		_ spinner: Spinner, words style: TextStyle,
+		size: CGSize, elapsed: Double, span: Double
 	) -> (image: CGImage, size: CGSize, anchor: CGPoint)? {
 		let diameter = max(4, spinner.size * size.height)
 		let scale: CGFloat = 2
 
 		// The word it is on, and how wide the block has to be for it.
 		var word: String?
-		let schedule = spinner.schedule(over: resolved.duration)
+		let schedule = spinner.schedule(over: span)
 		if !schedule.isEmpty {
-			var left = time - resolved.start
+			var left = elapsed
 			let cycle = schedule.reduce(0) { $0 + $1.duration }
 			if cycle > 0 { left = left.truncatingRemainder(dividingBy: cycle) }
 			for entry in schedule {
@@ -167,7 +171,7 @@ public enum OverlayPainter {
 		let ink = CGColor(srgbRed: spinner.color.r, green: spinner.color.g,
 		                  blue: spinner.color.b, alpha: spinner.color.a)
 		// Clockwise, from where it started.
-		let turn = -2 * CGFloat.pi * CGFloat(spinner.speed) * CGFloat(time - resolved.start)
+		let turn = -2 * CGFloat.pi * CGFloat(spinner.speed) * CGFloat(elapsed)
 
 		context.saveGState()
 		context.translateBy(x: centre.x, y: centre.y)
@@ -231,7 +235,7 @@ public enum OverlayPainter {
 			// It breathes rather than turns, so the rotation above means
 			// nothing to it: the size does the work.
 			let inset = diameter * SpinnerLook.pulseInset
-			let breath = 0.72 + 0.28 * (0.5 + 0.5 * sin(2 * .pi * spinner.speed * (time - resolved.start)))
+			let breath = 0.72 + 0.28 * (0.5 + 0.5 * sin(2 * .pi * spinner.speed * elapsed))
 			let radius = (diameter - inset * 2) / 2 * breath
 			context.setLineWidth(diameter * SpinnerLook.pulseWidth)
 			context.setAlpha(0.18)
@@ -244,7 +248,7 @@ public enum OverlayPainter {
 			let dot = diameter * SpinnerLook.bounceDot
 			let gapBetween = (diameter - dot * CGFloat(SpinnerLook.bounce)) / CGFloat(SpinnerLook.bounce - 1)
 			for step in 0..<SpinnerLook.bounce {
-				let phase = (time - resolved.start) * spinner.speed - Double(step) / Double(SpinnerLook.bounce)
+				let phase = elapsed * spinner.speed - Double(step) / Double(SpinnerLook.bounce)
 				let rise = max(0, sin(2 * .pi * phase)) * Double(diameter * SpinnerLook.bounceRise)
 				context.fillEllipse(in: CGRect(
 					x: -diameter / 2 + CGFloat(step) * (dot + gapBetween),
@@ -317,18 +321,53 @@ public enum OverlayPainter {
 						x: -plate.size.width / 2, y: -plate.size.height / 2,
 						width: plate.size.width, height: plate.size.height))
 				}
-			case .shape(let fill, let corner):
-				let box = CGRect(
-					x: -(key.width ?? 0.2) * size.width / 2,
-					y: -(key.height ?? 0.02) * size.height / 2,
-					width: (key.width ?? 0.2) * size.width,
-					height: (key.height ?? 0.02) * size.height)
+			case .shape(let fill, let corner, let kind):
+				let box = CGSize(width: (key.width ?? 0.2) * size.width,
+				                 height: (key.height ?? 0.02) * size.height)
 				let ink = key.color ?? fill
-				context.setFillColor(CGColor(srgbRed: ink.r, green: ink.g, blue: ink.b, alpha: ink.a))
-				context.addPath(CGPath(
-					roundedRect: box, cornerWidth: corner * size.height,
-					cornerHeight: corner * size.height, transform: nil))
+				context.setFillColor(cg(ink))
+				let morph = Scene.morph(of: keys, at: elapsed, default: kind)
+				context.addPath(Scene.ShapeKind.morphed(
+					morph, in: box, corner: corner * size.height))
 				context.fillPath()
+
+			case .bar(let bar):
+				let box = CGRect(
+					x: -(key.width ?? 0.4) * size.width / 2,
+					y: -(key.height ?? 0.02) * size.height / 2,
+					width: (key.width ?? 0.4) * size.width,
+					height: (key.height ?? 0.02) * size.height)
+				let rects = bar.rects(in: box, progress: key.progress ?? 0)
+				let radius = min(bar.corner * size.height, box.width / 2, box.height / 2)
+				if bar.track.a > 0 {
+					context.setFillColor(cg(bar.track))
+					context.addPath(CGPath(roundedRect: rects.track, cornerWidth: radius,
+					                       cornerHeight: radius, transform: nil))
+					context.fillPath()
+				}
+				if rects.fill.width > 0.01, rects.fill.height > 0.01 {
+					context.setFillColor(cg(key.color ?? bar.fill))
+					// The filled part is rounded by the same radius, clamped to
+					// itself: a pill an eighth full is a short pill, not a
+					// rectangle with one rounded end.
+					let end = min(radius, rects.fill.width / 2, rects.fill.height / 2)
+					context.addPath(CGPath(roundedRect: rects.fill, cornerWidth: end,
+					                       cornerHeight: end, transform: nil))
+					context.fillPath()
+				}
+
+			case .spinner(var spinner):
+				if let colour = key.color { spinner.color = colour }
+				if let progress = key.progress {
+					paint(spinner, filledTo: progress, in: context, frame: size)
+				} else if let drawn = spinnerImage(
+					spinner, words: TextStyle.caption, size: size,
+					elapsed: elapsed, span: max(elapsed, 1)) {
+					context.draw(drawn.image, in: CGRect(
+						x: -drawn.size.width / 2 + drawn.size.width * (0.5 - drawn.anchor.x),
+						y: -drawn.size.height / 2,
+						width: drawn.size.width, height: drawn.size.height))
+				}
 			case .image(let file):
 				let url = URL(fileURLWithPath: file, relativeTo: baseURL)
 				if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -353,6 +392,39 @@ public enum OverlayPainter {
 			context.restoreGState()
 		}
 		return context.makeImage()
+	}
+
+	private static func cg(_ colour: RGBA) -> CGColor {
+		CGColor(srgbRed: colour.r, green: colour.g, blue: colour.b, alpha: colour.a)
+	}
+
+	/// A spinner that knows how far it has got: a ring filled to `progress`.
+	///
+	/// Drawn here and, in the layer path, as the same arc with `strokeEnd` —
+	/// same centre, same radius, same thickness, same start at twelve o'clock,
+	/// same way round. The styles are for the indeterminate case, where there
+	/// is nothing to show but that it is still going; a spinner that knows the
+	/// fraction has something better to say and says it the one way.
+	private static func paint(
+		_ spinner: Spinner, filledTo progress: Double, in context: CGContext, frame: CGSize
+	) {
+		let diameter = max(4, spinner.size * frame.height)
+		let inset = diameter * SpinnerLook.ringInset
+		let radius = (diameter - inset * 2) / 2
+		context.setLineWidth(diameter * SpinnerLook.ringWidth)
+		context.setLineCap(.round)
+		context.setStrokeColor(cg(RGBA(r: spinner.color.r, g: spinner.color.g,
+		                               b: spinner.color.b, a: spinner.color.a * 0.25)))
+		context.addArc(center: .zero, radius: radius, startAngle: 0, endAngle: 2 * .pi,
+		               clockwise: false)
+		context.strokePath()
+
+		let along = max(0, min(1, progress))
+		guard along > 0.0005 else { return }
+		context.setStrokeColor(cg(spinner.color))
+		context.addArc(center: .zero, radius: radius, startAngle: .pi / 2,
+		               endAngle: .pi / 2 - along * 2 * .pi, clockwise: true)
+		context.strokePath()
 	}
 
 	/// A background across the whole frame: one colour, or a ramp between two.

@@ -94,9 +94,14 @@ public enum SceneLayout {
 				let style = project.style(named: styleName)
 				box = OverlayLayers.textLayer(Scene.fill(text, with: parameters),
 				                              style: style, size: size, tracking: tracking).1
-			case .shape, .image:
+			case .shape, .image, .bar:
 				box = CGSize(width: (key.width ?? 0.2) * size.width,
 				             height: (key.height ?? 0.02) * size.height)
+			case .spinner(let spinner):
+				// A spinner is as wide as it is tall and says so itself; the
+				// key's width and height mean nothing to it.
+				let diameter = spinner.size * size.height
+				box = CGSize(width: diameter, height: diameter)
 			case .background:
 				box = size
 			}

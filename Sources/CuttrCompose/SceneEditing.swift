@@ -15,13 +15,13 @@ public extension Scene {
 	/// per field and the stage writes one field per drag — and both of them
 	/// would otherwise be a switch that has to be kept in step with the format.
 	enum Field: String, Sendable, CaseIterable {
-		case x, y, opacity, scale, rotation, width, height
+		case x, y, opacity, scale, rotation, width, height, progress
 
 		/// What moving this by one unit means on screen, for a drag.
 		public var unit: String {
 			switch self {
 			case .x, .y, .width, .height: return "of the frame"
-			case .opacity, .scale: return "×"
+			case .opacity, .scale, .progress: return "×"
 			case .rotation: return "°"
 			}
 		}
@@ -31,8 +31,8 @@ public extension Scene {
 	/// are, and text is whatever size the words come out.
 	static func hasSize(_ content: Part.Content) -> Bool {
 		switch content {
-		case .shape, .image: return true
-		case .text, .background: return false
+		case .shape, .image, .bar: return true
+		case .text, .background, .spinner: return false
 		}
 	}
 
@@ -42,8 +42,18 @@ public extension Scene {
 		switch content {
 		case .background: return [.opacity]
 		case .text: return [.x, .y, .opacity, .scale, .rotation]
-		case .shape, .image: return Field.allCases
+		case .shape, .image: return [.x, .y, .opacity, .scale, .rotation, .width, .height]
+		case .bar: return Field.allCases
+		case .spinner: return [.x, .y, .opacity, .scale, .rotation, .progress]
 		}
+	}
+
+	/// Whether a key on this part can name a shape kind — which only a shape
+	/// part can, and which is why the inspector shows that row for one part and
+	/// not for the others.
+	static func morphs(_ content: Part.Content) -> Bool {
+		if case .shape = content { return true }
+		return false
 	}
 }
 
@@ -61,6 +71,7 @@ public extension Scene.Key {
 			case .rotation: return rotation
 			case .width: return width
 			case .height: return height
+			case .progress: return progress
 			}
 		}
 		set {
@@ -72,13 +83,14 @@ public extension Scene.Key {
 			case .rotation: rotation = newValue
 			case .width: width = newValue
 			case .height: height = newValue
+			case .progress: progress = newValue
 			}
 		}
 	}
 
 	/// Whether this key says anything beyond when it is.
 	var isEmpty: Bool {
-		Scene.Field.allCases.allSatisfy { self[$0] == nil } && color == nil
+		Scene.Field.allCases.allSatisfy { self[$0] == nil } && color == nil && shape == nil
 	}
 }
 
@@ -120,6 +132,12 @@ public extension Scene.Part {
 			key[field] = now[field]
 		}
 		if previous == nil || now.color != previous?.color { key.color = now.color }
+		// The kind is not a number and does not slide, so a key dropped inside
+		// a morph takes the kind it is coming *from*: the morph then runs from
+		// here to the same place it was going, and the shape at this instant is
+		// a little different from what it was. Said out loud because it is the
+		// one field where dropping a key is not free.
+		if previous == nil || now.shape != previous?.shape { key.shape = now.shape }
 		// The ease belongs to the key it arrives at, so a key dropped inside a
 		// move keeps the curve that move was using.
 		key.ease = filled.first { $0.t > t }?.ease ?? .inOut

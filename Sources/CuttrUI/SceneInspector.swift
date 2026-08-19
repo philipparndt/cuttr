@@ -25,6 +25,8 @@ public final class SceneInspector: NSView {
 	/// A field on a key, set or given back to the key before it.
 	public var onField: ((Int, Scene.Field, Double?) -> Void)?
 	public var onColor: ((Int, RGBA?) -> Void)?
+	/// A key names a shape kind, or gives it back to the key before.
+	public var onShape: ((Int, Scene.ShapeKind?) -> Void)?
 
 	private var project = Project()
 	private var scene = Scene()
@@ -135,8 +137,10 @@ public final class SceneInspector: NSView {
 	private func name(of content: Scene.Part.Content) -> String {
 		switch content {
 		case .text: return "text"
-		case .shape: return "shape"
+		case .shape(_, _, let kind): return kind.rawValue
 		case .image: return "image"
+		case .bar: return "bar"
+		case .spinner: return "spinner"
 		case .background: return "background"
 		}
 	}
@@ -158,13 +162,77 @@ public final class SceneInspector: NSView {
 				self?.onContent?(.text(words, style: style, tracking: value))
 			}], note: "space between the letters, as a fraction of the type size")
 
-		case .shape(let fill, let corner):
+		case .shape(let fill, let corner, let kind):
 			field("shape", [colour(fill) { [weak self] value in
-				self?.onContent?(.shape(fill: value, corner: corner))
+				self?.onContent?(.shape(fill: value, corner: corner, kind: kind))
 			}])
+			let kinds = Scene.ShapeKind.allCases
+			field("kind", [choice(kinds.map(\.rawValue),
+			                      selected: kinds.firstIndex(of: kind) ?? 0,
+			                      width: 118) { [weak self] picked in
+				self?.onContent?(.shape(fill: fill, corner: corner, kind: kinds[picked]))
+			}], note: "what it is the shape of. Say a different one on a key and it "
+				+ "morphs into that one over the interval ending there.")
 			field("corner", [number(corner, width: 66) { [weak self] value in
-				self?.onContent?(.shape(fill: fill, corner: value))
+				self?.onContent?(.shape(fill: fill, corner: value, kind: kind))
 			}], note: "rounding, as a fraction of the frame height")
+
+		case .bar(let bar):
+			field("fill", [colour(bar.fill) { [weak self] value in
+				var next = bar
+				next.fill = value
+				self?.onContent?(.bar(next))
+			}])
+			field("track", [
+				colour(bar.track) { [weak self] value in
+					var next = bar
+					next.track = value
+					self?.onContent?(.bar(next))
+				},
+				check("groove", on: bar.track.a > 0) { [weak self] on in
+					var next = bar
+					next.track.a = on ? max(next.track.a, 0.2) : 0
+					self?.onContent?(.bar(next))
+				},
+			], note: "off for a line that grows with nothing behind it")
+			field("corner", [number(bar.corner, width: 66) { [weak self] value in
+				var next = bar
+				next.corner = value
+				self?.onContent?(.bar(next))
+			}], note: "half the bar's own thickness makes the usual pill")
+			let ways = Scene.Bar.Direction.allCases
+			field("direction", [choice(ways.map(\.rawValue),
+			                           selected: ways.firstIndex(of: bar.direction) ?? 0,
+			                           width: 100) { [weak self] picked in
+				var next = bar
+				next.direction = ways[picked]
+				self?.onContent?(.bar(next))
+			}], note: "how full it is is `progress` on a key, below")
+
+		case .spinner(let spinner):
+			let styles = Spinner.Style.allCases
+			field("spinner", [choice(styles.map(\.rawValue),
+			                         selected: styles.firstIndex(of: spinner.style) ?? 0,
+			                         width: 118) { [weak self] picked in
+				var next = spinner
+				next.style = styles[picked]
+				self?.onContent?(.spinner(next))
+			}], note: "with `progress` on a key it stops going round and fills up instead")
+			field("size", [number(spinner.size, width: 66) { [weak self] value in
+				var next = spinner
+				next.size = value
+				self?.onContent?(.spinner(next))
+			}], note: "diameter, as a fraction of the frame height")
+			field("speed", [number(spinner.speed, width: 66) { [weak self] value in
+				var next = spinner
+				next.speed = value
+				self?.onContent?(.spinner(next))
+			}], note: "turns a second")
+			field("color", [colour(spinner.color) { [weak self] value in
+				var next = spinner
+				next.color = value
+				self?.onContent?(.spinner(next))
+			}])
 
 		case .image(let file):
 			field("image", [
@@ -239,6 +307,11 @@ public final class SceneInspector: NSView {
 				add(fieldRow(for: field, of: key, at: index,
 				             inherited: filled.indices.contains(index) ? filled[index][field] : nil))
 			}
+			if Scene.morphs(subject.content) {
+				add(shapeRow(key, of: subject, at: index,
+				             inherited: filled.indices.contains(index)
+				             	? filled[index].shape : nil))
+			}
 			add(colourRow(key, at: index, inherited: filled.indices.contains(index)
 				? filled[index].color : nil))
 		}
@@ -254,6 +327,7 @@ public final class SceneInspector: NSView {
 
 	private func stated(_ key: Scene.Key, fields: [Scene.Field]) -> String {
 		var said = fields.filter { key[$0] != nil }.map(\.rawValue)
+		if key.shape != nil { said.append("shape") }
 		if key.color != nil { said.append("color") }
 		return said.joined(separator: " ")
 	}
@@ -294,6 +368,45 @@ public final class SceneInspector: NSView {
 			: "Take it back to whatever the key before says"
 
 		let row = NSStackView(views: [name, box, button, NSView()])
+		row.orientation = .horizontal
+		row.spacing = 5
+		row.alignment = .centerY
+		row.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
+		return row
+	}
+
+	/// The one row that is not a number: which shape this key names.
+	///
+	/// Shown as inherited exactly as the numbers are — dim, with the kind it
+	/// already is in brackets — because the meaning is the same. A key that
+	/// names a different kind is the whole of how a morph is written down.
+	private func shapeRow(_ key: Scene.Key, of subject: Scene.Part, at index: Int,
+	                      inherited: Scene.ShapeKind?) -> NSView {
+		let declared: Scene.ShapeKind
+		if case .shape(_, _, let kind) = subject.content { declared = kind } else { declared = .rectangle }
+		let shown = key.shape ?? inherited ?? declared
+
+		let name = NSTextField(labelWithString: "shape")
+		name.font = Theme.mono
+		name.textColor = key.shape == nil ? Theme.faintText : Theme.text
+		name.translatesAutoresizingMaskIntoConstraints = false
+		let wide = name.widthAnchor.constraint(equalToConstant: Self.keyWidth)
+		wide.priority = NSLayoutConstraint.Priority(900)
+		wide.isActive = true
+
+		let kinds = Scene.ShapeKind.allCases
+		let picker = choice(kinds.map { key.shape == nil ? "(\($0.rawValue))" : $0.rawValue },
+		                    selected: kinds.firstIndex(of: shown) ?? 0,
+		                    width: 118) { [weak self] picked in
+			self?.onShape?(index, kinds[picked])
+		}
+		let button = small(key.shape == nil ? "set" : "inherit") { [weak self] in
+			self?.onShape?(index, key.shape == nil ? shown : nil)
+		}
+		button.toolTip = key.shape == nil
+			? "Name the shape here, at what it already is"
+			: "Take it back to whatever the key before says"
+		let row = NSStackView(views: [name, picker, button, NSView()])
 		row.orientation = .horizontal
 		row.spacing = 5
 		row.alignment = .centerY

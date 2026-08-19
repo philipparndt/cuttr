@@ -28,9 +28,25 @@ public enum ProjectWriter {
 					out += "      - text:  \(scalar(text))\n"
 					if let style { out += "        style: \(scalar(style))\n" }
 					if tracking != 0 { out += "        tracking: \(trim(tracking))\n" }
-				case .shape(let fill, let corner):
+				case .shape(let fill, let corner, let kind):
 					out += "      - shape: \(scalar(fill.hex))\n"
+					// Left out when it is a rectangle, which is what a shape
+					// part was before there were kinds — so a project written
+					// then comes back out exactly as it went in.
+					if kind != .rectangle { out += "        kind:   \(kind.rawValue)\n" }
 					if corner != 0 { out += "        corner: \(trim(corner))\n" }
+				case .bar(let bar):
+					out += "      - bar:   \(scalar(bar.fill.hex))\n"
+					out += "        track: \(bar.track.a == 0 ? "none" : scalar(bar.track.hex))\n"
+					if bar.corner != 0 { out += "        corner: \(trim(bar.corner))\n" }
+					if bar.direction != .right {
+						out += "        direction: \(bar.direction.rawValue)\n"
+					}
+				case .spinner(let spinner):
+					out += "      - spinner: \(spinner.style.rawValue)\n"
+					out += "        size:  \(trim(spinner.size))\n"
+					if spinner.speed != 1 { out += "        speed: \(trim(spinner.speed))\n" }
+					out += "        color: \(scalar(spinner.color.hex))\n"
 				case .image(let file):
 					out += "      - image: \(scalar(file))\n"
 				case .background(let background):
@@ -53,6 +69,8 @@ public enum ProjectWriter {
 					if let rotation = key.rotation { fields.append("rotation: \(trim(rotation))") }
 					if let width = key.width { fields.append("width: \(trim(width))") }
 					if let height = key.height { fields.append("height: \(trim(height))") }
+					if let progress = key.progress { fields.append("progress: \(trim(progress))") }
+					if let shape = key.shape { fields.append("shape: \(shape.rawValue)") }
 					if let color = key.color { fields.append("color: \(scalar(color.hex))") }
 					if key.ease != .inOut { fields.append("ease: \(key.ease.rawValue)") }
 					out += "          - {" + fields.joined(separator: ", ") + "}\n"

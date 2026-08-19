@@ -58,7 +58,9 @@ public final class ScenePartsList: NSView, NSTableViewDataSource, NSTableViewDel
 		add.addItem(withTitle: "+")
 		for (title, content) in [
 			("Text", Scene.Part.Content.text("{{title}}", style: "title", tracking: 0)),
-			("Shape", .shape(fill: .white, corner: 0)),
+			("Shape", .shape(fill: .white, corner: 0, kind: .rectangle)),
+			("Progress Bar", .bar(Scene.Bar(corner: 0.006))),
+			("Spinner", .spinner(Spinner())),
 			("Image…", .image("")),
 			("Background", .background(Scene.Background(from: RGBA(hex: "#101418")!))),
 		] as [(String, Scene.Part.Content)] {
@@ -139,9 +141,15 @@ public final class ScenePartsList: NSView, NSTableViewDataSource, NSTableViewDel
 		case .text(let text, let style, _):
 			kind = .text
 			title = text.isEmpty ? "(no words)" : text + (style.map { "  ·  \($0)" } ?? "")
-		case .shape(let fill, _):
+		case .shape(let fill, _, let shape):
 			kind = .effect
-			title = "shape  \(fill.hex)"
+			title = "\(shape.rawValue)  \(fill.hex)"
+		case .bar(let bar):
+			kind = .query
+			title = "bar  \(bar.fill.hex)  \(bar.direction.rawValue)"
+		case .spinner(let spinner):
+			kind = .spinner
+			title = "spinner  \(spinner.style.rawValue)"
 		case .image(let file):
 			kind = .clip
 			title = file.isEmpty ? "image  (none chosen)" : "image  \((file as NSString).lastPathComponent)"

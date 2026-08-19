@@ -687,6 +687,17 @@ public enum OverlayLayers {
 			let layer: CALayer
 			/// Where a colour animation goes, and under which key path.
 			var ink: (layer: CALayer, path: String)?
+			/// A bar's two halves, so its groove and its fill can be animated
+			/// once the keys are in hand.
+			var bars: (track: CAShapeLayer, fill: CAShapeLayer, bar: Scene.Bar, radius: Double)?
+			/// A determinate spinner's arc, whose `strokeEnd` is the progress.
+			var sweep: CAShapeLayer?
+			/// Whether any key names a different shape from another — which is
+			/// what decides between an exact outline and a sampled one, because
+			/// the two cannot be interpolated between.
+			let morphing = Set(keys.compactMap(\.shape)).count > 1
+			/// Whether any key says how far this has got.
+			let determinate = part.keys.contains { $0.progress != nil }
 			var natural = CGSize(
 				width: (first.width ?? 0.2) * size.width,
 				height: (first.height ?? 0.02) * size.height)
@@ -705,12 +716,95 @@ public enum OverlayLayers {
 					layer = built.0
 					natural = built.1
 				}
-			case .shape(let fill, let corner):
-				let shape = CALayer()
-				shape.backgroundColor = cgColor(first.color ?? fill)
-				shape.cornerRadius = corner * size.height
+			case .shape(let fill, let corner, let kind):
+				// A real path rather than a rounded rectangle standing in for
+				// one. It costs nothing for the shape that was always here and
+				// it is the only way a shape can become another shape: Core
+				// Animation interpolates one path into another when the two
+				// have the same points in the same order, which is exactly what
+				// the sampled outline gives it.
+				let shape = CAShapeLayer()
+				shape.fillColor = cgColor(first.color ?? fill)
+				shape.path = shapePath(for: first, kind: kind, corner: corner,
+				                       morphing: morphing, frame: size)
 				layer = shape
-				ink = (shape, "backgroundColor")
+				// The layer is the whole frame and the outline is drawn in the
+				// middle of it, because a path does not scale with its layer's
+				// bounds: sizing the layer to the shape put the outline in the
+				// corner of it, which is a square in the top right of the frame
+				// on the first render anybody looks at.
+				natural = size
+				ink = (shape, "fillColor")
+
+			case .bar(let bar):
+				let holder = CALayer()
+				let radius = bar.corner * size.height
+				let track = CAShapeLayer()
+				track.fillColor = cgColor(bar.track)
+				let filling = CAShapeLayer()
+				filling.fillColor = cgColor(first.color ?? bar.fill)
+				for part in [track, filling] {
+					part.frame = CGRect(origin: .zero, size: size)
+					part.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+					part.position = CGPoint(x: size.width / 2, y: size.height / 2)
+					holder.addSublayer(part)
+				}
+				track.path = barPath(first, bar: bar, radius: radius, filled: false, frame: size)
+				filling.path = barPath(first, bar: bar, radius: radius, filled: true, frame: size)
+				bars = (track, filling, bar, radius)
+				layer = holder
+				natural = size
+				ink = (filling, "fillColor")
+
+			case .spinner(let spinner):
+				if determinate {
+					// A spinner that knows how far it has got is a ring that
+					// fills to that fraction, drawn as the same arc the painter
+					// draws — same centre, same radius, same start at twelve
+					// o'clock, same way round — with `strokeEnd` doing the
+					// filling. The styles are for the case where there is
+					// nothing to show but that it is still going.
+					let holder = CALayer()
+					let diameter = max(4, spinner.size * size.height)
+					let inset = diameter * SpinnerLook.ringInset
+					let ring = CGRect(x: -diameter / 2 + inset, y: -diameter / 2 + inset,
+					                  width: diameter - inset * 2, height: diameter - inset * 2)
+					let circle = CGMutablePath()
+					circle.addArc(center: .zero, radius: ring.width / 2, startAngle: .pi / 2,
+					              endAngle: .pi / 2 - 2 * .pi, clockwise: true)
+					for (colour, isTrack) in [(spinner.color, true), (first.color ?? spinner.color, false)] {
+						let arc = CAShapeLayer()
+						arc.frame = CGRect(x: -diameter / 2, y: -diameter / 2,
+						                   width: diameter, height: diameter)
+						arc.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+						arc.position = .zero
+						arc.path = circle
+						arc.fillColor = nil
+						arc.lineWidth = diameter * SpinnerLook.ringWidth
+						arc.lineCap = .round
+						arc.strokeColor = cgColor(colour, alpha: isTrack ? colour.a * 0.25 : colour.a)
+						arc.strokeEnd = isTrack ? 1 : CGFloat(first.progress ?? 0)
+						holder.addSublayer(arc)
+						if !isTrack { sweep = arc }
+					}
+					layer = holder
+					natural = CGSize(width: diameter, height: diameter)
+					ink = sweep.map { ($0, "strokeColor") }
+				} else {
+					// The spinner this program already has, on the scene's own
+					// clock. A second implementation of a spinner is a spinner
+					// that eventually disagrees with itself.
+					let standing = ResolvedOverlay(
+						overlay: Overlay(kind: .spinner(spinner),
+						                 span: .times(from: resolved.start, to: resolved.end),
+						                 arrival: .cut, departure: .cut),
+						source: resolved.source, appearance: resolved.appearance,
+						start: resolved.start, end: resolved.end, path: nil)
+					let built = spinnerLayer(spinner, style: TextStyle.caption, size: size,
+					                         resolved: standing, host: host)
+					layer = built.layer
+					natural = built.size
+				}
 			case .image(let file):
 				let picture = CALayer()
 				let url = URL(fileURLWithPath: file, relativeTo: baseURL)
@@ -788,19 +882,39 @@ public enum OverlayLayers {
 			})
 			animate("transform.scale", keys.map { $0.scale ?? 1 })
 			animate("transform.rotation.z", keys.map { ($0.rotation ?? 0) * .pi / 180 })
-			// A shape's size is its own, and animating bounds is how a rule
-			// draws itself across the screen.
-			if case .text = part.content {} else {
+			// An image is the one part left whose size is its bounds. A shape
+			// and a bar carry theirs in their paths — which is what lets a
+			// shape change size and kind at once — and a spinner's is its own.
+			if case .image = part.content {
 				animate("bounds.size", keys.map {
 					NSValue(size: NSSize(width: ($0.width ?? 0.2) * size.width,
 					                     height: ($0.height ?? 0.02) * size.height))
 				})
 			}
+			if case .shape(_, let corner, let kind) = part.content, let shape = layer as? CAShapeLayer {
+				animate("path", keys.map {
+					shapePath(for: $0, kind: kind, corner: corner,
+					          morphing: morphing, frame: size)
+				}, on: shape)
+			}
+			if let bars {
+				animate("path", keys.map {
+					barPath($0, bar: bars.bar, radius: bars.radius, filled: false, frame: size)
+				}, on: bars.track)
+				animate("path", keys.map {
+					barPath($0, bar: bars.bar, radius: bars.radius, filled: true, frame: size)
+				}, on: bars.fill)
+			}
+			if let sweep {
+				animate("strokeEnd", keys.map { max(0, min(1, $0.progress ?? 0)) }, on: sweep)
+			}
 			if coloured, let ink {
 				let fallback: RGBA
 				switch part.content {
 				case .text(_, let styleName, _): fallback = project.style(named: styleName).color
-				case .shape(let fill, _): fallback = fill
+				case .shape(let fill, _, _): fallback = fill
+				case .bar(let bar): fallback = bar.fill
+				case .spinner(let spinner): fallback = spinner.color
 				default: fallback = .white
 				}
 				animate(ink.path, keys.map { cgColor($0.color ?? fallback) }, on: ink.layer)
@@ -808,6 +922,51 @@ public enum OverlayLayers {
 			root.addSublayer(layer)
 		}
 		return root
+	}
+
+	/// The outline of a shape part at one key, in the frame's coordinates.
+	///
+	/// Every key of a part that morphs gets a *sampled* outline, even the ones
+	/// whose kind never changes, because Core Animation can only interpolate
+	/// two paths with the same points in the same order. A part that does not
+	/// morph gets the exact outline — real arcs on a rounded rectangle, a real
+	/// ellipse — so a project written before there were kinds renders exactly
+	/// as it did.
+	private static func shapePath(
+		for key: Scene.Key, kind: Scene.ShapeKind, corner: Double,
+		morphing: Bool, frame: CGSize
+	) -> CGPath {
+		let box = CGSize(width: (key.width ?? 0.2) * frame.width,
+		                 height: (key.height ?? 0.02) * frame.height)
+		let radius = corner * frame.height
+		let shape = key.shape ?? kind
+		let outline = morphing
+			? Scene.ShapeKind.sampled(shape, in: box, corner: radius)
+			: shape.path(in: box, corner: radius)
+		var move = CGAffineTransform(translationX: frame.width / 2, y: frame.height / 2)
+		return outline.copy(using: &move) ?? outline
+	}
+
+	/// A bar's groove, or the filled part of it, at one key.
+	private static func barPath(
+		_ key: Scene.Key, bar: Scene.Bar, radius: Double, filled: Bool, frame: CGSize
+	) -> CGPath {
+		let width = (key.width ?? 0.4) * frame.width
+		let height = (key.height ?? 0.02) * frame.height
+		let box = CGRect(x: -width / 2, y: -height / 2, width: width, height: height)
+		let rects = bar.rects(in: box, progress: key.progress ?? 0)
+		let rect = filled ? rects.fill : rects.track
+		guard rect.width > 0.01, rect.height > 0.01 else {
+			// An empty bar is still a path with the same shape, or Core
+			// Animation has nothing to interpolate from. A rectangle of no
+			// width at the end it grows from is that path.
+			let seed = CGRect(x: rect.minX, y: rect.minY, width: 0.01, height: max(rect.height, 0.01))
+			return CGPath(roundedRect: seed.offsetBy(dx: frame.width / 2, dy: frame.height / 2),
+			              cornerWidth: 0, cornerHeight: 0, transform: nil)
+		}
+		let end = min(radius, rect.width / 2, rect.height / 2)
+		return CGPath(roundedRect: rect.offsetBy(dx: frame.width / 2, dy: frame.height / 2),
+		              cornerWidth: end, cornerHeight: end, transform: nil)
 	}
 
 	/// Text whose colour can move: the glyphs as a mask, over a plain layer

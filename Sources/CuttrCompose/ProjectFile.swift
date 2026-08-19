@@ -111,7 +111,7 @@ public enum ProjectReader {
 			for (name, value) in m {
 				guard let fields = mapping(value),
 				      let parts = fields["parts"] as? [Any] else { continue }
-				scenes[Slug.make(from: name)] = Scene(parts: parts.compactMap(readPart))
+				scenes[Slug.make(from: name)] = Scene(parts: try parts.map(readPart))
 			}
 		}
 
@@ -416,20 +416,82 @@ public enum ProjectReader {
 
 	/// `{slide: left, over: 0.4}`, `{fade: 0.3}`, or `cut`.
 	/// One part of a scene: what it is, and where it is at each of its keys.
-	private static func readPart(_ value: Any) -> Scene.Part? {
-		guard let fields = mapping(value) else { return nil }
+	///
+	/// Refused rather than dropped when it cannot be read, and that is the
+	/// whole of this function's history. A part whose `background:` was written
+	/// as a list of two colours rather than as `{from:, to:}` used to be
+	/// skipped in silence: the scene then rendered without its ground, which on
+	/// a black card is a black frame, and nothing anywhere said why. Measured
+	/// on a rendered file — thirty-eight of forty pixels at `#000000` — and the
+	/// answer was a line the reader had quietly thrown away.
+	///
+	/// So a part that names none of the kinds, or names one it cannot read, or
+	/// has no keys to appear at, is an error with the offending line in it.
+	/// That is the rule everywhere else in this format and there is no reason a
+	/// scene should be the exception.
+	private static func readPart(_ value: Any) throws -> Scene.Part {
+		guard let fields = mapping(value) else {
+			throw ProjectError.badValue(key: "parts", value: describe(value))
+		}
 		let content: Scene.Part.Content
 		if let text = fields["text"] as? String {
 			content = .text(text, style: (fields["style"] as? String).flatMap(nonEmpty),
 			                tracking: number(fields["tracking"]) ?? 0)
-		} else if let fill = (fields["shape"] as? String).flatMap(RGBA.init(hex:)) {
-			content = .shape(fill: fill, corner: number(fields["corner"]) ?? 0)
-		} else if let file = (fields["image"] as? String).flatMap(nonEmpty) {
+		} else if let shape = fields["shape"] {
+			guard let fill = (shape as? String).flatMap(RGBA.init(hex:)) else {
+				throw ProjectError.badValue(key: "shape", value: describe(shape))
+			}
+			var kind = Scene.ShapeKind.rectangle
+			if let named = fields["kind"] {
+				guard let read = (named as? String).flatMap(Scene.ShapeKind.init(rawValue:)) else {
+					throw ProjectError.badValue(key: "kind", value: describe(named))
+				}
+				kind = read
+			}
+			content = .shape(fill: fill, corner: number(fields["corner"]) ?? 0, kind: kind)
+		} else if let value = fields["bar"] {
+			guard let fill = (value as? String).flatMap(RGBA.init(hex:)) else {
+				throw ProjectError.badValue(key: "bar", value: describe(value))
+			}
+			var direction = Scene.Bar.Direction.right
+			if let named = fields["direction"] {
+				guard let read = (named as? String)
+					.flatMap(Scene.Bar.Direction.init(rawValue:)) else {
+					throw ProjectError.badValue(key: "direction", value: describe(named))
+				}
+				direction = read
+			}
+			var track = RGBA(r: 1, g: 1, b: 1, a: 0.2)
+			if let named = fields["track"] as? String {
+				// `none` for a bar with no groove behind it, the same word the
+				// styles use for a caption with no plate.
+				track = named == "none" ? RGBA(r: 0, g: 0, b: 0, a: 0) : (RGBA(hex: named) ?? track)
+			}
+			content = .bar(Scene.Bar(fill: fill, track: track,
+			                         corner: number(fields["corner"]) ?? 0,
+			                         direction: direction))
+		} else if let value = fields["spinner"] {
+			guard let style = (value as? String).flatMap(Spinner.Style.init(rawValue:)) else {
+				throw ProjectError.badValue(key: "spinner", value: describe(value))
+			}
+			content = .spinner(Spinner(
+				style: style,
+				size: number(fields["size"]) ?? 0.09,
+				speed: number(fields["speed"]) ?? 1,
+				color: (fields["color"] as? String).flatMap(RGBA.init(hex:)) ?? .white))
+		} else if let image = fields["image"] {
+			guard let file = (image as? String).flatMap(nonEmpty) else {
+				throw ProjectError.badValue(key: "image", value: describe(image))
+			}
 			content = .image(file)
-		} else if let background = fields["background"], let read = readBackground(background) {
+		} else if let background = fields["background"] {
+			guard let read = readBackground(background) else {
+				throw ProjectError.badValue(key: "background", value: describe(background))
+			}
 			content = .background(read)
 		} else {
-			return nil
+			throw ProjectError.badValue(
+				key: "parts", value: fields.keys.sorted().joined(separator: ", "))
 		}
 
 		let keys = (fields["keys"] as? [Any] ?? []).compactMap { entry -> Scene.Key? in
@@ -440,19 +502,37 @@ public enum ProjectReader {
 				opacity: number(key["opacity"]), scale: number(key["scale"]),
 				rotation: number(key["rotation"]),
 				width: number(key["width"]), height: number(key["height"]),
+				progress: number(key["progress"]),
+				shape: (key["shape"] as? String).flatMap(Scene.ShapeKind.init(rawValue:)),
 				color: (key["color"] as? String).flatMap(RGBA.init(hex:)),
 				ease: (key["ease"] as? String).flatMap(Scene.Ease.init(rawValue:)) ?? .inOut)
 		}
-		guard !keys.isEmpty else { return nil }
+		guard !keys.isEmpty else {
+			// A part with no keys is a part that is never anywhere, so it can
+			// never be drawn. Said out loud, because it looks like a part.
+			throw ProjectError.badValue(key: "keys", value: "none")
+		}
 		return Scene.Part(content: content, keys: keys)
+	}
+
+	/// A value from the file, as near to the way it was written as matters for
+	/// an error message.
+	private static func describe(_ value: Any) -> String {
+		if let text = value as? String { return text }
+		if let list = value as? [Any] {
+			return "[" + list.map(describe).joined(separator: ", ") + "]"
+		}
+		if let m = mapping(value) {
+			return "{" + m.keys.sorted().joined(separator: ", ") + "}"
+		}
+		return String(describing: value)
 	}
 
 	/// `background: "#101418"`, or `background: {from: …, to: …, angle: 90}`.
 	///
-	/// One colour is the common case and stays one word. A file that says
-	/// neither — a `to` with no `from`, say — is read as far as it makes sense
-	/// rather than refused, because a background is decoration and losing the
-	/// whole scene over it helps nobody.
+	/// One colour is the common case and stays one word. Anything else — a list
+	/// of two colours, a `to` with no `from` — comes back `nil` and the caller
+	/// refuses the part by name. Losing it quietly was the bug.
 	private static func readBackground(_ value: Any) -> Scene.Background? {
 		if let hex = (value as? String).flatMap(RGBA.init(hex:)) {
 			return Scene.Background(from: hex)

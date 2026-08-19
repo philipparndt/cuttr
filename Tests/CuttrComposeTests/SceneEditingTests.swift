@@ -178,4 +178,57 @@ import Testing
 		#expect(pixel(320, 4) < 0.1, "the painter puts `from` at the top")
 		#expect(pixel(320, 355) > 0.9)
 	}
+
+	/// Parts are drawn in the order the file lists them, in both paths.
+	///
+	/// The other thing a black card could have been: a background added last
+	/// rather than first is an opaque sheet over everything in front of it, and
+	/// a scene that renders as one flat colour looks exactly like a scene that
+	/// did not render at all. So it is checked from both ends — the same scene
+	/// with the parts the other way round has to look different.
+	@Test func partsAreDrawnInTheOrderTheyAreWritten() throws {
+		let ground = Scene.Part(
+			content: .background(Scene.Background(from: RGBA(hex: "#ff0000")!)),
+			keys: [.init(t: 0, opacity: 1)])
+		let block = Scene.Part(
+			content: .shape(fill: RGBA(hex: "#00ff00")!, corner: 0),
+			keys: [.init(t: 0, x: 0.5, y: 0.5, opacity: 1, width: 0.5, height: 0.5)])
+		let size = CGSize(width: 320, height: 180)
+		let context = CIContext(options: [.workingColorSpace: NSNull()])
+
+		func middle(of scene: Scene) throws -> (Double, Double) {
+			let project = Project(scenes: ["intro": scene])
+			let image = try #require(OverlayPainter.sceneImage(
+				scene, with: [:], project: project, baseURL: URL(fileURLWithPath: "."),
+				size: size, at: 0))
+			var bytes = [UInt8](repeating: 0, count: 4)
+			context.render(CIImage(cgImage: image), toBitmap: &bytes, rowBytes: 4,
+			               bounds: CGRect(x: 160, y: 90, width: 1, height: 1),
+			               format: .RGBA8, colorSpace: nil)
+			return (Double(bytes[0]) / 255, Double(bytes[1]) / 255)
+		}
+
+		// Ground first: the block is on top of it, so the middle is green.
+		let right = try middle(of: Scene(parts: [ground, block]))
+		#expect(right.1 > 0.9 && right.0 < 0.1)
+		// Ground last: it covers the block, and the middle is red.
+		let wrong = try middle(of: Scene(parts: [block, ground]))
+		#expect(wrong.0 > 0.9 && wrong.1 < 0.1)
+
+		// And the layer path builds them in the same order — the background is
+		// the first sublayer, which is the one furthest back.
+		let scene = Scene(parts: [
+			.init(content: .background(Scene.Background(from: .black, to: .white)),
+			      keys: [.init(t: 0, opacity: 1)]),
+			block,
+		])
+		let tree = OverlayLayers.build(resolved(Project(scenes: ["intro": scene])),
+		                               size: size, host: .export)
+		let holder = try #require(layers(in: tree).first {
+			($0.sublayers ?? []).contains { $0 is CAGradientLayer }
+		})
+		#expect(holder.sublayers?.first is CAGradientLayer,
+		        "the ground is not the first thing drawn")
+		#expect(holder.sublayers?.count == 2)
+	}
 }

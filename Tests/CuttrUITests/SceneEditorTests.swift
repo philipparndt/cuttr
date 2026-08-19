@@ -62,8 +62,16 @@ import Testing
 			.init(content: .shape(fill: .white, corner: 0.01),
 			      keys: [.init(t: 0, x: 0.5, y: 0.3, width: 0.3, height: 0.004)]),
 			.init(content: .image("logo.png"), keys: [.init(t: 0, x: 0.2, y: 0.8)]),
+			.init(content: .bar(Scene.Bar(corner: 0.006, direction: .up)),
+			      keys: [.init(t: 0, x: 0.1, y: 0.5, width: 0.02, height: 0.4, progress: 0),
+			             .init(t: 2, progress: 1, ease: .out)]),
+			.init(content: .spinner(Spinner(style: .ring)),
+			      keys: [.init(t: 0, x: 0.9, y: 0.5, opacity: 1)]),
+			.init(content: .shape(fill: .white, corner: 0, kind: .star),
+			      keys: [.init(t: 0, x: 0.5, y: 0.8, width: 0.1, height: 0.1),
+			             .init(t: 1, shape: .hexagon)]),
 		])
-		for part in [nil, 0, 1, 2, 3, 9] as [Int?] {
+		for part in [nil, 0, 1, 2, 3, 4, 5, 6, 9] as [Int?] {
 			inspector.reload(scene, project: project(), part: part, key: 0)
 			parts.reload(scene, selected: part)
 		}
@@ -248,6 +256,44 @@ import Testing
 		#expect(document.selectedPart == nil)
 		#expect(document.selectedKey == nil)
 		#expect(document.playhead == 0)
+	}
+
+	/// Naming a shape at the playhead is how a morph is made, and it lands on
+	/// the key there — or makes one.
+	@Test func namingAShapeWritesAKeyAtThePlayhead() {
+		let document = SceneDocument(
+			project: Project(scenes: ["badge": Scene(parts: [
+				.init(content: .shape(fill: .white, corner: 0, kind: .rectangle),
+				      keys: [.init(t: 0, x: 0.5, y: 0.5, width: 0.3, height: 0.3)]),
+			])]),
+			baseURL: nil, name: "badge")
+		document.playhead = 1.5
+		document.setShape(.star, on: 0)
+
+		let keys = document.scene.parts[0].keys
+		#expect(keys.count == 2)
+		#expect(keys[1].shape == .star)
+		#expect(keys[0].shape == nil, "the first key was given a kind it did not need")
+		// And the part is morphing, which is the whole point of writing it.
+		let morph = Scene.morph(of: Scene.filled(keys), at: 0.75, default: .rectangle)
+		#expect(morph.from == .rectangle)
+		#expect(morph.to == .star)
+	}
+
+	/// A project with no takes at all is a real programme now — a card with a
+	/// scene on it and nothing else — so the scene editor has to open on one.
+	@Test func aProjectWithNoTakesStillEdits() {
+		_ = NSApplication.shared
+		let project = Project(output: Output(width: 1920, height: 1080),
+		                      scenes: ["intro": SceneDocument.starter])
+		let document = SceneDocument(project: project, baseURL: nil, name: "intro")
+		#expect(document.length > 0)
+		let controller = SceneWindowController(document: document, projectURL: nil)
+		controller.window?.layoutIfNeeded()
+		document.addPart(.bar(Scene.Bar()))
+		controller.window?.layoutIfNeeded()
+		#expect(document.scene.parts.count == 3)
+		controller.window?.close()
 	}
 
 	/// The stage shows the scene with the words the project puts in it, not

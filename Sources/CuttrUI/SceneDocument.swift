@@ -153,6 +153,24 @@ public final class SceneDocument {
 		drag(next, actionName: "Move Part", commit: commit)
 	}
 
+	/// Names a shape kind at the playhead, which is what makes a morph.
+	public func setShape(_ kind: Scene.ShapeKind, on part: Int) {
+		guard part < scene.parts.count else { return }
+		var next = scene
+		let (keys, index) = next.parts[part].inserting(keyAt: playhead)
+		next.parts[part].keys = keys
+		next.parts[part].keys[index].shape = kind
+		selectedKey = index
+		apply(next, actionName: "Change Shape")
+	}
+
+	public func setKeyShape(_ kind: Scene.ShapeKind?, of index: Int, on part: Int) {
+		guard part < scene.parts.count, index < scene.parts[part].keys.count else { return }
+		var next = scene
+		next.parts[part].keys[index].shape = kind
+		apply(next, actionName: kind == nil ? "Inherit Shape" : "Change Shape")
+	}
+
 	public func setColor(_ color: RGBA?, on part: Int, commit: Bool = true) {
 		guard part < scene.parts.count else { return }
 		var next = scene
@@ -185,6 +203,13 @@ public final class SceneDocument {
 			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1, width: 0.4, height: 0.01)
 		case .image:
 			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1, width: 0.2, height: 0.2)
+		case .bar:
+			// Empty at the start, because a bar that is added full has nothing
+			// to show and the next thing anybody does is give it a second key.
+			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1,
+			                width: 0.5, height: 0.012, progress: 0)
+		case .spinner:
+			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1)
 		}
 		next.parts.append(Scene.Part(content: content, keys: [key]))
 		// A background goes underneath everything, whatever order it was added

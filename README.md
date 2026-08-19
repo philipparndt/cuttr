@@ -320,23 +320,45 @@ Four kinds of part:
 | written | what it is |
 | --- | --- |
 | `- text: "{{title}}"` | words, in a named `style:`, optionally `tracking:` |
-| `- shape: "#ffffff"` | a rectangle, `corner:` to round it |
+| `- shape: "#ffffff"` | a shape — `kind:` rectangle, ellipse, triangle, diamond, star or hexagon |
 | `- image: logo.png` | a file beside the project, fitted in its box |
 | `- background: "#101418"` | the whole frame — or `{from:, to:, angle:}` for a ramp |
+| `- bar: "#ffffff"` | a progress bar, with a `track:` behind it and a `direction:` |
+| `- spinner: dots` | the spinner this program already has, standing in a scene |
+
+A part that names a key the reader cannot read is **refused**, with the line
+quoted back. A dropped line is the worst error this format can have: the file
+says one thing and the program works from another, and the only sign is a frame
+that does not look right.
 
 Each part has `keys:`, one to a line, and **a key states only what changes**:
 everything else is what it was at the key before, which is why a part that only
 moves says its position twice and its opacity once. A key can say `t`, `x`,
-`y`, `opacity`, `scale`, `rotation`, `width`, `height`, `color` and `ease`.
-`color:` on a key overrides whatever the part was declared with, so a title
-arriving white and settling into the house colour is two keys and one field.
+`y`, `opacity`, `scale`, `rotation`, `width`, `height`, `progress`, `shape`,
+`color` and `ease`.
+
+Three of those are what make a scene do things rather than sit there:
+
+- **`color:`** overrides whatever the part was declared with, so a title
+  arriving white and settling into the house colour is two keys and one field.
+- **`progress:`** is how full a bar is, nought to one — and a spinner given one
+  stops going round and fills a ring to that fraction instead. A bar filling
+  over three seconds is `progress: 0` at one key and `progress: 1` at another,
+  and it gets the easing that key already carries for nothing.
+- **`shape:`** names a kind, and naming a different one from the key before
+  **morphs** between them across that interval. Both outlines are cut into the
+  same number of points at the same angles round the middle and matched up in
+  order, which is honest about what it can do: the shape stays closed and
+  convincing throughout, and no corner of either end survives exactly except
+  where the angles happen to land on one.
 
 There is a **window for making one**: the scenes are listed in the library
 beside the programme, and double-clicking one opens it — or Compose ▸ Edit
 Scenes…, or File ▸ New Scene…. It has the scene drawn at the output's size,
 playing, with the parts dragged on it directly: a corner handle scales, the
 handle above turns, and a drag writes into the key at the playhead or makes one
-there. The panel beside it shows every key, with the inherited values dim and
+there. A shape's kind is a menu on the part and again on a key, where naming a
+different one is how a morph gets written down. The panel beside it shows every key, with the inherited values dim and
 in brackets and a button to claim them.
 
 A scene has no length of its own, and the editor's "runs for" box is not
