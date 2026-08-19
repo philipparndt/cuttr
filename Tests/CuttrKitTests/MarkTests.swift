@@ -130,3 +130,30 @@ import Testing
 		#expect(take.lanes == [.rose])
 	}
 }
+
+/// One key for both edges of a clip.
+@Suite struct ClipEdgeTests {
+
+	private let clip = Clip(slug: "a", start: 10, end: 20)
+
+	@Test func fromAnywhereElseItIsTheTop() {
+		#expect(clip.edge(from: 0) == 10)
+		#expect(clip.edge(from: 15) == 10)
+		#expect(clip.edge(from: 20) == 10)
+		#expect(clip.edge(from: 99) == 10)
+	}
+
+	@Test func fromTheTopItIsTheEnd() {
+		#expect(clip.edge(from: 10) == 20)
+		// And near enough to the top, because a playhead lands on a frame.
+		#expect(clip.edge(from: 10.001) == 20)
+		#expect(clip.edge(from: 9.999) == 20)
+	}
+
+	/// Pressing it twice walks the clip end to end.
+	@Test func twicePutsYouAtTheEnd() {
+		let first = clip.edge(from: 3)
+		#expect(first == 10)
+		#expect(clip.edge(from: first) == 20)
+	}
+}

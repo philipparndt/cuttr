@@ -298,6 +298,18 @@ public struct Clip: Identifiable, Sendable, Equatable {
 
 	public func contains(_ time: Double) -> Bool { time >= start && time < end }
 
+	/// The end of this clip when the playhead is already at the start, and the
+	/// start otherwise.
+	///
+	/// One key does both, because they are one question — "take me to the edge
+	/// of this shot" — and which edge is obvious from where you already are.
+	/// Pressing it twice walks the clip end to end; pressing it from anywhere
+	/// else in the take goes to the top of the shot, which is what somebody
+	/// about to play it wants.
+	public func edge(from playhead: Double, within tolerance: Double = 0.002) -> Double {
+		abs(playhead - start) <= tolerance ? end : start
+	}
+
 	/// Two clips are the same clip if they say the same thing, whatever their
 	/// session identities are. Identity is a view concern; equality is used to
 	/// decide whether the document is dirty, which is a file concern.

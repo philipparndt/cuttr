@@ -303,6 +303,7 @@ enum MainMenu {
 	  J K L        rewind · stop · forward   (⇧ for 4×)
 	  ← →          one frame                 (⌥ 0.1 s, ⇧ 1 s)
 	  ⌘← ⌘→        previous / next cut mark
+	  C            to the top of this clip — again for its end
 	  home end     start / end of the take
 
 	Cutting

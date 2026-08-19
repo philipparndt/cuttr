@@ -515,6 +515,21 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		header.setStatus("\(clip.slug) — \(Timecode.string(clip.duration))")
 	}
 
+	/// To the top of the clip somebody is working on, or to its end if the
+	/// playhead is already at the top.
+	///
+	/// "The clip" is the selected one when there is a selection, and otherwise
+	/// whatever the playhead is inside — so it works whether somebody is
+	/// working from the list or from the timeline.
+	private func jumpToEdge() {
+		let clips = takeDocument.take.clips
+		let clip = selectedClip.flatMap { id in clips.first { $0.id == id } }
+			?? clips.last { $0.contains(playhead) }
+		guard let clip else { return }
+		move(to: clip.edge(from: playhead))
+		header.setStatus("\(clip.slug) — \(Timecode.string(playhead))")
+	}
+
 	/// The next place something starts or ends, in the given direction.
 	private func stepToMark(forward: Bool) {
 		var marks = takeDocument.take.clips.flatMap { [$0.start, $0.end] }
@@ -1308,6 +1323,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 
 		switch event.charactersIgnoringModifiers?.lowercased() {
+		case "c": jumpToEdge(); return true
 		case "s": split(); return true
 		case "i": setIn(); return true
 		case "o": setOut(); return true
