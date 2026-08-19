@@ -19,6 +19,18 @@ a tab for each.
     │ ╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫╫  recorder                      │
     └───────────────────────────────────────────────────────────────────────┘
 
+## Install
+
+    brew install --cask philipparndt/cuttr/cuttr
+
+Or take the disk image from [the releases page][releases], open it, and drag
+cuttr to Applications. Either way it is the same build: signed with a Developer
+ID and notarised, so it opens without a detour through System Settings.
+
+Needs macOS 14 or newer. To build it yourself instead, see [Building](#building).
+
+[releases]: https://github.com/philipparndt/cuttr/releases
+
 ## What it does
 
 - Opens a video, or a video **and** a separately recorded audio file.
