@@ -195,6 +195,13 @@ public final class ComposeDocument {
 		/// Which anchors came from which take, so the library can say where a
 		/// tracked face lives.
 		public var anchorTakes: [String: String] = [:]
+		/// Takes that were downloaded rather than recorded, by name.
+		///
+		/// Read from each take's own `source:` block — see ``TakeSource`` — and
+		/// not from the folder its file sits in. A guess from the path is right
+		/// until somebody moves the file somewhere tidier, and then the meme
+		/// quietly stops being a meme.
+		public var memeTakes: Set<String> = []
 
 		public struct Item: Sendable {
 			public var take: String
@@ -245,6 +252,7 @@ public final class ComposeDocument {
 			takeNames.append(entry.name)
 			for clip in take.clips { slugCounts[clip.slug, default: 0] += 1 }
 			for anchor in take.anchors { anchorTakes[anchor.name] = entry.name }
+			if take.source?.isMeme == true { found.memeTakes.insert(entry.name) }
 		}
 		for entry in takes {
 			guard let text = try? String(contentsOf: entry.url, encoding: .utf8),

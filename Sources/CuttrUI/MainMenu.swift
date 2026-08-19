@@ -18,6 +18,11 @@ enum MainMenu {
 		let app = NSMenu()
 		app.addItem(withTitle: "About cuttr", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
 		app.addItem(.separator())
+		// ⌘, wherever it is pressed, because the settings file is not about any
+		// one window. It lands on the application delegate, which is the last
+		// thing in the responder chain and is there whether a window is or not.
+		app.addItem(command("Settings…", #selector(AppDelegate.showSettings(_:)), ","))
+		app.addItem(.separator())
 		app.addItem(withTitle: "Hide cuttr", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
 		app.addItem(withTitle: "Quit cuttr", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 		appItem.submenu = app
@@ -54,6 +59,10 @@ enum MainMenu {
 		                     #selector(ComposeWindowController.addTake(_:)), "a", [.command, .shift]))
 		file.addItem(command("New Take in Project…",
 		                     #selector(ComposeWindowController.newTake(_:)), "t", [.command, .shift]))
+		// With the other two ways of putting material into a project, because
+		// that is what it is: what arrives is a take like any other.
+		file.addItem(command("Find a Meme…",
+		                     #selector(ComposeWindowController.findMeme(_:)), "m", [.command, .shift]))
 		file.addItem(command("Export Project to Folder…",
 		                     #selector(ComposeWindowController.exportProject(_:)), "E", [.command, .shift]))
 		file.addItem(.separator())

@@ -46,6 +46,8 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 	private var collapsed: Set<String> = []
 	private let table = KeyTable()
 	private let search = NSSearchField()
+	private let findMeme = NSButton()
+	private var memeObserver: NSObjectProtocol?
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
@@ -79,8 +81,24 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 		// project window.
 		table.setDraggingSourceOperationMask(.copy, forLocal: true)
 
+		// Memes are material, so the way to get one is here with the material
+		// rather than in a menu somewhere. It goes down the responder chain to
+		// whichever project window is in front, which is the same route the
+		// menu item takes — so there is one implementation of it and not two.
+		findMeme.title = "Find a meme…"
+		findMeme.bezelStyle = .rounded
+		findMeme.controlSize = .small
+		findMeme.font = NSFont.systemFont(ofSize: 11)
+		findMeme.target = nil
+		findMeme.action = #selector(ComposeWindowController.findMeme(_:))
+		findMeme.toolTip = "Search GIPHY or Tenor. What arrives is a take like any other."
+
+		let top = NSStackView(views: [search, findMeme])
+		top.orientation = .horizontal
+		top.spacing = 6
+
 		let scroll = TableScroll.fitting(table)
-		let stack = NSStackView(views: [search, scroll])
+		let stack = NSStackView(views: [top, scroll])
 		stack.orientation = .vertical
 		stack.spacing = 6
 		stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
@@ -92,12 +110,43 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 			stack.bottomAnchor.constraint(equalTo: bottomAnchor),
 			stack.leadingAnchor.constraint(equalTo: leadingAnchor),
 			stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-			search.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
+			top.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
 			scroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
 		])
+
+		// A meme that has just been downloaded is selected, not merely present.
+		// The project window reloads this panel by itself when its takes
+		// change; what this adds is knowing *which* row is the new one, and it
+		// is the one thing the reload cannot know.
+		memeObserver = NotificationCenter.default.addObserver(
+			forName: .cuttrMemeAdded, object: nil, queue: .main
+		) { [weak self] note in
+			MainActor.assumeIsolated {
+				guard let self, let reference = note.object as? String else { return }
+				self.reveal(reference)
+			}
+		}
+	}
+
+	deinit {
+		if let memeObserver { NotificationCenter.default.removeObserver(memeObserver) }
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
+
+	/// Puts a reference on screen and selects it, opening its section and
+	/// clearing whatever was being filtered for — because a row that is real
+	/// but filtered out looks exactly like a download that did not work.
+	public func reveal(_ reference: String) {
+		if !rows.contains(where: { $0.reference == reference }) {
+			search.stringValue = ""
+			collapsed.remove("memes")
+			rebuild()
+		}
+		guard let row = rows.firstIndex(where: { $0.reference == reference }) else { return }
+		table.selectRowIndexes([row], byExtendingSelection: false)
+		table.scrollRowToVisible(row)
+	}
 
 	// MARK: - Contents
 
@@ -122,12 +171,25 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 			if !folded { out += items }
 		}
 
-		for take in vocabulary.takeNames {
+		for take in vocabulary.takeNames where !vocabulary.memeTakes.contains(take) {
 			let clips = vocabulary.items.filter {
 				$0.take == take && matches($0.slug, $0.name, $0.tags.joined(separator: " "), take)
 			}
 			section(take, .take, clips.map { Row.clip($0) })
 		}
+
+		// Memes together, under one heading, rather than one heading each.
+		//
+		// A downloaded meme is a take with a single clip in it, so listing them
+		// take by take would be a page of headings with one line under each.
+		// They are material of a kind — short, borrowed, interchangeable — and
+		// what somebody wants is to see the ones they have and drag one out.
+		// Which takes those are comes from each take's own `source:` block, not
+		// from the folder the file is in.
+		section("memes", .take, vocabulary.items.filter {
+			vocabulary.memeTakes.contains($0.take)
+				&& matches($0.slug, $0.name, $0.tags.joined(separator: " "), $0.take)
+		}.map { Row.clip($0) })
 
 		section("tags", nil, vocabulary.tags.filter { matches($0) }.map { tag in
 			.tag(tag, vocabulary.items.filter { $0.tags.contains(tag) }.count)
