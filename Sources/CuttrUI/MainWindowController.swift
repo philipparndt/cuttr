@@ -21,6 +21,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	private let timeline = TimelineView()
 	private let clipTable = ClipTable()
 	private let anchorTable = AnchorTable()
+	private let lookPanel = LookPanel()
+	/// A drag on a slider is sixty changes and one undo step: the first one
+	/// registers the undo, and the rest are folded into it.
+	private var gradingSince: Take?
 	private var playerView: PlayerView!
 	private let markers = AnchorMarkerView()
 	private var solveTask: Task<Void, Never>?
@@ -105,6 +109,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		lists.dividerStyle = .thin
 		lists.addArrangedSubview(clipTable)
 		lists.addArrangedSubview(anchorTable)
+		// The grade goes beside the picture rather than behind a menu, because
+		// it is decided by looking at the picture while it moves.
+		lists.addArrangedSubview(lookPanel)
 
 		let top = NSSplitView()
 		top.isVertical = true
@@ -159,10 +166,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		// window.
 		let preferred = NSLayoutConstraint.Priority(250)
 		let sizes: [(NSLayoutConstraint, NSLayoutConstraint)] = [
-			(lists.widthAnchor.constraint(equalToConstant: 380),
-			 lists.widthAnchor.constraint(greaterThanOrEqualToConstant: 220)),
+			(lists.widthAnchor.constraint(equalToConstant: 430),
+			 lists.widthAnchor.constraint(greaterThanOrEqualToConstant: 260)),
 			(anchorTable.heightAnchor.constraint(equalToConstant: 150),
 			 anchorTable.heightAnchor.constraint(greaterThanOrEqualToConstant: 60)),
+			(lookPanel.heightAnchor.constraint(equalToConstant: 210),
+			 lookPanel.heightAnchor.constraint(greaterThanOrEqualToConstant: 120)),
 			(timeline.heightAnchor.constraint(equalToConstant: 280),
 			 timeline.heightAnchor.constraint(greaterThanOrEqualToConstant: 140)),
 			(picture.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
@@ -187,6 +196,24 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
 	private func wire() {
 		timeline.document = takeDocument
+
+		// The grade, live. Every move of a slider changes the take — so the
+		// picture changes with it — but only the first of a drag registers an
+		// undo, and the rest are folded into that one step. Sixty entries in
+		// the Edit menu for one decision is not an undo history.
+		lookPanel.onChange = { [weak self] look, finished in
+			guard let self else { return }
+			var next = self.takeDocument.take
+			next.look = look
+			if self.gradingSince == nil {
+				self.gradingSince = self.takeDocument.take
+				self.takeDocument.apply(next, actionName: "Grade")
+			} else {
+				self.takeDocument.replaceWithoutUndo(next)
+			}
+			self.transport.look = look
+			if finished { self.gradingSince = nil }
+		}
 
 		takeDocument.onChange = { [weak self] in self?.refresh() }
 		takeDocument.onMediaChange = { [weak self] in
@@ -463,6 +490,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		markers.markers = takeDocument.take.anchors.compactMap { anchor in
 			takeDocument.anchorPaths[anchor.name].map { (anchor.name, $0) }
 		}
+		lookPanel.show(takeDocument.take.look)
+		transport.look = takeDocument.take.look
 		anchorTable.reload(takeDocument.take.anchors,
 		                   paths: takeDocument.anchorPaths,
 		                   selected: selectedAnchor)

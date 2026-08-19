@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Foundation
 import Testing
 @testable import CuttrKit
@@ -68,5 +69,70 @@ import Testing
 		#expect(abs(ColourAnalysis.linear(0) - 0) < 1e-9)
 		#expect(abs(ColourAnalysis.linear(1) - 1) < 1e-9)
 		#expect(ColourAnalysis.linear(0.5) < 0.25)
+	}
+}
+
+/// The grade, on actual pixels.
+///
+/// It lives with the look because two things apply it now — the renderer and
+/// the cutting window's preview — and two copies of "what warmer means" would
+/// drift apart at the first change.
+@Suite struct LookAppliedTests {
+
+	private let context = CIContext(options: [.workingColorSpace: NSNull()])
+
+	private func pixel(_ look: Look, _ colour: CIColor) -> (Double, Double, Double) {
+		let frame = CIImage(color: colour).cropped(to: CGRect(x: 0, y: 0, width: 4, height: 4))
+		var bytes = [UInt8](repeating: 0, count: 4)
+		context.render(look.applied(to: frame), toBitmap: &bytes, rowBytes: 4,
+		               bounds: CGRect(x: 1, y: 1, width: 1, height: 1),
+		               format: .RGBA8, colorSpace: nil)
+		return (Double(bytes[0]) / 255, Double(bytes[1]) / 255, Double(bytes[2]) / 255)
+	}
+
+	private var grey: CIColor { CIColor(red: 0.5, green: 0.5, blue: 0.5) }
+
+	@Test func anEmptyLookLeavesTheFrameAlone() {
+		let before = pixel(.none, grey)
+		#expect(abs(before.0 - 0.5) < 0.01)
+		#expect(abs(before.1 - 0.5) < 0.01)
+	}
+
+	@Test func exposureIsInStops() {
+		let up = pixel(Look(exposure: 1), grey)
+		#expect(up.0 > 0.85, "a stop up should be about twice the light: \(up.0)")
+		let down = pixel(Look(exposure: -1), grey)
+		#expect(down.0 < 0.3)
+	}
+
+	/// Positive is warmer, which is the direction the file and the slider say.
+	@Test func warmerIsPositive() {
+		let warm = pixel(Look(temperature: 1500), grey)
+		#expect(warm.0 > warm.2, "warmer should come out redder than it is bluer")
+		let cool = pixel(Look(temperature: -1500), grey)
+		#expect(cool.2 > cool.0)
+
+		// And tint: green negative, magenta positive, as the file says.
+		let magenta = pixel(Look(tint: 40), grey)
+		#expect(magenta.0 > magenta.1 && magenta.2 > magenta.1)
+		let green = pixel(Look(tint: -40), grey)
+		#expect(green.1 > green.0 && green.1 > green.2)
+	}
+
+	@Test func saturationEmptiesTheColourOut() {
+		let red = CIColor(red: 0.8, green: 0.2, blue: 0.2)
+		let flat = pixel(Look(saturation: 0), red)
+		#expect(abs(flat.0 - flat.1) < 0.02)
+		#expect(abs(flat.1 - flat.2) < 0.02)
+		let more = pixel(Look(saturation: 1.8), red)
+		#expect(more.0 > 0.8)
+	}
+
+	/// The matched gain is a per-channel multiplier, and it is applied first —
+	/// a match under a hand grade rather than over it.
+	@Test func theMatchedGainMultipliesEachChannel() {
+		let matched = pixel(Look(gain: [1.4, 1, 0.6]), grey)
+		#expect(matched.0 > 0.6)
+		#expect(matched.2 < 0.4)
 	}
 }

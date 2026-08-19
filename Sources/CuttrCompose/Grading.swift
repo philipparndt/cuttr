@@ -15,36 +15,14 @@ import Foundation
 /// which is the order a person would work in.
 enum Grading {
 
+	/// The look's own arithmetic, which lives with the look.
+	///
+	/// It was written out again here once, and two copies of "what warmer
+	/// means" is one copy too many: the renderer's picture and the cutting
+	/// window's would drift apart at the first change and nobody would know
+	/// which was right.
 	static func apply(_ look: Look, to image: CIImage) -> CIImage {
-		var image = image
-		if let gain = look.gain, gain.count == 3 {
-			image = image.applyingFilter("CIColorMatrix", parameters: [
-				"inputRVector": CIVector(x: gain[0], y: 0, z: 0, w: 0),
-				"inputGVector": CIVector(x: 0, y: gain[1], z: 0, w: 0),
-				"inputBVector": CIVector(x: 0, y: 0, z: gain[2], w: 0),
-			])
-		}
-		if look.exposure != 0 {
-			image = image.applyingFilter("CIExposureAdjust", parameters: ["inputEV": look.exposure])
-		}
-		if look.temperature != 0 || look.tint != 0 {
-			// Neutral in, shifted out: the filter's job is "this was shot at
-			// 6500 K, make it look like it was shot at 6500 + n". Warmer is a
-			// higher target, which is why positive reads as warmer here and in
-			// the file.
-			image = image.applyingFilter("CITemperatureAndTint", parameters: [
-				"inputNeutral": CIVector(x: 6500, y: 0),
-				"inputTargetNeutral": CIVector(x: 6500 + look.temperature, y: look.tint),
-			])
-		}
-		if look.saturation != 1 || look.contrast != 1 {
-			image = image.applyingFilter("CIColorControls", parameters: [
-				"inputSaturation": look.saturation,
-				"inputContrast": look.contrast,
-				"inputBrightness": 0,
-			])
-		}
-		return image
+		look.applied(to: image)
 	}
 
 	/// Aspect-fits a frame into the output, centred.

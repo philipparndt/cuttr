@@ -206,3 +206,45 @@ import Testing
 		#expect(ProgrammePanel.EntryRow.arrival(odd) == nil)
 	}
 }
+
+/// The take's own grade, which had no controls at all until now.
+@Suite @MainActor struct LookPanelTests {
+
+	@Test func draggingASliderWritesTheLook() {
+		_ = NSApplication.shared
+		let panel = LookPanel()
+		var written: [(Look, Bool)] = []
+		panel.onChange = { written.append(($0, $1)) }
+		panel.show(Look(exposure: 0.5))
+
+		panel.set("exposure", to: -1.25)
+		#expect(panel.current.exposure == -1.25)
+		panel.set("saturation", to: 1.4)
+		panel.set("contrast", to: 0.9)
+		panel.set("temperature", to: 800)
+		panel.set("tint", to: -12)
+		#expect(panel.current == Look(exposure: -1.25, temperature: 800, tint: -12,
+		                              saturation: 1.4, contrast: 0.9))
+		#expect(written.count == 5)
+		// Showing what the document has does not write anything back.
+		panel.show(Look(exposure: 2))
+		#expect(written.count == 5)
+		#expect(panel.current.exposure == 2)
+	}
+
+	/// Reset is "the footage as it was shot" — but the matched gain is a
+	/// measurement, not a decision, and throwing it away means analysing again.
+	@Test func resetKeepsWhatWasMeasured() {
+		_ = NSApplication.shared
+		let panel = LookPanel()
+		var last: Look?
+		panel.onChange = { look, _ in last = look }
+		panel.show(Look(profile: "camera-a", exposure: 1, saturation: 1.5,
+		                gain: [1.1, 1, 0.9]))
+		panel.reset()
+		#expect(last?.exposure == 0)
+		#expect(last?.saturation == 1)
+		#expect(last?.profile == nil)
+		#expect(last?.gain == [1.1, 1, 0.9])
+	}
+}

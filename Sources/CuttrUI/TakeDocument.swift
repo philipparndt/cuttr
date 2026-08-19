@@ -92,6 +92,19 @@ public final class TakeDocument {
 		if mediaChanged { loadMedia() }
 	}
 
+	/// The take, changed, with no undo step of its own.
+	///
+	/// For the middle of a drag. A slider moved across its range is one
+	/// decision and sixty changes: the first registers an undo and the rest go
+	/// through here, so what Undo puts back is where the slider started rather
+	/// than where it was a frame ago. The timeline does the same thing for a
+	/// clip being dragged, with its own `commit` flag.
+	public func replaceWithoutUndo(_ newTake: Take) {
+		guard newTake != take else { return }
+		take = newTake
+		onChange?()
+	}
+
 	/// Renames a clip, and re-derives its slug unless somebody has claimed it.
 	public func setName(_ name: String, for id: Clip.ID) {
 		guard let index = take.clips.firstIndex(where: { $0.id == id }) else { return }

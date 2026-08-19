@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import CoreGraphics
+import CoreImage
 import Foundation
 
 /// What a recording turned out to be, once something has looked at it.
@@ -85,6 +86,51 @@ public struct Look: Sendable, Equatable {
 			saturation: base.saturation * saturation,
 			contrast: base.contrast * contrast,
 			gain: gain ?? base.gain)
+	}
+
+	/// This look, applied to a frame.
+	///
+	/// Here rather than in the renderer because a look is a thing that can be
+	/// *applied*, and two places now want to: the renderer, which grades every
+	/// frame of a programme, and the cutting window, which shows somebody what
+	/// they are doing while they drag a slider. Two implementations of the same
+	/// arithmetic would be two pictures, and the second one would be wrong in a
+	/// way nobody could see until the render came back.
+	public func applied(to image: CIImage) -> CIImage {
+		var image = image
+		if let gain, gain.count == 3 {
+			image = image.applyingFilter("CIColorMatrix", parameters: [
+				"inputRVector": CIVector(x: gain[0], y: 0, z: 0, w: 0),
+				"inputGVector": CIVector(x: 0, y: gain[1], z: 0, w: 0),
+				"inputBVector": CIVector(x: 0, y: 0, z: gain[2], w: 0),
+			])
+		}
+		if exposure != 0 {
+			image = image.applyingFilter("CIExposureAdjust", parameters: ["inputEV": exposure])
+		}
+		if temperature != 0 || tint != 0 {
+			// The *source* neutral moves, not the target.
+			//
+			// It was the other way round, with a comment explaining why that
+			// meant warmer — and measured on a flat grey, `temperature: 1500`
+			// came out blue. The filter's question is "what is this picture's
+			// neutral, and what should it be": saying the picture's neutral is
+			// 8000 K and should be 6500 tells it the picture is too cool, and
+			// it warms it. Saying the reverse cools it, which is what was
+			// happening. The file's meaning is unchanged — positive is warmer,
+			// as it always said — and the pixels now agree with it.
+			image = image.applyingFilter("CITemperatureAndTint", parameters: [
+				"inputNeutral": CIVector(x: 6500 + temperature, y: tint),
+				"inputTargetNeutral": CIVector(x: 6500, y: 0),
+			])
+		}
+		if saturation != 1 || contrast != 1 {
+			image = image.applyingFilter("CIColorControls", parameters: [
+				kCIInputSaturationKey: saturation,
+				kCIInputContrastKey: contrast,
+			])
+		}
+		return image
 	}
 
 	/// The per-channel gain that takes `cast` to `reference`.

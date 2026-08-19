@@ -165,6 +165,40 @@ public final class Transport {
 		if wasPlaying { player.play() }
 	}
 
+	/// The grade the picture is shown through.
+	///
+	/// The cutting window's whole reason for having one: a look is decided by
+	/// looking, and a slider whose effect only appears after a render is a
+	/// slider nobody can use. The same arithmetic the renderer applies, from
+	/// the same place, so what is dragged here is what will be encoded.
+	public var look: Look = .none {
+		didSet { if look != oldValue { showLook() } }
+	}
+
+	/// Colour management off, for the reason the renderer records at length: a
+	/// trip through Core Image's linear space and back lifts the picture, and
+	/// the preview would then disagree with the file it is previewing.
+	private let unmanaged = CIContext(options: [.workingColorSpace: NSNull()])
+
+	private func showLook() {
+		guard let item = player.currentItem else { return }
+		guard !look.isEmpty else {
+			// Nothing to do to the frames, so nothing is done to them — the
+			// same rule the renderer follows, and the only way the ungraded
+			// picture is the footage rather than a copy of it.
+			item.videoComposition = nil
+			return
+		}
+		let look = self.look
+		let unmanaged = self.unmanaged
+		let composition = AVMutableVideoComposition(
+			asset: item.asset,
+			applyingCIFiltersWithHandler: { request in
+				request.finish(with: look.applied(to: request.sourceImage), context: unmanaged)
+			})
+		item.videoComposition = composition
+	}
+
 	/// Moves the audio against the video. Cheap enough to call on every nudge.
 	public func setOffset(_ offset: Double) {
 		guard offset != self.offset else { return }
@@ -218,6 +252,7 @@ public final class Transport {
 
 		let item = AVPlayerItem(asset: composition)
 		player.replaceCurrentItem(with: item)
+		showLook()
 		if resumeAt > 0 { seek(to: resumeAt) }
 		if wasPlaying { player.play() }
 	}
