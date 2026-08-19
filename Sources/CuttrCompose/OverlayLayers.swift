@@ -113,9 +113,20 @@ public enum OverlayLayers {
 			// A scene is its own little tree, laid over the whole frame: its
 			// parts carry their own positions, so nothing about the overlay's
 			// anchor or style applies to it.
+			//
+			// What *does* apply is when it is on. Returning the tree bare
+			// skipped the envelope every other kind gets, and a scene's own
+			// keyframes hold their last value for ever — so the first scene in
+			// a programme covered everything after it, and a second card looked
+			// as though it had not been rendered at all. It had; it was
+			// underneath.
 			guard let scene = project.scenes[name] else { return placer }
-			return sceneLayer(scene, with: parameters, project: project, baseURL: baseURL,
-			                  size: size, resolved: resolved, host: host)
+			let tree = sceneLayer(scene, with: parameters, project: project, baseURL: baseURL,
+			                      size: size, resolved: resolved, host: host)
+			tree.opacity = 0
+			tree.add(opacity(resolved, host: host), forKey: "opacity")
+			tree.add(shown(resolved, host: host), forKey: "shown")
+			return tree
 		case .spinner(let spinner):
 			let built = spinnerLayer(
 				spinner, style: project.style(named: spinner.wordStyle ?? "caption"),
@@ -173,6 +184,7 @@ public enum OverlayLayers {
 		// and after it, so nothing has to be scheduled to take it away.
 		placer.opacity = 0
 		placer.add(opacity(resolved, host: host), forKey: "opacity")
+		placer.add(shown(resolved, host: host), forKey: "shown")
 
 		if let slide = slide(resolved, contentSize: contentSize, frame: size, host: host) {
 			mover.add(slide, forKey: "slide")
@@ -181,6 +193,25 @@ public enum OverlayLayers {
 	}
 
 	// MARK: - The animations
+
+	/// On screen for its span, and not one frame longer.
+	///
+	/// The opacity envelope takes an overlay away at the end only when it
+	/// *fades* away; one that leaves by sliding is off the edge of the frame,
+	/// and one that leaves by cutting is at full opacity with nowhere to be —
+	/// so it stayed. A discrete animation on `isHidden` says the plain thing
+	/// the other one only implies, whatever the transitions are.
+	private static func shown(_ resolved: ResolvedOverlay, host: Host) -> CAKeyframeAnimation {
+		let animation = CAKeyframeAnimation(keyPath: "hidden")
+		animation.values = [true, false, true]
+		animation.keyTimes = [0, 0, 1]
+		animation.calculationMode = .discrete
+		animation.beginTime = host.beginTime(resolved.start)
+		animation.duration = max(resolved.duration, 0.0001)
+		animation.fillMode = .both
+		animation.isRemovedOnCompletion = false
+		return animation
+	}
 
 	/// In, hold, out — as one keyframe animation over the overlay's whole span.
 	///

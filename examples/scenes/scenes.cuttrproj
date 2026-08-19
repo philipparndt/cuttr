@@ -1,29 +1,47 @@
-# cuttr project — the assembly. Clips are referenced by slug.
+# cuttr project — an intro screen made of nothing but this file.
+#
+# No takes, no footage: two cards are time on the programme with nothing behind
+# them, and a scene is drawn on each. `{{title}}` and `{{under}}` are what make
+# a scene a *template* rather than one title — the same scene is used twice
+# here, with different words each time.
 cuttr-project: 1
 
 output:
   size: 1920x1080
   fps:  25
+  file: scenes.mov
 
 timeline:
   - card:  00:01.100
     as:    intro
   - card:  00:01.100
     as:    next
+  - card:  00:01.400
+    as:    again
 
 overlays:
-  - scene:   next
-    from:   "@next"
-    in:     {fade: true, over: 0.4}
-    out:    {fade: true, over: 0.4}
-
-  - scene:   intro
+  - scene:  card
+    with:   {title: "cuttr", under: "editing as text"}
     from:   "@intro"
     in:     {fade: true, over: 0.4}
     out:    {fade: true, over: 0.4}
 
+  - scene:  warning
+    with:   {title: "one clock", under: "every time is on the video's"}
+    from:   "@next"
+    in:     {fade: true, over: 0.4}
+    out:    {fade: true, over: 0.4}
+
+  # The same scene as the first, with different words in it. That is the whole
+  # point of `{{name}}`: an intro built once and used in every episode.
+  - scene:  card
+    with:   {title: "and again", under: "same scene, different words"}
+    from:   "@again"
+    in:     {fade: true, over: 0.4}
+    out:    {fade: true, over: 0.4}
+
 scenes:
-  intro:
+  card:
     parts:
       - background: {from: "#0b1220", to: "#1d3557", angle: 90}
         keys:
@@ -33,9 +51,15 @@ scenes:
         style: title
         tracking: 0.08
         keys:
-          - {t: 0.3, x: 0.5, y: 0.46, opacity: 0, scale: 0.94}
-          - {t: 1.1, y: 0.5, opacity: 1, scale: 1, ease: out}
-  next:
+          - {t: 0.3, x: 0.5, y: 0.52, opacity: 0, scale: 0.94}
+          - {t: 1.1, y: 0.56, opacity: 1, scale: 1, ease: out}
+      - text:  "{{under}}"
+        style: caption
+        keys:
+          - {t: 0.5, x: 0.5, y: 0.42, opacity: 0}
+          - {t: 1.1, opacity: 1, ease: out}
+
+  warning:
     parts:
       - background: {from: "#1f0c0d", to: "#1d3557", angle: 90}
         keys:
@@ -45,5 +69,10 @@ scenes:
         style: title
         tracking: 0.08
         keys:
-          - {t: 0.3, x: 0.5, y: 0.46, opacity: 0, scale: 0.94}
-          - {t: 1.1, y: 0.5, opacity: 1, scale: 1, ease: out}
+          - {t: 0.3, x: 0.5, y: 0.52, opacity: 0, scale: 0.94}
+          - {t: 1.1, y: 0.56, opacity: 1, scale: 1, ease: out}
+      - text:  "{{under}}"
+        style: caption
+        keys:
+          - {t: 0.5, x: 0.5, y: 0.42, opacity: 0}
+          - {t: 1.1, opacity: 1, ease: out}

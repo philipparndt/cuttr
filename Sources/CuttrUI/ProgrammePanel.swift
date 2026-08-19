@@ -116,7 +116,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	// MARK: - Furniture
 
 	/// A titled pane: heading, list, and the buttons that act on it.
-	private func pane(_ title: String, _ list: NSView, _ buttons: [NSButton]) -> NSView {
+	private func pane(_ title: String, _ list: NSView, _ buttons: [NSView]) -> NSView {
 		let heading = NSTextField(labelWithString: title.uppercased())
 		heading.font = Theme.heading
 		heading.textColor = Theme.faintText
@@ -172,6 +172,45 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// acts on — and when the pane narrows they truncate, so the row ends up
 	/// saying "..." and "+ Spinner". A symbol is the same instruction in a
 	/// quarter of the room, and the words are still there on hover.
+	/// The kinds an overlay can be, behind one `+`.
+	///
+	/// A pull-down, so the face of it stays `+` rather than becoming whatever
+	/// was added last: this is a verb, not a choice being remembered.
+	/// For the tests: the menu behind the `+`, without a window to click in.
+	func addOverlayMenu() -> NSMenu? { addMenu().menu }
+
+	private func addMenu() -> NSPopUpButton {
+		let button = NSPopUpButton(frame: .zero, pullsDown: true)
+		button.bezelStyle = .rounded
+		button.controlSize = .small
+		button.toolTip = "Add an overlay, bound to what is selected"
+		button.translatesAutoresizingMaskIntoConstraints = false
+		button.widthAnchor.constraint(equalToConstant: 44).isActive = true
+
+		// The first item of a pull-down is its face and is never chosen.
+		let face = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+		face.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "add")?
+			.withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+		button.menu?.addItem(face)
+
+		for (title, symbol, kind, action) in [
+			("Caption", "textformat", Theme.Kind.text, #selector(addText)),
+			("Spinner", "circle.dotted", .spinner, #selector(addSpinner)),
+			("Scene", "rectangle.stack", .scene, #selector(addScene)),
+			("Effect", "sparkles", .effect, #selector(addEffect)),
+			("Film mode", "camera.filters", .film, #selector(addFilm)),
+			("Chromatic aberration", "circle.hexagongrid", .aberration, #selector(addAberration)),
+			("VHS tape", "tv.badge.wifi", .tape, #selector(addTape)),
+		] as [(String, String, Theme.Kind, Selector)] {
+			let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+			item.target = self
+			item.image = Theme.symbol(kind, size: 12)
+				?? NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+			button.menu?.addItem(item)
+		}
+		return button
+	}
+
 	private func button(_ symbol: String, _ action: Selector, _ tip: String) -> NSButton {
 		let button = NSButton()
 		button.bezelStyle = .rounded
@@ -243,6 +282,44 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			button("arrow.down", #selector(moveEntryDown), "Later"),
 			button("minus", #selector(removeEntry), "Take it off the programme"),
 		])
+	}
+
+	/// The `as:` name of a placement and whatever hangs on it.
+	///
+	/// An overlay hangs on a *name*, so this is the only place the two halves
+	/// meet: the timeline knows what it named, the overlays know what they are
+	/// pinned to, and a row that shows neither leaves somebody counting cards
+	/// to work out which one their intro is on.
+	func carried(by entry: TimelineEntry) -> String {
+		guard let label = entry.label else { return "" }
+		var out = "@\(label)"
+		let names = project.overlays.compactMap { overlay -> String? in
+			guard Self.hangs(overlay.span, on: label) else { return nil }
+			switch overlay.kind {
+			case .scene(let name, _): return "scene \(name)"
+			case .text: return "caption"
+			case .spinner: return "spinner"
+			case .effect(let effect): return effect.style.rawValue
+			case .film: return "film"
+			case .aberration: return "aberration"
+			case .tape: return "tape"
+			}
+		}
+		if !names.isEmpty { out += " · " + names.joined(separator: ", ") }
+		return out
+	}
+
+	/// Whether a span is pinned to this name, at either end.
+	static func hangs(_ span: Overlay.Span, on label: String) -> Bool {
+		func names(_ endpoint: Overlay.Span.Endpoint) -> Bool {
+			if case .group(let name) = endpoint { return name == label }
+			return false
+		}
+		switch span {
+		case .marks(let from, let to): return names(from) || names(to)
+		case .within(let mark, _, _): return names(mark)
+		case .times: return false
+		}
 	}
 
 	/// For the tests: click a row without a mouse.
@@ -338,10 +415,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		let scroll = TableScroll.fitting(overlayTable)
 		over(scroll, overlayHint)
 		return pane("overlays", scroll, [
-			button("textformat", #selector(addText), "Add a caption, bound to what is selected"),
-			button("circle.dotted", #selector(addSpinner),
-			       "Add a spinner; give it an anchor to pin it to a face"),
-			button("sparkles", #selector(addEffect), "Add confetti, sparks, snow or rain"),
+			// One menu rather than a button per kind. There were three of them
+			// and seven kinds — a caption, a spinner and an effect had buttons
+			// while a scene, film mode, the aberration and the tape could only
+			// be reached by adding something else and changing what it was.
+			// Another four buttons was not the answer to that.
+			addMenu(),
 			button("plus.square.on.square", #selector(duplicateOverlay), "Another one just like it"),
 			button("arrow.up", #selector(moveOverlayUp), "Draw it earlier — under the one above"),
 			button("arrow.down", #selector(moveOverlayDown), "Draw it later — over the one below"),
@@ -437,6 +516,49 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		default:
 			return .clips(from: ClipReference("clip"), to: ClipReference("clip"))
 		}
+	}
+
+	/// The kinds that had no way in until the menu existed.
+	///
+	/// A scene needs one to point at, and a project with none is told so rather
+	/// than given an overlay that names nothing.
+	@objc private func addScene() {
+		guard let name = project.scenes.keys.sorted().first else {
+			let alert = NSAlert()
+			alert.messageText = "No scenes yet"
+			alert.informativeText = "Make one with New ▸ Scene… beside the takes, "
+				+ "then add it here."
+			alert.runModal()
+			return
+		}
+		add(.scene(name, with: [:]), arrival: .fade(over: 0.4), departure: .fade(over: 0.4))
+	}
+
+	@objc private func addFilm() {
+		// The shape the bars close to is chosen against this programme: a shape
+		// it already is would show nothing happening.
+		let output = project.output.size
+		let ratio = output.height > 0 && output.width / output.height >= 16.0 / 9
+			? Film.Ratio(2.39, 1) : Film.Ratio(16, 9)
+		add(.film(Film(ratio: ratio)), arrival: .fade(over: 1), departure: .fade(over: 1))
+	}
+
+	@objc private func addAberration() {
+		add(.aberration(Aberration()), arrival: .fade(over: 0.4), departure: .fade(over: 0.4))
+	}
+
+	@objc private func addTape() {
+		add(.tape(Tape()), arrival: .fade(over: 0.4), departure: .fade(over: 0.4))
+	}
+
+	/// One overlay, over whatever is selected, and selected itself afterwards.
+	private func add(_ kind: Overlay.Kind, arrival: Overlay.Transition = .slide(.left, over: 0.4),
+	                 departure: Overlay.Transition = .slide(.right, over: 0.4)) {
+		var next = project
+		next.overlays.append(Overlay(kind: kind, span: spanForNewOverlay,
+		                             arrival: arrival, departure: departure))
+		pending = .overlay(next.overlays.count - 1)
+		onChange?(next)
 	}
 
 	@objc private func addText() {
@@ -581,6 +703,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			?? { let view = EntryRow(); view.identifier = .init("entry"); return view }()
 		view.entry = node.entry
 		view.count = node.children.count
+		view.carries = carried(by: node.entry)
 		view.needsDisplay = true
 		return view
 	}
@@ -793,6 +916,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	final class EntryRow: NSTableCellView {
 		var entry = TimelineEntry(clip: ClipReference(""))
 		var count = 0
+		/// The name this placement was given with `as:`, and what hangs on it.
+		/// Worked out by the panel, which is the only thing that can see the
+		/// overlays as well as the timeline.
+		var carries = ""
 
 		override func draw(_ dirtyRect: NSRect) {
 			let kind: Theme.Kind
@@ -844,7 +971,14 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			// How it arrives, in the accent the transition controls use, so a
 			// programme with three dissolves in it can be found by eye.
 			if let arrival = Self.arrival(entry) {
-				_ = note(arrival, at: x, colour: Theme.color(.section))
+				x = note(arrival, at: x, colour: Theme.color(.section)) + 10
+			}
+			// What is *on* this stretch. A card is a hole in the programme —
+			// black, one and a tenth seconds long — and the only interesting
+			// thing about one is the scene somebody put on it, which was the
+			// one thing the row did not say.
+			if !carries.isEmpty {
+				_ = note(carries, at: x, colour: Theme.color(.scene))
 			}
 		}
 

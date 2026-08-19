@@ -414,3 +414,97 @@ import Testing
 		#expect(document.problem?.contains("Save the project") == true)
 	}
 }
+
+/// What a row says about a stretch of programme that has something on it.
+@Suite @MainActor struct CarriedTests {
+
+	private func panel() -> ProgrammePanel {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+		var project = Project(timeline: [
+			TimelineEntry(source: .card(Card(duration: 1.1)), label: "intro"),
+			TimelineEntry(source: .card(Card(duration: 1.1)), label: "next"),
+			TimelineEntry(source: .card(Card(duration: 1.1))),
+		])
+		project.scenes["card"] = Scene(parts: [])
+		project.overlays = [
+			Overlay(kind: .scene("card", with: [:]),
+			        span: .marks(from: .group("intro"), to: .group("intro"))),
+			Overlay(kind: .text("hello", style: nil),
+			        span: .within(.group("next"), from: 0, to: 1)),
+		]
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary())
+		return panel
+	}
+
+	/// A card is a hole in the programme — black, a second long — and the only
+	/// interesting thing about one is what somebody put on it.
+	@Test func aCardSaysWhatIsOnIt() {
+		let panel = self.panel()
+		let intro = TimelineEntry(source: .card(Card(duration: 1.1)), label: "intro")
+		#expect(panel.carried(by: intro) == "@intro · scene card")
+
+		let next = TimelineEntry(source: .card(Card(duration: 1.1)), label: "next")
+		#expect(panel.carried(by: next) == "@next · caption")
+
+		// A placement nobody named carries nothing, and says nothing.
+		#expect(panel.carried(by: TimelineEntry(source: .card(Card(duration: 1.1)))) == "")
+	}
+
+	/// A name with nothing hung on it still shows, because that is how somebody
+	/// finds out an overlay is pointing at the wrong one.
+	@Test func aNameWithNothingOnItStillShows() {
+		let panel = self.panel()
+		let lonely = TimelineEntry(clip: ClipReference("shot"), label: "unused")
+		#expect(panel.carried(by: lonely) == "@unused")
+	}
+
+	@Test func bothEndsOfASpanCount() {
+		#expect(ProgrammePanel.hangs(.marks(from: .group("a"), to: .group("b")), on: "b"))
+		#expect(ProgrammePanel.hangs(.within(.group("a"), from: 0, to: 1), on: "a"))
+		#expect(ProgrammePanel.hangs(.times(from: 0, to: 1), on: "a") == false)
+		#expect(ProgrammePanel.hangs(.clips(from: ClipReference("a"), to: ClipReference("a")),
+		                             on: "a") == false)
+	}
+}
+
+/// The overlay kinds, behind one `+`.
+@Suite @MainActor struct AddOverlayTests {
+
+	/// Every kind an overlay can be is reachable, which four of them were not:
+	/// a scene, film mode, the aberration and the tape had no button at all.
+	@Test func everyKindCanBeAdded() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+		var project = Project(timeline: [TimelineEntry(clip: ClipReference("shot"))])
+		project.scenes["card"] = Scene(parts: [])
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary())
+		var written: Project?
+		panel.onChange = { written = $0; panel.reload($0, vocabulary: ComposeDocument.Vocabulary()) }
+
+		guard let menu = panel.addOverlayMenu() else {
+			Issue.record("no add menu")
+			return
+		}
+		// The first item is the button's own face and is never chosen.
+		#expect(menu.items.count == 8)
+		for index in 1 ..< menu.items.count {
+			menu.performActionForItem(at: index)
+		}
+		#expect(written?.overlays.count == 7)
+
+		let kinds = written?.overlays.map(\.kind) ?? []
+		#expect(kinds.contains { if case .text = $0 { return true } else { return false } })
+		#expect(kinds.contains { if case .spinner = $0 { return true } else { return false } })
+		#expect(kinds.contains { if case .scene = $0 { return true } else { return false } })
+		#expect(kinds.contains { if case .effect = $0 { return true } else { return false } })
+		#expect(kinds.contains { if case .film = $0 { return true } else { return false } })
+		#expect(kinds.contains { if case .aberration = $0 { return true } else { return false } })
+		#expect(kinds.contains { if case .tape = $0 { return true } else { return false } })
+
+		// Each one lands on what is selected rather than on nothing.
+		for overlay in written?.overlays ?? [] {
+			#expect(overlay.span == .clips(from: ClipReference("shot"), to: ClipReference("shot")))
+		}
+	}
+}
