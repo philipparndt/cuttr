@@ -282,6 +282,27 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			self.onOpenTakeAt?(take.url, clip.takeTime(forProgramme: time))
 		}
 
+		// The same journey as a double-click on the programme, from the two
+		// lists: right-click a placement or a clip and be taken to where it was
+		// cut. The panel and the library know what was pointed at; only this
+		// window knows which file that take is in.
+		inspector.onOpenInTake = { [weak self] path in
+			guard let self, let placed = self.composeDocument.resolved?.clips
+				.first(where: { $0.entry == path }),
+			      let take = self.composeDocument.takes
+				.first(where: { $0.name == placed.takeName })
+			else { return }
+			// The first frame this placement shows, which is the clip's start
+			// plus whatever was trimmed off for this use of it.
+			self.onOpenTakeAt?(take.url, placed.clip.start)
+		}
+		library.onOpenInTake = { [weak self] item in
+			guard let self, let take = self.composeDocument.takes
+				.first(where: { $0.name == item.take })
+			else { return }
+			self.onOpenTakeAt?(take.url, item.start)
+		}
+
 		// Dragged on the big timeline, written back the way the file says it:
 		// snapped to a clip, kept relative to one, or in programme times —
 		// whichever that range was already using.

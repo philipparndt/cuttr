@@ -15,6 +15,10 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 
 	/// Put this reference on the programme — double-clicked, or the + button.
 	public var onInsert: ((String) -> Void)?
+	/// Somebody wants to see where a clip came from: the take it is in, at the
+	/// moment it starts. The window knows how to open a take; this list only
+	/// knows which clip was pointed at.
+	public var onOpenInTake: ((ComposeDocument.Vocabulary.Item) -> Void)?
 	/// Open a scene in the scene editor. A scene is the one thing in this list
 	/// that is not material to be placed but a thing to be made, so double
 	/// clicking it opens it rather than putting it on the programme.
@@ -69,6 +73,7 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 
 		table.dataSource = self
 		table.delegate = self
+		table.onMenu = { [weak self] event in self?.rowMenu(for: event) }
 		table.rowHeight = 30
 		table.backgroundColor = Theme.panel
 		table.gridStyleMask = []
@@ -310,6 +315,35 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 	/// Four things have to fit in a narrow column — a kind, a name, what it is
 	/// called, and its tags — and stacked text fields would spend most of the
 	/// width on the gaps between them.
+	/// The row under the pointer, whatever is selected.
+	///
+	/// A right-click that quietly acts on the selection rather than on what was
+	/// clicked is the way to delete the wrong thing, so the menu names the row
+	/// it is over and selects it first.
+	func rowMenu(for event: NSEvent) -> NSMenu? {
+		let place = table.convert(event.locationInWindow, from: nil)
+		let row = table.row(at: place)
+		guard row >= 0, row < rows.count, case .clip(let item) = rows[row] else { return nil }
+		table.selectRowIndexes([row], byExtendingSelection: false)
+		let menu = NSMenu()
+		let open = NSMenuItem(title: "Open “\(item.slug)” in \(item.take)",
+		                      action: #selector(openInTake(_:)), keyEquivalent: "")
+		open.target = self
+		open.representedObject = item.reference
+		menu.addItem(open)
+		return menu
+	}
+
+	@objc private func openInTake(_ sender: NSMenuItem) {
+		guard let reference = sender.representedObject as? String else { return }
+		for row in rows {
+			if case .clip(let item) = row, item.reference == reference {
+				onOpenInTake?(item)
+				return
+			}
+		}
+	}
+
 	fileprivate final class LibraryRow: NSTableCellView {
 		var row: Row = .header("", nil, collapsed: false)
 

@@ -46,6 +46,10 @@ public final class ProjectInspector: NSView {
 	public var onScrub: ((Double) -> Void)? {
 		didSet { properties.onScrub = onScrub }
 	}
+	/// Somebody right-clicked a placement and asked to see where it came from.
+	public var onOpenInTake: (([Int]) -> Void)? {
+		didSet { programme.onOpenInTake = onOpenInTake }
+	}
 
 	private let programme = ProgrammePanel()
 	private let properties = PropertiesPanel()

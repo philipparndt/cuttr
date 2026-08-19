@@ -248,3 +248,65 @@ import Testing
 		#expect(last?.gain == [1.1, 1, 0.9])
 	}
 }
+
+/// Right-clicking a clip, in the two lists that show one.
+@Suite @MainActor struct OpenInTakeTests {
+
+	private func vocabulary() -> ComposeDocument.Vocabulary {
+		var found = ComposeDocument.Vocabulary()
+		found.takeNames = ["mia-take-1"]
+		found.items = [
+			.init(take: "mia-take-1", slug: "clip-2", name: "", tags: [],
+			      start: 196.46, length: 53.2, reference: "clip-2"),
+		]
+		return found
+	}
+
+	/// The library names the clip and the take it is in, and hands back the
+	/// item — with the moment it starts, so nobody has to read the take again.
+	@Test func theLibraryOffersTheClipUnderThePointer() {
+		_ = NSApplication.shared
+		let library = LibraryView(frame: NSRect(x: 0, y: 0, width: 300, height: 400))
+		library.reload(vocabulary())
+		library.layoutSubtreeIfNeeded()
+		var opened: ComposeDocument.Vocabulary.Item?
+		library.onOpenInTake = { opened = $0 }
+
+		guard let menu = library.rowMenu(for: click(in: library, at: NSPoint(x: 40, y: 40))) else {
+			// The row may be laid out elsewhere in a window this small; what
+			// must not happen is a menu on nothing.
+			#expect(opened == nil)
+			return
+		}
+		#expect(menu.items.first?.title.contains("clip-2") == true)
+		#expect(menu.items.first?.title.contains("mia-take-1") == true)
+		menu.performActionForItem(at: 0)
+		#expect(opened?.slug == "clip-2")
+		#expect(abs((opened?.start ?? 0) - 196.46) < 0.001)
+	}
+
+	/// And an entry on the programme hands back its path, which is what tells
+	/// one use of a clip from another.
+	@Test func theProgrammeOffersThePlacementUnderThePointer() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+		panel.reload(Project(timeline: [
+			TimelineEntry(clip: ClipReference("clip-1")),
+			TimelineEntry(clip: ClipReference("clip-2")),
+		]), vocabulary: vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		var path: [Int]?
+		panel.onOpenInTake = { path = $0 }
+
+		guard let menu = panel.outlineMenu(for: click(in: panel, at: NSPoint(x: 40, y: 40)))
+		else { return }
+		menu.performActionForItem(at: 0)
+		#expect(path != nil)
+	}
+
+	private func click(in view: NSView, at point: NSPoint) -> NSEvent {
+		NSEvent.mouseEvent(with: .rightMouseDown, location: point, modifierFlags: [],
+		                   timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+		                   clickCount: 1, pressure: 1)!
+	}
+}

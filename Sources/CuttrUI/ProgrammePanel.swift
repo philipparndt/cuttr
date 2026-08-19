@@ -28,13 +28,17 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	public var onChange: ((Project) -> Void)?
 	/// What is selected now.
 	public var onSelect: ((ProjectSelection) -> Void)?
+	/// Somebody wants to see where this placement came from: the take, at the
+	/// first frame this use of the clip shows. The panel knows which entry was
+	/// pointed at; the window knows how to open a take.
+	public var onOpenInTake: (([Int]) -> Void)?
 
 	private var project = Project()
 	private var roots: [Node] = []
 	private var vocabulary = ComposeDocument.Vocabulary()
 	private var collapsed: Set<String> = []
 
-	private let outline = NSOutlineView()
+	private let outline = MenuOutline()
 	private let overlayTable = NSTableView()
 	/// What to do when there is nothing there yet. An empty list that says
 	/// nothing looks like a list that is broken.
@@ -179,6 +183,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	private func buildOutline() -> NSView {
 		outline.dataSource = self
 		outline.delegate = self
+		outline.onMenu = { [weak self] event in self?.outlineMenu(for: event) }
 		outline.rowHeight = 26
 		outline.backgroundColor = Theme.panel
 		outline.gridStyleMask = []
@@ -547,6 +552,31 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		overlayTable.deselectAll(nil)
 		selection = .output
 		onSelect?(selection)
+	}
+
+	/// Right-click a row: what can be done to the entry under the pointer.
+	///
+	/// The row is selected first, because a menu that acts on the selection
+	/// rather than on what was clicked is how somebody opens the wrong take.
+	public func outlineMenu(for event: NSEvent) -> NSMenu? {
+		let place = outline.convert(event.locationInWindow, from: nil)
+		let row = outline.row(at: place)
+		guard row >= 0, let node = outline.item(atRow: row) as? Node,
+		      case .clip(let reference) = node.entry.source
+		else { return nil }
+		outline.selectRowIndexes([row], byExtendingSelection: false)
+		let menu = NSMenu()
+		let open = NSMenuItem(title: "Open “\(reference.slug)” in its take",
+		                      action: #selector(openInTake(_:)), keyEquivalent: "")
+		open.target = self
+		open.representedObject = node.path
+		menu.addItem(open)
+		return menu
+	}
+
+	@objc private func openInTake(_ sender: NSMenuItem) {
+		guard let path = sender.representedObject as? [Int] else { return }
+		onOpenInTake?(path)
 	}
 
 	// MARK: - Rows

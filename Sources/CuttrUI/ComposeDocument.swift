@@ -222,6 +222,9 @@ public final class ComposeDocument {
 			public var slug: String
 			public var name: String
 			public var tags: [String]
+			/// Where it begins on the take's clock, so somebody can be taken
+			/// there without the take being read a second time.
+			public var start: Double = 0
 			public var length: Double
 			/// What a project would write to mean this clip: bare when the slug
 			/// is unique across the takes, `take/slug` when it is not.
@@ -274,7 +277,7 @@ public final class ComposeDocument {
 			for clip in take.clips {
 				items.append(Vocabulary.Item(
 					take: entry.name, slug: clip.slug, name: clip.name, tags: clip.tags,
-					length: clip.end - clip.start,
+					start: clip.start, length: clip.end - clip.start,
 					reference: (slugCounts[clip.slug] ?? 0) > 1
 						? "\(entry.name)/\(clip.slug)" : clip.slug))
 			}
