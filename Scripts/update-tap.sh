@@ -94,7 +94,11 @@ mkdir -p "$WORK/tap/Casks"
 cp "$CASK" "$WORK/tap/Casks/cuttr.rb"
 
 cd "$WORK/tap"
-if git diff --quiet -- Casks/cuttr.rb; then
+# `status`, not `diff`: a tap that has never had a cask in it is an *empty*
+# repository, the file is untracked, and `git diff` — which compares what is
+# tracked — says nothing has changed. The first release said "already points at
+# 0.1.0" and pushed nothing.
+if [ -z "$(git status --porcelain -- Casks/cuttr.rb)" ]; then
 	echo "==> $TAP already points at $VERSION"
 	exit 0
 fi
