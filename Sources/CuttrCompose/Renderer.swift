@@ -228,16 +228,76 @@ public enum Renderer {
 					at: CMTime(seconds: stretch.start, preferredTimescale: scale))
 			}
 		}
-		// A lane nothing was laid on is dropped before the export sees it.
-		// It only happens with cards — a programme of nothing but them puts no
-		// shot on any lane — and an export of a composition carrying a video
-		// track with no media in it stops dead, as "Operation Stopped", which
-		// says nothing about the empty track that caused it.
-		if !resolved.cards.isEmpty {
-			for track in composition.tracks where track.segments.isEmpty {
-				composition.removeTrack(track)
+		// The sounds, each on a lane of its own only where it has to be.
+		//
+		// One lane holds any number of sounds that do not overlap, which is
+		// nearly always: music, then an atmosphere, then a sting. A second lane
+		// appears when two of them are on at once, because a track can only
+		// play one thing at a time.
+		var soundLanes: [(track: AVMutableCompositionTrack, sounds: [ResolvedSound])] = []
+		for sound in resolved.sounds {
+			let asset = AVURLAsset(url: sound.url)
+			guard let source = (try? await asset.loadTracks(withMediaType: .audio))?.first
+			else { continue }
+			let free = soundLanes.firstIndex { $0.sounds.last.map { $0.end <= sound.start + 1e-6 } ?? true }
+			let lane: Int
+			if let free {
+				lane = free
+			} else {
+				guard let track = composition.addMutableTrack(
+					withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+				else { continue }
+				soundLanes.append((track, []))
+				lane = soundLanes.count - 1
 			}
+			// As much of the file as the span asks for, or as much as there is.
+			// A sound shorter than its span simply stops; looping it would be a
+			// decision the file did not make.
+			let available = (try? await source.load(.timeRange).duration) ?? .zero
+			let wanted = CMTime(seconds: sound.duration, preferredTimescale: scale)
+			try? soundLanes[lane].track.insertTimeRange(
+				CMTimeRange(start: .zero, duration: min(available, wanted)), of: source,
+				at: CMTime(seconds: sound.start, preferredTimescale: scale))
+			soundLanes[lane].sounds.append(sound)
 		}
+
+		// A track nothing was laid on is dropped before the export sees it.
+		//
+		// An export of a composition carrying a track with no media in it stops
+		// dead, as "Operation Stopped", which says nothing at all about the
+		// empty track that caused it. It is the same reasoning the second video
+		// lane already gets a few lines up, and it has bitten twice from the
+		// other end: a take whose video has no audio track — silent b-roll, a
+		// downloaded clip — leaves the audio lane empty and the whole render
+		// refuses. A programme of nothing but cards leaves both empty.
+		//
+		// The video side only drops a lane no instruction names. A lane a clip
+		// was assigned to but whose media would not load is still where the
+		// compositor will look, and taking it out of the composition turns a
+		// black stretch into a failed render.
+		let named = Set(segments.compactMap(\.track))
+		for track in composition.tracks(withMediaType: .audio) where track.segments.isEmpty {
+			composition.removeTrack(track)
+		}
+		for track in composition.tracks(withMediaType: .video)
+		where track.segments.isEmpty && !named.contains(track.trackID) {
+			composition.removeTrack(track)
+		}
+		// What is left, with the lane each one is — the mix is about lanes, and
+		// after a removal the positions in this array are not them.
+		let liveAudio = audioTracks.enumerated()
+			.filter { !$0.element.segments.isEmpty }
+			.map { (lane: $0.offset, track: $0.element) }
+		let liveSounds = soundLanes.filter { !$0.track.segments.isEmpty }
+		// Whether any lane has a hole in it — under a card, or where a silent
+		// shot sits between two that are not. A hole has to be *heard* as
+		// silence, and that wants a mix even when every level in it is one:
+		// without one the export passes the audio through and says where the
+		// holes are in an edit list, which some players honour and some quietly
+		// play straight over. Measured twice: a tone that should have stopped
+		// under a card ran on through it, and a programme that opened on a
+		// silent shot came back with the second shot's sound at the top.
+		let gaps = liveAudio.contains { $0.track.segments.contains(where: \.isEmpty) }
 		cursor = max(cursor, CMTime(seconds: resolved.duration, preferredTimescale: scale))
 
 		// A card is a picture with no footage in it, so a programme made only of
@@ -302,8 +362,10 @@ public enum Renderer {
 
 			return Built(composition: composition, videoComposition: plainComposition,
 			             overlays: overlays,
-			             audioMix: audioMix(audioTracks, levels: levels, clips: resolved.clips,
-			                              lanes: clipLanes, silences: !resolved.cards.isEmpty))
+			             audioMix: audioMix(liveAudio, levels: levels, clips: resolved.clips,
+			                              lanes: clipLanes, duration: resolved.duration,
+			                              silences: gaps,
+			                              sounds: liveSounds))
 		}
 
 		// A dissolve needs two frames at once, and only the compositor can hold
@@ -334,8 +396,10 @@ public enum Renderer {
 				value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
 			return Built(composition: composition, videoComposition: filtered,
 			             overlays: overlays,
-			             audioMix: audioMix(audioTracks, levels: levels, clips: resolved.clips,
-			                              lanes: clipLanes, silences: !resolved.cards.isEmpty))
+			             audioMix: audioMix(liveAudio, levels: levels, clips: resolved.clips,
+			                              lanes: clipLanes, duration: resolved.duration,
+			                              silences: gaps,
+			                              sounds: liveSounds))
 		}
 
 		let session = ProgrammeCompositor.register(ProgrammeCompositor.Work(
@@ -388,8 +452,10 @@ public enum Renderer {
 
 		return Built(composition: composition, videoComposition: videoComposition,
 		             session: session, overlays: overlays,
-		             audioMix: audioMix(audioTracks, levels: levels, clips: resolved.clips,
-			                              lanes: clipLanes, silences: !resolved.cards.isEmpty))
+		             audioMix: audioMix(liveAudio, levels: levels, clips: resolved.clips,
+			                              lanes: clipLanes, duration: resolved.duration,
+			                              silences: gaps,
+			                              sounds: liveSounds))
 	}
 
 	/// One black frame in a file, for a card to hold its place with.
@@ -461,73 +527,175 @@ public enum Renderer {
 		return (asset, track)
 	}
 
-	/// The mix: one parameter set per audio track, stepping the volume at each
-	/// cut and ramping it across a dissolve.
+	/// The mix: what each lane is set to, moment by moment.
 	///
-	/// A step at a cut because the cut is already a discontinuity — a crossfade
+	/// A level is *held* rather than set once and left. Measured, and it cost
+	/// an afternoon: two volume settings a few seconds apart are read as the
+	/// ends of a ramp, not as a step and a step, so a sound set to its gain at
+	/// three seconds and to nothing at six faded steadily away across the whole
+	/// of itself. So everything here is written as a ramp — a flat one where the
+	/// level holds — and the flat stretches are worked out from where the next
+	/// change is.
+	///
+	/// A step at a cut because the cut is already a discontinuity: a crossfade
 	/// of levels across it would be audible as a swell on the wrong side of the
 	/// edit. A ramp across a dissolve because there the picture is mixing too,
 	/// and a hard audio cut in the middle of one is the thing everybody hears.
 	private static func audioMix(
-		_ tracks: [AVMutableCompositionTrack],
+		_ tracks: [(lane: Int, track: AVMutableCompositionTrack)],
 		levels: [(track: Int, at: CMTime, volume: Float)],
 		clips: [ResolvedClip],
 		lanes: [Int],
-		silences: Bool = false
+		duration: Double,
+		silences: Bool = false,
+		sounds: [(track: AVMutableCompositionTrack, sounds: [ResolvedSound])] = []
 	) -> AVAudioMix? {
-		guard !tracks.isEmpty else { return nil }
+		guard !tracks.isEmpty || !sounds.isEmpty else { return nil }
 		let scale: CMTimeScale = 600
-		var parameters: [(lane: Int, input: AVMutableAudioMixInputParameters)] = []
+		var parameters: [AVMutableAudioMixInputParameters] = []
 		// Stretches that have to be *heard* as silence want a mix even when
 		// every level in it is one. Without one the export passes the audio
 		// through and says where the gaps are in an edit list, which some
-		// players honour and some quietly play straight over — measured: a
-		// tone that should have stopped under a card ran on through it.
-		var wanted = silences
+		// players honour and some quietly play straight over — measured: a tone
+		// that should have stopped under a card ran on through it.
+		var wanted = silences || !sounds.isEmpty
+		let end = max(duration, 0) + 1
 
-		for (lane, track) in tracks.enumerated() {
-			let mine = levels.filter { $0.track == lane }
-			guard !mine.isEmpty else { continue }
-			let input = AVMutableAudioMixInputParameters(track: track)
-			// Silent to begin with: a track only carries the clips laid on it,
-			// and what is between them must not be heard.
-			input.setVolume(0, at: .zero)
-			for level in mine {
-				input.setVolume(level.volume, at: level.at)
-				if level.volume != 1 { wanted = true }
-			}
-			parameters.append((lane, input))
+		func time(_ seconds: Double) -> CMTime {
+			CMTime(seconds: max(0, seconds), preferredTimescale: scale)
 		}
 
-		// The dissolves: the outgoing lane down, the incoming lane up, over
-		// exactly the overlap.
-		for (index, clip) in clips.enumerated() where clip.transition > 0 && index > 0 {
-			wanted = true
-			let range = CMTimeRange(
-				start: CMTime(seconds: clip.start, preferredTimescale: scale),
-				duration: CMTime(seconds: clip.transition, preferredTimescale: scale))
-			let outgoing = clips[index - 1]
-			let up = Float(pow(10, clip.gain / 20)), down = Float(pow(10, outgoing.gain / 20))
-			// The lanes the two clips were actually laid on, rather than the
-			// parity of their position. A lane only changes where a dissolve
-			// asks for it, so in a programme that mixes cuts and dissolves the
-			// two are not the same number — and the ramps went to the wrong
-			// lanes, taking the incoming shot's sound up from nothing on a
-			// track that had nothing on it.
-			let coming = index < lanes.count ? lanes[index] : index % 2
-			let going = index - 1 < lanes.count ? lanes[index - 1] : (index - 1) % 2
-			for (lane, input) in parameters {
+		/// One lane's instructions: levels that hold, and moves between them.
+		struct Lane {
+			var steps: [(at: Double, volume: Float)] = []
+			var moves: [(start: Double, end: Double, from: Float, to: Float)] = []
+		}
+
+		/// Writes a lane out, turning every held level into a flat ramp that
+		/// runs as far as the next thing that happens on that lane.
+		func write(_ lane: Lane, to input: AVMutableAudioMixInputParameters) {
+			var moves = lane.moves
+			let changes = (lane.moves.map(\.start) + lane.steps.map(\.at)).sorted()
+			for step in lane.steps {
+				let next = changes.first { $0 > step.at + 1e-6 } ?? end
+				moves.append((step.at, next, step.volume, step.volume))
+			}
+			// Silent until the first thing happens: a lane carries only what was
+			// laid on it, and what is between must not be heard.
+			if let first = changes.first, first > 0 {
+				moves.append((0, first, 0, 0))
+			}
+			for move in moves.sorted(by: { $0.start < $1.start }) where move.end > move.start {
+				input.setVolumeRamp(
+					fromStartVolume: move.from, toEndVolume: move.to,
+					timeRange: CMTimeRange(start: time(move.start),
+					                       duration: time(move.end - move.start)))
+			}
+		}
+
+		/// What a lane is set to at a moment, before anything ducks it.
+		func level(_ lane: Int, at when: Double) -> Float {
+			levels.last { $0.track == lane && $0.at.seconds <= when + 1e-6 }?.volume ?? 0
+		}
+
+		/// Everything pulling the programme under at a moment, multiplied
+		/// together. Two sounds ducking at once duck twice, which is what the
+		/// numbers say.
+		let ducking = sounds.flatMap(\.sounds).filter { $0.sound.ducks != 0 }
+		func duck(at when: Double) -> Float {
+			var factor: Float = 1
+			for sound in ducking where when > sound.start - 1e-6 && when < sound.end + 1e-6 {
+				factor *= Float(pow(10, -sound.sound.ducks / 20))
+			}
+			return factor
+		}
+
+		for (lane, track) in tracks {
+			let mine = levels.filter { $0.track == lane }
+			guard !mine.isEmpty else { continue }
+			var built = Lane()
+
+			for step in mine {
+				if step.volume != 1 { wanted = true }
+				built.steps.append((step.at.seconds, step.volume * duck(at: step.at.seconds)))
+			}
+
+			// The dissolves: the outgoing lane down, the incoming lane up, over
+			// exactly the overlap.
+			for (index, clip) in clips.enumerated() where clip.transition > 0 && index > 0 {
+				wanted = true
+				let under = duck(at: clip.start)
+				let up = Float(pow(10, clip.gain / 20)) * under
+				let down = Float(pow(10, clips[index - 1].gain / 20)) * under
+				// The lanes the two clips were actually laid on, rather than the
+				// parity of their position. A lane only changes where a dissolve
+				// asks for it, so in a programme that mixes cuts and dissolves
+				// the two are not the same number — and the ramps went to the
+				// wrong lanes, taking the incoming shot's sound up from nothing
+				// on a track that had nothing on it.
+				let coming = index < lanes.count ? lanes[index] : index % 2
+				let going = index - 1 < lanes.count ? lanes[index - 1] : (index - 1) % 2
 				if lane == coming {
-					input.setVolumeRamp(fromStartVolume: 0, toEndVolume: up, timeRange: range)
+					built.moves.append((clip.start, clip.start + clip.transition, 0, up))
 				} else if lane == going {
-					input.setVolumeRamp(fromStartVolume: down, toEndVolume: 0, timeRange: range)
+					built.moves.append((clip.start, clip.start + clip.transition, down, 0))
 				}
 			}
+
+			// The ducking, at its two edges. In the middle the levels above
+			// already carry it, so what is left is getting there and back: down
+			// as the sound comes up, and up again as it goes. It follows the
+			// sound's own fades, because a duck that snaps under a fading-in bed
+			// is heard as a drop rather than as room being made.
+			for sound in ducking {
+				let factor = Float(pow(10, -sound.sound.ducks / 20))
+				let inOver = max(0.25, min(sound.sound.fadeIn, sound.duration / 2))
+				let outOver = max(0.25, min(sound.sound.fadeOut, sound.duration / 2))
+				let before = level(lane, at: sound.start - 1e-3)
+				if before > 0 {
+					built.moves.append((max(0, sound.start - inOver), sound.start,
+					                    before, before * factor))
+				}
+				let after = level(lane, at: sound.end)
+				if after > 0 {
+					built.moves.append((max(0, sound.end - outOver), sound.end,
+					                    after * factor, after))
+				}
+			}
+
+			let input = AVMutableAudioMixInputParameters(track: track)
+			write(built, to: input)
+			parameters.append(input)
+		}
+
+		// The sounds themselves: a level, and a fade at each end when the file
+		// asks for one.
+		for lane in sounds {
+			var built = Lane()
+			for sound in lane.sounds {
+				let gain = Float(pow(10, sound.sound.gain / 20))
+				let inOver = min(sound.sound.fadeIn, sound.duration / 2)
+				let outOver = min(sound.sound.fadeOut, sound.duration / 2)
+				if inOver > 0 {
+					built.moves.append((sound.start, sound.start + inOver, 0, gain))
+				}
+				built.steps.append((sound.start + inOver, gain))
+				if outOver > 0 {
+					built.moves.append((sound.end - outOver, sound.end, gain, 0))
+				}
+				// Off at the end, whether it faded or stopped: the lane may
+				// carry another sound later, and what is between them must not
+				// be heard.
+				built.steps.append((sound.end, 0))
+			}
+			let input = AVMutableAudioMixInputParameters(track: lane.track)
+			write(built, to: input)
+			parameters.append(input)
 		}
 
 		guard wanted, !parameters.isEmpty else { return nil }
 		let mix = AVMutableAudioMix()
-		mix.inputParameters = parameters.map(\.input)
+		mix.inputParameters = parameters
 		return mix
 	}
 
