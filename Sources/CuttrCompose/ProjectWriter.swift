@@ -274,6 +274,7 @@ public enum ProjectWriter {
 					if effect.density != 1 { out += "    density: \(trim(effect.density))\n" }
 					if effect.speed != 1 { out += "    speed:   \(trim(effect.speed))\n" }
 					if effect.size != 1 { out += "    size:    \(trim(effect.size))\n" }
+					if effect.wind != 0 { out += "    wind:    \(trim(effect.wind))\n" }
 					if effect.seed != 1 { out += "    seed:    \(effect.seed)\n" }
 					if !effect.palette.isEmpty {
 						out += "    palette: ["

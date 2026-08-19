@@ -253,6 +253,7 @@ public enum ProjectReader {
 				if let density = number(m["density"]) { effect.density = density }
 				if let speed = number(m["speed"]) { effect.speed = speed }
 				if let size = number(m["size"]) { effect.size = size }
+				if let wind = number(m["wind"]) { effect.wind = wind }
 				if let seed = m["seed"] as? Int { effect.seed = seed }
 				if let palette = m["palette"] as? [Any] {
 					effect.palette = palette.compactMap { ($0 as? String).flatMap(RGBA.init(hex:)) }

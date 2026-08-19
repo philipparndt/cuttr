@@ -665,6 +665,13 @@ public final class PropertiesPanel: NSView {
 			field("size", [number(effect.size, width: 72) { [weak self] value in
 				self?.editEffect(index) { $0.size = max(0.05, value) }
 			}], note: "the size of each piece, not how many there are")
+			if effect.style == .rain || effect.style == .snow {
+				field("wind", [number(effect.wind, width: 72) { [weak self] value in
+					self?.editEffect(index) { $0.wind = max(-4, min(4, value)) }
+				}], note: effect.style == .rain
+					? "positive blows to the right, and the streaks lean into it"
+					: "positive blows to the right; 1 is a good wind rather than a gale")
+			}
 			field("seed", [number(Double(effect.seed), width: 72) { [weak self] value in
 				self?.editEffect(index) { $0.seed = Int(value) }
 			}], note: "the same number gives the same cloud, every render")

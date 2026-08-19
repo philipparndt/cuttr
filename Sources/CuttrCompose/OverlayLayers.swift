@@ -44,9 +44,10 @@ public enum OverlayLayers {
 	///
 	/// Effects are not: they are geometry with light on it, rendered into the
 	/// frame itself, and a layer tree has nothing to say about them.
-	/// Public because the panel has to be able to say which of the two passes a
-	/// row is drawn in — the ordering in `overlays:` decides the frame pass,
-	/// and a layer is always over all of it.
+	///
+	/// Public because the panel has to say which of the two passes a row is
+	/// drawn in. The order of `overlays:` decides the frame pass; a layer is
+	/// over all of it whatever the list says.
 	public static func isLayered(_ overlay: Overlay) -> Bool {
 		if case .effect = overlay.kind { return false }
 		// Film mode, the aberration and the tape *are* the picture rather than

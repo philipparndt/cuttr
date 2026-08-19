@@ -22,6 +22,14 @@ public struct Effect: Sendable, Equatable {
 		/// Bright shards thrown upwards and falling back — a burst rather than
 		/// a fall, for the moment something lands.
 		case sparkle
+		/// Rain: long thin streaks, nearly vertical, going fast.
+		///
+		/// Geometry rather than a filter, and in here with the rest for that
+		/// reason: a streak is a thing at a distance, so the far ones are
+		/// smaller, dimmer and slower, and the near ones pass in front of them.
+		/// A rain filter over the whole frame has no depth in it and looks like
+		/// a scratched print.
+		case rain
 	}
 
 	public var style: Style
@@ -47,6 +55,12 @@ public struct Effect: Sendable, Equatable {
 	public var size: Double
 	/// What the pieces are made of. Empty takes the style's own colours.
 	public var palette: [RGBA]
+	/// How hard it is blowing, and which way: positive to the right.
+	///
+	/// Only the styles that drift have any use for it — rain leans into it and
+	/// travels sideways as it falls, snow is simply carried. Nought is straight
+	/// down, and one is a good wind rather than a gale.
+	public var wind: Double
 	/// The same number gives the same cloud, every render, on every machine.
 	///
 	/// An effect nobody can reproduce is one nobody can approve: a director who
@@ -61,6 +75,7 @@ public struct Effect: Sendable, Equatable {
 		speed: Double = 1,
 		size: Double = 1,
 		palette: [RGBA] = [],
+		wind: Double = 0,
 		seed: Int = 1
 	) {
 		self.style = style
@@ -69,6 +84,7 @@ public struct Effect: Sendable, Equatable {
 		self.speed = speed
 		self.size = size
 		self.palette = palette
+		self.wind = wind
 		self.seed = seed
 	}
 
@@ -83,6 +99,11 @@ public struct Effect: Sendable, Equatable {
 			return [RGBA(hex: "#ffffff")!, RGBA(hex: "#eaf4ff")!]
 		case .sparkle:
 			return [RGBA(hex: "#ffe680")!, RGBA(hex: "#ffffff")!, RGBA(hex: "#ffc74d")!]
+		case .rain:
+			// Rain is not blue. It is whatever is behind it, slightly brighter
+			// along the streak — so the pieces are pale and nearly white, with
+			// a hint of the sky in them.
+			return [RGBA(hex: "#dfe9f2")!, RGBA(hex: "#c9d8e6")!, RGBA(hex: "#eef4fa")!]
 		}
 	}
 
@@ -93,6 +114,9 @@ public struct Effect: Sendable, Equatable {
 		case .confetti: base = finish == .glitter ? 320 : 160
 		case .snow: base = 220
 		case .sparkle: base = 120
+		// More of them than anything else, and they are the thinnest things
+		// here: a dozen streaks is a leak in the roof.
+		case .rain: base = 420
 		}
 		return max(4, min(1200, Int(Double(base) * max(0.05, density))))
 	}
