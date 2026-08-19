@@ -229,6 +229,10 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 			guard let self, let part = self.sceneDocument.selectedPart else { return }
 			self.sceneDocument.setField(field, to: value, of: key, on: part)
 		}
+		inspector.onShape = { [weak self] key, kind in
+			guard let self, let part = self.sceneDocument.selectedPart else { return }
+			self.sceneDocument.setKeyShape(kind, of: key, on: part)
+		}
 		inspector.onColor = { [weak self] key, colour in
 			guard let self, let part = self.sceneDocument.selectedPart,
 			      part < self.sceneDocument.scene.parts.count,
