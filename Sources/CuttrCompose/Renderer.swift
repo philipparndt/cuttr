@@ -129,12 +129,14 @@ public enum Renderer {
 		// The effects are drawn into the frame here, in the same pass as the
 		// grade — they are pixels, not layers, and a layer tree cannot hold
 		// three hundred lit slips of card tumbling in depth.
-		let effects: [(overlay: ResolvedOverlay, renderer: EffectRenderer)] =
+		let effects: [(overlay: ResolvedOverlay, effect: Effect, renderer: EffectRenderer)] =
 			resolved.overlays.compactMap { shown in
 				guard case .effect(let effect) = shown.overlay.kind,
 				      let renderer = EffectRenderer(effect, size: size) else { return nil }
-				return (shown, renderer)
+				return (shown, effect, renderer)
 			}
+		// Asked for only when something wants to go behind somebody.
+		let people = effects.contains { $0.effect.behind == .people } ? PersonMask() : nil
 
 		// Colour management off.
 		//
@@ -183,29 +185,57 @@ public enum Renderer {
 			var image = Grading.apply(look, to: request.sourceImage)
 			image = image.transformed(by: Grading.fit(image.extent, into: size))
 
-			for (shown, renderer) in effects where time >= shown.start && time <= shown.end {
+			// The frame as the programme has it — graded, fitted, nothing over it
+			// yet. Both the mask and the person it cuts out come from this, so
+			// they are in the same coordinates as everything being composited.
+			// Taking the mask from `request.sourceImage` instead put it in the
+			// footage's coordinates, which for any output that is not the size
+			// of the footage is the wrong place by exactly the scale factor.
+			let frame = image
+
+			for (shown, effect, renderer) in effects where time >= shown.start && time <= shown.end {
 				// A fall-out stops letting pieces go before the end, so what is
 				// already in the air has time to leave the frame.
 				var spawningUntil = Double.infinity
 				if case .fall(let over) = shown.overlay.departure {
 					spawningUntil = max(0, shown.duration - over)
 				}
-				guard let plate = renderer.image(at: time - shown.start,
-				                                 spawningUntil: spawningUntil) else { continue }
 				let opacity = fade(shown, at: time)
 				guard opacity > 0.001 else { continue }
-				let faded = opacity >= 0.999 ? plate : plate.applyingFilter("CIColorMatrix", parameters: [
-					"inputAVector": CIVector(x: 0, y: 0, z: 0, w: opacity),
-				])
-				image = faded.composited(over: image)
+
+				func plate(_ half: EffectRenderer.Half) -> CIImage? {
+					guard let drawn = renderer.image(at: time - shown.start,
+					                                 spawningUntil: spawningUntil, only: half)
+					else { return nil }
+					guard opacity < 0.999 else { return drawn }
+					return drawn.applyingFilter("CIColorMatrix", parameters: [
+						"inputAVector": CIVector(x: 0, y: 0, z: 0, w: opacity),
+					])
+				}
+
+				// Behind whoever is in the frame, then them, then the near half
+				// over the top. The mask is the only thing that knows where
+				// they are; everything else is arithmetic on depth.
+				if effect.behind == .people,
+				   let mask = people?.mask(for: frame, at: time) {
+					if let back = plate(.back) {
+						image = back.composited(over: image)
+						image = frame.applyingFilter("CIBlendWithRedMask", parameters: [
+							"inputBackgroundImage": image,
+							"inputMaskImage": mask,
+						])
+					}
+					if let front = plate(.front) { image = front.composited(over: image) }
+					continue
+				}
+
+				if let all = plate(.all) { image = all.composited(over: image) }
 			}
 			request.finish(with: image, context: plain)
 		}
 		videoComposition.renderSize = size
 		videoComposition.frameDuration = CMTime(
 			value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
-		// Said out loud: the programme is Rec. 709.
-		//
 		// A phone shoots HLG, and a file whose pixels are HLG but whose tags say
 		// nothing is shown as sRGB — flat, milky, the blacks lifted and the sky
 		// gone. Naming the colour makes AVFoundation convert into it instead of
@@ -322,7 +352,10 @@ public enum Renderer {
 		progress: @escaping @Sendable (Double) -> Void = { _ in }
 	) async throws {
 		let built = try await build(resolved, host: .export)
-		let drawsOver = !resolved.overlays.isEmpty
+		// Only *layers* need the second pass. An effect is drawn into the frame
+		// in the first one, so a programme with nothing but effects over it is
+		// encoded once.
+		let drawsOver = resolved.overlays.contains { OverlayLayers.isLayered($0.overlay) }
 
 		guard FileManager.default.isWritableFile(atPath: url.deletingLastPathComponent().path)
 		else { throw RenderError.cannotWrite(url) }

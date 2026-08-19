@@ -232,6 +232,7 @@ public enum ProjectWriter {
 				case .effect(let effect):
 					out += "  - effect:  \(effect.style.rawValue)\n"
 					if effect.finish != .matte { out += "    finish:  \(effect.finish.rawValue)\n" }
+					if effect.behind != .nothing { out += "    behind:  \(effect.behind.rawValue)\n" }
 					if effect.density != 1 { out += "    density: \(trim(effect.density))\n" }
 					if effect.speed != 1 { out += "    speed:   \(trim(effect.speed))\n" }
 					if effect.size != 1 { out += "    size:    \(trim(effect.size))\n" }

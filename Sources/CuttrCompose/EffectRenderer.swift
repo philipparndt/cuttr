@@ -46,6 +46,16 @@ final class EffectRenderer: @unchecked Sendable {
 	/// from more than one thread and a scene graph is not two things.
 	private let lock = NSLock()
 
+	/// Which part of the cloud to draw: the near half, the far half, or all of
+	/// it. The far half is what goes behind whoever is in the frame.
+	enum Half { case all, front, back }
+
+	/// Where the cloud is cut in two: everything beyond this goes behind. Nearer
+	/// two fifths than half, because the far pieces are the small dark ones and
+	/// a subject with only a handful of them behind her does not read as
+	/// standing *in* the shower.
+	static let behindLine: Float = 0.4
+
 	/// The world is two units tall at the camera's distance, whatever the
 	/// frame's shape — so `size` and speeds mean the same thing at any output.
 	private static let worldHeight: Float = 10
@@ -264,11 +274,26 @@ final class EffectRenderer: @unchecked Sendable {
 	/// `spawningUntil` is when the last piece may be let go: after that the
 	/// cloud thins out as what is already falling leaves the frame, which is
 	/// what "fall out" means and what a fade cannot do.
-	func image(at time: Double, spawningUntil: Double = .infinity) -> CIImage? {
+	func image(at time: Double, spawningUntil: Double = .infinity,
+	           only half: Half = .all) -> CIImage? {
 		lock.lock()
 		defer { lock.unlock() }
 
 		place(at: time, spawningUntil: spawningUntil)
+		if half != .all {
+			// Inside a transaction with actions off, like everything else here:
+			// hiding a node is an animatable change, and a scene with no view
+			// has no clock to run the animation on — so the flags were set and
+			// nothing was hidden. Both halves then held the whole cloud, which
+			// composites to exactly what no occlusion looks like.
+			SCNTransaction.begin()
+			SCNTransaction.animationDuration = 0
+			SCNTransaction.disableActions = true
+			for piece in pieces where !piece.node.isHidden {
+				piece.node.isHidden = (piece.depth >= Self.behindLine) != (half == .back)
+			}
+			SCNTransaction.commit()
+		}
 
 		guard let buffer = makeBuffer(), let texture = makeTexture(for: buffer) else { return nil }
 		let pass = MTLRenderPassDescriptor()

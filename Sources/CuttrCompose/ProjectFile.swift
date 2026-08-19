@@ -198,6 +198,9 @@ public enum ProjectReader {
 				if let finish = (m["finish"] as? String).flatMap({ Effect.Finish(rawValue: $0) }) {
 					effect.finish = finish
 				}
+				if let behind = (m["behind"] as? String).flatMap({ Effect.Occlusion(rawValue: $0) }) {
+					effect.behind = behind
+				}
 				if let density = number(m["density"]) { effect.density = density }
 				if let speed = number(m["speed"]) { effect.speed = speed }
 				if let size = number(m["size"]) { effect.size = size }

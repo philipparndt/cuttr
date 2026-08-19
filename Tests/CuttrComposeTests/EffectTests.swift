@@ -106,3 +106,57 @@ import Testing
 			> far.map(\.fall).reduce(0, +) / Double(far.count))
 	}
 }
+
+/// The keys an effect is written with come back as the same effect.
+@Suite struct EffectFileTests {
+
+	@Test func everyDialSurvivesTheFile() throws {
+		let effect = Effect(style: .confetti, finish: .metallic, behind: .people,
+		                    density: 1.4, speed: 1.2, size: 1.6,
+		                    palette: [RGBA(hex: "#ff0000")!], seed: 9)
+		let project = Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"))],
+			overlays: [Overlay(kind: .effect(effect),
+			                   span: .times(from: 0, to: 4),
+			                   arrival: .cut, departure: .fall(over: 1.5))])
+		let text = ProjectWriter.write(project)
+		let back = try ProjectReader.read(text)
+		guard case .effect(let read) = back.overlays.first?.kind else {
+			Issue.record("it did not come back as an effect")
+			return
+		}
+		#expect(read == effect, "written:\n\(text)")
+		#expect(back.overlays.first?.departure == .fall(over: 1.5))
+		#expect(ProjectWriter.write(back) == text)
+	}
+}
+
+/// The two halves of the cloud are two halves: they add up to it, and neither
+/// is the whole thing.
+///
+/// Which is the test the occlusion needed. Hiding a node is an animatable
+/// change, and a scene with no view has no clock to run the animation on — so
+/// the flags were set and nothing was hidden. Both halves held the whole cloud,
+/// the composite came out pixel-identical to no occlusion at all, and every
+/// intermediate step looked right.
+@Suite struct EffectHalvesTests {
+
+	@Test func theHalvesPartitionTheCloud() throws {
+		let renderer = try #require(EffectRenderer(
+			Effect(style: .confetti, behind: .people, density: 1, seed: 6),
+			size: CGSize(width: 320, height: 180)))
+
+		_ = renderer.image(at: 6, only: .all)
+		let all = renderer.showing
+		_ = renderer.image(at: 6, only: .back)
+		let back = renderer.showing
+		_ = renderer.image(at: 6, only: .front)
+		let front = renderer.showing
+
+		#expect(all > 0)
+		#expect(back > 0, "nothing goes behind")
+		#expect(front > 0, "nothing stays in front")
+		#expect(back + front == all, "\(back) + \(front) is not \(all)")
+		#expect(back < all)
+	}
+}
