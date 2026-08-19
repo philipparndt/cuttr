@@ -46,6 +46,19 @@ public struct Overlay: Sendable, Equatable {
 
 	public var kind: Kind
 
+	/// What to call one in a sentence somebody reads.
+	public var described: String {
+		switch kind {
+		case .text(let text, _): return text.isEmpty ? "a caption" : "the caption “\(text)”"
+		case .spinner: return "a spinner"
+		case .scene(let name, _): return "the scene `\(name)`"
+		case .effect(let effect): return "the \(effect.style.rawValue)"
+		case .film: return "film mode"
+		case .aberration: return "the aberration"
+		case .tape: return "the tape"
+		}
+	}
+
 	/// Each time it is on screen, and what it says while it is.
 	///
 	/// A list, because one overlay is often wanted in three places — a spinner

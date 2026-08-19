@@ -128,13 +128,24 @@ import Testing
 		#expect((both.overlays[1].start, both.overlays[1].end) == (0, 10))
 	}
 
-	@Test func anEmptySectionIsAnErrorRatherThanAZeroLengthSpan() throws {
+	/// This used to throw, and the reasoning was that a zero-length section is
+	/// not a section. It is, though — it is a section somebody has just made and
+	/// has not filled yet, and refusing the whole programme for it leaves an
+	/// empty preview and a greyed render button while they work. Skipped, and
+	/// said out loud.
+	@Test func anEmptySectionIsSkippedRatherThanRefused() throws {
 		let directory = try fixture()
 		defer { try? FileManager.default.removeItem(at: directory) }
-		let project = try ProjectReader.read(header + "timeline:\n  - group: nothing\n    clips: []\n")
-		#expect(throws: ResolveError.self) { try Resolver.resolve(project, baseURL: directory) }
+		let project = try ProjectReader.read(
+			header + "timeline:\n  - one\n  - group: nothing\n    clips: []\n")
+		let resolved = try Resolver.resolve(project, baseURL: directory)
+		#expect(resolved.clips.count == 1)
+		#expect(resolved.groups.contains { $0.name == "nothing" } == false)
+		#expect(resolved.warnings.contains { $0.contains("@nothing") })
 	}
 
+	/// The same for an overlay pointing at a section that is not there: it comes
+	/// off the programme, and the programme stays.
 	@Test func aSectionNobodyDefinedIsNamed() throws {
 		let directory = try fixture()
 		defer { try? FileManager.default.removeItem(at: directory) }
@@ -144,7 +155,10 @@ import Testing
 		  - text: Nowhere
 		    group: missing
 		""")
-		#expect(throws: ResolveError.self) { try Resolver.resolve(project, baseURL: directory) }
+		let resolved = try Resolver.resolve(project, baseURL: directory)
+		#expect(resolved.overlays.isEmpty)
+		#expect(resolved.clips.count == 1)
+		#expect(resolved.warnings.contains { $0.contains("@missing") && $0.contains("Nowhere") })
 	}
 
 	@Test func groupsRoundTripThroughTheFile() throws {
@@ -166,5 +180,70 @@ import Testing
 		let back = try ProjectReader.read(text)
 		#expect(back.timeline == project.timeline)
 		#expect(back.overlays == project.overlays)
+	}
+}
+
+/// A section somebody has made and not yet filled.
+///
+/// Half-built is the normal state of a project being worked on, and refusing to
+/// resolve any of it leaves an empty preview and a greyed render button — a
+/// hard way to be told that a section you are still building is still empty.
+@Suite struct EmptySectionTests {
+
+	private func resolve(_ project: Project) throws -> ResolvedProject {
+		try Resolver.resolve(project, baseURL: URL(fileURLWithPath: NSTemporaryDirectory()))
+	}
+
+	private func programme(_ extra: [TimelineEntry] = []) -> Project {
+		var project = Project(timeline: [
+			TimelineEntry(group: "nothing", entries: []),
+			TimelineEntry(source: .card(Card(duration: 2)), label: "something"),
+		] + extra)
+		project.scenes = [:]
+		return project
+	}
+
+    @Test func anEmptySectionIsSkippedAndSaidSo() throws {
+		let resolved = try resolve(programme())
+		#expect(resolved.duration == 2)
+		#expect(resolved.cards.count == 1)
+		// Not registered as a section, because there is nothing there to hang on.
+		#expect(resolved.groups.contains { $0.name == "nothing" } == false)
+		#expect(resolved.warnings.count == 1)
+		#expect(resolved.warnings[0].contains("@nothing"))
+	}
+
+	/// And an overlay hung on one comes off the programme rather than taking
+	/// the programme with it.
+	@Test func anOverlayOnAnEmptySectionIsDroppedNotFatal() throws {
+		var project = programme()
+		project.overlays = [
+			Overlay(kind: .text("on nothing", style: nil),
+			        span: .marks(from: .group("nothing"), to: .group("nothing"))),
+			Overlay(kind: .text("on something", style: nil),
+			        span: .marks(from: .group("something"), to: .group("something"))),
+		]
+		let resolved = try resolve(project)
+		#expect(resolved.overlays.count == 1)
+		#expect(resolved.overlays.first?.overlay.described.contains("on something") == true)
+		#expect(resolved.warnings.count == 2)
+		#expect(resolved.warnings.contains { $0.contains("on nothing") })
+	}
+
+	/// A section with something in it is untouched by any of this.
+	@Test func aFullSectionStillResolves() throws {
+		var project = Project(timeline: [
+			TimelineEntry(group: "intro", entries: [
+				TimelineEntry(source: .card(Card(duration: 1.5)), label: "card"),
+			]),
+		])
+		project.overlays = [
+			Overlay(kind: .text("hello", style: nil),
+			        span: .marks(from: .group("intro"), to: .group("intro"))),
+		]
+		let resolved = try resolve(project)
+		#expect(resolved.warnings.isEmpty)
+		#expect(resolved.overlays.count == 1)
+		#expect(resolved.groups.first?.name == "intro")
 	}
 }

@@ -508,3 +508,28 @@ import Testing
 		}
 	}
 }
+
+/// The menu on a section.
+@Suite @MainActor struct SectionMenuTests {
+
+	@Test func aSectionOffersToPlayOnItsOwn() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+		panel.reload(Project(timeline: [
+			TimelineEntry(group: "middle", entries: [
+				TimelineEntry(clip: ClipReference("shot")),
+			]),
+		]), vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		var asked: String?
+		panel.onPreviewSection = { asked = $0 }
+
+		guard let menu = panel.rowMenu(0) else {
+			Issue.record("no menu on the section row")
+			return
+		}
+		#expect(menu.items.first?.title.contains("middle") == true)
+		menu.performActionForItem(at: 0)
+		#expect(asked == "middle")
+	}
+}

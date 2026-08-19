@@ -292,6 +292,11 @@ do {
 }
 
 if describe {
+	// What was skipped, before what was kept: a warning after two hundred lines
+	// of programme is a warning nobody reads.
+	for warning in resolved.warnings {
+		FileHandle.standardError.write("warning: \(warning)\n".data(using: .utf8)!)
+	}
 	print("clips")
 	for clip in resolved.clips {
 		print(String(format: "  %-28@ %7.3f → %7.3f  %@",

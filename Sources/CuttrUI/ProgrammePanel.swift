@@ -33,6 +33,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// first frame this use of the clip shows. The panel knows which entry was
 	/// pointed at; the window knows how to open a take.
 	public var onOpenInTake: (([Int]) -> Void)?
+	/// Somebody wants to see one section on its own: play from where it starts
+	/// to where it ends and stop there.
+	public var onPreviewSection: ((String) -> Void)?
 
 	private var project = Project()
 	private var roots: [Node] = []
@@ -891,17 +894,42 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	public func outlineMenu(for event: NSEvent) -> NSMenu? {
 		let place = outline.convert(event.locationInWindow, from: nil)
 		let row = outline.row(at: place)
-		guard row >= 0, let node = outline.item(atRow: row) as? Node,
-		      case .clip(let reference) = node.entry.source
-		else { return nil }
+		return rowMenu(row)
+	}
+
+	/// The menu for a row, whatever pointed at it.
+	///
+	/// Split out from the event because a right-click in a test is a coordinate
+	/// nobody can predict — the rows are laid out by the outline, and a panel
+	/// with no window has not necessarily laid them out at all.
+	func rowMenu(_ row: Int) -> NSMenu? {
+		guard row >= 0, let node = outline.item(atRow: row) as? Node else { return nil }
 		outline.selectRowIndexes([row], byExtendingSelection: false)
 		let menu = NSMenu()
+
+		// A section: play it on its own. What somebody wants when they have
+		// built one is to watch that and not the four minutes before it.
+		if let name = node.groupName {
+			let play = NSMenuItem(title: "Preview “\(name)” on its own",
+			                      action: #selector(previewSection(_:)), keyEquivalent: "")
+			play.target = self
+			play.representedObject = name
+			menu.addItem(play)
+			return menu
+		}
+
+		guard case .clip(let reference) = node.entry.source else { return nil }
 		let open = NSMenuItem(title: "Open “\(reference.slug)” in its take",
 		                      action: #selector(openInTake(_:)), keyEquivalent: "")
 		open.target = self
 		open.representedObject = node.path
 		menu.addItem(open)
 		return menu
+	}
+
+	@objc private func previewSection(_ sender: NSMenuItem) {
+		guard let name = sender.representedObject as? String else { return }
+		onPreviewSection?(name)
 	}
 
 	@objc private func openInTake(_ sender: NSMenuItem) {

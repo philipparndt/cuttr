@@ -296,6 +296,17 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			// plus whatever was trimmed off for this use of it.
 			self.onOpenTakeAt?(take.url, placed.clip.start)
 		}
+		// One section, from its own menu: to the preview, to its first frame,
+		// and stopping where it ends rather than running on into the rest of
+		// the programme.
+		inspector.onPreviewSection = { [weak self] name in
+			guard let self, let group = self.composeDocument.resolved?.groups
+				.first(where: { $0.name == name })
+			else { return }
+			self.show(.preview)
+			self.transport.play(from: group.start, to: group.end)
+		}
+
 		library.onOpenInTake = { [weak self] item in
 			guard let self, let take = self.composeDocument.takes
 				.first(where: { $0.name == item.take })
@@ -447,8 +458,21 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			: nil
 		// An empty project is a state, not a fault, so it is not printed in red
 		// under the picture as though something had gone wrong.
-		problemLabel.stringValue = composeDocument.project.timeline.isEmpty
-			? "" : (composeDocument.problem ?? "")
+		//
+		// Warnings are not faults either: a section made and not yet filled, a
+		// caption hung on one before there is anything under it. They are said
+		// in the same place and in a colour that is not an alarm, because the
+		// programme they describe is playing perfectly well beside them.
+		let warnings = composeDocument.resolved?.warnings ?? []
+		if let problem = composeDocument.problem, !composeDocument.project.timeline.isEmpty {
+			problemLabel.stringValue = problem
+			problemLabel.textColor = NSColor(calibratedRed: 0.95, green: 0.5, blue: 0.5, alpha: 1)
+		} else if !warnings.isEmpty {
+			problemLabel.stringValue = warnings.joined(separator: "   ")
+			problemLabel.textColor = Theme.dimText
+		} else {
+			problemLabel.stringValue = ""
+		}
 		bar.setEnabled(composeDocument.resolved != nil)
 
 		guard let resolved = composeDocument.resolved else { return }

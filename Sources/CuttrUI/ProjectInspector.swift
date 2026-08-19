@@ -50,6 +50,10 @@ public final class ProjectInspector: NSView {
 	public var onOpenInTake: (([Int]) -> Void)? {
 		didSet { programme.onOpenInTake = onOpenInTake }
 	}
+	/// One section, played on its own.
+	public var onPreviewSection: ((String) -> Void)? {
+		didSet { programme.onPreviewSection = onPreviewSection }
+	}
 
 	private let programme = ProgrammePanel()
 	private let properties = PropertiesPanel()

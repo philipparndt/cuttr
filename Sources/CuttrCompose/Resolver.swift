@@ -203,6 +203,15 @@ public struct ResolvedProject: Sendable {
 	/// Music and the rest, in the order it starts.
 	public var sounds: [ResolvedSound] = []
 	public let groups: [ResolvedGroup]
+	/// What was skipped, and why.
+	///
+	/// A project being built is half-built most of the time: a section made
+	/// and not yet filled, a caption hung on it before there is anything under
+	/// it. Refusing to resolve any of that leaves the window with an empty
+	/// preview and the render button greyed, which is a poor way to be told
+	/// "you have not finished". These are said beside the picture instead, and
+	/// the programme is whatever *does* resolve.
+	public var warnings: [String] = []
 	/// Every anchor the takes brought, with its path on the programme's clock.
 	public let anchors: [(anchor: Anchor, path: AnchorPath?)]
 	public var duration: Double { max(clips.last?.end ?? 0, cards.last?.end ?? 0) }
@@ -345,6 +354,9 @@ public enum Resolver {
 		/// a group that produced nothing has no extent at all.
 		var groups: [String: (start: Double, end: Double)] = [:]
 		var groupDepth: [String: Int] = [:]
+		/// What was skipped along the way, for the panel to say beside the
+		/// picture rather than instead of it.
+		var warnings: [String] = []
 
 		/// A dissolve waiting to be applied to the next clip laid down.
 		///
@@ -371,7 +383,15 @@ public enum Resolver {
 				if case .group(let name, let inner) = entry.source {
 					let start = cursor
 					try lay(out: inner, depth: depth + 1, at: path)
-					guard cursor > start else { throw ResolveError.emptyGroup(name) }
+					// An empty section is a section somebody has just made.
+					// It contributes nothing and is skipped; the name is not
+					// registered, so anything hung on it is dropped with a
+					// word about it rather than taking the programme down.
+					guard cursor > start else {
+						warnings.append("The section `@\(name)` has nothing in it, "
+							+ "so it was skipped.")
+						continue
+					}
 					// A name used twice extends the first one rather than
 					// replacing it: two `@interview` sections are one section
 					// with something in between, which is what an overlay hung
@@ -577,7 +597,12 @@ public enum Resolver {
 				guard !matching.isEmpty else { throw ResolveError.unknownClip(reference) }
 				return matching.map { ($0.start, $0.end) }
 			case .group(let name):
-				guard let range = groups[name] else { throw ResolveError.unknownGroup(name) }
+				// A section that is not there — never made, renamed, or made
+				// and not yet filled — takes this overlay off the programme and
+				// says so. It used to take the whole programme off instead,
+				// which is a hard way to be told that a section you are still
+				// building is still empty.
+				guard let range = groups[name] else { return [] }
 				return [range]
 			}
 		}
@@ -623,7 +648,13 @@ public enum Resolver {
 			// that is on from one moment to another, so an overlay that is on
 			// three times is three of those and nothing else changes.
 			for (position, appearance) in overlay.appearances.enumerated() {
-				for span in try when(appearance.span) where span.end > span.start {
+				let spans = try when(appearance.span)
+				if spans.isEmpty, case .marks(let from, _) = appearance.span,
+				   case .group(let name) = from {
+					warnings.append("Nothing is called `@\(name)` on this timeline, "
+						+ "so \(overlay.described) is not on it.")
+				}
+				for span in spans where span.end > span.start {
 					// What it says *here*: a spinner that comes back saying
 					// something else is one overlay with two appearances, and by
 					// the time it reaches the layer tree it is simply two
@@ -671,8 +702,11 @@ public enum Resolver {
 		let resolvedAnchors = anchorsByName.keys.sorted().map {
 			(anchor: anchorsByName[$0]!, path: paths[$0])
 		}
-		return ResolvedProject(project: project, baseURL: baseURL, clips: clips, cards: cards,
-		                       overlays: overlays, sounds: sounds, groups: resolvedGroups,
-		                       anchors: resolvedAnchors)
+		var resolved = ResolvedProject(
+			project: project, baseURL: baseURL, clips: clips, cards: cards,
+			overlays: overlays, sounds: sounds, groups: resolvedGroups,
+			anchors: resolvedAnchors)
+		resolved.warnings = warnings
+		return resolved
 	}
 }
