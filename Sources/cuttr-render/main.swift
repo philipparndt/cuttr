@@ -21,9 +21,10 @@ func usage() -> Never {
 	  --solve   re-solve every anchor's path before rendering, rather than
 	            using the sidecars the composing window wrote
 	  --describe
-	            print what the project resolves to — every clip with its times,
-	            every overlay with when it is on, what it says then and whether
-	            its anchor was found — and render nothing. The first question
+	            print what the project resolves to — every clip and card with its
+	            times, every sound with its level, every overlay with when it is
+	            on, what it says then and whether its anchor was found — and
+	            render nothing. The first question
 	            when something is missing from a render is whether it was ever
 	            in the programme.
 	  --quiet   no progress
@@ -296,6 +297,28 @@ if describe {
 		print(String(format: "  %-28@ %7.3f → %7.3f  %@",
 		             clip.reference.description as NSString, clip.start, clip.end,
 		             clip.takeName as NSString))
+	}
+	if !resolved.cards.isEmpty {
+		print("cards")
+		for card in resolved.cards {
+			let fill: String
+			switch card.card.fill {
+			case .solid(let colour): fill = colour.hex
+			case .gradient(let top, let bottom): fill = "\(top.hex) → \(bottom.hex)"
+			}
+			print(String(format: "  %-28@ %7.3f → %7.3f", fill as NSString, card.start, card.end))
+		}
+	}
+	if !resolved.sounds.isEmpty {
+		print("sounds")
+		for sound in resolved.sounds {
+			var says = String(format: "%.1f dB", sound.sound.gain)
+			if sound.sound.fadeIn > 0 { says += String(format: ", in %.2fs", sound.sound.fadeIn) }
+			if sound.sound.fadeOut > 0 { says += String(format: ", out %.2fs", sound.sound.fadeOut) }
+			if sound.sound.ducks != 0 { says += String(format: ", ducks %.1f dB", sound.sound.ducks) }
+			print(String(format: "  %7.3f → %7.3f  %@  (%@)", sound.start, sound.end,
+			             sound.sound.file as NSString, says as NSString))
+		}
 	}
 	print("anchors")
 	for entry in resolved.anchors {
