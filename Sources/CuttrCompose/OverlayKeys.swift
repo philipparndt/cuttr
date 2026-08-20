@@ -111,6 +111,19 @@ public extension Overlay.Kind {
 		}
 	}
 
+	/// The knob somebody most likely means when they first ask for something to
+	/// move. What a new key list states, so that the panel opens with one number
+	/// to type rather than a list of empty rows.
+	var principal: Overlay.Parameter? {
+		switch self {
+		case .film: return .strength
+		case .aberration: return .amount
+		case .tape: return .jitter
+		case .effect: return .density
+		case .text, .spinner, .scene: return nil
+		}
+	}
+
 	/// What to call one in an error message.
 	///
 	/// ``Overlay/described`` is this with the caption's own words in it; a
@@ -185,6 +198,22 @@ public extension Overlay {
 	/// The largest a parameter ever gets, for the things that have to be built
 	/// before the render starts and cannot be rebuilt half way through.
 	func peak(_ parameter: Parameter) -> Double { track(parameter).peak }
+
+	/// What each key's value for a parameter actually is once the gaps are
+	/// filled in from the key before — one number per key, in the order the
+	/// keys are held.
+	///
+	/// For the panel, which shows an inherited number dim and in brackets
+	/// rather than as something somebody typed. The scene inspector shows the
+	/// same distinction the same way, and it is the whole reason a key list is
+	/// readable: at a glance, what this key *says* against what it merely is.
+	func inherited(_ parameter: Parameter) -> [Double] {
+		var last = kind.declared(parameter)
+		return keys.map { key in
+			last = key[parameter] ?? last
+			return last
+		}
+	}
 
 	internal func track(_ parameter: Parameter, clampedTo range: ClosedRange<Double>? = nil) -> Track {
 		Track(keys, parameter, declared: kind.declared(parameter), clampedTo: range)
