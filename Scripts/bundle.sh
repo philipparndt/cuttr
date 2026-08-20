@@ -65,9 +65,14 @@ git diff --quiet 2>/dev/null || COMMIT="$COMMIT+"
 /usr/libexec/PlistBuddy -c "Add :CuttrCommit string $COMMIT" "$APP/Contents/Info.plist" 2>/dev/null \
 	|| /usr/libexec/PlistBuddy -c "Set :CuttrCommit $COMMIT" "$APP/Contents/Info.plist"
 # A crash report prints `CFBundleVersion` and nothing of our own, so for a
-# build nobody released the commit goes there as well. A release keeps its
-# plain number: that one *is* the thing it says it is.
-if [ "$XCODE_CONFIG" = "Debug" ]; then
+# build nobody released the commit goes there as well. A tagged commit keeps
+# its plain number: that one *is* the thing it says it is.
+#
+# Decided by the tag rather than by Debug/Release, because the build somebody
+# actually runs is `make build`, which is a *release* build of whatever is
+# checked out — and a crash report from one of those saying plain `0.4.1 (5)`
+# is what sent me looking at the wrong tree this morning.
+if ! git describe --exact-match --tags HEAD >/dev/null 2>&1; then
 	BUILD="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Contents/Info.plist")"
 	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD-$COMMIT" "$APP/Contents/Info.plist"
 fi
