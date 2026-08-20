@@ -1140,6 +1140,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		return view
 	}
 
+	/// A mark and a lighter ground, not a bar of saturated blue across the row.
+	public func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+		MarkedRow.make(in: outlineView)
+	}
+
 	public func outlineViewItemDidCollapse(_ notification: Notification) {
 		if let node = notification.userInfo?["NSObject"] as? Node, node.isOverlayRoot {
 			collapsed.remove("")

@@ -292,6 +292,12 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 		}
 	}
 
+	/// One rule for every list in this program: a selected row is a mark and a
+	/// lighter ground, not a bar of saturated blue across it.
+	public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+		MarkedRow.make(in: tableView)
+	}
+
 	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
 		let view = (tableView.makeView(withIdentifier: .init("row"), owner: self) as? LibraryRow)
 			?? { let view = LibraryRow(); view.identifier = .init("row"); return view }()

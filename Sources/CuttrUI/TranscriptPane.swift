@@ -215,9 +215,13 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		text.isHorizontallyResizable = false
 		text.autoresizingMask = [.width]
 		text.textContainer?.widthTracksTextView = true
+		// Inverted, because the accent is a light steel now rather than a blue:
+		// white words on a pale band are no words at all. A selection in a page
+		// of text has always been the ink and the paper swapped over, and that
+		// is also the plainest reading of "selection is said in value".
 		text.selectedTextAttributes = [
-			.backgroundColor: Theme.accent.withAlphaComponent(0.45),
-			.foregroundColor: NSColor.white,
+			.backgroundColor: Theme.accent.withAlphaComponent(0.9),
+			.foregroundColor: Theme.background,
 		]
 
 		scroll.documentView = text

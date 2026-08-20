@@ -100,8 +100,13 @@ public final class TrimTimeline: NSView {
 		// What is kept, lit.
 		let kept = NSRect(x: keptFrom, y: band.minY, width: max(1, keptTo - keptFrom),
 		                  height: band.height)
-		Theme.clipFill(.green, selected: true).setFill()
+		// The same grammar as a clip on the timeline: a grey block, lifted, with
+		// the clip green as a stripe rather than as the whole of it.
+		Theme.clipBlock(true).setFill()
 		NSBezierPath(roundedRect: kept, xRadius: 3, yRadius: 3).fill()
+		Theme.clipStripe(.green).setFill()
+		NSRect(x: kept.minX, y: kept.minY, width: min(3, kept.width),
+		       height: kept.height).fill()
 		Theme.clipStroke(.green).setStroke()
 		NSBezierPath(roundedRect: kept.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3).stroke()
 

@@ -1011,3 +1011,107 @@ import Testing
 		        "not offered on hover: \(notes.subtracting(shown))")
 	}
 }
+
+/// Hue says what kind of thing something is. Selection does not get one.
+///
+/// Measured rather than argued about, because the thing that went wrong here was
+/// measurable: the selection accent was `#4D8FF2` and the camera waveform is
+/// `#6B9ED9` — two blues within a few degrees of each other, on the same screen,
+/// one saying "this is the camera's audio" and the other "this is the row you
+/// clicked".
+@Suite @MainActor struct ColourDisciplineTests {
+
+	private func hsb(_ colour: NSColor) -> (h: CGFloat, s: CGFloat, b: CGFloat) {
+		let it = colour.usingColorSpace(.deviceRGB) ?? colour
+		return (it.hueComponent, it.saturationComponent, it.brightnessComponent)
+	}
+
+	/// The accent is not a hue anybody could mistake for a kind of thing.
+	@Test func theAccentIsAlmostWithoutHue() {
+		let accent = hsb(Theme.accent)
+		#expect(accent.s < 0.15, "the accent is saturated: \(accent)")
+		// And every hue that *does* mean something is properly a hue.
+		for kind: Theme.Kind in [.clip, .query, .list, .section, .spinner, .scene] {
+			#expect(hsb(Theme.color(kind)).s > 0.3,
+			        "\(kind) is washed out: \(hsb(Theme.color(kind)))")
+		}
+	}
+
+	/// Not confusable with either recording, which is what it used to be.
+	@Test func theAccentIsNeitherRecording() {
+		func apart(_ a: NSColor, _ b: NSColor) -> Bool {
+			let one = hsb(a), two = hsb(b)
+			// Either a different hue by a wide margin, or so much less
+			// saturated that hue does not come into it.
+			let hue = min(abs(one.h - two.h), 1 - abs(one.h - two.h))
+			return hue > 0.12 || abs(one.s - two.s) > 0.35
+		}
+		#expect(apart(Theme.accent, Theme.cameraWave))
+		#expect(apart(Theme.accent, Theme.externalWave))
+	}
+
+	/// Amber means the separate recording, and stopped meaning "about to be cut".
+	@Test func thePendingSpanIsNotAmberAnyMore() {
+		let pending = hsb(Theme.pendingStroke)
+		let amber = hsb(Theme.externalWave)
+		#expect(abs(pending.h - amber.h) > 0.1 || pending.s < 0.2,
+		        "the pending span is still amber: \(pending)")
+		#expect(pending.s < 0.15, "the pending span has a hue of its own: \(pending)")
+	}
+
+	/// A clip's colour is a stripe on its block: the block itself is the same
+	/// grey whatever the clip is filed as.
+	@Test func theBlockIsGreyAndTheColourIsTheStripe() {
+		let blocks = ClipColor.allCases.map { _ in Theme.clipBlock(false) }
+		#expect(Set(blocks.map { $0.description }).count == 1)
+		#expect(hsb(Theme.clipBlock(false)).s < 0.05)
+		#expect(hsb(Theme.clipBlock(true)).s < 0.05)
+		// Selected is lighter, not louder.
+		#expect(hsb(Theme.clipBlock(true)).b > hsb(Theme.clipBlock(false)).b)
+		// And the stripes are the six hues, still six.
+		let stripes = ClipColor.allCases.map { hsb(Theme.clipStripe($0)).h }
+		#expect(Set(stripes).count == ClipColor.allCases.count)
+	}
+
+	/// The palette hands out labels; `color(_:)` hands out meanings.
+	///
+	/// Two answers to one question arrived from two directions — this branch
+	/// deciding that hue says what *kind* of thing something is, and `Takes carry
+	/// who is speaking` giving every speaker a hue — and this is the single rule
+	/// they reconcile into. `base(_:)` is six hues that can be told apart and
+	/// nothing more; whoever hands one out says what it means, and both who do
+	/// are the person using the program: a clip's lane, and who is speaking.
+	/// `color(_:)` is where the program itself fixes an assignment, and those are
+	/// the ones that must not be borrowed twice.
+	@Test func speakersBorrowThePaletteRatherThanInventingHues() {
+		for colour in ClipColor.allCases {
+			#expect(Theme.speakerLabel(colour) == Theme.base(colour),
+			        "\(colour) invented a hue for a speaker")
+			// The words are the same hue moved towards the ordinary text
+			// colour, because a page of full-strength amber is a page nobody
+			// reads for five minutes. Measured as saturation rather than
+			// brightness: the lift pulls every channel towards 0.88, which for a
+			// hue that already has a channel above that takes it *down* — the
+			// colour becomes paler without becoming lighter, which is the point.
+			let words = hsb(Theme.speakerText(colour))
+			let name = hsb(Theme.speakerLabel(colour))
+			#expect(words.s < name.s, "\(colour)'s words were not lifted")
+			// And it is still recognisably the same hue as the name at the head
+			// of the line, or the two would not read as one voice.
+			let apart = min(abs(words.h - name.h), 1 - abs(words.h - name.h))
+			#expect(apart < 0.02, "\(colour)'s words are a different hue from its name")
+			// A guess is dimmer than a fact.
+			#expect(Theme.suggestedLabel(colour).alphaComponent
+				< Theme.speakerLabel(colour).alphaComponent)
+		}
+	}
+
+	/// The selected row is a lighter ground, near the panel rather than shouting
+	/// over it.
+	@Test func aSelectedRowIsLiftedNotPainted() {
+		let ground = hsb(Theme.selected)
+		#expect(ground.s < 0.05, "the selected ground has a hue: \(ground)")
+		#expect(ground.b > hsb(Theme.panel).b, "a selected row is not lifted")
+		#expect(ground.b < hsb(Theme.text).b, "a selected row is brighter than its text")
+	}
+}

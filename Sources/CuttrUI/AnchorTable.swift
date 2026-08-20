@@ -48,7 +48,11 @@ public final class AnchorTable: NSView, NSTableViewDataSource, NSTableViewDelega
 		table.dataSource = self
 		table.delegate = self
 		table.headerView = NSTableHeaderView()
-		table.usesAlternatingRowBackgroundColors = true
+		// No alternating stripes. Selection is now said by a row being a shade
+		// lighter, and a list where every other row is already a shade lighter
+		// has nothing left to say it with.
+		table.usesAlternatingRowBackgroundColors = false
+		table.selectionHighlightStyle = .regular
 		table.style = .plain
 		table.rowHeight = 20
 		table.allowsMultipleSelection = false
@@ -115,6 +119,12 @@ public final class AnchorTable: NSView, NSTableViewDataSource, NSTableViewDelega
 	// MARK: - Data source
 
 	public func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+
+	/// One rule for every list in this program: a selected row is a mark and a
+	/// lighter ground, not a bar of saturated blue across it.
+	public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+		MarkedRow.make(in: tableView)
+	}
 
 	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
 		guard let tableColumn, let column = Column(rawValue: tableColumn.identifier.rawValue),

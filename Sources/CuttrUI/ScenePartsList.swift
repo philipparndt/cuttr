@@ -131,6 +131,12 @@ public final class ScenePartsList: NSView, NSTableViewDataSource, NSTableViewDel
 
 	public func numberOfRows(in tableView: NSTableView) -> Int { scene.parts.count }
 
+	/// One rule for every list in this program: a selected row is a mark and a
+	/// lighter ground, not a bar of saturated blue across it.
+	public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+		MarkedRow.make(in: tableView)
+	}
+
 	public func tableView(_ tableView: NSTableView, viewFor column: NSTableColumn?,
 	                      row: Int) -> NSView? {
 		guard row < scene.parts.count else { return nil }

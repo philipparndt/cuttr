@@ -102,16 +102,22 @@ public final class ProgrammeStrip: NSView {
 		}
 		let groupsHeight = CGFloat(depths) * groupRowHeight
 
-		// The clips. Coloured by the clip's own colour, so the lane somebody cut
+		// The clips. Striped with the clip's own colour, so the lane somebody cut
 		// it on in the other window is still visible here — which is how you see
-		// at a glance that the b-roll query picked up the right things.
+		// at a glance that the b-roll query picked up the right things. The same
+		// grammar as the cutting timeline: the colour is a stripe on the block,
+		// not the block, or a strip of forty shots is forty coloured rectangles
+		// and the slugs on them cannot be read.
 		let top = rulerHeight + groupsHeight
 		for clip in resolved.clips {
 			let a = x(for: clip.start), b = x(for: clip.end)
 			let rect = NSRect(x: a, y: top + 2, width: max(b - a - 1, 1), height: clipRowHeight - 4)
-			Theme.clipFill(clip.clip.color, selected: false).setFill()
+			Theme.clipBlock(false).setFill()
 			rect.fill()
-			Theme.clipStroke(clip.clip.color).setStroke()
+			Theme.clipStripe(clip.clip.color).setFill()
+			NSRect(x: rect.minX, y: rect.minY, width: min(3, rect.width),
+			       height: rect.height).fill()
+			Theme.rule.setStroke()
 			NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5)).stroke()
 
 			// Slug on top, take underneath, and only what fits — a truncated

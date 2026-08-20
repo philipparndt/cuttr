@@ -20,6 +20,9 @@ public enum Theme {
 	/// Its own hue rather than a weight of the text's, because it is not a
 	/// quieter kind of word — it is a different claim about the recording, and
 	/// a reader skimming for the laugh should find it without reading.
+	///
+	/// A fixed assignment, not a palette slot: it means this and nothing else,
+	/// anywhere in the program.
 	public static let heardNotSaid = NSColor(calibratedRed: 0.45, green: 0.78, blue: 0.58, alpha: 1)
 
 	/// The camera's own audio, and the separate recorder's. Two hues, because
@@ -27,13 +30,34 @@ public enum Theme {
 	public static let cameraWave = NSColor(calibratedRed: 0.42, green: 0.62, blue: 0.85, alpha: 1)
 	public static let externalWave = NSColor(calibratedRed: 0.95, green: 0.72, blue: 0.32, alpha: 1)
 
-	/// The clip palette.
+	/// The palette: six hues that can be told apart, and **nothing more**.
 	///
-	/// Chosen to stay apart from each other *and* from the two waveform hues,
-	/// because a clip bar sits directly above a camera lane drawn in blue and a
-	/// recorder lane drawn in amber. The clip blue is darker and the clip amber
-	/// redder than the waveforms they sit over, which is what keeps a coloured
-	/// region from reading as part of the audio underneath it.
+	/// This is the rule the whole scheme rests on, and it is written here because
+	/// it was arrived at twice from two directions.
+	///
+	/// `base(_:)` is a set of *labels*. It does not mean six things. Whoever
+	/// hands one out says what it means, and there are two who do: somebody
+	/// cutting a take assigns them to lanes — "these four are the alternates" —
+	/// and the transcript assigns them to whoever is speaking. In both cases the
+	/// person chose, the choice is arbitrary, and the hue is never the only
+	/// marker: a clip carries its slug and a line of speech begins with the
+	/// speaker's name in a fixed-width column.
+	///
+	/// ``color(_:)`` is the one place the *program* fixes an assignment, and
+	/// there the rule is tighter: within that set a hue means exactly one kind
+	/// of thing, everywhere it appears — in the library, on the programme, on a
+	/// badge, in the properties, in the project file. That is how somebody
+	/// learns what `#` and `@` mean without being told. A second meaning for one
+	/// of those hues spends the only signal that carries information.
+	///
+	/// And selection is not a hue at all — see ``accent``. It is a state a thing
+	/// is in rather than a kind of thing, so it is said in value.
+	///
+	/// The hues are chosen to stay apart from each other *and* from the two
+	/// waveform hues, because a clip bar sits directly above a camera lane drawn
+	/// in blue and a recorder lane drawn in amber. The clip blue is darker and
+	/// the clip amber redder than the waveforms they sit over, which is what
+	/// keeps a coloured region from reading as part of the audio underneath it.
 	public static func base(_ color: ClipColor) -> NSColor {
 		switch color {
 		case .green:  return NSColor(calibratedRed: 0.36, green: 0.82, blue: 0.60, alpha: 1)
@@ -45,14 +69,25 @@ public enum Theme {
 		}
 	}
 
-	/// The bar's outline, its fill, and the wash over the waveform lanes.
+	/// The bar's outline, its ground, its stripe, and the wash over the lanes.
 	///
-	/// Three alphas of one hue rather than three colours. The wash is faint on
-	/// purpose: several of them overlap, and each one has to stay readable
-	/// through the others — two stacked regions at 0.30 would be a solid block.
+	/// **The colour is a stripe on the block, not the block.** Six saturated hues
+	/// filled solid, in a band sitting directly on two waveform lanes that are
+	/// themselves blue and amber, made the loudest thing on a cutting screen a
+	/// decision somebody once made about filing. The block is the panel's own
+	/// grey, lifted when it is selected; the colour is a bar down its leading
+	/// edge, in line with the tick at the head of the lane, so a row of them
+	/// reads as one lane rather than as forty coloured rectangles.
+	///
+	/// The wash across the waveform keeps the colour and stays faint on purpose:
+	/// several of them overlap, and each has to stay readable through the others
+	/// — two stacked regions at 0.30 would be a solid block.
 	public static func clipStroke(_ color: ClipColor) -> NSColor { base(color) }
-	public static func clipFill(_ color: ClipColor, selected: Bool) -> NSColor {
-		base(color).withAlphaComponent(selected ? 0.55 : 0.28)
+	public static func clipStripe(_ color: ClipColor) -> NSColor {
+		base(color).withAlphaComponent(0.95)
+	}
+	public static func clipBlock(_ selected: Bool) -> NSColor {
+		selected ? cardHigh : card
 	}
 	public static func clipWash(_ color: ClipColor, selected: Bool) -> NSColor {
 		base(color).withAlphaComponent(selected ? 0.20 : 0.10)
@@ -63,6 +98,12 @@ public enum Theme {
 	/// A speaker's name at the head of their line. The palette's own hue, full
 	/// strength, because it is three or four characters and has to be found at
 	/// a glance down the left edge of a page of text.
+	///
+	/// Out of ``base(_:)`` — the palette — for the reason written there: a
+	/// speaker is somebody's own filing of a take, exactly as a clip's lane is,
+	/// and the hue is a label rather than a meaning. Which is also why it is
+	/// safe for one hue to be a lane in one window and a voice in another: in
+	/// neither is it the only marker.
 	public static func speakerLabel(_ color: ClipColor) -> NSColor { base(color) }
 
 	/// The words themselves, in the speaker's hue but lifted towards the
@@ -94,19 +135,43 @@ public enum Theme {
 	}
 
 	/// The uncommitted in/out span, before it becomes a clip.
-	public static let pendingFill = NSColor(calibratedRed: 0.90, green: 0.55, blue: 0.30, alpha: 0.22)
-	public static let pendingStroke = NSColor(calibratedRed: 0.95, green: 0.62, blue: 0.35, alpha: 0.9)
+	///
+	/// The accent, not amber. It was the fifth thing amber meant on one screen —
+	/// the separate recording's waveform, a clip filed on the amber lane, a
+	/// `#tag`, film mode, and this — and amber in the cutting window has one job:
+	/// it is the recorder. A span somebody has just marked and not yet committed
+	/// is not a *kind* of thing at all, it is the thing being done, and that is
+	/// what the accent is for.
+	public static let pendingFill = accent.withAlphaComponent(0.16)
+	public static let pendingStroke = accent.withAlphaComponent(0.85)
 
 	public static let playhead = NSColor(calibratedRed: 0.95, green: 0.30, blue: 0.35, alpha: 1)
 
-	/// The editor's own furniture: a card ground that lifts off the panel, a
-	/// rule that separates without drawing a line anybody notices, and one
-	/// accent — the same blue the system uses for selection, so a selected row
-	/// looks selected rather than decorated.
+	/// The editor's own furniture: a card ground that lifts off the panel, and a
+	/// rule that separates without drawing a line anybody notices.
 	public static let card = NSColor(calibratedWhite: 0.17, alpha: 1)
 	public static let cardHigh = NSColor(calibratedWhite: 0.21, alpha: 1)
-	public static let accent = NSColor(calibratedRed: 0.30, green: 0.56, blue: 0.95, alpha: 1)
 	public static let faintText = NSColor(calibratedWhite: 0.40, alpha: 1)
+
+	/// Selection, and the thing being done. Almost without hue, on purpose.
+	///
+	/// It was `#4D8FF2` — within a few degrees of the camera waveform's
+	/// `#6B9ED9`. Two blues on one screen doing two entirely different jobs: one
+	/// saying "this is the camera's audio", the other saying "this is the row you
+	/// clicked". Measured side by side they are indistinguishable at a glance,
+	/// which is the definition of a colour that is not carrying information.
+	///
+	/// The rule this settles is that **hue says what kind of thing something
+	/// is**, program-wide — and there was no hue left to move the accent to.
+	/// Green is a clip, amber is the separate recording, teal is a list, violet
+	/// is a section, rose is a spinner, blue is a scene and the camera. Selection
+	/// is not a kind of thing; it is a state one is in. So it is said in *value*
+	/// — a light, barely-cool steel that nothing in this program is drawn in —
+	/// and the hues are left to mean what they mean.
+	public static let accent = NSColor(calibratedRed: 0.80, green: 0.84, blue: 0.90, alpha: 1)
+
+	/// What a selected row sits on: the panel, lifted. Never a bar of colour.
+	public static let selected = NSColor(calibratedWhite: 0.26, alpha: 1)
 
 	/// One hue per kind of thing a project names, used everywhere that kind
 	/// appears — in the library, on the programme, on its badge, in the
