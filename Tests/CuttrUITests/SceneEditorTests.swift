@@ -34,7 +34,7 @@ import Testing
 	@Test func theWindowOpensAndTakesTheSizeItIsGiven() {
 		_ = NSApplication.shared
 		let controller = SceneWindowController(document: document(), projectURL: nil)
-		guard let window = controller.window else { return }
+		let window = controller.windowForTesting
 		window.setContentSize(NSSize(width: 1400, height: 900))
 		window.layoutIfNeeded()
 		#expect(window.contentView?.frame.width ?? 0 >= 1300)
@@ -289,9 +289,9 @@ import Testing
 		let document = SceneDocument(project: project, baseURL: nil, name: "intro")
 		#expect(document.length > 0)
 		let controller = SceneWindowController(document: document, projectURL: nil)
-		controller.window?.layoutIfNeeded()
+		controller.windowForTesting.layoutIfNeeded()
 		document.addPart(.bar(Scene.Bar()))
-		controller.window?.layoutIfNeeded()
+		controller.windowForTesting.layoutIfNeeded()
 		#expect(document.scene.parts.count == 3)
 		controller.window?.close()
 	}

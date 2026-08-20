@@ -27,7 +27,7 @@ import Testing
 	@Test func theCapsuleClearsTheTrafficLights() throws {
 		let take = MainWindowController(document: TakeDocument())
 		let project = ComposeWindowController(document: ComposeDocument())
-		for window in [take.window, project.window] {
+		for window in [take.windowForTesting, project.windowForTesting] {
 			guard let gap = gap(in: window) else {
 				Issue.record("no capsule in the window")
 				continue

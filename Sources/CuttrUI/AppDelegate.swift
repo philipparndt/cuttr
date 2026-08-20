@@ -6,10 +6,8 @@ import UniformTypeIdentifiers
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-	/// Windows are held here and nowhere else. An `NSWindowController` whose
-	/// only reference is the window it made is deallocated the moment the
-	/// window closes, taking the key monitor and the transport with it — which
-	/// is fine, and is why the array is pruned on close rather than never.
+	/// The documents open, held here and nowhere else — a document no longer
+	/// owns a window, so nothing else keeps it alive.
 	private var controllers: [MainWindowController] = []
 	private var composers: [ComposeWindowController] = []
 	/// Scene editors, and what each is listening to. A scene window shows one
@@ -75,6 +73,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				window.moveTabToNewWindow(nil)
 			}
 		}
+		// Which place somebody was last in, so a document opened from a menu
+		// goes where they are looking. `NSApp.keyWindow` is nil while a menu is
+		// tracking or a popover is up, which is exactly when this is asked.
+		NotificationCenter.default.addObserver(
+			forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+		) { [weak self] note in
+			MainActor.assumeIsolated {
+				guard let window = note.object as? NSWindow,
+				      let place = self?.places.first(where: { $0.window === window })
+				else { return }
+				self?.lastPlace = place
+			}
+		}
 
 		// Which open documents a checkout would pull the ground out from under.
 		//
@@ -94,26 +105,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				return controller.takeDocument.displayName
 			}
 		}
-		NotificationCenter.default.addObserver(
-			forName: NSWindow.willCloseNotification, object: nil, queue: .main
-		) { [weak self] note in
-			MainActor.assumeIsolated {
-				guard let window = note.object as? NSWindow else { return }
-				// The place outlives the document that was in it.
-				if self?.documentWindows.contains(window) == true { self?.place = window.frame }
-				self?.controllers.removeAll { $0.window === window }
-				self?.composers.removeAll { $0.window === window }
-				for scene in self?.scenes.filter({ $0.window === window }) ?? [] {
-					if let observer = self?.sceneObservers
-						.removeValue(forKey: ObjectIdentifier(scene)) {
-						NotificationCenter.default.removeObserver(observer)
-					}
-					self?.sceneOwners.removeValue(forKey: ObjectIdentifier(scene))
-				}
-				self?.scenes.removeAll { $0.window === window }
-				self?.fillThePlace(without: window)
+	}
+
+	/// A document has gone: from a place that closed, or closed on its own.
+	private func forget(_ document: DocumentEditor) {
+		controllers.removeAll { $0 === document }
+		composers.removeAll { $0 === document }
+		if let scene = document as? SceneWindowController {
+			if let observer = sceneObservers.removeValue(forKey: ObjectIdentifier(scene)) {
+				NotificationCenter.default.removeObserver(observer)
 			}
+			sceneOwners.removeValue(forKey: ObjectIdentifier(scene))
 		}
+		scenes.removeAll { $0 === document }
 	}
 
 	/// Files handed over by the Finder, by `open -a`, or by a drop on the Dock
@@ -180,11 +184,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		openProject(url)
 	}
 
-	private func openProject(_ url: URL) {
+	private func openProject(_ url: URL, aside: Bool = false) {
 		if let existing = composers.first(where: {
 			$0.composeDocument.url?.standardizedFileURL == url.standardizedFileURL
 		}) {
-			reveal(existing.window)
+			if aside { revealAside(existing) } else { reveal(existing) }
 			return
 		}
 		// An untitled project window that nobody has touched is a placeholder,
@@ -196,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				return
 			}
 			AppDelegate.remember(url)
-			reveal(blank.window)
+			if aside { revealAside(blank) } else { reveal(blank) }
 			return
 		}
 		let document = ComposeDocument()
@@ -205,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 			return
 		}
 		AppDelegate.remember(url)
-		showComposer(document)
+		showComposer(document, aside: aside)
 	}
 
 	// MARK: - Scenes
@@ -222,7 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 			sceneOwners[ObjectIdentifier($0)] == ObjectIdentifier(document)
 		}) {
 			if let chosen { existing.sceneDocument.show(chosen) }
-			reveal(existing.window)
+			reveal(existing)
 			return
 		}
 		// A project with no scenes yet opens on one this program made, under a
@@ -259,14 +263,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 			}
 		}
 		scenes.append(controller)
-		present(controller.window)
+		reveal(controller)
 	}
 
 	/// File ▸ New Scene, with no project window in front: there is nothing for
 	/// a scene to belong to, so the project comes first.
 	@objc func newScene(_ sender: Any?) {
-		guard let composer = composers.first(where: { $0.window?.isKeyWindow == true })
-			?? composers.last else {
+		// The project on screen, else whichever one is open. Asked of the place
+		// rather than of `NSApp.keyWindow`, which names a window and a window
+		// holds several documents.
+		guard let composer = (showing as? ComposeWindowController) ?? composers.last else {
 			let alert = NSAlert()
 			alert.messageText = "A scene belongs to a project"
 			alert.informativeText = "Open or make a project first — a scene lives in its "
@@ -277,10 +283,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		showScene(for: composer.composeDocument, named: nil)
 	}
 
-	private func showComposer(_ document: ComposeDocument) {
+	private func showComposer(_ document: ComposeDocument, aside: Bool = false) {
 		let controller = ComposeWindowController(document: document)
-		// The project opens its takes, and they arrive as tabs beside it.
-		controller.onOpenTake = { [weak self] url in self?.open(url) }
+		wire(controller)
+		composers.append(controller)
+		if aside { revealAside(controller) } else { reveal(controller) }
+	}
+
+	/// What a project window asks the application to do for it.
+	///
+	/// Its own method rather than a block inside ``showComposer(_:aside:)``,
+	/// because a project made in a test has to be able to do the same things —
+	/// and a test that opens a take by calling ``open(_:aside:)`` directly is
+	/// not testing the gesture, it is testing the last link of it.
+	private func wire(_ controller: ComposeWindowController) {
+		// The project opens its takes, and they take its place — or open beside
+		// it, when that is what was asked for.
+		controller.onOpenTake = { [weak self] url, aside in self?.open(url, aside: aside) }
 		controller.onOpenTakeAt = { [weak self] url, time in self?.open(url, at: time) }
 		controller.isTakeOpen = { [weak self] url in
 			self?.controllers.contains { $0.takeDocument.url?.standardizedFileURL == url } ?? false
@@ -288,8 +307,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		controller.onEditScene = { [weak self] document, name in
 			self?.showScene(for: document, named: name)
 		}
-		composers.append(controller)
-		present(controller.window)
 	}
 
 	/// Records a file in the recents list. Projects only.
@@ -319,7 +336,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		var kind: Theme.Kind
 		/// The project a take belongs to, when one that is open owns it.
 		var project: String?
-		var window: NSWindow?
+		/// The document itself. A window would not do any more: one window holds
+		/// several documents, so "go to this window" no longer names one.
+		var editor: DocumentEditor?
 		/// Its file, so a row can say where it is and a recent one that is
 		/// already open can be left out of the second group.
 		var url: URL?
@@ -338,7 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 		for composer in composers {
 			out.append(OpenDocument(name: composer.composeDocument.displayName,
-			                        kind: .scene, project: nil, window: composer.window,
+			                        kind: .scene, project: nil, editor: composer,
 			                        url: composer.composeDocument.url))
 			let paths = Set(composer.composeDocument.takes.map(\.url.standardizedFileURL))
 			for controller in controllers
@@ -347,7 +366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				out.append(OpenDocument(name: controller.takeDocument.displayName,
 				                        kind: .take,
 				                        project: composer.composeDocument.displayName,
-				                        window: controller.window,
+				                        editor: controller,
 				                        url: controller.takeDocument.url))
 			}
 		}
@@ -356,18 +375,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		// is not a fault.
 		for controller in controllers where !owned.contains(ObjectIdentifier(controller)) {
 			out.append(OpenDocument(name: controller.takeDocument.displayName,
-			                        kind: .take, project: nil, window: controller.window,
+			                        kind: .take, project: nil, editor: controller,
 			                        url: controller.takeDocument.url))
 		}
 		for scene in scenes {
 			out.append(OpenDocument(name: scene.sceneDocument.name,
-			                        kind: .section, project: nil, window: scene.window,
+			                        kind: .section, project: nil, editor: scene,
 			                        url: scene.sceneDocument.baseURL))
 		}
 		return out
 	}
 
-	func documentsMenu(for current: NSWindow?) -> NSMenu {
+	func documentsMenu(for here: DocumentEditor?) -> NSMenu {
 		let menu = NSMenu()
 		var wasTake = false
 		for document in openDocuments() {
@@ -377,22 +396,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				wasTake = false
 			}
 			if document.kind == .take, document.project != nil { wasTake = true }
-			menu.addItem(item(for: document.window, name: document.name, kind: document.kind,
-			                  under: document.project, current: current))
+			menu.addItem(item(for: document.editor, name: document.name, kind: document.kind,
+			                  under: document.project, here: here))
 		}
 		return menu
 	}
 
-	private func item(for window: NSWindow?, name: String, kind: Theme.Kind,
-	                  under project: String?, current: NSWindow?) -> NSMenuItem {
+	private func item(for editor: DocumentEditor?, name: String, kind: Theme.Kind,
+	                  under project: String?, here: DocumentEditor?) -> NSMenuItem {
 		let item = NSMenuItem(title: name, action: #selector(goToDocument(_:)), keyEquivalent: "")
 		item.target = self
-		item.representedObject = window
+		item.representedObject = editor
 		item.image = Theme.symbol(kind, size: 12)
 		// The tick has to be readable at a glance, including when the list is a
 		// list of one: with a single document open the menu should still look
 		// like an answer to "which am I in" rather than like a stray item.
-		item.state = window === current ? .on : .off
+		item.state = editor === here ? .on : .off
 		if let project {
 			item.indentationLevel = 1
 			item.toolTip = "in \(project)"
@@ -400,35 +419,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		return item
 	}
 
-	/// For the tests: a delegate holding these windows, without the application
-	/// having opened them.
+	/// For the tests: a delegate holding these documents, without the
+	/// application having opened them. Nothing is on screen until something is
+	/// revealed, exactly as at launch.
 	func adoptForTesting(composers: [ComposeWindowController] = [],
 	                     controllers: [MainWindowController] = [],
 	                     scenes: [SceneWindowController] = []) {
 		self.composers = composers
 		self.controllers = controllers
 		self.scenes = scenes
+		// Wired as the application wires them, so a double click in a takes list
+		// arrives here rather than stopping at a `nil` callback.
+		for composer in composers { wire(composer) }
 	}
+
+	/// For the tests: the places, so a test can count the windows and ask which
+	/// document each holds.
+	var placesForTesting: [DocumentPlace] { places }
 
 	@objc func goToDocument(_ sender: NSMenuItem) {
-		reveal(sender.representedObject as? NSWindow)
+		reveal(sender.representedObject as? DocumentEditor)
 	}
 
-	/// The keyboard path, which must not regress now that the tabs are gone:
-	/// `⌘⇧[` and `⌘⇧]` still walk the open documents in the order the menu
-	/// lists them.
 	/// The list behind the capsule's left half and behind `⇧⌘P`: what is open,
-	/// then what was open before.
+	/// then what this project is made of, then what was open before.
 	///
-	/// Two groups rather than one flat pile. "Open" and "Recent" answer two
-	/// different questions — which of these am I already in, and which did I
-	/// work on last week — and a list that mixes them makes somebody read every
-	/// row to find out which kind each one is.
-	func switcherGroups(current: NSWindow? = nil) -> [DocumentSwitcher.Group] {
+	/// Three groups rather than one flat pile, because they answer three
+	/// questions — which of these am I already in, what else is in the thing I
+	/// am working on, and what did I work on last week — and a list that mixes
+	/// them makes somebody read every row to find out which kind each one is.
+	///
+	/// The middle group is what makes this a navigator rather than a window
+	/// list, and it is the reason the panel's height matters: a real project has
+	/// twenty takes and a scene or two, so the list is long by design and the
+	/// filter is how it is used.
+	func switcherGroups(current: DocumentEditor? = nil) -> [DocumentSwitcher.Group] {
 		var groups: [DocumentSwitcher.Group] = []
 
-		let here = current ?? NSApp.keyWindow
-		let open = openDocuments().map { document in
+		let here = current ?? showing
+		let listed = openDocuments()
+		let open = listed.map { document in
 			DocumentSwitcher.Entry(
 				name: document.name,
 				// Always the folder, never "in dingsda". The indent already says
@@ -438,10 +468,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				path: shortPath(document.url),
 				kind: document.kind,
 				indented: document.project != nil,
-				isCurrent: document.window === here,
-				open: { [weak self] in self?.reveal(document.window) })
+				isCurrent: document.editor === here,
+				open: { [weak self] in self?.reveal(document.editor) },
+				openAside: { [weak self] in self?.revealAside(document.editor) })
 		}
 		if !open.isEmpty { groups.append(.init("Open Documents", open)) }
+
+		// Everything the project on screen is made of, opened or not.
+		//
+		// This is what turns the capsule from a window list into a navigator,
+		// and it is what the user asked for: "maybe we should show directly all
+		// scenes and takes in the dropdown". A project lists its takes and its
+		// scenes; there is no reason to have to open one before it can be
+		// switched to, and a list that only offers what is already open cannot
+		// answer "take me to walter-take-3".
+		//
+		// Once each. A take that is open is in the group above, so it is left
+		// out here rather than appearing twice under two headings — which would
+		// make the count of rows a lie and give two rows the same effect.
+		let alreadyOpen = Set(listed.compactMap { $0.url?.standardizedFileURL.path })
+		if let project = projectOnScreen {
+			var inside: [DocumentSwitcher.Entry] = []
+			for take in project.composeDocument.takes
+			where !alreadyOpen.contains(take.url.standardizedFileURL.path) {
+				let url = take.url
+				inside.append(DocumentSwitcher.Entry(
+					name: take.name,
+					path: shortPath(url),
+					kind: .take,
+					// A take whose file has gone says so rather than offering a
+					// row that opens an alert. The project already knows: that
+					// is what `problem` is.
+					missing: take.problem != nil,
+					open: take.problem == nil ? { [weak self] in self?.open(url) } : nil,
+					openAside: take.problem == nil
+						? { [weak self] in self?.open(url, aside: true) } : nil))
+			}
+			let mine = ObjectIdentifier(project.composeDocument)
+			let openScenes = Set(scenes
+				.filter { sceneOwners[ObjectIdentifier($0)] == mine }
+				.map { $0.sceneDocument.name })
+			for name in project.composeDocument.project.scenes.keys.sorted()
+			where !openScenes.contains(name) {
+				inside.append(DocumentSwitcher.Entry(
+					name: name,
+					path: shortPath(project.composeDocument.url),
+					kind: .section,
+					open: { [weak self] in
+						self?.showScene(for: project.composeDocument, named: name)
+					}))
+			}
+			if !inside.isEmpty {
+				groups.append(.init("In \(project.composeDocument.displayName)", inside))
+			}
+		}
 
 		// What was open before. `remember(_:)` already files these with the
 		// document controller, so the list is there for the taking — but a
@@ -455,7 +535,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		// most-recent-first and this is a switcher rather than an archive: past
 		// the first handful, somebody is looking for a file rather than for the
 		// thing they had open on Tuesday, and `⌘O` is the better door.
-		let alreadyOpen = Set(openDocuments().compactMap { $0.url?.standardizedFileURL.path })
 		let recent = NSDocumentController.shared.recentDocumentURLs
 			.filter { !alreadyOpen.contains($0.standardizedFileURL.path) }
 			.prefix(8)
@@ -466,10 +545,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 					path: shortPath(url),
 					kind: url.pathExtension == "cuttr" ? .take : .scene,
 					missing: !there,
-					open: there ? { [weak self] in self?.open(url) } : nil)
+					open: there ? { [weak self] in self?.open(url) } : nil,
+					openAside: there ? { [weak self] in self?.open(url, aside: true) } : nil)
 			}
 		if !recent.isEmpty { groups.append(.init("Recent Documents", Array(recent))) }
 		return groups
+	}
+
+	/// The project the document on screen belongs to.
+	///
+	/// Itself when a project is showing; the project that lists this take when a
+	/// take is; the project a scene is a scene of. A take opened on its own that
+	/// no open project names falls back to whichever project is open, because
+	/// the answer to "what else is there" is better than no answer.
+	private var projectOnScreen: ComposeWindowController? {
+		if let composer = showing as? ComposeWindowController { return composer }
+		if let scene = showing as? SceneWindowController,
+		   let owner = sceneOwners[ObjectIdentifier(scene)] {
+			return composers.first { ObjectIdentifier($0.composeDocument) == owner }
+		}
+		if let take = showing as? MainWindowController, let url = take.takeDocument.url {
+			let wanted = url.standardizedFileURL
+			if let owner = composers.first(where: { composer in
+				composer.composeDocument.takes.contains { $0.url.standardizedFileURL == wanted }
+			}) {
+				return owner
+			}
+		}
+		return composers.first
 	}
 
 	/// A path as somebody would say it: under the home folder, `~` stands in.
@@ -484,7 +587,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	@discardableResult
 	func showDocumentSwitcher(from view: NSView, rect: NSRect,
 	                          onClose: @escaping () -> Void) -> Bool {
-		let groups = switcherGroups(current: view.window)
+		let groups = switcherGroups()
 		guard !groups.isEmpty else { onClose(); return false }
 		return DocumentSwitcher.show(groups, from: view, rect: rect, onClose: onClose)
 	}
@@ -496,28 +599,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// hangs from the capsule of the document on screen, so the popover appears
 	/// where the eye already is rather than in the middle of the screen.
 	@objc func showDocumentPalette(_ sender: Any?) {
-		// The document on screen first, and only then whichever window is key.
-		// Reached from the Window menu there is no key window — the menu is
-		// tracking — and this used to give up and do nothing at all, having
-		// first lit the capsule's chevron and left it lit.
-		guard let window = showing ?? NSApp.keyWindow ?? documentWindows.first,
-		      let bar = documentBar(in: window)
-		else { return }
+		// The place somebody is looking at, and its bar — which is the window's
+		// own now, so there is nothing to go looking for in a view tree.
+		// Reached from the Window menu there is no key window at all, since the
+		// menu is tracking, and this used to give up and do nothing having first
+		// lit the capsule's chevron and left it lit.
+		guard let place = current ?? places.first else { return }
+		let bar = place.bar
 		bar.setOpenHalf(.project)
 		let (view, rect) = bar.anchor(for: .project)
 		showDocumentSwitcher(from: view, rect: rect) { bar.setOpenHalf(nil) }
-	}
-
-	/// The bar at the top of a window, whichever kind of window it is.
-	private func documentBar(in window: NSWindow) -> DocumentBar? {
-		func find(_ view: NSView) -> DocumentBar? {
-			for sub in view.subviews {
-				if let bar = sub as? DocumentBar { return bar }
-				if let found = find(sub) { return found }
-			}
-			return nil
-		}
-		return window.contentView.flatMap(find)
 	}
 
 	/// What a document is, when it is not filed under something else.
@@ -534,12 +625,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	@objc func previousDocument(_ sender: Any?) { step(by: -1) }
 
 	private func step(by offset: Int) {
-		let open = openDocuments().compactMap(\.window)
+		let open = openDocuments().compactMap(\.editor)
 		guard open.count > 1 else { return }
 		// From the document on screen rather than from whichever window is
 		// key: with a menu tracking or a popover up there may be no key window
 		// at all, and stepping from index 0 then goes somewhere arbitrary.
-		let here = open.firstIndex { $0 === showing } ?? open.firstIndex { $0.isKeyWindow } ?? 0
+		let here = open.firstIndex { $0 === showing } ?? 0
 		let landing = (here + offset + open.count) % open.count
 		reveal(open[landing])
 	}
@@ -590,8 +681,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		controller.reveal(at: time)
 	}
 
-	func open(_ url: URL) {
-		if url.pathExtension != "cuttr" { openMedia([url]); return }
+	/// Opens a take. `aside` puts it in a window of its own rather than in the
+	/// one somebody is looking at — ⌥-double-clicking a take in a project, which
+	/// is how two takes get compared side by side.
+	func open(_ url: URL, aside: Bool = false) {
+		if url.pathExtension != "cuttr" { openMedia([url], aside: aside); return }
 		// Compared standardised. `/tmp/x` and `/private/tmp/x` are one file
 		// under two names, and a project naming its takes relative to itself
 		// hands over the other one from the panel — so plain `==` opened a
@@ -600,7 +694,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		if let existing = controllers.first(where: {
 			$0.takeDocument.url?.standardizedFileURL == url.standardizedFileURL
 		}) {
-			reveal(existing.window)
+			// Already open: it comes to the front of the place it is in, or moves
+			// to a window of its own when that is what was asked for.
+			if aside { revealAside(existing) } else { reveal(existing) }
 			return
 		}
 		let document = TakeDocument()
@@ -611,10 +707,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 			return
 		}
 		AppDelegate.remember(url)
-		show(MainWindowController(document: document))
+		show(MainWindowController(document: document), aside: aside)
 	}
 
-	private func openMedia(_ urls: [URL]) {
+	private func openMedia(_ urls: [URL], aside: Bool = false) {
 		var video: URL?
 		var audio: URL?
 		for url in urls {
@@ -628,119 +724,157 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		// windows disagreeing about the same recording.
 		if let media = video ?? audio {
 			let beside = media.deletingPathExtension().appendingPathExtension("cuttr")
-			if FileManager.default.fileExists(atPath: beside.path) { open(beside); return }
+			if FileManager.default.fileExists(atPath: beside.path) { open(beside, aside: aside); return }
 		}
 		let document = TakeDocument()
 		document.setMedia(video: video, audio: audio)
-		show(MainWindowController(document: document))
+		show(MainWindowController(document: document), aside: aside)
 	}
 
-	private func show(_ controller: MainWindowController) {
+	private func show(_ controller: MainWindowController, aside: Bool = false) {
 		controllers.append(controller)
-		present(controller.window)
+		if aside { revealAside(controller) } else { reveal(controller) }
 	}
 
 	// MARK: - One place to work
 
-	/// The frame the documents take turns in.
+	/// The windows. One usually, and each of them a place a document can be.
 	///
-	/// **A window is a place to work, and the document in it changes.** That is
-	/// the model, and it is the one the user asked for twice: opening a take
-	/// from a project puts the take where the project was, and the switcher
-	/// behind the document's name puts anything else back there. Exactly one
-	/// document window is on screen at a time. The others stay *open* — still
-	/// in memory, still holding unsaved cuts, still listed in the capsule — and
-	/// are simply not on screen.
+	/// **A window is a place to work, and the document in it changes.** Not a
+	/// window per document with one ordered in at a time — which is what this
+	/// replaces, and which the user could see through twice: "it still seems to
+	/// open a new window instead of just switching the contents". It did. Six
+	/// windows for six documents, all at one frame, `orderOut` on five of them.
+	/// From the inside that reads as a switch; from the outside the Window menu
+	/// listed six, Mission Control showed six, and every switch was macOS
+	/// fading one window in over another rather than a view being replaced.
 	///
-	/// What this replaces was two mechanisms pulling opposite ways.
-	/// ``present(_:)`` put each new window into a tab group with the project by
-	/// calling `addTabbedWindow`, which works whatever `tabbingMode` says —
-	/// `.disallowed` declines *automatic* tabbing and does not refuse an
-	/// explicit request. So a group was formed, a system tab bar appeared over
-	/// the title bar this program draws itself, and the observer installed in
-	/// ``applicationDidFinishLaunching(_:)`` then saw a window become key
-	/// inside a group of two and called `moveTabToNewWindow` on it — during the
-	/// very notification the tabbing had just caused. The take ended up in a
-	/// window of its own, cascaded away from the project, sometimes behind it
-	/// and off screen: "it only opens sometimes and then in a different
-	/// window". Measured on a real project, three documents open, every take
-	/// hidden and the project window walked 58 points down and right each time.
-	///
-	/// Two windows can never show one document here, because no document has
-	/// two controllers and no more than one controller is on screen at all.
-	var place: NSRect?
+	/// So: a ``DocumentPlace`` is one `NSWindow` with a bar across the top and
+	/// whichever document underneath. Switching swaps the view under the bar.
+	/// The frame, the screen and the full-screen state come through untouched
+	/// because they belong to a window nobody touched.
+	private var places: [DocumentPlace] = []
+	/// Which place somebody was last in — the one a document opens into.
+	private weak var lastPlace: DocumentPlace?
 
-	/// Every window that holds a document, in the order the capsule lists them.
-	var documentWindows: [NSWindow] {
-		composers.compactMap(\.window) + controllers.compactMap(\.window)
-			+ scenes.compactMap(\.window)
+	/// Every window holding a document.
+	var documentWindows: [NSWindow] { places.map(\.window) }
+
+	/// Every document open, in the order they were opened, whatever place each
+	/// is in.
+	var documents: [DocumentEditor] {
+		(composers as [DocumentEditor]) + (controllers as [DocumentEditor])
+			+ (scenes as [DocumentEditor])
 	}
 
-	/// Whichever document is on screen.
-	var showing: NSWindow? { documentWindows.first { $0.isVisible } }
+	/// The document somebody is looking at.
+	var showing: DocumentEditor? { current?.showing }
 
-	/// Puts a document in the place, and takes whatever was there out of sight.
+	/// The place a document opens into: the one whose window is key, else the
+	/// one last used, else whatever there is.
+	var current: DocumentPlace? {
+		if let key = places.first(where: { $0.window.isKeyWindow }) { return key }
+		if let last = lastPlace, places.contains(where: { $0 === last }) { return last }
+		return places.last
+	}
+
+	/// Puts a document on screen.
 	///
-	/// The same gesture lands the same way every time: there is no host window
-	/// to look for, no tab group to form, and nothing that depends on which
-	/// window happened to be key.
-	func reveal(_ window: NSWindow?) {
-		guard let window else { return }
-		let leaving = documentWindows.filter { $0 !== window && $0.isVisible }
-		if let frame = leaving.first?.frame { place = frame }
-		// A window somebody has taken full screen keeps its own arrangement:
-		// putting a frame on it would drop it out, which is not what opening a
-		// take asked for.
-		if let frame = place, !window.styleMask.contains(.fullScreen) {
-			window.setFrame(fitted(frame, to: window), display: false)
+	/// In the place it is already in, if it is in one — a document is in exactly
+	/// one place, because it *is* a view tree and a view is in one window. Else
+	/// in the place asked for, or the one somebody is looking at, or a new one
+	/// when there is none.
+	func reveal(_ document: DocumentEditor?, in wanted: DocumentPlace? = nil) {
+		guard let document else { return }
+		if let holding = document.place, holding.holds(document) {
+			if let wanted, wanted !== holding {
+				holding.release(document, closing: false)
+				wanted.adopt(document)
+			} else {
+				holding.show(document)
+			}
+		} else {
+			let place = wanted ?? current ?? makePlace(for: document)
+			place.adopt(document)
 		}
-		window.makeKeyAndOrderFront(nil)
+		lastPlace = document.place
 		NSApp.activate(ignoringOtherApps: true)
-		// Afterwards, never before. Ordering the outgoing window out first
-		// leaves the screen blank for a frame — and ordering it out at all is
-		// what stops AppKit handing key status back to it.
-		for window in leaving { window.orderOut(nil) }
 	}
 
-	/// A frame this window can actually take. Windows differ in what they will
-	/// go down to, and a project asked to fit into a take's frame must not end
-	/// up smaller than it can draw itself in.
-	private func fitted(_ frame: NSRect, to window: NSWindow) -> NSRect {
-		var frame = frame
-		frame.size.width = max(frame.width, window.minSize.width)
-		frame.size.height = max(frame.height, window.minSize.height)
-		return frame
-	}
-
-	/// When the document on screen closes, the next one takes its place rather
-	/// than leaving an empty screen with documents still open.
+	/// A window of its own for this document, which is the answer to "one place
+	/// to be must not mean being unable to be in two".
 	///
-	/// The window that is closing is named rather than waited for. `willClose`
-	/// arrives while it is still on screen, so asking `showing` at that moment
-	/// gets the answer "the one that is going" — and deferring the question to
-	/// the next turn of the run loop makes the whole thing depend on a hop
-	/// that a test cannot see the far side of.
-	private func fillThePlace(without closing: NSWindow?) {
-		let open = documentWindows.filter { $0 !== closing }
-		guard !open.contains(where: \.isVisible), let next = open.first else { return }
-		reveal(next)
+	/// Comparing two takes side by side is a real thing to want, and the default
+	/// gesture swaps in place. So there is a second gesture and it is explicit:
+	/// ⌥⌘N in the Window menu, ⌥-double-click on a take in a project, or ⌥ held
+	/// while choosing in the switcher.
+	@discardableResult
+	func revealAside(_ document: DocumentEditor?) -> DocumentPlace? {
+		guard let document else { return nil }
+		let place = makePlace(for: document)
+		reveal(document, in: place)
+		return place
 	}
 
-	private func present(_ window: NSWindow?) { reveal(window) }
+	/// ⌥⌘N: the document on screen moves into a window of its own, leaving
+	/// whatever else is open in the one it came from.
+	@objc func moveToNewWindow(_ sender: Any?) {
+		guard let here = current, let document = here.showing else { return }
+		// A place with one document in it is already a window of its own.
+		guard here.documents.count > 1 else { return }
+		revealAside(document)
+	}
+
+	private func makePlace(for document: DocumentEditor) -> DocumentPlace {
+		let place = DocumentPlace(size: document.openingSize)
+		place.onClose = { [weak self] going in self?.places.removeAll { $0 === going } }
+		place.onCloseDocument = { [weak self] document in self?.forget(document) }
+		// Not exactly on top of the window it came from. Two windows at one
+		// frame is the fault the tab bar existed to fix, and the whole point of
+		// a second window is seeing both.
+		if let over = current?.window {
+			var frame = over.frame
+			frame.origin.x += 32
+			frame.origin.y -= 32
+			place.window.setFrame(frame, display: false)
+		} else {
+			place.window.center()
+		}
+		places.append(place)
+		lastPlace = place
+		return place
+	}
+
+	/// ⌘W: closes the *document*, and the window with it when it was the last
+	/// one in it.
+	///
+	/// A window holding four documents must not take all four away on one ⌘W —
+	/// that is the cost of one window per place, and this is the answer to it.
+	/// ⇧⌘W closes the window, asking about every document in it.
+	@objc func closeDocument(_ sender: Any?) {
+		guard let place = current, let document = place.showing else { return }
+		guard document.mayClose() else { return }
+		place.release(document, closing: true)
+	}
+
+	@objc func closeWindow(_ sender: Any?) { current?.window.performClose(nil) }
 
 	// MARK: - Menu targets
 
-	private var current: MainWindowController? {
-		controllers.first { $0.window?.isKeyWindow == true } ?? controllers.last
+	/// The take on screen. Asked of the place rather than of `NSApp.keyWindow`:
+	/// a window holds several documents now, so "which window is key" no longer
+	/// says which document a menu item is about.
+	private var currentTake: MainWindowController? {
+		if let take = showing as? MainWindowController { return take }
+		return controllers.last
 	}
 
-	/// The compose window somebody is looking at, if that is what they are
-	/// looking at.
-	/// A scene window belongs to a project, and saving from one saves that
-	/// project — a scene is written inside it, not in a file of its own.
+	/// The project somebody is looking at, if that is what they are looking at.
+	/// A scene belongs to a project, and saving from one saves that project — a
+	/// scene is written inside it, not in a file of its own.
 	private var currentComposer: ComposeWindowController? {
-		if let composer = composers.first(where: { $0.window?.isKeyWindow == true }) { return composer }
-		guard let scene = scenes.first(where: { $0.window?.isKeyWindow == true }),
+		if let composer = showing as? ComposeWindowController { return composer }
+		guard let scene = showing as? SceneWindowController,
 		      let owner = sceneOwners[ObjectIdentifier(scene)]
 		else { return nil }
 		return composers.first { ObjectIdentifier($0.composeDocument) == owner }
@@ -751,18 +885,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// panel offering to write a `.cuttr` file from a window showing a
 	/// `.cuttrproj`. Both now ask the key window what it is.
 	@objc func save(_ sender: Any?) {
-		if let composer = currentComposer { composer.save(sender) } else { current?.save(sender) }
+		if let composer = currentComposer { composer.save(sender) } else { currentTake?.save(sender) }
 	}
 
 	@objc func saveAs(_ sender: Any?) {
-		if let composer = currentComposer { composer.saveAs(sender) } else { current?.saveAs(sender) }
+		if let composer = currentComposer { composer.saveAs(sender) } else { currentTake?.saveAs(sender) }
 	}
 
 	/// The versions kept of a project. Only a project window has them: a take is
 	/// kept as part of the project that names it, because a version has to
 	/// restore a coherent state rather than half of one.
 	@objc func showVersions(_ sender: Any?) { currentComposer?.showVersions(sender) }
-	@objc func importSubclips(_ sender: Any?) { current?.importSubclips(sender) }
+	@objc func importSubclips(_ sender: Any?) { currentTake?.importSubclips(sender) }
 
 	@objc func showShortcuts(_ sender: Any?) {
 		let alert = NSAlert()

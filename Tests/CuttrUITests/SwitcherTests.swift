@@ -141,4 +141,66 @@ import Testing
 		// that starts eighty points in.
 		#expect(DocumentSwitcher.Switcher.width <= 420)
 	}
+
+	/// The panel is as tall as what is in it, and every row of it is whole.
+	///
+	/// "The dropdown is too short. About two hundred points: one heading, one
+	/// project, and the second row clipped mid-line with a scroller." Both halves
+	/// of that were real. The room the field and the margins take was the
+	/// constant 44 and is 41 on its own at a rounded bezel, so a panel sized to
+	/// its content was three points short of it — the last row lost its
+	/// descenders and a scroller appeared over a list that fitted. And the cap
+	/// was 560 whatever screen it was on, which is a third of a large one.
+	@Test func theHeightFollowsWhatIsInIt() {
+		_ = NSApplication.shared
+		var heights: [CGFloat] = []
+		for count in [1, 3, 8, 20, 60] {
+			let entries = (1...count).map {
+				DocumentSwitcher.Entry(name: "take-\($0)", path: "~/dev", kind: .take, open: {})
+			}
+			let switcher = DocumentSwitcher.Switcher([.init("Open Documents", entries)])
+			switcher.loadView()
+			let height = switcher.preferredContentSize.height
+			heights.append(height)
+
+			// Never a sliver, and never taller than a good fraction of the
+			// screen. The floor is snapped down to whole rows, so it is the
+			// floor less at most one row.
+			#expect(height > DocumentSwitcher.Switcher.floorHeight
+				- DocumentSwitcher.Switcher.rowHeight,
+			        "\(count) rows gave a panel \(height) points tall")
+			#expect(height <= DocumentSwitcher.Switcher.ceilingHeight(on: nil),
+			        "\(count) rows gave a panel \(height) points tall")
+
+			// And whatever it is, a whole number of rows fits in the room left
+			// for the list — at the floor, at the cap and everywhere between.
+			// This is the assertion the old constant failed: it is not about the
+			// cap, it is about no row ever being cut through its own text.
+			let list = height - switcher.chromeForTesting
+			let rows = list / DocumentSwitcher.Switcher.rowHeight
+			#expect(abs(rows.rounded() - rows) < 0.01, .init(rawValue:
+				"\(count) rows leaves \(list) points of list, which is "
+					+ "\(rows) rows — the last one is cut through"))
+		}
+		// It grows with the content, up to the cap, and then stops.
+		#expect(heights == heights.sorted(), "the panel does not follow its content")
+		let cap = DocumentSwitcher.Switcher.ceilingHeight(on: nil)
+		#expect(heights.last ?? 0 > cap - DocumentSwitcher.Switcher.rowHeight,
+		        "sixty rows did not reach the cap: \(heights) against \(cap)")
+		#expect(heights.first ?? 0 > DocumentSwitcher.Switcher.floorHeight
+			- DocumentSwitcher.Switcher.rowHeight,
+		        "one row did not sit on the floor: \(heights)")
+	}
+
+	/// And the cap is a fraction of the screen rather than a number chosen for
+	/// no screen in particular.
+	@Test func theCapIsAFractionOfTheScreen() throws {
+		_ = NSApplication.shared
+		let screen = try #require(NSScreen.main)
+		let cap = DocumentSwitcher.Switcher.ceilingHeight(on: screen)
+		#expect(cap < screen.visibleFrame.height,
+		        "the panel may take the whole screen: \(cap) of \(screen.visibleFrame.height)")
+		#expect(cap > screen.visibleFrame.height / 2,
+		        "the cap is \(cap) on a screen \(screen.visibleFrame.height) tall")
+	}
 }

@@ -3,7 +3,11 @@ import AVFoundation
 import CuttrKit
 import UniformTypeIdentifiers
 
-/// One window, one take.
+/// One take, cut.
+///
+/// The content of a window rather than a window — see ``DocumentEditor``. It
+/// builds a view, keeps it whole between turns on screen, and a
+/// ``DocumentPlace`` puts it in front of somebody.
 ///
 /// This is where the keyboard lives, and the keyboard is the program. Cutting a
 /// forty-minute recording into eighty named clips is eighty repetitions of the
@@ -12,12 +16,11 @@ import UniformTypeIdentifiers
 /// bare key, the keys are under the left hand, and naming a clip is the *same*
 /// keystroke that made it.
 @MainActor
-public final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
+public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 
 	public let takeDocument: TakeDocument
 	private let transport = Transport()
 
-	private let bar = DocumentBar()
 	/// What this take is made of, behind the take's name.
 	private let setup = TakeSetup()
 	/// The six lane colours, on the clips pane's heading, beside the clips they
@@ -82,47 +85,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
 	public init(document: TakeDocument) {
 		self.takeDocument = document
-		let window = NSWindow(
-			contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
-			// `.fullSizeContentView`, so the content runs to the top of the
-			// frame and the bar stands in the whole title band — see
-			// `DocumentBar.height`. The old objection to this was that controls
-			// ended up behind the traffic lights; the answer is
-			// `DocumentBar.trafficLights`, which is where the first of them
-			// starts.
-			styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-			backing: .buffered, defer: false)
-		window.titlebarAppearsTransparent = true
-		window.appearance = NSAppearance(named: .darkAqua)
-		window.backgroundColor = Theme.background
-		window.minSize = NSSize(width: 900, height: 600)
-		// Each document is a plain window, and the bar says which one.
-		//
-		// These were tabs of one window, on the system's own tabbing. What that
-		// fixed was real — two windows the same size, both centred, sit exactly
-		// on top of each other and the one underneath may as well not exist —
-		// but it cost a permanent row in every window to answer a question
-		// somebody asks a few times an hour, and the bar already answers it in
-		// the one place anybody looks: the document's name, top left. So the
-		// name lists every document open and takes you to one.
-		//
-		// This is a change in how the program behaves in the system, and worth
-		// knowing about: there is no tab bar, no tab overview and no dragging a
-		// tab out. In their place macOS's own window handling does the work —
-		// `⌘\`` cycles the windows and the Window menu lists them — and
-		// `⌘⇧[` / `⌘⇧]` walk the documents in the order the name's menu shows
-		// them, so the keyboard path is the one it was.
-		window.tabbingMode = .disallowed
-		// One band at the top, and the bar is it. See `DocumentBar.height`.
-		window.titleVisibility = .hidden
-		DocumentBar.growTitleBand(of: window)
-		super.init(window: window)
-		window.delegate = self
+		super.init()
+		openingSize = NSSize(width: 1280, height: 800)
+		minimumSize = NSSize(width: 900, height: 600)
 		build()
 		wire()
 		takeDocument.loadMedia()
 		refresh()
-		window.center()
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
@@ -130,7 +99,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	// MARK: - Layout
 
 	private func build() {
-		guard let window else { return }
 		playerView = PlayerView(player: transport.player)
 
 		// The markers sit over the picture, inside the same pane, so they move
@@ -200,32 +168,30 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		content.wantsLayer = true
 		content.layer?.backgroundColor = Theme.background.cgColor
 
-		for view in [bar, rail, outer] as [NSView] {
+		// No bar among them. The bar belongs to the window — see
+		// ``DocumentPlace/bar`` — and this view is what goes *under* it, so the
+		// rail and the panes start at the top of their own content.
+		for view in [rail, outer] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			content.addSubview(view)
 		}
 		NSLayoutConstraint.activate([
-			bar.topAnchor.constraint(equalTo: content.topAnchor),
-			bar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-			bar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-			bar.heightAnchor.constraint(equalToConstant: DocumentBar.height),
-
 			// The rail says how wide it is; this only says where.
-			rail.topAnchor.constraint(equalTo: bar.bottomAnchor),
+			rail.topAnchor.constraint(equalTo: content.topAnchor),
 			rail.leadingAnchor.constraint(equalTo: content.leadingAnchor),
 			rail.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
-			outer.topAnchor.constraint(equalTo: bar.bottomAnchor),
+			outer.topAnchor.constraint(equalTo: content.topAnchor),
 			outer.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
 			outer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
 			outer.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 		])
-		window.contentView = content
+		contentRoot = content
 		// The timeline owns the keyboard from the moment the window opens, so
 		// the first `space` rolls the tape and the first `S` marks. Everything
 		// that takes focus away from it — a rename, a click in the table — hands
 		// it back when it is done.
-		window.initialFirstResponder = timeline
+		initialResponder = timeline
 
 		// The panes are sized by constraints, not by placing dividers.
 		//
@@ -269,8 +235,93 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			self.timeline.zoomToFit()
 			// The timeline holds the focus to begin with, so the first `space`
 			// rolls the tape rather than doing nothing.
-			window.makeFirstResponder(self.timeline)
+			self.window?.makeFirstResponder(self.timeline)
 		}
+	}
+
+	// MARK: - Being the document in the window
+
+	override var documentTitle: String {
+		takeDocument.displayName + (takeDocument.isDirty ? " — edited" : "")
+	}
+	override var documentFile: URL? { takeDocument.url }
+	override var documentIsEdited: Bool { takeDocument.isDirty }
+
+	/// What a take puts in the shared bar: its name, the branch, the `…` behind
+	/// which its files and their alignment sit, and the monitor switch.
+	///
+	/// Run on every appearance rather than once, because the bar is the window's
+	/// and the last document in it took its own furniture out. The clock, the
+	/// status line and the progress bar are written from what this take
+	/// remembers, so coming back to a take that was transcribing shows the
+	/// transcribing rather than an empty bar.
+	override func furnish(_ bar: DocumentBar) {
+		bar.setUp = setup
+		// The two halves of the capsule: the documents on the left, and what can
+		// be done about the repository this one sits in on the right.
+		bar.onProject = { [weak self] in
+			guard let self else { return }
+			self.bar?.setOpenHalf(.project)
+			guard let (view, rect) = self.bar?.anchor(for: .project) else { return }
+			AppDelegate.shared?.showDocumentSwitcher(from: view, rect: rect) {
+				self.bar?.setOpenHalf(nil)
+			}
+		}
+		bar.onBranch = { [weak self] in
+			guard let self, let root = self.repositoryRoot else { return }
+			self.bar?.setOpenHalf(.branch)
+			guard let menu = BranchMenu.menu(for: root,
+			                                 branch: GitRepository.branch(in: root)) else {
+				self.bar?.setOpenHalf(nil)
+				return
+			}
+			guard let (view, rect) = self.bar?.anchor(for: .branch) else { return }
+			menu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY + 4), in: view)
+			self.bar?.setOpenHalf(nil)
+		}
+		bar.onPlayPause = { [weak self] in self?.playSelectionOrToggle() }
+		bar.addLeading(monitor)
+		bar.setPlaying(transport.isPlaying)
+		bar.setStatus(said)
+		bar.setProgress(progressed)
+		// The name, the branch, the clock and the monitor come from
+		// `showDocument(at:)`, which `documentAppeared()` calls a moment after
+		// this — one place that knows how to say what take this is.
+	}
+
+	/// What this take last said, and how far along it was.
+	///
+	/// Per document rather than per window, and this is the state that would
+	/// have gone missing quietly. One bar means one status line, and a take that
+	/// is transcribing while somebody looks at the project has to find its own
+	/// message still there when it comes back — not the project's, and not
+	/// nothing.
+	private var said = ""
+	private var progressed: Double?
+
+	private func say(_ text: String) {
+		said = text
+		bar?.setStatus(text)
+	}
+
+	private func showProgress(_ fraction: Double?) {
+		progressed = fraction
+		bar?.setProgress(fraction)
+	}
+
+	/// Back on screen: the picture is redrawn at the playhead, because a player
+	/// whose view was out of the window shows the frame it had when it left.
+	override func documentAppeared() {
+		refresh()
+		timeline.needsDisplay = true
+		showDocument(at: playhead)
+	}
+
+	/// Off screen and still open. The tape stops — a take playing behind a
+	/// project somebody has switched to is a voice from nowhere — and where it
+	/// had got to is kept by the player, so `space` carries on from there.
+	override func documentHidden() {
+		transport.pause()
 	}
 
 	/// For the tests: the rail and the pane it opens.
@@ -421,7 +472,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			guard let self else { return }
 			self.transcriptPane.offer(languages, choosing: self.preferredLanguage)
 		}
-		transcriptPane.onStatus = { [weak self] note in self?.bar.setStatus(note) }
+		transcriptPane.onStatus = { [weak self] note in self?.say(note) }
 
 		// Who is speaking. One key per turn of an interview, and the pane walks
 		// the caret on by itself — so a take is labelled without the hand ever
@@ -431,7 +482,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			let changed = self.takeDocument.assignSpeaker(slug, from: word)
 			guard changed > 0 else { return }
 			let who = slug.map { self.takeDocument.take.speakerTitle($0) } ?? "nobody"
-			self.bar.setStatus(changed == 1
+			self.say(changed == 1
 				? "this line is \(who)"
 				: "\(who), for \(changed) lines — until somebody else was already named")
 			self.refresh()
@@ -443,7 +494,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			// the same act as naming that line — the first two speakers of a
 			// take are made exactly this way.
 			if let word { self.transcriptPane.assign(added.slug, from: word) }
-			self.bar.setStatus("\(added.title) is \(self.takeDocument.take.speakers.count)"
+			self.say("\(added.title) is \(self.takeDocument.take.speakers.count)"
 				+ " — press that number in the words")
 		}
 		transcriptPane.onRenameSpeaker = { [weak self] slug, name in
@@ -459,7 +510,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			guard let self else { return }
 			let count = self.takeDocument.suggestedSpeakers.count
 			self.takeDocument.acceptSuggestions()
-			self.bar.setStatus("\(count) lines written down")
+			self.say("\(count) lines written down")
 			self.refresh()
 		}
 
@@ -482,35 +533,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			self?.swatches.setColor(color)
 		}
 
-		bar.setUp = setup
-		// The two halves of the capsule: the documents on the left, and what can
-		// be done about the repository this one sits in on the right.
-		bar.onProject = { [weak self] in
-			guard let self else { return }
-			self.bar.setOpenHalf(.project)
-			let (view, rect) = self.bar.anchor(for: .project)
-			AppDelegate.shared?.showDocumentSwitcher(from: view, rect: rect) {
-				self.bar.setOpenHalf(nil)
-			}
-		}
-		bar.onBranch = { [weak self] in
-			guard let self, let root = self.repositoryRoot else { return }
-			self.bar.setOpenHalf(.branch)
-			guard let menu = BranchMenu.menu(for: root,
-			                                 branch: GitRepository.branch(in: root)) else {
-				self.bar.setOpenHalf(nil)
-				return
-			}
-			let (view, rect) = self.bar.anchor(for: .branch)
-			menu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY + 4), in: view)
-			self.bar.setOpenHalf(nil)
-		}
-
-		bar.onPlayPause = { [weak self] in self?.playSelectionOrToggle() }
 		// The button shows what pressing it will do, so it has to hear about
 		// the tape starting and stopping from anywhere — `space`, a menu item,
 		// a clip playing itself to its end.
-		transport.onRateChange = { [weak self] rate in self?.bar.setPlaying(rate != 0) }
+		transport.onRateChange = { [weak self] rate in self?.bar?.setPlaying(rate != 0) }
 		setup.onChooseVideo = { [weak self] in self?.chooseMedia(video: true) }
 		setup.onChooseAudio = { [weak self] in self?.chooseMedia(video: false) }
 		setup.onOffsetTyped = { [weak self] value in self?.setOffset(value, commit: true) }
@@ -544,7 +570,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		monitor.action = #selector(monitorChanged)
 		monitor.toolTip = "Which microphone you hear (U). \u{201C}Both\u{201D} is the alignment tool:\n"
 			+ "nudge until the hollow, flanging sound goes away."
-		bar.addLeading(monitor)
 
 		// Right-click the picture to track something in it. The footage is here,
 		// so the marking is here.
@@ -628,7 +653,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		// Said out loud, because this rename reaches outside the file: a
 		// project pointing at the old name stops resolving, and finding that out
 		// at render time is finding it out too late.
-		bar.setStatus(name == old
+		say(name == old
 			? "unchanged"
 			: "renamed to \(name) — any project saying `anchor: \(old)` needs updating")
 	}
@@ -658,7 +683,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	@objc private func removeAnchorAction(_ sender: NSMenuItem) {
 		guard let name = sender.representedObject as? String else { return }
 		takeDocument.removeAnchor(named: name)
-		bar.setStatus("removed \(name)")
+		say("removed \(name)")
 	}
 
 	private func solve(_ anchor: Anchor) {
@@ -670,8 +695,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	private func solve(_ anchor: Anchor, from time: Double, at point: CGPoint, extending: Bool) {
 		guard let video = takeDocument.videoURL else { return }
 		solveTask?.cancel()
-		bar.setStatus("following \(anchor.name)…")
-		bar.setProgress(0)
+		say("following \(anchor.name)…")
+		showProgress(0)
 		let duration = takeDocument.duration
 		solveTask = Task { [weak self] in
 			do {
@@ -681,8 +706,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 					within: 0 ... max(duration, time),
 					onProgress: { step in
 						Task { @MainActor in
-							self?.bar.setProgress(step.fraction)
-							self?.bar.setStatus(String(
+							self?.showProgress(step.fraction)
+							self?.say(String(
 								format: "following %@… %d of at most %d",
 								anchor.name, step.solved, step.total))
 						}
@@ -699,7 +724,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 					}
 					try self.takeDocument.writePath(path, for: anchor)
 				}
-				self.bar.setProgress(nil)
+				self.showProgress(nil)
 
 				let spans = self.takeDocument.anchorPaths[anchor.name]?.covered ?? []
 				let where_ = spans
@@ -715,10 +740,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 				if end < duration - 0.5 {
 					status += "  ·  lost her here — right-click later to continue"
 				}
-				self.bar.setStatus(status)
+				self.say(status)
 			} catch {
-				self?.bar.setProgress(nil)
-				self?.bar.setStatus(error.localizedDescription)
+				self?.showProgress(nil)
+				self?.say(error.localizedDescription)
 			}
 		}
 	}
@@ -737,12 +762,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			takeDocument.take, videoURL: takeDocument.videoURL,
 			audioURL: takeDocument.audioURL, duration: takeDocument.duration)
 		else {
-			bar.setStatus("nothing to listen to — give this take a video or an audio file first")
+			say("nothing to listen to — give this take a video or an audio file first")
 			return
 		}
-		bar.setStatus("listening to \(source.url.lastPathComponent)"
+		say("listening to \(source.url.lastPathComponent)"
 			+ " — on this Mac, and nothing is uploaded")
-		bar.setProgress(0)
+		showProgress(0)
 		transcriptPane.setBusy(true)
 		wordsTask = Task { [weak self] in
 			do {
@@ -750,14 +775,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 					source, locale: locale,
 					onProgress: { step in
 						Task { @MainActor in
-							self?.bar.setProgress(step.fraction)
+							self?.showProgress(step.fraction)
 							self?.transcriptPane.setNote(step.note)
 						}
 					})
 				guard !Task.isCancelled, let self else { return }
 				try self.takeDocument.setTranscript(
 					made.transcript, recogniser: made.recogniser, locale: made.locale)
-				self.bar.setStatus(
+				self.say(
 					"\(made.transcript.count) words · \(made.recogniser.rawValue) · \(made.locale)"
 						+ " — listening for what is not a word…")
 				self.refresh()
@@ -769,11 +794,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 				let heard = try? await SoundSpotter.listen(source)
 				guard !Task.isCancelled else { return }
 				self.wordsTask = nil
-				self.bar.setProgress(nil)
+				self.showProgress(nil)
 				if let heard, !heard.isEmpty {
 					self.report(heard)
 				} else {
-					self.bar.setStatus(
+					self.say(
 						"\(made.transcript.count) words · \(made.recogniser.rawValue) · \(made.locale)"
 							+ " — select a sentence and press ⏎")
 				}
@@ -781,8 +806,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			} catch {
 				guard let self else { return }
 				self.wordsTask = nil
-				self.bar.setProgress(nil)
-				self.bar.setStatus(error.localizedDescription)
+				self.showProgress(nil)
+				self.say(error.localizedDescription)
 				self.refresh()
 			}
 		}
@@ -803,7 +828,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	private func guessSpeakers() {
 		guard speakerTask == nil else { return }
 		guard !takeDocument.transcript.isEmpty else {
-			bar.setStatus("no words yet — transcribe this take first")
+			say("no words yet — transcribe this take first")
 			return
 		}
 		guard let audio = takeDocument.audioURL ?? takeDocument.videoURL else { return }
@@ -818,7 +843,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		let locale = takeDocument.take.words?.locale ?? ""
 		let video = takeDocument.videoURL
 
-		bar.setStatus("\(method.title.lowercased()): working out who is speaking…")
+		say("\(method.title.lowercased()): working out who is speaking…")
 		speakerTask = Task { [weak self] in
 			let offer = try? await SpeakerProposal.propose(
 				for: transcript, audio: audio, offset: offset, method: method,
@@ -828,12 +853,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			guard let offer, !offer.isEmpty else {
 				// Saying nothing is an answer, and it is the right one when the
 				// voices did not separate. See `SpeakerClustering.silhouette`.
-				self.bar.setStatus("the voices in this take did not separate —"
+				self.say("the voices in this take did not separate —"
 					+ " nothing worth offering")
 				return
 			}
 			self.takeDocument.suggest(offer.byLine)
-			self.bar.setStatus(String(
+			self.say(String(
 				format: "%d lines guessed, %d left alone — the bracketed names."
 					+ " Keep them, or answer a line yourself. (separation %.2f)",
 				offer.byLine.count, offer.skipped, offer.separation))
@@ -853,10 +878,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			takeDocument.take, videoURL: takeDocument.videoURL,
 			audioURL: takeDocument.audioURL, duration: takeDocument.duration)
 		else {
-			bar.setStatus("nothing to listen to — give this take a video or an audio file first")
+			say("nothing to listen to — give this take a video or an audio file first")
 			return
 		}
-		bar.setStatus("listening to \(source.url.lastPathComponent) for what is not a word")
+		say("listening to \(source.url.lastPathComponent) for what is not a word")
 		soundsTask = Task { [weak self] in
 			let heard = try? await SoundSpotter.listen(source)
 			guard !Task.isCancelled, let self else { return }
@@ -871,17 +896,17 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	/// as a failure.
 	private func report(_ heard: [SoundEvent]?) {
 		guard let heard else {
-			bar.setStatus("this Mac's sound classifier would not run")
+			say("this Mac's sound classifier would not run")
 			return
 		}
 		guard !heard.isEmpty else {
-			bar.setStatus("nothing but words in this one")
+			say("nothing but words in this one")
 			return
 		}
 		takeDocument.setSounds(heard)
 		var counted: [String: Int] = [:]
 		for sound in heard { counted[sound.label, default: 0] += 1 }
-		bar.setStatus(counted.sorted { $0.value > $1.value }
+		say(counted.sorted { $0.value > $1.value }
 			.map { "\($0.value) × \($0.key)" }.joined(separator: ", "))
 	}
 
@@ -890,11 +915,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	/// The keystroke that turns `clip-7` into `arbeitsanzug`.
 	private func nameFromWords() {
 		guard let id = selectedClip else {
-			bar.setStatus("select a clip first — W names it after what is said in it")
+			say("select a clip first — W names it after what is said in it")
 			return
 		}
 		guard !takeDocument.transcript.isEmpty || !takeDocument.take.sounds.isEmpty else {
-			bar.setStatus("no words yet — transcribe this take first")
+			say("no words yet — transcribe this take first")
 			return
 		}
 		propose(for: id)
@@ -920,12 +945,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		let span = clip.start ... clip.end
 		let firstWords = firstWordsOrSound(covering: span)
 		guard !firstWords.isEmpty else {
-			bar.setStatus("nothing is said in \(clip.slug)")
+			say("nothing is said in \(clip.slug)")
 			return
 		}
 		timeline.reveal(from: clip.start, to: clip.end)
 		timeline.beginRenaming(clip, proposing: firstWords)
-		bar.setStatus("\(firstWords) — ⏎ to keep it, or type over it")
+		say("\(firstWords) — ⏎ to keep it, or type over it")
 
 		let said = takeDocument.transcript.text(covering: span)
 		guard !said.isEmpty, ClipNamer.availability.isAvailable else { return }
@@ -940,12 +965,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			// answers to the same question.
 			switch naming.source {
 			case .model:
-				self.bar.setStatus("\(naming.name) — suggested here on this Mac."
+				self.say("\(naming.name) — suggested here on this Mac."
 					+ " ⏎ to keep it, or type over it")
 			case .invented(let made):
-				self.bar.setStatus("kept “\(naming.name)”: nobody said “\(made)”")
+				self.say("kept “\(naming.name)”: nobody said “\(made)”")
 			case .firstWords(let why):
-				self.bar.setStatus("\(naming.name) — its first words, because \(why)")
+				self.say("\(naming.name) — its first words, because \(why)")
 			}
 		}
 	}
@@ -983,15 +1008,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
 	private func showDocument(at time: Double) {
 		findRepository()
-		bar.setName(takeDocument.displayName)
-		bar.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
-		bar.setClock(time)
+		bar?.setName(takeDocument.displayName)
+		bar?.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
+		bar?.setClock(time)
 		setup.update(document: takeDocument)
 		let hasAudio = takeDocument.take.audio != nil
 		monitor.isHidden = !hasAudio
 		// A stack view does not notice a child being hidden, and the rule
 		// beside the group should not be drawn for an empty group.
-		bar.groupChanged()
+		bar?.groupChanged()
 		monitor.selectedSegment = transport.monitor.rawValue
 	}
 
@@ -1001,10 +1026,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	}
 
 	private func refresh() {
-		guard let window else { return }
-		window.title = takeDocument.displayName + (takeDocument.isDirty ? " — edited" : "")
-		window.representedURL = takeDocument.url
-		window.isDocumentEdited = takeDocument.isDirty
+		titleChanged()
 		timeline.needsDisplay = true
 		timeline.window?.invalidateCursorRects(for: timeline)
 		markers.markers = takeDocument.take.anchors.compactMap { anchor in
@@ -1025,7 +1047,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		clipTable.reload(takeDocument.take.clips, selected: selectedClip)
 		showDocument(at: playhead)
 		swatches.setColor(currentColor)
-		if let error = takeDocument.mediaError { bar.setStatus(error) }
+		if let error = takeDocument.mediaError { say(error) }
 	}
 
 	// MARK: - Transport
@@ -1068,7 +1090,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			return
 		}
 		transport.play(from: clip.start, to: clip.end)
-		bar.setStatus("\(clip.slug) — \(Timecode.string(clip.duration))")
+		say("\(clip.slug) — \(Timecode.string(clip.duration))")
 	}
 
 	/// To the top of the clip somebody is working on, or to its end if the
@@ -1096,7 +1118,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			?? clips.last { $0.contains(playhead) }
 		guard let clip else { return }
 		move(to: clip.edge(from: playhead))
-		bar.setStatus("\(clip.slug) — \(Timecode.string(playhead))")
+		say("\(clip.slug) — \(Timecode.string(playhead))")
 	}
 
 	/// The next place something starts or ends, in the given direction.
@@ -1125,7 +1147,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			// Nothing to mark: the playhead has not moved since the last one.
 			// Said rather than ignored, because a key that silently does
 			// nothing reads as a key that has stopped working.
-			bar.setStatus("nothing to mark here — the playhead is on a cut already")
+			say("nothing to mark here — the playhead is on a cut already")
 			return
 		}
 		takeDocument.apply(next, actionName: next.clips.count == takeDocument.take.clips.count + 1 ? "Mark Clip" : "Split Clip")
@@ -1165,7 +1187,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			else { return }
 			let name = Slug.numbered(finding.name, taken: self.takeDocument.take.slugs)
 			self.takeDocument.setSlug(name, for: id)
-			self.bar.setStatus(String(
+			self.say(String(
 				format: "%@ — %@ was talking (%.0f%% more than anyone else)",
 				name, finding.name,
 				finding.margin.isFinite ? (finding.margin - 1) * 100 : 100))
@@ -1556,17 +1578,17 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
 	@objc public func zoomAudioIn(_ sender: Any? = nil) {
 		timeline.zoomWaveform(by: 2)
-		bar.setStatus(String(format: "waveform ×%g", timeline.waveformGain))
+		say(String(format: "waveform ×%g", timeline.waveformGain))
 	}
 
 	@objc public func zoomAudioOut(_ sender: Any? = nil) {
 		timeline.zoomWaveform(by: 0.5)
-		bar.setStatus(String(format: "waveform ×%g", timeline.waveformGain))
+		say(String(format: "waveform ×%g", timeline.waveformGain))
 	}
 
 	@objc public func resetAudioZoom(_ sender: Any? = nil) {
 		timeline.resetWaveformGain()
-		bar.setStatus("waveform ×1")
+		say("waveform ×1")
 	}
 	@objc public func nudgeEarlier(_ sender: Any? = nil) { nudge(-0.001) }
 	@objc public func nudgeLater(_ sender: Any? = nil) { nudge(0.001) }
@@ -1575,7 +1597,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		transport.monitor = Transport.Monitor(
 			rawValue: (transport.monitor.rawValue + 1) % Transport.Monitor.allCases.count) ?? .external
 		monitor.selectedSegment = transport.monitor.rawValue
-		bar.setStatus("monitoring \(transport.monitor.title)")
+		say("monitoring \(transport.monitor.title)")
 	}
 
 	@objc public func renameSelected(_ sender: Any? = nil) {
@@ -1649,15 +1671,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	private func nudge(_ seconds: Double) {
 		guard let audio = takeDocument.take.audio else { return }
 		setOffset(audio.offset + seconds, commit: true)
-		bar.setStatus("offset \(Timecode.offsetString(takeDocument.take.audio?.offset ?? 0))")
+		say("offset \(Timecode.offsetString(takeDocument.take.audio?.offset ?? 0))")
 	}
 
 	private func autoAlign() {
 		guard let video = takeDocument.videoWaveform, let audio = takeDocument.audioWaveform else {
-			bar.setStatus("Both recordings have to finish decoding first.")
+			say("Both recordings have to finish decoding first.")
 			return
 		}
-		bar.setStatus("aligning…")
+		say("aligning…")
 		Task {
 			// Off the main thread: an exhaustive search over an hour of
 			// envelope is about a second, which is four dropped frames of
@@ -1666,11 +1688,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 				AudioAligner.align(videoAudio: video, audio: audio)
 			}.value
 			guard let result else {
-				bar.setStatus("No match — is one of the recordings silent?")
+				say("No match — is one of the recordings silent?")
 				return
 			}
 			setOffset(result.offset, commit: true)
-			bar.setStatus(String(
+			say(String(
 				format: "offset %@  ·  match %.2f  ·  measured at %@",
 				Timecode.offsetString(result.offset), result.confidence,
 				Timecode.string(result.probeStart + result.offset)))
@@ -1746,14 +1768,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			let (rebased, shift) = ResolveImport.rebase(clips, against: takeDocument.duration)
 			let result = ResolveImport.merge(rebased, into: takeDocument.take, duration: takeDocument.duration)
 			guard result.added > 0 else {
-				bar.setStatus("nothing to import — every clip lands outside this recording")
+				say("nothing to import — every clip lands outside this recording")
 				return
 			}
 			takeDocument.apply(result.take, actionName: "Import Subclips")
 			var message = "imported \(result.added) from \(url.lastPathComponent)"
 			if shift != 0 { message += "  ·  shifted by \(Timecode.offsetString(shift))" }
 			if result.skipped > 0 { message += "  ·  \(result.skipped) outside the recording" }
-			bar.setStatus(message)
+			say(message)
 			timeline.zoomToFit()
 		} catch {
 			report(error)
@@ -1780,7 +1802,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		do {
 			try takeDocument.write(to: url)
 			AppDelegate.remember(url)
-			bar.setStatus("saved \(url.lastPathComponent)")
+			say("saved \(url.lastPathComponent)")
 			refresh()
 		} catch {
 			report(error)
@@ -1789,16 +1811,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
 	private func report(_ error: Error) {
 		let alert = NSAlert(error: error)
-		alert.beginSheetModal(for: window!)
+		guard let window else { alert.runModal(); return }
+		alert.beginSheetModal(for: window)
 	}
 
 	/// Hands the window's responder chain this take's undo manager.
 	///
 	/// This is what a field editor asks for when somebody types into a clip
 	/// name, so ⌘Z inside one takes back a keystroke.
-	public func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
-		takeDocument.undoManager
-	}
+	override var documentUndoManager: UndoManager? { takeDocument.undoManager }
 
 	/// Undo and redo, as actions this controller answers to.
 	///
@@ -1867,7 +1888,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 	}
 
-	public func windowShouldClose(_ sender: NSWindow) -> Bool {
+	override func mayClose() -> Bool {
 		guard takeDocument.isDirty else { return true }
 		let alert = NSAlert()
 		alert.messageText = "Save changes to \(takeDocument.displayName)?"
@@ -1882,7 +1903,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 	}
 
-	public func windowWillClose(_ notification: Notification) {
+	override func documentClosed() {
 		solveTask?.cancel()
 		namingTask?.cancel()
 		nameProposalTask?.cancel()

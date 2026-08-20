@@ -3,9 +3,9 @@ import CuttrCompose
 import CuttrKit
 import UniformTypeIdentifiers
 
-/// The scene window: one intro screen, title card or end plate, being made.
+/// The scene editor: one intro screen, title card or end plate, being made.
 ///
-/// The third kind of window, and it exists for the same reason the cutting
+/// The third kind of document, and it exists for the same reason the cutting
 /// window does. A project window is about a programme — which shots, in what
 /// order, with what over them — and a scene is a thing made of six parts and
 /// twenty keyframes that happens to be *used* by one overlay. Putting that in
@@ -16,12 +16,11 @@ import UniformTypeIdentifiers
 /// document owns a `.cuttr`: this window edits `scenes:` and hands the project
 /// back, and the project writes it.
 @MainActor
-public final class SceneWindowController: NSWindowController, NSWindowDelegate,
-                                          NSMenuItemValidation {
+public final class SceneWindowController: DocumentEditor, NSMenuItemValidation {
 
 	public let sceneDocument: SceneDocument
 	/// Which project this scene belongs to, so the application can tell whether
-	/// a window for it is already open.
+	/// an editor for it is already open.
 	public let projectURL: URL?
 
 	private let stage = SceneStage()
@@ -32,7 +31,6 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 	/// just happened. The scene editor had a bar of its own and was left out of
 	/// the redesign — three windows, three arrangements, which is exactly the
 	/// thing this was all for.
-	private let bar = DocumentBar()
 	private let setup = SceneSetup()
 
 	private var playing: Timer?
@@ -41,28 +39,12 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 	public init(document: SceneDocument, projectURL: URL?) {
 		self.sceneDocument = document
 		self.projectURL = projectURL
-		let window = NSWindow(
-			contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
-			styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-			backing: .buffered, defer: false)
-		window.titlebarAppearsTransparent = true
-		window.titleVisibility = .hidden
-		DocumentBar.growTitleBand(of: window)
-		window.appearance = NSAppearance(named: .darkAqua)
-		window.backgroundColor = Theme.background
-		window.minSize = NSSize(width: 860, height: 560)
-		// Not a tab. This used to be one — a scene window joined the project it
-		// belongs to, the way takes did — and asking for one now brings the
-		// system's tab bar back over a title bar the program draws itself.
-		// Where you are is said by the name in that bar, and what is open is
-		// said by the list behind it.
-		window.tabbingMode = .disallowed
-		super.init(window: window)
-		window.delegate = self
+		super.init()
+		openingSize = NSSize(width: 1180, height: 760)
+		minimumSize = NSSize(width: 860, height: 560)
 		build()
 		wire()
 		reload()
-		window.center()
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
@@ -70,8 +52,6 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 	// MARK: - Layout
 
 	private func build() {
-		guard let window else { return }
-
 		// The picture and its clock, one above the other, in a split view —
 		// which is how both of the other windows arrange a picture over a
 		// timeline, and both of those work.
@@ -100,16 +80,14 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		let content = NSView()
 		content.wantsLayer = true
 		content.layer?.backgroundColor = Theme.background.cgColor
-		for view in [bar, middle] as [NSView] {
+		// No bar among them: it belongs to the window, and this is what goes
+		// under it.
+		for view in [middle] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			content.addSubview(view)
 		}
 		NSLayoutConstraint.activate([
-			bar.topAnchor.constraint(equalTo: content.topAnchor),
-			bar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-			bar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-			bar.heightAnchor.constraint(equalToConstant: DocumentBar.height),
-			middle.topAnchor.constraint(equalTo: bar.bottomAnchor),
+			middle.topAnchor.constraint(equalTo: content.topAnchor),
 			middle.leadingAnchor.constraint(equalTo: content.leadingAnchor),
 			middle.trailingAnchor.constraint(equalTo: content.trailingAnchor),
 			middle.bottomAnchor.constraint(equalTo: content.bottomAnchor),
@@ -132,7 +110,8 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 			stage.heightAnchor.constraint(greaterThanOrEqualToConstant: 200).asFloor,
 			scrubber.heightAnchor.constraint(greaterThanOrEqualToConstant: 60).asFloor,
 		])
-		window.contentView = content
+		contentRoot = content
+		initialResponder = parts
 	}
 
 	// MARK: - Wiring
@@ -140,31 +119,6 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 	private func wire() {
 		sceneDocument.onChange = { [weak self] in self?.reload() }
 
-		bar.setUp = setup
-		// The two halves of the capsule: the documents on the left, and what can
-		// be done about the repository this one sits in on the right.
-		bar.onProject = { [weak self] in
-			guard let self else { return }
-			self.bar.setOpenHalf(.project)
-			let (view, rect) = self.bar.anchor(for: .project)
-			AppDelegate.shared?.showDocumentSwitcher(from: view, rect: rect) {
-				self.bar.setOpenHalf(nil)
-			}
-		}
-		bar.onBranch = { [weak self] in
-			guard let self, let root = self.repositoryRoot else { return }
-			self.bar.setOpenHalf(.branch)
-			guard let menu = BranchMenu.menu(for: root,
-			                                 branch: GitRepository.branch(in: root)) else {
-				self.bar.setOpenHalf(nil)
-				return
-			}
-			let (view, rect) = self.bar.anchor(for: .branch)
-			menu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY + 4), in: view)
-			self.bar.setOpenHalf(nil)
-		}
-
-		bar.onPlayPause = { [weak self] in self?.togglePlay(nil) }
 		setup.onScene = { [weak self] name in
 			self?.sceneDocument.show(name)
 		}
@@ -325,9 +279,8 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 	// MARK: - Showing it
 
 	private func reload() {
-		guard let window else { return }
 		let document = sceneDocument
-		window.title = "\(document.name) — \(projectURL?.deletingPathExtension().lastPathComponent ?? "Untitled")"
+		titleChanged()
 
 		stage.project = document.project
 		stage.baseURL = document.baseURL
@@ -350,10 +303,10 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		                 part: document.selectedPart, key: document.selectedKey)
 
 		findRepository()
-		bar.setName(document.name)
-		bar.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
-		bar.setClock(document.playhead)
-		bar.setPlaying(playing != nil)
+		bar?.setName(document.name)
+		bar?.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
+		bar?.setClock(document.playhead)
+		bar?.setPlaying(playing != nil)
 		setup.show(names: document.sceneNames, current: document.name, length: document.length)
 	}
 
@@ -445,9 +398,7 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 
 	// MARK: - Undo
 
-	public func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
-		sceneDocument.undoManager
-	}
+	override var documentUndoManager: UndoManager? { sceneDocument.undoManager }
 
 	@objc public func undoEdit(_ sender: Any?) {
 		if let editor = window?.firstResponder as? NSTextView,
@@ -476,9 +427,59 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		}
 	}
 
-	public func windowWillClose(_ notification: Notification) {
+	override func documentClosed() {
 		if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
 		keyMonitor = nil
+		playing?.invalidate()
+		playing = nil
+	}
+
+	// MARK: - Being the document in the window
+
+	override var documentTitle: String {
+		"\(sceneDocument.name) — "
+			+ (projectURL?.deletingPathExtension().lastPathComponent ?? "Untitled")
+	}
+	override var documentFile: URL? { sceneDocument.baseURL }
+
+	/// What a scene puts in the shared bar: its name, the `…` behind which the
+	/// scene picker and the length sit, and the two halves of the capsule.
+	override func furnish(_ bar: DocumentBar) {
+		bar.setUp = setup
+		// The two halves of the capsule: the documents on the left, and what can
+		// be done about the repository this one sits in on the right.
+		bar.onProject = { [weak self] in
+			guard let self else { return }
+			self.bar?.setOpenHalf(.project)
+			guard let (view, rect) = self.bar?.anchor(for: .project) else { return }
+			AppDelegate.shared?.showDocumentSwitcher(from: view, rect: rect) {
+				self.bar?.setOpenHalf(nil)
+			}
+		}
+		bar.onBranch = { [weak self] in
+			guard let self, let root = self.repositoryRoot else { return }
+			self.bar?.setOpenHalf(.branch)
+			guard let menu = BranchMenu.menu(for: root,
+			                                 branch: GitRepository.branch(in: root)) else {
+				self.bar?.setOpenHalf(nil)
+				return
+			}
+			guard let (view, rect) = self.bar?.anchor(for: .branch) else { return }
+			menu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY + 4), in: view)
+			self.bar?.setOpenHalf(nil)
+		}
+		bar.onPlayPause = { [weak self] in self?.togglePlay(nil) }
+		bar.setName(sceneDocument.name)
+		bar.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
+		bar.setClock(sceneDocument.playhead)
+		bar.setPlaying(playing != nil)
+	}
+
+	override func documentAppeared() { reload() }
+
+	/// A scene plays on a timer of its own rather than through the transport, so
+	/// this is what stopping it looks like.
+	override func documentHidden() {
 		playing?.invalidate()
 		playing = nil
 	}

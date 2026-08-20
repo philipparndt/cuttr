@@ -89,7 +89,15 @@ enum MainMenu {
 		versions.toolTip = "Versions kept on refs/cuttr/saves every time the editing went quiet"
 		file.addItem(versions)
 		file.addItem(.separator())
-		file.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+		// ⌘W closes the *document*, not the window.
+		//
+		// One window holds several documents now — the whole point of the model
+		// — so a ⌘W that closed the window would take four takes away on one
+		// keystroke. The window is still closable, and says so: ⇧⌘W, which asks
+		// about every document in it.
+		file.addItem(command("Close", #selector(AppDelegate.closeDocument(_:)), "w"))
+		file.addItem(command("Close Window", #selector(AppDelegate.closeWindow(_:)), "W",
+		                     [.command, .shift]))
 		fileItem.submenu = file
 		main.addItem(fileItem)
 
@@ -266,6 +274,13 @@ enum MainMenu {
 		// The keyboard path through the open documents, which the tab bar used
 		// to own. It walks them in the order the name's menu lists them:
 		// projects, each with its takes under it.
+		// One place to be must not mean being unable to be in two: two takes side
+		// by side is a real thing to want, and every other gesture in this
+		// program swaps in place.
+		window.addItem(command("Move to New Window",
+		                       #selector(AppDelegate.moveToNewWindow(_:)), "n",
+		                       [.command, .option]))
+		window.addItem(.separator())
 		window.addItem(command("Go to Document…",
 		                       #selector(AppDelegate.showDocumentPalette(_:)), "p", [.command, .shift]))
 		window.addItem(command("Previous Document",
@@ -367,7 +382,7 @@ enum MainMenu {
 		func menuNeedsUpdate(_ menu: NSMenu) {
 			let colour = menu.items.first { $0.identifier?.rawValue == "clip-colour" }
 			let tags = menu.items.first { $0.identifier?.rawValue == "clip-tags" }
-			guard let controller = NSApp.keyWindow?.windowController as? MainWindowController else {
+			guard let controller = AppDelegate.shared?.showing as? MainWindowController else {
 				for item in [colour, tags].compactMap({ $0 }) {
 					item.submenu = nil
 					item.isEnabled = false

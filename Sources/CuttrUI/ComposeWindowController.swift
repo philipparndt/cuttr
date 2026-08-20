@@ -6,13 +6,15 @@ import UniformTypeIdentifiers
 
 /// The composing window: what the project comes to, played.
 ///
+/// The content of a window rather than a window — see ``DocumentEditor``.
+///
 /// The preview is not an approximation of the render. It is the same
 /// `AVComposition` the renderer builds and the same Core Animation tree the
 /// renderer hands to the encoder — the only difference is that one is played and
 /// the other is written. That is the point of ``OverlayLayers/Host``: a preview
 /// that agrees with the export by construction rather than by care.
 @MainActor
-public final class ComposeWindowController: NSWindowController, NSWindowDelegate,
+public final class ComposeWindowController: DocumentEditor,
 	NSMenuItemValidation, NSSplitViewDelegate {
 
 	public let composeDocument: ComposeDocument
@@ -46,20 +48,20 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private var pointerWatch: Any?
 
 	/// Opening a take is the application's business, not this window's: it may
-	/// already be open in another tab.
-	public var onOpenTake: ((URL) -> Void)?
+	/// already be open somewhere.
+	/// The flag is "in a window of its own", for ⌥ on the double-click.
+	public var onOpenTake: ((URL, Bool) -> Void)?
 	/// Open a take *at* a moment: from a clip on the programme to the place it
 	/// was cut from, which is the question somebody asks when a shot is wrong.
 	public var onOpenTakeAt: ((URL, Double) -> Void)?
-	/// Whether a take already has a tab of its own. Renaming one that is open
-	/// would leave that tab writing to a file that no longer exists.
+	/// Whether a take is open. Renaming one that is would leave a document
+	/// writing to a file that no longer exists.
 	public var isTakeOpen: ((URL) -> Bool)?
 	/// Open a scene of this project in the scene editor. A scene is a window's
 	/// worth of editing — parts, keyframes, a stage — and putting that inside
 	/// one field of the properties panel is what this callback exists to avoid.
 	/// `nil` means "whichever one, or a new one".
 	public var onEditScene: ((ComposeDocument, String?) -> Void)?
-	private let bar = DocumentBar()
 	/// Which of the three has the window, down the left edge — the same shape
 	/// and the same place as the cutting window's.
 	private let rail = Rail([
@@ -111,36 +113,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 	public init(document: ComposeDocument) {
 		self.composeDocument = document
-		let window = NSWindow(
-			contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
-			styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-			backing: .buffered, defer: false)
-		window.titlebarAppearsTransparent = true
-		window.appearance = NSAppearance(named: .darkAqua)
-		window.backgroundColor = Theme.background
-		window.minSize = NSSize(width: 900, height: 600)
-		// Each document is a plain window, and the bar says which one.
-		//
-		// These were tabs of one window, on the system's own tabbing. What that
-		// fixed was real — two windows the same size, both centred, sit exactly
-		// on top of each other and the one underneath may as well not exist —
-		// but it cost a permanent row in every window to answer a question
-		// somebody asks a few times an hour, and the bar already answers it in
-		// the one place anybody looks: the document's name, top left. So the
-		// name lists every document open and takes you to one.
-		//
-		// This is a change in how the program behaves in the system, and worth
-		// knowing about: there is no tab bar, no tab overview and no dragging a
-		// tab out. In their place macOS's own window handling does the work —
-		// `⌘\`` cycles the windows and the Window menu lists them — and
-		// `⌘⇧[` / `⌘⇧]` walk the documents in the order the name's menu shows
-		// them, so the keyboard path is the one it was.
-		window.tabbingMode = .disallowed
-		// One band at the top, and the bar is it. See `DocumentBar.height`.
-		window.titleVisibility = .hidden
-		DocumentBar.growTitleBand(of: window)
-		super.init(window: window)
-		window.delegate = self
+		super.init()
+		openingSize = NSSize(width: 1200, height: 820)
+		minimumSize = NSSize(width: 900, height: 600)
 		build()
 		wire()
 		document.onChange?()
@@ -157,7 +132,6 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		if composeDocument.project.timeline.isEmpty && composeDocument.takes.isEmpty {
 			show(.project)
 		}
-		window.center()
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
@@ -165,7 +139,6 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	// MARK: - Layout
 
 	private func build() {
-		guard let window else { return }
 		playerView = PlayerView(player: transport.player)
 
 		buildBar()
@@ -180,7 +153,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			// document notice, exactly as an external editor would.
 			try? text.write(to: url, atomically: true, encoding: .utf8)
 			self.composeDocument.reload()
-			self.bar.setStatus("applied")
+			self.say("applied")
 		}
 
 		problemLabel.font = Theme.monoSmall
@@ -332,27 +305,24 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		ground.translatesAutoresizingMaskIntoConstraints = false
 		content.addSubview(ground)
 
-		for view in [bar, rail, problemLabel, modes] as [NSView] {
+		// No bar among them: it belongs to the window now, and this view is
+		// what goes under it.
+		for view in [rail, problemLabel, modes] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			content.addSubview(view)
 		}
 		NSLayoutConstraint.activate([
-			bar.topAnchor.constraint(equalTo: content.topAnchor),
-			bar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-			bar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-			bar.heightAnchor.constraint(equalToConstant: DocumentBar.height),
-
 			// The rail says how wide it is; this only says where.
-			rail.topAnchor.constraint(equalTo: bar.bottomAnchor),
+			rail.topAnchor.constraint(equalTo: content.topAnchor),
 			rail.leadingAnchor.constraint(equalTo: content.leadingAnchor),
 			rail.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
-			ground.topAnchor.constraint(equalTo: bar.bottomAnchor),
+			ground.topAnchor.constraint(equalTo: content.topAnchor),
 			ground.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
 			ground.trailingAnchor.constraint(equalTo: content.trailingAnchor),
 			ground.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
-			problemLabel.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 2),
+			problemLabel.topAnchor.constraint(equalTo: content.topAnchor, constant: 2),
 			problemLabel.leadingAnchor.constraint(equalTo: rail.trailingAnchor, constant: 10),
 			problemLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
 			problemLabel.heightAnchor.constraint(equalToConstant: 14),
@@ -387,7 +357,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180).asFloor,
 		])
 
-		window.contentView = content
+		contentRoot = content
 		// Nothing in this window opens with the keyboard in it.
 		//
 		// Left to itself AppKit hands the first responder to the first text
@@ -400,7 +370,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// field somebody was typing in. The file was read, the panel declined to
 		// show it, and the page stayed on the empty project it had been built
 		// with until somebody switched pages and back.
-		window.initialFirstResponder = rail
+		initialResponder = rail
 
 		// No marking here: an anchor is marked on the take, in the cutting
 		// window, where the footage is. This window shows what was found.
@@ -422,6 +392,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// For the tests: the rail, so its place can be compared with the other
 	/// window's.
 	var railForTesting: Rail { rail }
+	/// For the tests: the takes list, so the double-click that opens a take can
+	/// be driven where it actually starts.
+	var takesForTesting: TakesTable { takesTable }
 
 	/// The bar: the project's name, the clock, what just happened — and two
 	/// things that are true whatever mode is showing.
@@ -449,32 +422,75 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		renderButton.toolTip = "Render\u{2026} (\u{21E7}\u{2318}R)"
 		renderButton.translatesAutoresizingMaskIntoConstraints = false
 		renderButton.widthAnchor.constraint(equalToConstant: 24).isActive = true
-		bar.addTrailing(renderButton)
+	}
 
+	// MARK: - Being the document in the window
+
+	override var documentTitle: String { composeDocument.displayName }
+	override var documentFile: URL? { composeDocument.url }
+
+	/// What a project puts in the shared bar: its name, the branch, `Render…`,
+	/// and the two halves of the capsule.
+	override func furnish(_ bar: DocumentBar) {
+		bar.addTrailing(renderButton)
 		bar.onPlayPause = { [weak self] in self?.playPressed() }
 		// The two halves of the capsule: the documents on the left, and what can
 		// be done about the repository this one sits in on the right.
 		bar.onProject = { [weak self] in
 			guard let self else { return }
-			self.bar.setOpenHalf(.project)
-			let (view, rect) = self.bar.anchor(for: .project)
+			self.bar?.setOpenHalf(.project)
+			guard let (view, rect) = self.bar?.anchor(for: .project) else { return }
 			AppDelegate.shared?.showDocumentSwitcher(from: view, rect: rect) {
-				self.bar.setOpenHalf(nil)
+				self.bar?.setOpenHalf(nil)
 			}
 		}
 		bar.onBranch = { [weak self] in
 			guard let self, let root = self.repositoryRoot else { return }
-			self.bar.setOpenHalf(.branch)
+			self.bar?.setOpenHalf(.branch)
 			guard let menu = BranchMenu.menu(for: root,
 			                                 branch: GitRepository.branch(in: root)) else {
-				self.bar.setOpenHalf(nil)
+				self.bar?.setOpenHalf(nil)
 				return
 			}
-			let (view, rect) = self.bar.anchor(for: .branch)
+			guard let (view, rect) = self.bar?.anchor(for: .branch) else { return }
 			menu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY + 4), in: view)
-			self.bar.setOpenHalf(nil)
+			self.bar?.setOpenHalf(nil)
 		}
+		bar.setName(composeDocument.displayName)
+		bar.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
+		bar.setClock(playhead)
+		bar.setPlaying(transport.isPlaying)
+		bar.setStatus(said)
+		bar.setProgress(progressed)
+	}
 
+	/// What this project last said, and how far along it was — kept here rather
+	/// than on the bar, because the bar is the window's and the next document to
+	/// come through it would otherwise be looking at this project's message.
+	private var said = ""
+	private var progressed: Double?
+
+	private func say(_ text: String) {
+		said = text
+		bar?.setStatus(text)
+	}
+
+	private func showProgress(_ fraction: Double?) {
+		progressed = fraction
+		bar?.setProgress(fraction)
+	}
+
+	/// Back on screen. The picture is only in the window on the preview page, so
+	/// the overlays are laid out again against whatever size the window is now.
+	override func documentAppeared() {
+		layoutOverlays()
+	}
+
+	/// Off screen and still open: the tape stops, and full-screen presentation
+	/// ends — a project cannot present itself from behind another document.
+	override func documentHidden() {
+		if presenting { toggleFullScreenPreview(nil) }
+		transport.pause()
 	}
 
 	/// The controls that belong to the picture, in the corner of the picture.
@@ -532,12 +548,12 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		composeDocument.history.onOutcome = { [weak self] outcome in
 			guard let self else { return }
 			switch outcome {
-			case .kept(let version): self.bar.setStatus("kept a version — \(version.short)")
+			case .kept(let version): self.say("kept a version — \(version.short)")
 			// Not in a work tree, nothing changed, or somebody is mid-rebase.
 			// All three are ordinary and none is worth a word.
 			case .nothingChanged, .noRepository: break
-			case .busy(let what): self.bar.setStatus("no version kept — \(what) is in progress")
-			case .failed(let why): self.bar.setStatus("no version kept — \(why)")
+			case .busy(let what): self.say("no version kept — \(what) is in progress")
+			case .failed(let why): self.say("no version kept — \(why)")
 			}
 		}
 		strip.onScrub = { [weak self] time in self?.seek(to: time) }
@@ -627,7 +643,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			try? self.composeDocument.write()
 		}
 
-		takesTable.onOpen = { [weak self] url in self?.onOpenTake?(url) }
+		takesTable.onOpen = { [weak self] url, aside in self?.onOpenTake?(url, aside) }
 		takesTable.onRemove = { [weak self] path in self?.composeDocument.removeTake(path) }
 		takesTable.onAdd = { [weak self] in self?.addTake(nil) }
 		takesTable.onRename = { [weak self] path, name in
@@ -636,12 +652,12 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			// Refused rather than half-done: the open tab holds the old URL and
 			// would recreate the old file on its next save.
 			if self.isTakeOpen?(url.standardizedFileURL) == true {
-				self.bar.setStatus("close that take's tab before renaming it")
+				self.say("close that take before renaming it")
 				self.rebuild()
 				return
 			}
 			if let problem = self.composeDocument.renameTake(path, to: name) {
-				self.bar.setStatus(problem)
+				self.say(problem)
 				self.rebuild()
 			}
 		}
@@ -722,7 +738,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			// The overlay tree is paused; this is what puts it at the same
 			// moment as the picture, exactly, every tick.
 			self.overlayLayer?.timeOffset = time
-			self.bar.setClock(time)
+			self.bar?.setClock(time)
 			// The full-screen bar shows the same clock, and only while it is
 			// the thing on screen.
 			if self.presenting {
@@ -733,7 +749,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		}
 		transport.onRateChange = { [weak self] rate in
 			guard let self else { return }
-			self.bar.setPlaying(rate != 0)
+			self.bar?.setPlaying(rate != 0)
 			guard self.presenting else { return }
 			self.controls.isPlaying = rate != 0
 			// Pausing is a reason to see the controls: somebody has just
@@ -744,12 +760,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 	/// Rebuilds the composition and the overlays from the project.
 	private func rebuild() {
-		guard let window else { return }
-		window.title = composeDocument.displayName
-		window.representedURL = composeDocument.url
+		titleChanged()
 		findRepository()
-		bar.setName(composeDocument.displayName)
-		bar.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
+		bar?.setName(composeDocument.displayName)
+		bar?.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
 		takesTable.reload(composeDocument.takes, scenes: composeDocument.project.scenes)
 		inspector.resolved = composeDocument.resolved
 		let vocabulary = composeDocument.vocabulary
@@ -796,7 +810,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			} catch {
 				// Swallowed with `try?` before, which is how a preview comes to
 				// be black for a reason nobody can see.
-				await MainActor.run { self?.bar.setStatus("preview: \(error.localizedDescription)") }
+				await MainActor.run { self?.say("preview: \(error.localizedDescription)") }
 				return
 			}
 			guard !Task.isCancelled, let self else { return }
@@ -819,7 +833,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 				self.itemStatus = item.observe(\.status, options: [.new]) { item, _ in
 					guard item.status == .failed else { return }
 					let message = item.error?.localizedDescription ?? "unknown"
-					Task { @MainActor in self.bar.setStatus("preview failed: \(message)") }
+					Task { @MainActor in self.say("preview failed: \(message)") }
 				}
 			}
 
@@ -1016,7 +1030,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard let window else { return }
 		presenting.toggle()
 		if presenting { show(.preview) }
-		bar.isHidden = presenting
+		place?.setBarHidden(presenting)
 		rail.isHidden = presenting
 		strip.isHidden = presenting
 		pictureControls.isHidden = presenting
@@ -1051,11 +1065,11 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		window?.acceptsMouseMovedEvents = false
 	}
 
-	public func windowDidExitFullScreen(_ notification: Notification) {
+	override func placeDidExitFullScreen() {
 		guard presenting else { return }
 		presenting = false
 		stopWatchingThePointer()
-		bar.isHidden = false
+		place?.setBarHidden(false)
 		rail.isHidden = false
 		strip.isHidden = false
 		pictureControls.isHidden = false
@@ -1069,7 +1083,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		return ProjectWriter.write(composeDocument.project)
 	}
 
-	public func windowDidResize(_ notification: Notification) {
+	override func placeDidResize() {
 		layoutOverlays()
 	}
 
@@ -1080,7 +1094,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 	private func seek(to time: Double) {
 		playhead = max(0, time)
-		bar.setClock(playhead)
+		bar?.setClock(playhead)
 		strip.playhead = playhead
 		markers.playhead = playhead
 		overlayLayer?.timeOffset = playhead
@@ -1157,7 +1171,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		panel.message = "Choose the takes this programme is made from"
 		guard panel.runModal() == .OK else { return }
 		let added = panel.urls.filter { composeDocument.addTake($0) }.count
-		bar.setStatus(added == 0 ? "already in this project" : "added \(added)")
+		say(added == 0 ? "already in this project" : "added \(added)")
 	}
 
 	/// Cuts a new take from a recording, and adds it.
@@ -1192,8 +1206,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			return
 		}
 		composeDocument.addTake(place)
-		bar.setStatus("added \(place.lastPathComponent) — cut it in its own tab")
-		onOpenTake?(place)
+		say("added \(place.lastPathComponent) — open it to cut it")
+		onOpenTake?(place, false)
 	}
 
 	// MARK: - Saving
@@ -1206,7 +1220,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard composeDocument.url != nil else { saveAs(sender); return }
 		do {
 			try composeDocument.write()
-			bar.setStatus("saved \(composeDocument.displayName)")
+			say("saved \(composeDocument.displayName)")
 		} catch {
 			report(error)
 		}
@@ -1225,7 +1239,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		do {
 			try composeDocument.saveAs(url)
 			AppDelegate.remember(url)
-			bar.setStatus("saved \(url.lastPathComponent)")
+			say("saved \(url.lastPathComponent)")
 			rebuild()
 		} catch {
 			report(error)
@@ -1252,7 +1266,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			}
 			let outcome = self.composeDocument.restore(commit)
 			if case .kept(let version) = outcome {
-				self.bar.setStatus("went back to \(version.short) — \(version.title)")
+				self.say("went back to \(version.short) — \(version.title)")
 				self.rebuild()
 			}
 			return outcome
@@ -1260,7 +1274,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard !shown else { return }
 		// Nothing to show, and the reason is worth one line: a project on a
 		// footage volume is not in a work tree and never will have versions.
-		bar.setStatus(repository == nil
+		say(repository == nil
 			? "no versions — this project is not in a git repository"
 			: "no versions kept yet")
 	}
@@ -1302,8 +1316,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 		let project = composeDocument.project
 		let name = composeDocument.displayName
-		bar.setProgress(0)
-		bar.setStatus("exporting…")
+		showProgress(0)
+		say("exporting…")
 		Task { [weak self] in
 			// Off the main thread: on a real shoot this is gigabytes of copying.
 			let outcome = await Task.detached(priority: .userInitiated) { () -> Result<ProjectExporter.Report, Error> in
@@ -1311,10 +1325,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 				catch { return .failure(error) }
 			}.value
 			guard let self else { return }
-			self.bar.setProgress(nil)
+			self.showProgress(nil)
 			switch outcome {
 			case .success(let report):
-				self.bar.setStatus("exported to \(target.lastPathComponent) — \(report.summary)")
+				self.say("exported to \(target.lastPathComponent) — \(report.summary)")
 				// Missing files are worth a sheet rather than a status line:
 				// the folder is complete apart from them, and somebody has to
 				// know which before they hand it over.
@@ -1332,7 +1346,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 					NSWorkspace.shared.activateFileViewerSelecting([target])
 				}
 			case .failure(let error):
-				self.bar.setStatus(error.localizedDescription)
+				self.say(error.localizedDescription)
 				self.report(error)
 			}
 		}
@@ -1349,19 +1363,19 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		if let base = composeDocument.baseURL { panel.directoryURL = base }
 		guard panel.runModal() == .OK, let url = panel.url else { return }
 
-		bar.setProgress(0)
+		showProgress(0)
 		renderButton.isEnabled = false
-		bar.setStatus("rendering…")
+		say("rendering…")
 		Task { [weak self] in
 			do {
 				try await Renderer.export(resolved, to: url) { fraction in
-					Task { @MainActor in self?.bar.setProgress(fraction) }
+					Task { @MainActor in self?.showProgress(fraction) }
 				}
-				self?.bar.setStatus("wrote \(url.lastPathComponent)")
+				self?.say("wrote \(url.lastPathComponent)")
 			} catch {
-				self?.bar.setStatus(error.localizedDescription)
+				self?.say(error.localizedDescription)
 			}
-			self?.bar.setProgress(nil)
+			self?.showProgress(nil)
 			self?.renderButton.isEnabled = true
 		}
 	}
@@ -1392,7 +1406,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		}
 	}
 
-	public func windowWillClose(_ notification: Notification) {
+	override func documentClosed() {
 		if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
 		keyMonitor = nil
 		buildTask?.cancel()

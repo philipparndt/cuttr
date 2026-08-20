@@ -30,12 +30,16 @@ public enum DocumentSwitcher {
 		public var isCurrent: Bool
 		/// What to do about it. `nil` for a document whose file has gone.
 		public var open: (() -> Void)?
+		/// The same, into a window of its own, for ⌥ held while choosing.
+		/// `nil` falls back to ``open``.
+		public var openAside: (() -> Void)?
 		/// Said instead of the path when the file is not where it was.
 		public var missing: Bool
 
 		public init(name: String, path: String, kind: Theme.Kind,
 		            indented: Bool = false, isCurrent: Bool = false,
-		            missing: Bool = false, open: (() -> Void)?) {
+		            missing: Bool = false, open: (() -> Void)?,
+		            openAside: (() -> Void)? = nil) {
 			self.name = name
 			self.path = path
 			self.kind = kind
@@ -43,6 +47,7 @@ public enum DocumentSwitcher {
 			self.isCurrent = isCurrent
 			self.missing = missing
 			self.open = open
+			self.openAside = openAside
 		}
 
 		/// The hue that stands for this document, derived from its name.
@@ -289,12 +294,60 @@ public enum DocumentSwitcher {
 		/// capsule that starts eighty points in.
 		static let width: CGFloat = 380
 
-		/// Height follows the content up to a cap, so a short list is a short
-		/// popover rather than a tall one mostly full of nothing.
+		/// Never less than this, so a project with one take is not a sliver
+		/// hanging off the capsule.
+		static let floorHeight: CGFloat = 240
+
+		/// And never more than a good fraction of the screen it is on.
+		///
+		/// Of the *screen*, because that is what the number is about: a panel may
+		/// take most of the height somebody has and must not take all of it. 560
+		/// was the old cap, chosen for no screen in particular, and it is a
+		/// third of a 27-inch display.
+		static func ceilingHeight(on screen: NSScreen?) -> CGFloat {
+			let visible = (screen ?? NSScreen.main)?.visibleFrame.height ?? 900
+			return max(floorHeight, min(visible * 0.72, 1000))
+		}
+
+		/// The room the field and the margins take, measured rather than
+		/// guessed.
+		///
+		/// It was the constant 44 and the field is 41 points of chrome on its
+		/// own at a rounded bezel — so every list was three points short, the
+		/// last row was clipped through the middle of its text, and a scroller
+		/// appeared over a list that fitted. That is the "too short" in the
+		/// report: not only the cap but a panel that could never show a whole
+		/// number of rows.
+		private var chrome: CGFloat {
+			// 7 above the field, 6 between it and the list, 6 below the list.
+			7 + ceil(field.fittingSize.height) + 6 + 6
+		}
+
+		/// For the tests: the room that is not list, so an assertion can be made
+		/// about whole rows fitting in what is left.
+		var chromeForTesting: CGFloat { chrome }
+
+		/// Height follows the content between a floor and a ceiling, so a short
+		/// list is a short popover and a long one scrolls rather than growing off
+		/// the screen.
+		///
+		/// And always a whole number of rows. That is the other half of "the
+		/// second row clipped mid-line with a scroller": a panel whose list is
+		/// two thirds of a row taller than it needs shows two thirds of a row,
+		/// and a row cut through its own text reads as a rendering fault whether
+		/// the list scrolls or not.
 		private func resize() {
-			let content = CGFloat(rows.count) * Self.rowHeight + 44
-			preferredContentSize = NSSize(width: Self.width,
-			                              height: min(max(content, 110), 560))
+			let ceiling = Self.ceilingHeight(on: view.window?.screen)
+			let content = CGFloat(rows.count) * Self.rowHeight + chrome
+			let wanted = min(max(content, Self.floorHeight), ceiling)
+			preferredContentSize = NSSize(width: Self.width, height: wholeRows(wanted))
+		}
+
+		/// The nearest height at or below `wanted` that holds a whole number of
+		/// rows — and never less than one row's worth of list.
+		private func wholeRows(_ wanted: CGFloat) -> CGFloat {
+			let room = max(wanted - chrome, Self.rowHeight)
+			return chrome + (room / Self.rowHeight).rounded(.down) * Self.rowHeight
 		}
 
 		private func rebuild(filter: String) {
@@ -328,7 +381,7 @@ public enum DocumentSwitcher {
 			table.selectRowIndexes([row], byExtendingSelection: false)
 		}
 
-		func chooseForTesting() { take() }
+		func chooseForTesting(aside: Bool = false) { chose(aside: aside) }
 
 		var shownForTesting: [String] {
 			rows.map {
@@ -370,9 +423,14 @@ public enum DocumentSwitcher {
 		private var pending: (() -> Void)?
 
 		@objc private func take() {
+			chose(aside: NSEvent.modifierFlags
+				.intersection(.deviceIndependentFlagsMask).contains(.option))
+		}
+
+		private func chose(aside: Bool) {
 			let row = table.selectedRow
 			guard row >= 0, row < rows.count, case .entry(let entry) = rows[row],
-			      let open = entry.open
+			      let open = aside ? (entry.openAside ?? entry.open) : entry.open
 			else { return }
 			// The panel goes first and the document comes forward after it,
 			// never the other way round.
