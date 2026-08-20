@@ -63,7 +63,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	private let programmeHint = ProgrammePanel.hint(
 		"Drag a clip or a #tag from the library, or press + Clip")
 	private let overlayHint = ProgrammePanel.hint(
-		"Select where it should go, then + Text or + Spinner")
+		"Select where it should go on the timeline, then pick a kind from +")
 	private let soundHint = ProgrammePanel.hint(
 		"Music, an atmosphere, a sting — a file, and when it plays")
 
@@ -314,16 +314,23 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 		let scroll = TableScroll.fitting(outline)
 		over(scroll, programmeHint)
-		return pane("programme", scroll, [
+		// "Timeline", not "programme".
+		//
+		// The programme is the finished film — what the clock belongs to, what
+		// a card takes time on, what an overlay is drawn over — and this pane
+		// is not that. It is the tree of entries the file calls `timeline:`,
+		// and calling it by the key it writes is the same rule every label in
+		// the properties panel follows.
+		return pane("timeline", scroll, [
 			button("plus", #selector(addClip), "Add a clip by slug, or a #tag query"),
 			button("folder.badge.plus", #selector(addGroup),
 			       "Add a named section overlays can be hung on"),
 			button("rectangle.fill", #selector(addCard),
-			       "Add a card: time on the programme with no take behind it"),
+			       "Add a card: time on the timeline with nothing behind it"),
 			button("plus.square.on.square", #selector(duplicateEntry), "Another one just like it"),
 			button("arrow.up", #selector(moveEntryUp), "Earlier"),
 			button("arrow.down", #selector(moveEntryDown), "Later"),
-			button("minus", #selector(removeEntry), "Take it off the programme"),
+			button("minus", #selector(removeEntry), "Take it off the timeline"),
 		])
 	}
 
