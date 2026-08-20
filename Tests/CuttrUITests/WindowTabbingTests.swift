@@ -8,6 +8,14 @@ import Testing
 /// The document switcher in the title bar is how you get from one take to
 /// another, and the bar is drawn by the program — so a tab bar arriving above
 /// it lands on top of the window's own furniture.
+///
+/// Neither of these was enough, and it is worth knowing why. `tabbingMode`
+/// declines *automatic* tabbing; it does not refuse an explicit
+/// `addTabbedWindow`, which `AppDelegate.present(_:)` was calling on every
+/// window it opened. So a group was formed anyway, and the observer these tests
+/// stand in for then tore it apart on the very notification the tabbing caused.
+/// `DocumentPlaceTests.nothingIsEverPutInATabGroup` is the one that checks no
+/// group is ever formed in the first place.
 @MainActor @Suite struct WindowTabbingTests {
 
 	/// Every window says no. This is the part that was already true, and it is

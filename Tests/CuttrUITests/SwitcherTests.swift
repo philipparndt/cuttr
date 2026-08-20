@@ -27,6 +27,14 @@ import Testing
 	/// A single click opens a row. It was wired to `doubleAction` only, so
 	/// pointing at a row and clicking it did nothing at all — and clicking is
 	/// what somebody does in a list that drops out of a button.
+	///
+	/// Necessary and nowhere near sufficient, which is worth saying here: this
+	/// watches a closure run, and a closure running was never the problem. The
+	/// switcher was reported fixed twice on the strength of this test while
+	/// choosing a document still went nowhere, because the window it ordered
+	/// front was ordered back again as the popover closed. What the control
+	/// actually *does* is held by `DocumentPlaceTests`, which asks which
+	/// document is in front afterwards.
 	@Test func oneClickChoosesARow() throws {
 		_ = NSApplication.shared
 		let switcher = DocumentSwitcher.Switcher(groups())

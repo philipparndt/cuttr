@@ -43,6 +43,18 @@ public final class DocumentCapsule: NSView {
 	private static let gap: CGFloat = 7
 	private static let chevron: CGFloat = 9
 	private static let minimumWidth: CGFloat = 300
+	/// The least the project half may be squeezed to.
+	///
+	/// The bar gives this view a compression resistance of 1, so it is the
+	/// first thing to give when the window narrows — and at this program's own
+	/// minimum of 900 points it gives a lot. Without a floor the divider is
+	/// simply `maxX - branchWidth`, which at that width lands *left of the
+	/// capsule's own leading edge*: the project half's rectangle came out
+	/// 18 points wide with a negative width, the two names were drawn one on
+	/// top of the other, and `NSPopover` was handed an empty anchor and
+	/// declined to appear. Enough for the padding either side and a few
+	/// characters between them.
+	private static let leastProject: CGFloat = 92
 	/// A hairline of air inside the frame, so the shape does not touch whatever
 	/// the bar puts beside it.
 	private static let inset: CGFloat = 1
@@ -86,11 +98,19 @@ public final class DocumentCapsule: NSView {
 		ceil((text as NSString).size(withAttributes: [.font: font]).width)
 	}
 
+	/// What the right half is when it has given up everything but the shortcut.
+	///
+	/// The hint is the last thing to go, and it does not go: it is the only
+	/// thing on the capsule that says the capsule can be typed into.
+	private var hintWidth: CGFloat {
+		Self.padding + width(of: Self.hint, font: Self.hintFont) + Self.padding
+	}
+
 	private var branchWidth: CGFloat {
-		let hint = width(of: Self.hint, font: Self.hintFont)
-		guard let branch else { return Self.padding + hint + Self.padding }
+		guard let branch else { return hintWidth }
 		return Self.padding + width(of: branch, font: Self.branchFont)
-			+ Self.gap + Self.chevron + Self.gap + hint + Self.padding
+			+ Self.gap + Self.chevron + Self.gap
+			+ width(of: Self.hint, font: Self.hintFont) + Self.padding
 	}
 
 	private var projectWidth: CGFloat {
@@ -104,7 +124,28 @@ public final class DocumentCapsule: NSView {
 	}
 
 	private var shape: NSRect { bounds.insetBy(dx: Self.inset, dy: Self.inset) }
-	private var divider: CGFloat { shape.maxX - branchWidth }
+
+	/// Where the two halves meet.
+	///
+	/// With room for both, the branch keeps its natural width and the project
+	/// takes the slack — a project name is somebody else's data and can be any
+	/// length, a branch name rather less so. Without room, both give ground:
+	/// the branch is squeezed towards the hint, the project keeps
+	/// ``leastProject``, and each half truncates its own text inside itself.
+	///
+	/// The clamp is the whole of the fix. This was `shape.maxX - branchWidth`,
+	/// which is right only while the capsule is at least as wide as it asked
+	/// to be — and the bar gives it a compression resistance of 1, so it very
+	/// often is not.
+	private var divider: CGFloat {
+		let room = max(hintWidth, shape.width - Self.leastProject)
+		// Clamped into the shape as well, so neither half's rectangle can come
+		// out with a negative width however narrow the capsule is squeezed.
+		// A negative rectangle is not just badly drawn: `NSPopover` is handed
+		// one of these as its anchor, and an empty anchor is a popover that
+		// never appears.
+		return min(shape.maxX, max(shape.minX, shape.maxX - min(branchWidth, room)))
+	}
 
 	/// The project half, for anchoring its list under it.
 	public var projectRect: NSRect {
@@ -195,18 +236,74 @@ public final class DocumentCapsule: NSView {
 		drawBranch()
 	}
 
+	/// Where each string is allowed to draw.
+	///
+	/// One calculation, used by the drawing and by the tests that measure it —
+	/// rather than a second one beside it that can drift.
+	struct Spans {
+		/// From the leading padding to just short of the divider.
+		var project: ClosedRange<CGFloat>
+		/// From just past the divider to just short of the hint. `nil` when the
+		/// folder is not a work tree and there is no branch to draw.
+		var branch: ClosedRange<CGFloat>?
+		/// The shortcut, which keeps its room whatever the names do.
+		var hint: ClosedRange<CGFloat>
+	}
+
+	var spans: Spans {
+		let hint = ceil(hintSize.width)
+		let hintFrom = shape.maxX - Self.padding - hint
+		let projectFrom = shape.minX + Self.padding
+		let projectTo = max(projectFrom, divider - Self.gap - Self.chevron)
+		let branchFrom = divider + Self.padding
+		let branchTo = max(branchFrom, hintFrom - Self.gap - Self.chevron - Self.gap)
+		return Spans(project: projectFrom...projectTo,
+		             branch: branch == nil ? nil : branchFrom...branchTo,
+		             hint: hintFrom...(hintFrom + hint))
+	}
+
+	private var hintSize: NSSize {
+		(Self.hint as NSString).size(withAttributes: [.font: Self.hintFont])
+	}
+
 	private func drawProject() {
-		let text = NSAttributedString(string: project, attributes: [
-			.font: Self.nameFont, .foregroundColor: Theme.text,
-		])
-		let size = text.size()
-		let x = shape.minX + Self.padding
-		text.draw(at: NSPoint(x: x, y: shape.midY - size.height / 2))
+		let span = spans.project
+		// The chevron's room is kept whether or not it is drawn, so the name
+		// does not jump sideways as the pointer arrives.
+		let ink = draw(project, font: Self.nameFont, colour: Theme.text,
+		               from: span.lowerBound, to: span.upperBound,
+		               truncating: .byTruncatingMiddle)
 		// The chevron is drawn only for the half being pointed at: at rest the
 		// capsule is two names and a hint.
 		if hovered == .project || openHalf == .project {
-			drawChevron(at: NSPoint(x: x + ceil(size.width) + Self.gap, y: shape.midY))
+			drawChevron(at: NSPoint(x: span.lowerBound + ink + Self.gap, y: shape.midY))
 		}
+	}
+
+	/// One line of text inside a span, truncated rather than allowed out.
+	///
+	/// Returns how wide the text actually came out, so a chevron can be put
+	/// after it. Every string on this capsule is somebody else's data — a
+	/// project is named by whoever named the folder, a branch by whoever cut
+	/// it — so none of them may decide where the next thing sits, and none of
+	/// them may draw past the span it was given. Both used to: the name ran
+	/// over the divider and into the branch beside it, and at 900 points of
+	/// window the two were drawn on top of each other.
+	@discardableResult
+	private func draw(_ string: String, font: NSFont, colour: NSColor,
+	                  from x: CGFloat, to limit: CGFloat,
+	                  truncating mode: NSLineBreakMode) -> CGFloat {
+		let available = limit - x
+		guard available > 1 else { return 0 }
+		let paragraph = NSMutableParagraphStyle()
+		paragraph.lineBreakMode = mode
+		let text = NSAttributedString(string: string, attributes: [
+			.font: font, .foregroundColor: colour, .paragraphStyle: paragraph,
+		])
+		let size = text.size()
+		text.draw(in: NSRect(x: x, y: shape.midY - size.height / 2,
+		                     width: available, height: size.height))
+		return min(ceil(size.width), available)
 	}
 
 	private func drawDivider() {
@@ -215,22 +312,21 @@ public final class DocumentCapsule: NSView {
 	}
 
 	private func drawBranch() {
+		let places = spans
 		let hint = NSAttributedString(string: Self.hint, attributes: [
 			.font: Self.hintFont, .foregroundColor: Theme.faintText,
 		])
-		let hintSize = hint.size()
-		hint.draw(at: NSPoint(x: shape.maxX - Self.padding - ceil(hintSize.width),
-		                      y: shape.midY - hintSize.height / 2))
+		hint.draw(at: NSPoint(x: places.hint.lowerBound,
+		                      y: shape.midY - hint.size().height / 2))
 
-		guard let branch else { return }
-		let text = NSAttributedString(string: branch, attributes: [
-			.font: Self.branchFont, .foregroundColor: Theme.dimText,
-		])
-		let size = text.size()
-		let x = divider + Self.padding
-		text.draw(at: NSPoint(x: x, y: shape.midY - size.height / 2))
+		guard let branch, let span = places.branch else { return }
+		// Stopping short of the hint, which the branch may not draw over any
+		// more than the project may draw over the branch.
+		let ink = draw(branch, font: Self.branchFont, colour: Theme.dimText,
+		               from: span.lowerBound, to: span.upperBound,
+		               truncating: .byTruncatingTail)
 		if hovered == .branch || openHalf == .branch {
-			drawChevron(at: NSPoint(x: x + ceil(size.width) + Self.gap, y: shape.midY))
+			drawChevron(at: NSPoint(x: span.lowerBound + ink + Self.gap, y: shape.midY))
 		}
 	}
 
