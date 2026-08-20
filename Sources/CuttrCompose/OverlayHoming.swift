@@ -89,18 +89,19 @@ extension Project {
 	/// times where it has not — a card with no `as:`, a list, a query — and
 	/// also where the name would be *wrong*: `from: intro` finds every use of
 	/// `intro`, so a clip that is on the timeline twice cannot be named without
-	/// silently widening the caption to cover both. Checked against the resolved
-	/// programme rather than assumed.
+	/// silently widening the caption to cover both.
+	///
+	/// That last check needs the programme laid out, and there is not always
+	/// one: a project whose takes have gone missing still opens, and its tree
+	/// can still be dragged about. Without it the name is the best that can be
+	/// said, and it is exactly what somebody writing the line by hand would
+	/// have written. With neither a name nor a layout there is nothing true to
+	/// write, and the move is refused rather than guessed at.
 	private func spanCovering(_ home: OverlayHome, in resolved: ResolvedProject?)
 		-> Overlay.Span?
 	{
-		guard let path = home, let entry = entry(at: path), let resolved else { return nil }
-		guard let extent = Self.extent(of: path, in: resolved) else { return nil }
-
-		func means(_ endpoint: Overlay.Span.Endpoint) -> Bool {
-			guard let where_ = Overlay.Span.extent(of: endpoint, in: resolved) else { return false }
-			return abs(where_.start - extent.start) < 1e-6 && abs(where_.end - extent.end) < 1e-6
-		}
+		guard let path = home, let entry = entry(at: path) else { return nil }
+		let extent = resolved.flatMap { Self.extent(of: path, in: $0) }
 
 		var name: Overlay.Span.Endpoint?
 		if let label = entry.label {
@@ -110,7 +111,16 @@ extension Project {
 		} else if case .clip(let reference) = entry.source {
 			name = .clip(reference)
 		}
-		if let name, means(name) { return .marks(from: name, to: name) }
+
+		if let name {
+			guard let resolved, let extent else { return .marks(from: name, to: name) }
+			let where_ = Overlay.Span.extent(of: name, in: resolved)
+			if let where_, abs(where_.start - extent.start) < 1e-6,
+			   abs(where_.end - extent.end) < 1e-6 {
+				return .marks(from: name, to: name)
+			}
+		}
+		guard let extent else { return nil }
 		return .times(from: extent.start, to: extent.end)
 	}
 

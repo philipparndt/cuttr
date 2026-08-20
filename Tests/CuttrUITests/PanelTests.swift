@@ -507,6 +507,144 @@ import Testing
 			#expect(overlay.span == .clips(from: ClipReference("shot"), to: ClipReference("shot")))
 		}
 	}
+
+	/// The timeline's own `+` offers everything that can go on one — the
+	/// entries, the overlays, and a sound.
+	@Test func theTimelinePlusOffersEntriesAndOverlaysAndSound() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+		panel.reload(Project(timeline: [TimelineEntry(clip: ClipReference("shot"))]),
+		             vocabulary: ComposeDocument.Vocabulary())
+		guard let menu = panel.addEntryMenu() else {
+			Issue.record("no add menu on the timeline")
+			return
+		}
+		let titles = menu.items.map(\.title)
+		#expect(titles.contains("Clip"))
+		#expect(titles.contains("Section"))
+		#expect(titles.contains("Card"))
+		#expect(titles.contains("Caption"))
+		#expect(titles.contains("Sound"))
+	}
+
+	/// Added while a shot is selected, the caption is written inside that shot
+	/// — where it covers that placement and needs no name to be found by.
+	@Test func aCaptionAddedOnASelectedEntryIsWrittenInsideIt() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+		panel.reload(Project(timeline: [
+			TimelineEntry(clip: ClipReference("one")),
+			TimelineEntry(clip: ClipReference("two")),
+		]), vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		var written: Project?
+		panel.onChange = { written = $0 }
+
+		panel.selectRow(1)
+		guard let menu = panel.addEntryMenu(),
+		      let caption = menu.items.firstIndex(where: { $0.title == "Caption" })
+		else {
+			Issue.record("no Caption on the menu")
+			return
+		}
+		menu.performActionForItem(at: caption)
+
+		#expect(written?.overlays.isEmpty == true)
+		#expect(written?.timeline[0].overlays.isEmpty == true)
+		#expect(written?.timeline[1].overlays.count == 1)
+		// No range of its own: it covers the placement it is written in.
+		#expect(written?.timeline[1].overlays[0].appearances.isEmpty == true)
+	}
+
+	/// And on the heading at the end, which is the top-level list — the one
+	/// place an overlay is on the programme's own clock.
+	@Test func aCaptionAddedOnTheLooseHeadingIsGlobal() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+		panel.reload(Project(timeline: [TimelineEntry(clip: ClipReference("one"))]),
+		             vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		var written: Project?
+		panel.onChange = { written = $0 }
+
+		// The heading is the last row, and it is there even with nothing under
+		// it — otherwise there would be no way to put the first thing there.
+		panel.selectRow(panel.rowCountForTesting - 1)
+		guard let menu = panel.addEntryMenu(),
+		      let caption = menu.items.firstIndex(where: { $0.title == "Caption" })
+		else {
+			Issue.record("no Caption on the menu")
+			return
+		}
+		menu.performActionForItem(at: caption)
+		#expect(written?.overlays.count == 1)
+		#expect(written?.timeline[0].overlays.isEmpty == true)
+	}
+
+	/// The same list is on a row's own menu, so adding to a shot is done where
+	/// the shot is rather than somewhere else and then pointed at it.
+	@Test func aRowsMenuOffersTheSameThingsAndAddsThemThere() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+		panel.reload(Project(timeline: [
+			TimelineEntry(clip: ClipReference("one")),
+			TimelineEntry(clip: ClipReference("two")),
+		]), vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		var written: Project?
+		panel.onChange = { written = $0 }
+
+		guard let menu = panel.rowMenu(1),
+		      let add = menu.items.first(where: { $0.title == "Add" })?.submenu,
+		      let caption = add.items.firstIndex(where: { $0.title == "Caption" })
+		else {
+			Issue.record("no Add submenu on the row")
+			return
+		}
+		add.performActionForItem(at: caption)
+		#expect(written?.timeline[1].overlays.count == 1)
+	}
+
+	/// Dragged from one shot to another, the caption belongs to the other one.
+	@Test func draggingAnOverlayOntoAnotherEntryRehomesIt() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+		panel.reload(Project(timeline: [
+			TimelineEntry(clip: ClipReference("one"),
+			              overlays: [Overlay(kind: .text("moving", style: nil), appearances: [])]),
+			TimelineEntry(clip: ClipReference("two")),
+		]), vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		var written: Project?
+		panel.onChange = { written = $0 }
+
+		#expect(panel.rehome(.entry(path: [0], index: 0), onto: [1]))
+		#expect(written?.timeline[0].overlays.isEmpty == true)
+		#expect(written?.timeline[1].overlays.count == 1)
+	}
+
+	/// And dropped on the heading at the end it becomes one of the global ones,
+	/// still on at the moments it was on before.
+	@Test func draggingAnOverlayOntoTheHeadingMakesItGlobal() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+		panel.reload(Project(timeline: [
+			TimelineEntry(clip: ClipReference("one"), label: "opening",
+			              overlays: [Overlay(kind: .text("moving", style: nil), appearances: [])]),
+		]), vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		var written: Project?
+		panel.onChange = { written = $0 }
+
+		// No resolved programme here, so there is nothing to work the times out
+		// from — but the placement has a name, and a name is what it would have
+		// been written as anyway.
+		#expect(panel.rehome(.entry(path: [0], index: 0), onto: nil))
+		#expect(written?.overlays.count == 1)
+		#expect(written?.overlays[0].span
+			== .marks(from: .group("opening"), to: .group("opening")))
+		#expect(written?.timeline[0].overlays.isEmpty == true)
+	}
 }
 
 /// The menu on a section.

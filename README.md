@@ -224,6 +224,15 @@ graduate from.
 Typing in it follows the file's own rules, because it is the same rule: `intro`
 is a clip, `#b-roll and not #reject` is a query, `@introduction` is a section.
 
+**Things are made where they will live.** The timeline's `+` offers everything
+that can go on one — a clip, a section, a card, any kind of overlay, a sound —
+and so does `Add ▸` on any row's own menu. What is added lands relative to what
+is selected: inside a selected section, after anything else, and an overlay
+added on a clip is *written inside that clip*, where it covers that placement
+and needs no name to be found by. Drag one from a shot to a section and it
+belongs to the section; drag it to the heading at the end and it becomes one of
+the global ones, still on at exactly the moments it was on before.
+
 Takes edited in another tab update the programme at once — re-cut a clip, track
 a face, and the project window has it before you have switched back.
 
