@@ -138,6 +138,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		window.tabbingMode = .disallowed
 		// One band at the top, and the bar is it. See `DocumentBar.height`.
 		window.titleVisibility = .hidden
+		DocumentBar.centreTrafficLights(in: window)
 		super.init(window: window)
 		window.delegate = self
 		build()
@@ -1013,6 +1014,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 	public func windowDidResize(_ notification: Notification) {
 		layoutOverlays()
+		// AppKit puts the traffic lights back where it likes them on every
+		// resize, so they are placed again here.
+		if let window { DocumentBar.centreTrafficLights(in: window) }
 	}
 
 	/// One frame of the *output*, which is what a project's timeline is in.

@@ -29,6 +29,39 @@ public final class DocumentBar: NSView {
 	/// title has always sat.
 	public static let height: CGFloat = 52
 
+	/// Puts the close, minimise and zoom buttons in the middle of the bar.
+	///
+	/// AppKit centres them in the *titlebar*, which is 28 points whatever the
+	/// window does — so under a 52-point bar they sat ten points high, while the
+	/// name and the clock were centred below them. Three dots that line up with
+	/// nothing are the first thing the eye finds in a window.
+	///
+	/// Moved rather than asked, because asking does not work. An empty titlebar
+	/// accessory makes the band taller — that is the mechanism a unified toolbar
+	/// uses — and it was tried first: measured afterwards the buttons had not
+	/// moved at all, still sixteen points from the top of a fifty-two point
+	/// band. So this sets the frames, and does it again whenever the window
+	/// changes size, because AppKit puts them back.
+	///
+	/// Not in full screen, where there is no titlebar to be in the middle of.
+	public static func centreTrafficLights(in window: NSWindow) {
+		guard !window.styleMask.contains(.fullScreen), let content = window.contentView else {
+			return
+		}
+		// Worked out in the content view, which is the thing the bar is pinned
+		// to, and converted back — rather than in whatever coordinate space the
+		// titlebar happens to hand out.
+		let middle = content.bounds.maxY - height / 2
+		for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+			guard let button = window.standardWindowButton(kind),
+			      let holder = button.superview
+			else { continue }
+			let wanted = holder.convert(NSPoint(x: 0, y: middle), from: content)
+			button.setFrameOrigin(NSPoint(x: button.frame.origin.x,
+			                              y: wanted.y - button.frame.height / 2))
+		}
+	}
+
 	/// How far in the first thing starts, so it clears the traffic lights.
 	///
 	/// This is the reason the program refused `.fullSizeContentView` for so

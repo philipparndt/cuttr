@@ -123,6 +123,75 @@ import Testing
 		}
 	}
 }
+/// The traffic lights sit in the middle of the bar.
+///
+/// AppKit centres them in the *titlebar*, which is 28 points whatever the window
+/// does — so under a 52-point bar they sat ten points high while the name and
+/// the clock were centred below them, and three dots lining up with nothing are
+/// the first thing the eye finds in a window.
+///
+/// Measured, because the obvious fix does not work: an empty titlebar accessory
+/// makes the band taller — the mechanism a unified toolbar uses — and after
+/// adding one the buttons had not moved at all, still sixteen points from the
+/// top of a fifty-two point band.
+@Suite @MainActor struct TrafficLightTests {
+
+	private func buttons(of window: NSWindow) -> [(NSWindow.ButtonType, CGFloat)] {
+		guard let content = window.contentView else { return [] }
+		return [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+			.compactMap { kind in
+				guard let button = window.standardWindowButton(kind) else { return nil }
+				let here = button.convert(button.bounds, to: content)
+				return (kind, content.bounds.maxY - here.midY)
+			}
+	}
+
+	@Test func theySitInTheMiddleOfTheBandInEveryWindow() {
+		_ = NSApplication.shared
+		let cutting = MainWindowController(document: TakeDocument())
+		let composing = ComposeWindowController(document: ComposeDocument())
+		defer {
+			cutting.window?.close()
+			composing.window?.close()
+		}
+		for controller in [cutting as NSWindowController, composing as NSWindowController] {
+			guard let window = controller.window else { continue }
+			window.setContentSize(NSSize(width: 1400, height: 900))
+			window.makeKeyAndOrderFront(nil)
+			window.layoutIfNeeded()
+			let placed = buttons(of: window)
+			#expect(placed.count == 3, "no traffic lights on \(type(of: controller))")
+			for (kind, fromTop) in placed {
+				#expect(abs(fromTop - DocumentBar.height / 2) < 1,
+				        "\(kind) is \(fromTop) from the top of a \(DocumentBar.height) band")
+			}
+		}
+	}
+
+	/// And they are put back after a resize, because AppKit puts them back
+	/// where it likes them.
+	@Test func theyStayThereWhenTheWindowIsResized() {
+		_ = NSApplication.shared
+		let controller = MainWindowController(document: TakeDocument())
+		defer { controller.window?.close() }
+		guard let window = controller.window else { return }
+		window.makeKeyAndOrderFront(nil)
+		for size in [NSSize(width: 1400, height: 900), NSSize(width: 1000, height: 700),
+		             NSSize(width: 1600, height: 1000)] {
+			window.setContentSize(size)
+			window.layoutIfNeeded()
+			// The notification AppKit would send, which is where the placing
+			// happens.
+			(controller as NSWindowDelegate).windowDidResize?(
+				Notification(name: NSWindow.didResizeNotification, object: window))
+			for (kind, fromTop) in buttons(of: window) {
+				#expect(abs(fromTop - DocumentBar.height / 2) < 1,
+				        "at \(size) \(kind) drifted to \(fromTop)")
+			}
+		}
+	}
+}
+
 /// One bar, both windows, and the clock always in it.
 ///
 /// This replaces two suites: one that asserted the mode buttons were on the

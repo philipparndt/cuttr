@@ -115,6 +115,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		window.tabbingMode = .disallowed
 		// One band at the top, and the bar is it. See `DocumentBar.height`.
 		window.titleVisibility = .hidden
+		DocumentBar.centreTrafficLights(in: window)
 		super.init(window: window)
 		window.delegate = self
 		build()
@@ -1830,6 +1831,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		default:
 			return true
 		}
+	}
+
+	/// AppKit puts the traffic lights back where it likes them on every
+	/// resize, so they are placed again here. See `centreTrafficLights`.
+	public func windowDidResize(_ notification: Notification) {
+		if let window { DocumentBar.centreTrafficLights(in: window) }
 	}
 
 	public func windowShouldClose(_ sender: NSWindow) -> Bool {

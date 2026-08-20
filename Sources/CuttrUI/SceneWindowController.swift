@@ -47,6 +47,7 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 			backing: .buffered, defer: false)
 		window.titlebarAppearsTransparent = true
 		window.titleVisibility = .hidden
+		DocumentBar.centreTrafficLights(in: window)
 		window.appearance = NSAppearance(named: .darkAqua)
 		window.backgroundColor = Theme.background
 		window.minSize = NSSize(width: 860, height: 560)
@@ -437,6 +438,12 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 			return manager.canRedo
 		default: return true
 		}
+	}
+
+	/// AppKit puts the traffic lights back where it likes them on every
+	/// resize, so they are placed again here. See `centreTrafficLights`.
+	public func windowDidResize(_ notification: Notification) {
+		if let window { DocumentBar.centreTrafficLights(in: window) }
 	}
 
 	public func windowWillClose(_ notification: Notification) {
