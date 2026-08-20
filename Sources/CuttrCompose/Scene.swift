@@ -86,9 +86,19 @@ public struct Scene: Sendable, Equatable {
 	/// a list of five is a gradient editor — a thing this program would then
 	/// have to draw. A file that wants more can say so later; nothing here
 	/// stops it.
+	///
+	/// **A flat fill is a gradient whose stops are the same colour.** The file
+	/// still spells one colour as one word — `to` is `nil` for it, and stays
+	/// `nil`, because `background: "#101418"` is what somebody writes and what
+	/// they get back. But every piece of arithmetic here reads a missing `to`
+	/// as "the same as `from`", which is what makes ramping from a flat colour
+	/// into a gradient fall out of the interpolation instead of needing a rule
+	/// of its own. See ``at(_:keys:)``.
 	public struct Background: Sendable, Equatable {
 		public var from: RGBA
-		/// `nil` for a flat colour.
+		/// `nil` for a flat colour — which is to say, the same colour as
+		/// ``from``. Kept optional rather than filled in so that the one word
+		/// somebody wrote is the one word written back.
 		public var to: RGBA?
 		/// Degrees anticlockwise from left-to-right, so `90` runs up the frame
 		/// and `0` runs across it. The same convention as ``Key/rotation``.
@@ -115,6 +125,55 @@ public struct Scene: Sendable, Equatable {
 			return (CGPoint(x: centre.x - dx, y: centre.y - dy),
 			        CGPoint(x: centre.x + dx, y: centre.y + dy))
 		}
+
+		/// This background as the keys have it at a moment: both stops and the
+		/// angle, ready to be drawn.
+		///
+		/// The part declares what it is *before the first key says otherwise*,
+		/// and a key states what changes there. So a key's `color` is the first
+		/// stop, its `to` is the second, its `angle` is the direction, and
+		/// anything a key leaves out is what the part said.
+		///
+		/// A key stating `to` or `angle` is what makes the whole thing a ramp.
+		/// Nothing stating either of them takes the path this had before there
+		/// were gradient keys — the declared `to`, tinted at the first stop by
+		/// `color` — because a flat background must go on being drawn as one
+		/// fill, and every scene written before now must come out the same
+		/// pixels it always did.
+		///
+		/// `keys` wants to be ``Scene/filled(_:)``, so that a stop stated once
+		/// holds from there.
+		public func at(_ time: Double, keys: [Key]) -> Background {
+			guard Scene.movesTheGradient(keys) else {
+				let now = Scene.state(of: keys, at: time)
+				return Background(from: now?.color ?? from, to: to, angle: angle)
+			}
+			// Resolved against the part *before* interpolating, not after: a
+			// flat fill is two stops of the same colour, so a background that
+			// starts flat and ends ramped has a second stop at both ends and
+			// the ramp between them is ordinary arithmetic.
+			let resolved = keys.map { key -> Key in
+				var out = key
+				let start = key.color ?? from
+				out.color = start
+				out.to = key.to ?? to ?? start
+				out.angle = key.angle ?? angle
+				return out
+			}
+			guard let now = Scene.state(of: resolved, at: time) else {
+				return Background(from: from, to: to, angle: angle)
+			}
+			return Background(from: now.color ?? from, to: now.to, angle: now.angle ?? angle)
+		}
+	}
+
+	/// Whether any key states the gradient itself rather than only tinting its
+	/// first stop.
+	///
+	/// The one thing that decides which of the two paths a background is drawn
+	/// by, so both render paths ask it and neither guesses.
+	public static func movesTheGradient(_ keys: [Key]) -> Bool {
+		keys.contains { $0.to != nil || $0.angle != nil }
 	}
 
 	/// Where a part is at one moment. Times are seconds from the start of the
@@ -153,6 +212,27 @@ public struct Scene: Sendable, Equatable {
 		/// keys and one extra field, where before it was two text parts crossed
 		/// over each other.
 		public var color: RGBA?
+		/// A background's far stop here — the other end of the ramp.
+		///
+		/// The same word the part declares it with, and beside `color`, which
+		/// is the near one. Between them a background is animated in the thing
+		/// it actually is: a gradient that ramps into another gradient, rather
+		/// than a flat colour that can move while the ramp behind it cannot.
+		///
+		/// A key says *flat* by stating `to` equal to `color`, because a flat
+		/// fill is a gradient whose stops are the same colour. There is nothing
+		/// to say "no ramp from here": a `nil` here means inherited, as it does
+		/// in every other field.
+		public var to: RGBA?
+		/// A background's ramp direction here, in degrees, the same convention
+		/// the part declares.
+		///
+		/// Turned the short way round between two keys — 350 to 10 is twenty
+		/// degrees, not three hundred and forty — because that is what the two
+		/// numbers look like on screen. Which means a full turn cannot be
+		/// written as 0 to 360, since those are the same direction: say 120 and
+		/// 240 on the way and it goes round.
+		public var angle: Double?
 		/// How it gets here from the key before.
 		public var ease: Ease
 
@@ -161,6 +241,7 @@ public struct Scene: Sendable, Equatable {
 			scale: Double? = nil, rotation: Double? = nil,
 			width: Double? = nil, height: Double? = nil,
 			progress: Double? = nil, shape: ShapeKind? = nil, color: RGBA? = nil,
+			to: RGBA? = nil, angle: Double? = nil,
 			ease: Ease = .inOut
 		) {
 			self.progress = progress
@@ -174,6 +255,8 @@ public struct Scene: Sendable, Equatable {
 			self.width = width
 			self.height = height
 			self.color = color
+			self.to = to
+			self.angle = angle
 			self.ease = ease
 		}
 	}
@@ -213,6 +296,12 @@ public struct Scene: Sendable, Equatable {
 			// otherwise.
 			filled.color = key.color ?? last.color
 			filled.shape = key.shape ?? last.shape
+			// The far stop and the angle, carried like the colour and for the
+			// same reason: a background with none of them anywhere is drawn the
+			// way the part declares it, and a default here would quietly
+			// override that.
+			filled.to = key.to ?? last.to
+			filled.angle = key.angle ?? last.angle
 			// Carried forward and not defaulted, like the colour and the kind.
 			// A part with no `progress` at any key has never been told how far
 			// it has got, which is not the same as being told nought: it is how
@@ -245,6 +334,20 @@ public struct Scene: Sendable, Equatable {
 			guard let a, let b else { return b ?? a }
 			return a + (b - a) * fraction
 		}
+		/// The gradient's angle, turned the short way round.
+		///
+		/// Not ``Key/rotation``, which is linear on purpose — a part told to go
+		/// from nought to seven hundred and twenty spins twice, and that is a
+		/// thing somebody means. A gradient's direction is not: 350 and 10 are
+		/// twenty degrees apart wherever they are written, and going the other
+		/// way round is nothing anybody asked for.
+		func turning(_ a: Double?, _ b: Double?) -> Double? {
+			guard let a, let b else { return b ?? a }
+			var delta = (b - a).truncatingRemainder(dividingBy: 360)
+			if delta > 180 { delta -= 360 }
+			if delta <= -180 { delta += 360 }
+			return a + delta * fraction
+		}
 		return Key(
 			t: time,
 			x: between(before.x, after.x), y: between(before.y, after.y),
@@ -258,6 +361,8 @@ public struct Scene: Sendable, Equatable {
 			// is a separate question, and `morph(of:at:)` is where it is asked.
 			shape: before.shape ?? after.shape,
 			color: RGBA.between(before.color, after.color, fraction),
+			to: RGBA.between(before.to, after.to, fraction),
+			angle: turning(before.angle, after.angle),
 			ease: after.ease)
 	}
 

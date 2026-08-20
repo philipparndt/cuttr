@@ -1197,10 +1197,16 @@ public enum OverlayLayers {
 				layer = picture
 			case .background(let background):
 				natural = size
-				if let to = background.to {
+				// The background as the first key has it. For one whose keys
+				// only tint it that is the declared ramp with `color` at the
+				// near stop, which is what this always built; for one whose
+				// keys state the gradient it is a ramp either way, because a
+				// flat fill is a gradient whose stops are the same colour.
+				let start = background.at(first.t, keys: keys)
+				if let to = start.to {
 					let ramp = CAGradientLayer()
-					ramp.colors = [cgColor(first.color ?? background.from), cgColor(to)]
-					let ends = background.ends(in: CGSize(width: 1, height: 1))
+					ramp.colors = [cgColor(start.from), cgColor(to)]
+					let ends = start.ends(in: CGSize(width: 1, height: 1))
 					// A gradient layer's unit space is the layer's own, which on
 					// this platform is bottom-left up — the same way round as
 					// everything else in a scene. Flipping it here, which is
@@ -1212,7 +1218,7 @@ public enum OverlayLayers {
 					ink = (ramp, "colors")
 				} else {
 					let flat = CALayer()
-					flat.backgroundColor = cgColor(first.color ?? background.from)
+					flat.backgroundColor = cgColor(start.from)
 					layer = flat
 					ink = (flat, "backgroundColor")
 				}
@@ -1252,7 +1258,10 @@ public enum OverlayLayers {
 			// a background must never do — so it is placed and left alone.
 			if case .background(let background) = part.content {
 				layer.position = CGPoint(x: size.width / 2, y: size.height / 2)
-				if coloured, let ink {
+				if Scene.movesTheGradient(keys), let ramp = layer as? CAGradientLayer {
+					turning(background, on: ramp, keys: keys, over: span, host: host,
+					        from: resolved.start)
+				} else if coloured, let ink {
 					if let to = background.to {
 						animate(ink.path, keys.map {
 							[cgColor($0.color ?? background.from), cgColor(to)]
@@ -1312,6 +1321,48 @@ public enum OverlayLayers {
 			root.addSublayer(layer)
 		}
 		return root
+	}
+
+	/// A background whose gradient moves: both stops and the direction, as one
+	/// sampled track.
+	///
+	/// Sampled rather than keyframed at the keys, which is what every other
+	/// property here is, and for one reason: Core Animation interpolates a
+	/// gradient's ends as *points*. Two directions forty degrees apart are two
+	/// points on a circle, and the straight line between them is a chord — so
+	/// half way through a turn the ramp is aimed correctly and reaches less far
+	/// than it should, which shows as the gradient tightening and loosening as
+	/// it goes round. Asking ``Scene/Background/at(_:keys:)`` for the answer
+	/// often enough that the chord *is* the arc costs a few hundred numbers and
+	/// makes the export the picture the preview draws. The same trick a bubble's
+	/// tail uses.
+	///
+	/// The easing is in the samples, so the segments between them are linear.
+	private static func turning(
+		_ background: Scene.Background, on ramp: CAGradientLayer, keys: [Scene.Key],
+		over span: Double, host: Host, from start: Double
+	) {
+		// Thirty a second, which is finer than any frame rate this renders at,
+		// and never more than a scene's worth of them.
+		let steps = min(300, max(2, Int((span * 30).rounded(.up))))
+		let moments = (0 ... steps).map { Double($0) / Double(steps) }
+		let states = moments.map { background.at($0 * span, keys: keys) }
+
+		func track(_ path: String, _ values: [Any]) {
+			let animation = CAKeyframeAnimation(keyPath: path)
+			animation.values = values
+			animation.keyTimes = moments.map { NSNumber(value: $0) }
+			animation.calculationMode = .linear
+			animation.beginTime = host.beginTime(start)
+			animation.duration = span
+			animation.fillMode = .both
+			animation.isRemovedOnCompletion = false
+			ramp.add(animation, forKey: path)
+		}
+		track("colors", states.map { [cgColor($0.from), cgColor($0.to ?? $0.from)] })
+		let ends = states.map { $0.ends(in: CGSize(width: 1, height: 1)) }
+		track("startPoint", ends.map { NSValue(point: NSPoint(x: $0.start.x, y: $0.start.y)) })
+		track("endPoint", ends.map { NSValue(point: NSPoint(x: $0.end.x, y: $0.end.y)) })
 	}
 
 	/// The outline of a shape part at one key, in the frame's coordinates.

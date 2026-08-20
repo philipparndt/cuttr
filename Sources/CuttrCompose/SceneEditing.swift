@@ -16,13 +16,16 @@ public extension Scene {
 	/// would otherwise be a switch that has to be kept in step with the format.
 	enum Field: String, Sendable, CaseIterable {
 		case x, y, opacity, scale, rotation, width, height, progress
+		/// Which way a background's ramp runs. Not every part has one, which is
+		/// why ``fields(for:)`` and not ``allCases`` is what the form asks.
+		case angle
 
 		/// What moving this by one unit means on screen, for a drag.
 		public var unit: String {
 			switch self {
 			case .x, .y, .width, .height: return "of the frame"
 			case .opacity, .scale, .progress: return "×"
-			case .rotation: return "°"
+			case .rotation, .angle: return "°"
 			}
 		}
 	}
@@ -40,10 +43,12 @@ public extension Scene {
 	/// text has no width and height of its own.
 	static func fields(for content: Part.Content) -> [Field] {
 		switch content {
-		case .background: return [.opacity]
+		case .background: return [.opacity, .angle]
 		case .text: return [.x, .y, .opacity, .scale, .rotation]
 		case .shape, .image: return [.x, .y, .opacity, .scale, .rotation, .width, .height]
-		case .bar: return Field.allCases
+		// Everything a shape has, and how full it is. Spelt out rather than
+		// ``allCases``, which would hand a bar the gradient's angle.
+		case .bar: return [.x, .y, .opacity, .scale, .rotation, .width, .height, .progress]
 		case .spinner: return [.x, .y, .opacity, .scale, .rotation, .progress]
 		}
 	}
@@ -72,6 +77,7 @@ public extension Scene.Key {
 			case .width: return width
 			case .height: return height
 			case .progress: return progress
+			case .angle: return angle
 			}
 		}
 		set {
@@ -84,13 +90,15 @@ public extension Scene.Key {
 			case .width: width = newValue
 			case .height: height = newValue
 			case .progress: progress = newValue
+			case .angle: angle = newValue
 			}
 		}
 	}
 
 	/// Whether this key says anything beyond when it is.
 	var isEmpty: Bool {
-		Scene.Field.allCases.allSatisfy { self[$0] == nil } && color == nil && shape == nil
+		Scene.Field.allCases.allSatisfy { self[$0] == nil }
+			&& color == nil && to == nil && shape == nil
 	}
 }
 
@@ -132,6 +140,7 @@ public extension Scene.Part {
 			key[field] = now[field]
 		}
 		if previous == nil || now.color != previous?.color { key.color = now.color }
+		if previous == nil || now.to != previous?.to { key.to = now.to }
 		// The kind is not a number and does not slide, so a key dropped inside
 		// a morph takes the kind it is coming *from*: the morph then runs from
 		// here to the same place it was going, and the shape at this instant is

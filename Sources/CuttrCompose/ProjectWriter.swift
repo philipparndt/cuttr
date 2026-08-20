@@ -72,6 +72,11 @@ public enum ProjectWriter {
 					if let progress = key.progress { fields.append("progress: \(trim(progress))") }
 					if let shape = key.shape { fields.append("shape: \(shape.rawValue)") }
 					if let color = key.color { fields.append("color: \(scalar(color.hex))") }
+					// The far stop and the angle sit with the colour, which is
+					// the near one: a background's three gradient words in the
+					// order the part declares them.
+					if let to = key.to { fields.append("to: \(scalar(to.hex))") }
+					if let angle = key.angle { fields.append("angle: \(trim(angle))") }
 					if key.ease != .inOut { fields.append("ease: \(key.ease.rawValue)") }
 					out += "          - {" + fields.joined(separator: ", ") + "}\n"
 				}
