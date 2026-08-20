@@ -170,6 +170,25 @@ public enum TakeReader {
 			}
 		}
 
+		// The sounds that are not words. Read leniently, and in the order the
+		// file has them: a block missing its `sound:` is skipped rather than
+		// failing a whole take, and an unfamiliar kind is kept exactly as it
+		// was written — a later version will know what `sigh` means and this
+		// one must not turn it into something else on the way past.
+		var sounds: [SoundEvent] = []
+		for entry in (root.removeValue(forKey: "sounds") as? [Any]) ?? [] {
+			guard let m = mapping(entry),
+			      let kind = nonEmpty(m["sound"] as? String ?? ""),
+			      let start = try m["start"].map({ try time($0, key: "start") }),
+			      let end = try m["end"].map({ try time($0, key: "end") })
+			else { continue }
+			sounds.append(SoundEvent(
+				kind: kind.lowercased(), start: start, end: end,
+				// A block with no confidence on it is one somebody typed, and
+				// somebody typing it is as sure as it gets.
+				confidence: number(m["confidence"]) ?? 1))
+		}
+
 		var measured = Measured()
 		if let m = root.removeValue(forKey: "measured").flatMap(mapping) {
 			measured.loudness = number(m["loudness"])
@@ -193,7 +212,8 @@ public enum TakeReader {
 		}
 
 		return Take(video: video, audio: audio, clips: clips, anchors: anchors, words: words,
-		            measured: measured, look: look, source: source, unknownKeys: root)
+		            sounds: sounds, measured: measured, look: look, source: source,
+		            unknownKeys: root)
 	}
 
 	static func number(_ value: Any?) -> Double? {
@@ -339,6 +359,24 @@ public enum TakeWriter {
 				if !words.locale.isEmpty {
 					out += "  locale:     \(scalar(words.locale))\n"
 				}
+			}
+		}
+
+		// What was heard that nobody said, directly under the words: it is the
+		// same kind of claim about the same recording, and it reads as a
+		// continuation of them.
+		//
+		// No blank line between the blocks, unlike the clips. A clip is
+		// something somebody wrote and wants room around; these are findings,
+		// and a column somebody scans down for the laugh at four minutes.
+		if !take.sounds.isEmpty {
+			out += "\nsounds:\n"
+			for sound in take.sounds {
+				out += "  - sound:      \(scalar(sound.kind))\n"
+				out += "    start:      \(Timecode.string(sound.start))\n"
+				out += "    end:        \(Timecode.string(sound.end))"
+				out += "   # \(Timecode.string(sound.duration))\n"
+				out += "    confidence: \(number(sound.confidence, places: 2))\n"
 			}
 		}
 

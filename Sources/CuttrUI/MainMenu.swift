@@ -200,6 +200,14 @@ enum MainMenu {
 		transcribe.toolTip = "Reads the audio on this Mac and writes the words beside the take.\n"
 			+ "Nothing is uploaded. The answer is kept, so this is asked once."
 		audio.addItem(transcribe)
+		// Done as part of transcribing, and here as well, because a take that
+		// was transcribed before this existed should not have to be listened to
+		// again from scratch to get its laughs.
+		let sounds = command("Find the Sounds",
+		                     #selector(MainWindowController.findSoundsAction(_:)), "")
+		sounds.toolTip = "Listens for what is not a word — a laugh, applause, a cough —\n"
+			+ "and writes it into the take. On this Mac; nothing is uploaded."
+		audio.addItem(sounds)
 		audioItem.submenu = audio
 		main.addItem(audioItem)
 

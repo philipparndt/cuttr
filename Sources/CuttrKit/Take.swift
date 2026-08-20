@@ -46,6 +46,18 @@ public struct Take: Sendable, Equatable {
 	/// take is one recording and one recording has one transcript.
 	public var words: Words?
 
+	/// What was heard in this recording that nobody said: a laugh, applause, a
+	/// cough. See ``SoundEvent``.
+	///
+	/// In the take file itself rather than in a sidecar, unlike the words, and
+	/// the difference is arithmetic: a five-minute take has four hundred words
+	/// and six laughs. Six blocks do not bury the clips, they read as part of
+	/// the cut list — and they are exactly the sort of thing somebody wants to
+	/// correct by hand, because a classifier that has heard a cough in a laugh
+	/// should be one block to delete in an editor rather than a reason to run
+	/// the whole pass again.
+	public var sounds: [SoundEvent]
+
 	/// The subclips, in the order they appear in the file.
 	///
 	/// The file's order is kept rather than sorted by time. Two clips may
@@ -70,7 +82,7 @@ public struct Take: Sendable, Equatable {
 
 	public init(
 		video: String? = nil, audio: AudioTrack? = nil, clips: [Clip] = [],
-		anchors: [Anchor] = [], words: Words? = nil,
+		anchors: [Anchor] = [], words: Words? = nil, sounds: [SoundEvent] = [],
 		measured: Measured = Measured(), look: Look = .none,
 		source: TakeSource? = nil, unknownKeys: [String: Any] = [:]
 	) {
@@ -80,6 +92,7 @@ public struct Take: Sendable, Equatable {
 		self.clips = clips
 		self.anchors = anchors
 		self.words = words
+		self.sounds = sounds
 		self.measured = measured
 		self.look = look
 		self.unknown = UnknownKeys(storage: unknownKeys)
@@ -87,7 +100,7 @@ public struct Take: Sendable, Equatable {
 
 	public static func == (a: Take, b: Take) -> Bool {
 		a.video == b.video && a.audio == b.audio && a.clips == b.clips
-			&& a.anchors == b.anchors && a.words == b.words
+			&& a.anchors == b.anchors && a.words == b.words && a.sounds == b.sounds
 			&& a.measured == b.measured && a.look == b.look
 			&& a.source == b.source
 	}

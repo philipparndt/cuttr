@@ -15,6 +15,13 @@ public enum Theme {
 	public static let text = NSColor(calibratedWhite: 0.88, alpha: 1)
 	public static let dimText = NSColor(calibratedWhite: 0.55, alpha: 1)
 
+	/// `[laughter]` in the transcript: something that was heard and not said.
+	///
+	/// Its own hue rather than a weight of the text's, because it is not a
+	/// quieter kind of word — it is a different claim about the recording, and
+	/// a reader skimming for the laugh should find it without reading.
+	public static let heardNotSaid = NSColor(calibratedRed: 0.45, green: 0.78, blue: 0.58, alpha: 1)
+
 	/// The camera's own audio, and the separate recorder's. Two hues, because
 	/// the whole alignment task is telling one from the other at a glance.
 	public static let cameraWave = NSColor(calibratedRed: 0.42, green: 0.62, blue: 0.85, alpha: 1)

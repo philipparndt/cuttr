@@ -176,6 +176,20 @@ public struct Transcript: Sendable, Equatable {
 		phrase(indices(in: span), limit: limit)
 	}
 
+	/// Everything said inside a span, as one line of prose.
+	///
+	/// What a model is handed when it is asked to name a clip — the *whole*
+	/// passage rather than the first few words, because the difference between
+	/// naming a clip and abbreviating it is having read to the end of it. It is
+	/// capped all the same: a two-minute clip is three hundred words, and a
+	/// model given three hundred words to make a label out of will make a label
+	/// out of the last of them.
+	public func text(covering span: ClosedRange<Double>, limit: Int = 60) -> String {
+		let clamped = indices(in: span).clamped(to: 0 ..< words.count)
+		guard !clamped.isEmpty else { return "" }
+		return words[clamped].prefix(limit).map(\.text).joined(separator: " ")
+	}
+
 	// MARK: - Finding a phrase
 
 	/// The run of words matching `phrase`, at or after `from`, wrapping once.

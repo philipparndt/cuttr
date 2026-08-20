@@ -50,13 +50,58 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	private let button = NSButton()
 
 	private var transcript = Transcript()
-	/// Where each word sits in the text, parallel to `transcript.words`.
-	private var ranges: [NSRange] = []
-	/// Where each pause mark sits, and the silence it stands for. A pause is
-	/// not a word — it is the *absence* of one — but it is a real stretch of
-	/// the take, and somebody who selects it means it.
-	private var marks: [(range: NSRange, after: Int, start: Double, end: Double)] = []
-	/// The word the playhead is in, if any.
+	private var sounds: [SoundEvent] = []
+
+	/// One thing in the laid-out text.
+	///
+	/// There were two kinds of thing in this text and there are now three, and
+	/// three arrays that have to be kept parallel to each other is two too
+	/// many. They are one kind with a ``What`` on it instead, because
+	/// everything this pane does asks all three the same two questions: where
+	/// are you in the text, and what stretch of the take are you? The selection
+	/// arithmetic, the lit thing under the playhead and the menu are each one
+	/// pass over one array now, and none of them has a special case in it.
+	private struct Piece {
+		enum What: Equatable {
+			/// A word, by its index in the transcript.
+			case word(Int)
+			/// The silence after the word at this index. Not a word — the
+			/// *absence* of one — but a real stretch of the take, and somebody
+			/// who selects it means it.
+			case pause(after: Int)
+			/// Something that was heard and not said, by its index in
+			/// ``sounds``. Selectable exactly like a word, because a laugh is
+			/// as much a thing to play or cut as a sentence is.
+			case sound(Int)
+		}
+
+		var what: What
+		/// Where it sits in the text.
+		var range: NSRange
+		/// What stretch of the take it is, on the video's clock.
+		var start: Double
+		var end: Double
+
+		var wordIndex: Int? {
+			if case .word(let index) = what { return index }
+			return nil
+		}
+
+		var soundIndex: Int? {
+			if case .sound(let index) = what { return index }
+			return nil
+		}
+
+		func contains(_ time: Double) -> Bool { time >= start && time < end }
+	}
+
+	/// Everything in the text, in the order it is laid out.
+	private var pieces: [Piece] = []
+	/// Where each word sits among the pieces, parallel to `transcript.words` —
+	/// so that "the third word" is still one lookup, which is what the playhead
+	/// asks for on every tick.
+	private var wordPieces: [Int] = []
+	/// The piece the playhead is inside, if any.
 	private var marked: Int?
 	/// Set while the selection is being changed from here, so that redrawing
 	/// the pane does not read back as somebody having selected something.
@@ -238,58 +283,91 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// so it returns early unless something here has actually changed. Laying
 	/// four hundred words out again on every keystroke would be waste, and it
 	/// would also drop the selection somebody was in the middle of making.
-	public func show(_ transcript: Transcript, words: Words?) {
-		guard !shown || transcript != self.transcript || words != shownWords else { return }
+	public func show(_ transcript: Transcript, words: Words?, sounds: [SoundEvent] = []) {
+		let heard = sounds.sorted { $0.start < $1.start }
+		guard !shown || transcript != self.transcript || words != shownWords
+			|| heard != self.sounds else { return }
 		shown = true
 		shownWords = words
 		self.transcript = transcript
+		self.sounds = heard
 		marked = nil
 		searchedTo = 0
-		ranges = []
-		marks = []
+		pieces = []
+		wordPieces = []
 
 		let body = NSMutableAttributedString()
-		if transcript.isEmpty {
+
+		/// A space before whatever comes next, unless a pause has just ended
+		/// the line for us.
+		func separate() {
+			guard let last = pieces.last else { return }
+			if case .pause = last.what { return }
+			body.append(NSAttributedString(string: " ", attributes: [.font: Theme.transcript]))
+		}
+
+		func add(_ what: Piece.What, _ string: NSAttributedString,
+		         from start: Double, to end: Double, length: Int? = nil) {
+			let at = body.length
+			body.append(string)
+			if case .word(let index) = what {
+				precondition(index == wordPieces.count)
+				wordPieces.append(pieces.count)
+			}
+			pieces.append(Piece(what: what,
+			                    range: NSRange(location: at, length: length ?? (body.length - at)),
+			                    start: start, end: end))
+		}
+
+		if transcript.isEmpty, heard.isEmpty {
 			body.append(NSAttributedString(
 				string: "No words yet.\n\nTranscribe reads this take's audio on this Mac —"
 					+ " nothing is uploaded — and writes what it hears into a file beside the"
 					+ " take. Then: drag across a sentence to set in and out, ⏎ to make a clip"
-					+ " of it, W to name a clip after its first words.",
+					+ " of it, W to name a clip after what is said in it.",
 				attributes: [.font: Theme.body, .foregroundColor: Theme.dimText]))
 		} else {
 			// Laid out by its silences: a line for a beat, a paragraph for a
 			// rest, and an ellipsis at the end of the line so the pause itself
 			// is on the page rather than merely implied by the white space.
 			//
-			// `ranges` stays parallel to the *words* — the ellipses and the
-			// newlines are not words, and every other thing this pane does
-			// (the lit word, the selection, the find) counts in words.
-			for (index, word) in transcript.words.enumerated() {
-				let start = body.length
-				body.append(NSAttributedString(
-					string: word.text,
-					attributes: [.font: Theme.transcript, .foregroundColor: Theme.text]))
-				ranges.append(NSRange(location: start, length: body.length - start))
-				switch transcript.silence(after: index) {
-				case .none:
-					if index + 1 < transcript.count {
-						body.append(NSAttributedString(
-							string: " ", attributes: [.font: Theme.transcript]))
-					}
-				case .beat, .rest:
-					let mark = body.length
-					body.append(pause(transcript.silence(after: index) == .rest ? "\n\n" : "\n"))
-					// Only as far as the ellipsis: the newlines after it belong
-					// to the layout rather than to the silence, and a selection
-					// that runs to the end of a line should not be read as
-					// reaching into the next one.
-					marks.append((
-						range: NSRange(location: mark, length: 2),
-						after: index,
-						start: transcript.words[index].end,
-						end: transcript.words[index + 1].start))
+			// The sounds go in among the words at the moment they happened,
+			// which is usually in one of those silences — people laugh between
+			// sentences — so a laugh reads as the thing that came between two
+			// lines, which is what it was.
+			var next = 0
+			func soundsBefore(_ time: Double) {
+				while next < heard.count, heard[next].start < time {
+					separate()
+					add(.sound(next),
+					    NSAttributedString(string: "[\(heard[next].label)]",
+					                       attributes: [.font: Theme.transcript,
+					                                    .foregroundColor: Theme.heardNotSaid]),
+					    from: heard[next].start, to: heard[next].end)
+					next += 1
 				}
 			}
+
+			for (index, word) in transcript.words.enumerated() {
+				soundsBefore(word.start)
+				separate()
+				add(.word(index),
+				    NSAttributedString(string: word.text,
+				                       attributes: [.font: Theme.transcript,
+				                                    .foregroundColor: Theme.text]),
+				    from: word.start, to: word.end)
+				let silence = transcript.silence(after: index)
+				guard silence != .none else { continue }
+				// Only as far as the ellipsis: the newlines after it belong to
+				// the layout rather than to the silence, and a selection that
+				// runs to the end of a line should not be read as reaching into
+				// the next one.
+				add(.pause(after: index), pause(silence == .rest ? "\n\n" : "\n"),
+				    from: word.end, to: transcript.words[index + 1].start, length: 2)
+			}
+			// Anything heard after the last word, or in a take where nobody
+			// said anything at all.
+			soundsBefore(.infinity)
 		}
 
 		quiet = true
@@ -306,33 +384,44 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			// Not the language: the pop-up beside this says that, and saying it
 			// twice is what made the row too wide for its own heading.
 			provenance.stringValue = "\(transcript.count) words · \(words.recogniser.rawValue)"
+				+ (heard.isEmpty ? "" : " · \(heard.count) sounds")
 		} else {
 			provenance.stringValue = ""
 		}
 		button.title = transcript.isEmpty ? "Transcribe" : "Again"
 	}
 
-	/// While it plays. Lights the word being said and keeps it on screen.
+	/// While it plays. Lights whatever is happening and keeps it on screen.
 	public var playhead: Double = 0 {
-		didSet { mark(transcript.index(at: playhead)) }
+		didSet { mark(happening(at: playhead)) }
 	}
 
 	/// Whether the pane scrolls itself to keep up. Off while somebody is
 	/// reading it with the tape stopped, so the text does not move under them.
 	public var follows = false
 
+	/// What is going on at `time`: the word being said, or the laugh being
+	/// laughed. `nil` in the gaps, because the highlight is a claim about what
+	/// is happening *now* — leaving the last word lit through four seconds of
+	/// silence says she is still saying it.
+	private func happening(at time: Double) -> Int? {
+		if let word = transcript.index(at: time) { return wordPieces[safe: word] }
+		return pieces.firstIndex { $0.soundIndex != nil && $0.contains(time) }
+	}
+
 	private func mark(_ index: Int?) {
 		guard index != marked else { return }
-		if let old = marked, old < ranges.count {
-			text.textStorage?.removeAttribute(.backgroundColor, range: ranges[old])
+		if let old = marked, old < pieces.count {
+			text.textStorage?.removeAttribute(.backgroundColor, range: pieces[old].range)
 		}
 		marked = index
-		guard let index, index < ranges.count else { return }
+		guard let index, index < pieces.count else { return }
 		// The playhead's own colour, so the lit word and the line on the
 		// timeline are recognisably the same claim about where you are.
 		text.textStorage?.addAttribute(
-			.backgroundColor, value: Theme.playhead.withAlphaComponent(0.35), range: ranges[index])
-		if follows { text.scrollRangeToVisible(ranges[index]) }
+			.backgroundColor, value: Theme.playhead.withAlphaComponent(0.35),
+			range: pieces[index].range)
+		if follows { text.scrollRangeToVisible(pieces[index].range) }
 	}
 
 	/// The mark a pause leaves: dim, so it reads as the shape of the take
@@ -385,11 +474,13 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	}
 
 	/// What a click is about: whatever is selected when the click is inside the
-	/// selection, then the pause under the pointer, then the line it is in.
+	/// selection, then the pause or the sound under the pointer, then the line
+	/// it is in.
 	///
-	/// The pause comes before the line because clicking an ellipsis is somebody
-	/// pointing at the silence itself, and answering with the sentence beside
-	/// it would be answering a different question.
+	/// The pause and the sound come before the line because clicking an
+	/// ellipsis is somebody pointing at the silence itself and clicking
+	/// `[laughter]` is somebody pointing at the laugh — answering either with
+	/// the sentence beside it would be answering a different question.
 	private func clicked(at charIndex: Int)
 		-> (start: Double, end: Double, characters: NSRange, name: String, count: Int)?
 	{
@@ -397,14 +488,13 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		if selected.length > 0, NSLocationInRange(charIndex, selected),
 		   let touched = touched(by: selected) {
 			let count = touched.words?.count ?? 1
-			return (touched.start, touched.end, selected,
-			        touched.words == nil ? "this pause"
-			            : (count == 1 ? "this word" : "these \(count) words"),
-			        count)
+			return (touched.start, touched.end, selected, describe(selected), count)
 		}
-		if let mark = mark(containing: charIndex) {
-			let silence = marks[mark]
-			return (silence.start, silence.end, silence.range, "this pause", 1)
+		if let at = pieces.firstIndex(where: { NSLocationInRange(charIndex, $0.range) }),
+		   pieces[at].wordIndex == nil {
+			let piece = pieces[at]
+			return (piece.start, piece.end, piece.range,
+			        piece.soundIndex.map { "[\(sounds[$0].label)]" } ?? "this pause", 1)
 		}
 		guard let index = word(containing: charIndex, orBefore: true) else { return nil }
 		let line = transcript.segment(around: index)
@@ -414,12 +504,26 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		        line.count == 1 ? "this word" : "these \(line.count) words", line.count)
 	}
 
+	/// What a selection is, said out loud: the words in it, else the sounds in
+	/// it, else how long the silence was.
+	private func describe(_ selected: NSRange) -> String {
+		let hit = pieces.filter { NSIntersectionRange($0.range, selected).length > 0 }
+		let spoken = hit.compactMap(\.wordIndex)
+		if let first = spoken.min(), let last = spoken.max() {
+			return spoken.count == 1 ? "this word" : "these \(last - first + 1) words"
+		}
+		let heard = hit.compactMap { $0.soundIndex.map { "[\(sounds[$0].label)]" } }
+		if !heard.isEmpty { return heard.joined(separator: " ") }
+		return "this pause"
+	}
+
 	/// Where a run of words sits in the text.
 	private func characters(of range: Range<Int>) -> NSRange? {
-		guard let first = ranges[safe: range.lowerBound],
-		      let last = ranges[safe: range.upperBound - 1] else { return nil }
-		return NSRange(location: first.location,
-		               length: NSMaxRange(last) - first.location)
+		guard let first = wordPieces[safe: range.lowerBound].flatMap({ pieces[safe: $0] }),
+		      let last = wordPieces[safe: range.upperBound - 1].flatMap({ pieces[safe: $0] })
+		else { return nil }
+		return NSRange(location: first.range.location,
+		               length: NSMaxRange(last.range) - first.range.location)
 	}
 
 	@objc private func playPointed() {
@@ -510,13 +614,14 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// turns character positions into words, and dragging a pointer across a
 	/// view is a poor way to ask about arithmetic.
 	func selectionChanged(to selected: NSRange) {
-		guard !quiet, !ranges.isEmpty else { return }
+		guard !quiet, !pieces.isEmpty else { return }
 		if selected.length == 0 {
 			// A click. A non-editable text view answers one with an empty
 			// selection where the caret would have gone, which is the only
 			// thing about it worth knowing.
-			if let mark = mark(containing: selected.location) {
-				onMoveTo?(marks[mark].start)
+			if let at = pieces.firstIndex(where: { NSLocationInRange(selected.location, $0.range) }),
+			   pieces[at].wordIndex == nil {
+				onMoveTo?(pieces[at].start)
 			} else if let index = word(containing: selected.location, orBefore: true) {
 				clickWord(at: index)
 			}
@@ -524,39 +629,43 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		}
 		guard let touched = touched(by: selected) else { return }
 		onSelectWords?(touched.start, touched.end)
-		let what = touched.words.map { transcript.phrase($0, limit: 4) }
-			?? String(format: "a pause of %.1fs", touched.end - touched.start)
+		let what = said(in: selected) ?? String(
+			format: "a pause of %.1fs", touched.end - touched.start)
 		onStatus?("\(Timecode.string(touched.start))–\(Timecode.string(touched.end))"
 			+ (what.isEmpty ? "" : " · \(what) — ⏎ to make a clip"))
 	}
 
-	/// Everything a selection covers, words and silences alike.
-	///
-	/// A pause is selectable because a pause is part of the take: the beat
-	/// before an answer is often the thing that has to go, or the thing that
-	/// has to stay, and either way somebody has to be able to point at it. So
-	/// the span runs from the earliest thing the selection touches to the
-	/// latest, whether those are words or the silence between them — which is
-	/// also what the highlight on screen already says it is.
-	func touched(by selected: NSRange) -> (start: Double, end: Double, words: Range<Int>?)? {
-		let first = word(containing: selected.location, orBefore: false)
-		let last = word(containing: NSMaxRange(selected) - 1, orBefore: true)
-		var covered: Range<Int>?
-		if let first, let last, first <= last { covered = first ..< (last + 1) }
-		let silences = marks.filter { NSIntersectionRange($0.range, selected).length > 0 }
-		var start: Double?
-		var end: Double?
-		if let covered, let span = transcript.span(covered) { start = span.start; end = span.end }
-		for silence in silences {
-			start = min(start ?? silence.start, silence.start)
-			end = max(end ?? silence.end, silence.end)
+	/// What a selection *says*, for the status line and for naming a clip after
+	/// it: the words in it, or failing that the sounds in it. `nil` when it is
+	/// nothing but silence, which has no words to be named after.
+	func said(in selected: NSRange) -> String? {
+		let hit = pieces.filter { NSIntersectionRange($0.range, selected).length > 0 }
+		let spoken = hit.compactMap(\.wordIndex)
+		if let first = spoken.min(), let last = spoken.max() {
+			return transcript.phrase(first ..< (last + 1), limit: 4)
 		}
-		guard let start, let end else { return nil }
-		return (start, end, covered)
+		let heard = hit.compactMap { $0.soundIndex.map { "[\(sounds[$0].label)]" } }
+		return heard.isEmpty ? nil : heard.joined(separator: " ")
 	}
 
-	private func mark(containing location: Int) -> Int? {
-		marks.firstIndex { NSLocationInRange(location, $0.range) }
+	/// Everything a selection covers: words, silences and sounds alike.
+	///
+	/// A pause is selectable because a pause is part of the take — the beat
+	/// before an answer is often the thing that has to go, or the thing that
+	/// has to stay — and a laugh is selectable for the plainer reason that it
+	/// is a thing that happened. So the span runs from the earliest piece the
+	/// selection touches to the latest, whatever kinds those are, which is also
+	/// what the highlight on screen already says it is.
+	///
+	/// One pass over one array. This used to be two — a walk over the words and
+	/// a filter over the pauses, reconciled afterwards — and a third kind of
+	/// thing in the text would have made it three.
+	func touched(by selected: NSRange) -> (start: Double, end: Double, words: Range<Int>?)? {
+		let hit = pieces.filter { NSIntersectionRange($0.range, selected).length > 0 }
+		guard let start = hit.map(\.start).min(), let end = hit.map(\.end).max() else { return nil }
+		let spoken = hit.compactMap(\.wordIndex)
+		guard let first = spoken.min(), let last = spoken.max() else { return (start, end, nil) }
+		return (start, end, first ..< (last + 1))
 	}
 
 	/// Which word a character belongs to. A character in the space between two
@@ -564,12 +673,14 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// selection dragged from mid-gap to mid-gap covers the words between them
 	/// and not one on either side.
 	private func word(containing location: Int, orBefore: Bool) -> Int? {
-		guard !ranges.isEmpty else { return nil }
-		for (index, range) in ranges.enumerated() {
-			if location < range.location { return orBefore ? (index > 0 ? index - 1 : nil) : index }
-			if location < NSMaxRange(range) { return index }
+		var before: Int?
+		for piece in pieces {
+			guard let index = piece.wordIndex else { continue }
+			if location < piece.range.location { return orBefore ? before : index }
+			if location < NSMaxRange(piece.range) { return index }
+			before = index
 		}
-		return orBefore ? ranges.count - 1 : nil
+		return orBefore ? before : nil
 	}
 
 	/// For the tests: a real selection in the text view, the way dragging makes
@@ -603,7 +714,9 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 
 	/// For the tests: what the pane is showing.
 	var wordCount: Int { transcript.count }
-	var markedWord: Int? { marked }
+	var soundCount: Int { sounds.count }
+	var markedWord: Int? { marked.flatMap { pieces[safe: $0]?.wordIndex } }
+	var markedSound: Int? { marked.flatMap { pieces[safe: $0]?.soundIndex } }
 	var searchField: NSSearchField { search }
 }
 

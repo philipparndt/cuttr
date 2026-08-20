@@ -69,7 +69,25 @@ public enum Transcriber {
 		/// means the recorder was started after the camera" written as
 		/// arithmetic, and it is unit-tested against both signs.
 		public func onVideoClock(_ word: Word) -> Word? {
-			let moved = Word(start: word.start + offset, end: word.end + offset, text: word.text)
+			guard let moved = moved(word.start, word.end) else { return nil }
+			return Word(start: moved.start, end: moved.end, text: word.text)
+		}
+
+		/// One sound that is not a word, moved the same way.
+		///
+		/// Here rather than in ``SoundSpotter`` on purpose. A laugh and a word
+		/// are the same kind of claim — that something happened at a time — and
+		/// two places in the program that add an offset are two places for the
+		/// sign of it to be wrong. It has been wrong once already.
+		public func onVideoClock(_ sound: SoundEvent) -> SoundEvent? {
+			guard let moved = moved(sound.start, sound.end) else { return nil }
+			return SoundEvent(kind: sound.kind, start: moved.start, end: moved.end,
+			                  confidence: sound.confidence)
+		}
+
+		/// The one place the offset is added.
+		private func moved(_ start: Double, _ end: Double) -> (start: Double, end: Double)? {
+			let moved = (start: start + offset, end: end + offset)
 			guard let limit else { return moved }
 			// Overlap, not containment: a word that begins a hair before the
 			// first frame is still the first word of the take.
