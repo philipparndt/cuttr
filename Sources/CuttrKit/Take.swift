@@ -38,6 +38,14 @@ public struct Take: Sendable, Equatable {
 	/// rather than to a programme that uses it.
 	public var anchors: [Anchor]
 
+	/// What was said in this recording, worked out on this machine.
+	///
+	/// A reference to a sidecar and the provenance of it — see ``Words``. Like
+	/// an anchor's path, the thousands of numbers live beside the take rather
+	/// than in it; unlike an anchor, there is only ever one of these, because a
+	/// take is one recording and one recording has one transcript.
+	public var words: Words?
+
 	/// The subclips, in the order they appear in the file.
 	///
 	/// The file's order is kept rather than sorted by time. Two clips may
@@ -62,7 +70,8 @@ public struct Take: Sendable, Equatable {
 
 	public init(
 		video: String? = nil, audio: AudioTrack? = nil, clips: [Clip] = [],
-		anchors: [Anchor] = [], measured: Measured = Measured(), look: Look = .none,
+		anchors: [Anchor] = [], words: Words? = nil,
+		measured: Measured = Measured(), look: Look = .none,
 		source: TakeSource? = nil, unknownKeys: [String: Any] = [:]
 	) {
 		self.video = video
@@ -70,6 +79,7 @@ public struct Take: Sendable, Equatable {
 		self.source = source
 		self.clips = clips
 		self.anchors = anchors
+		self.words = words
 		self.measured = measured
 		self.look = look
 		self.unknown = UnknownKeys(storage: unknownKeys)
@@ -77,7 +87,8 @@ public struct Take: Sendable, Equatable {
 
 	public static func == (a: Take, b: Take) -> Bool {
 		a.video == b.video && a.audio == b.audio && a.clips == b.clips
-			&& a.anchors == b.anchors && a.measured == b.measured && a.look == b.look
+			&& a.anchors == b.anchors && a.words == b.words
+			&& a.measured == b.measured && a.look == b.look
 			&& a.source == b.source
 	}
 
