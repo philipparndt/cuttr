@@ -156,7 +156,16 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		// The cut above, what is laid over it under that, and what is laid
 		// under it at the bottom — in the order they happen: a caption is drawn
 		// over a clip that has to exist first, and music goes under the lot.
-		let split = NSSplitView()
+		// A real frame, not zero.
+		//
+		// A split view created at 0x0 has its size turned into a pair of
+		// *required* constraints by its autoresizing mask — `width == 0`,
+		// `height == 0` — and every content minimum inside it is then one half
+		// of a system with no solution. That is the same lesson `TableScroll`
+		// already records for scroll views, and it is what filled the log with
+		// `layout constraints are not satisfiable` before this window had ever
+		// been shown.
+		let split = NSSplitView(frame: .roomToLayOutIn)
 		split.isVertical = false
 		split.dividerStyle = .thin
 		split.addArrangedSubview(programme)
@@ -169,9 +178,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			split.bottomAnchor.constraint(equalTo: bottomAnchor),
 			split.leadingAnchor.constraint(equalTo: leadingAnchor),
 			split.trailingAnchor.constraint(equalTo: trailingAnchor),
-			programme.heightAnchor.constraint(greaterThanOrEqualToConstant: 160),
-			overlays.heightAnchor.constraint(greaterThanOrEqualToConstant: 100),
-			sounds.heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
+			// Floors, not laws — see `asFloor`. Three required minimums adding
+			// to 340 inside a split view that a tab view gives no height at all
+			// until its item is selected is a system with no solution.
+			programme.heightAnchor.constraint(greaterThanOrEqualToConstant: 160).asFloor,
+			overlays.heightAnchor.constraint(greaterThanOrEqualToConstant: 100).asFloor,
+			sounds.heightAnchor.constraint(greaterThanOrEqualToConstant: 80).asFloor,
 		])
 	}
 

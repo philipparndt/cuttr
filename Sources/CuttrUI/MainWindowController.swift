@@ -137,7 +137,16 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		                        accessory: transcriptPane.detachedHead())
 		lookPane = FoldingPane("look", content: lookPanel, accessory: lookPanel.detachedHead())
 
-		let lists = NSSplitView()
+		// A real frame, not zero.
+		//
+		// A split view created at 0x0 has its size turned into a pair of
+		// *required* constraints by its autoresizing mask — `width == 0`,
+		// `height == 0` — and every content minimum inside it is then one half
+		// of a system with no solution. That is the same lesson `TableScroll`
+		// already records for scroll views, and it is what filled the log with
+		// `layout constraints are not satisfiable` before this window had ever
+		// been shown.
+		let lists = NSSplitView(frame: .roomToLayOutIn)
 		lists.isVertical = false
 		lists.dividerStyle = .thin
 		for pane in [clipPane!, anchorPane!, wordsPane!, lookPane!] {
@@ -145,13 +154,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			pane.onFold = { [weak lists] _ in lists?.adjustSubviews() }
 		}
 
-		let top = NSSplitView()
+		let top = NSSplitView(frame: .roomToLayOutIn)
 		top.isVertical = true
 		top.dividerStyle = .thin
 		top.addArrangedSubview(picture)
 		top.addArrangedSubview(lists)
 
-		let outer = NSSplitView()
+		let outer = NSSplitView(frame: .roomToLayOutIn)
 		outer.isVertical = false
 		outer.dividerStyle = .thin
 		outer.addArrangedSubview(top)
@@ -205,6 +214,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		// Autolayout answers that by breaking one and going round the display
 		// cycle again — and through four nested split views and their scroll
 		// views that is a great many passes for one click on a chevron.
+		// The clips pane gets both of these too, and used to get neither.
+		//
+		// It is the main list in this window, and with nothing said about its
+		// height it was whatever the other three left over — which at an
+		// ordinary window size was its heading and nothing else. It also meant
+		// that folding it was a one-way door: nothing pulled it back open,
+		// because the only thing left saying how tall it was was the split
+		// view's own memory of the height it had while folded.
+		clipPane!.minimumHeight = 96
 		anchorPane!.minimumHeight = 84
 		wordsPane!.minimumHeight = 96
 		lookPane!.minimumHeight = 144
@@ -221,14 +239,17 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		// What each folding pane would like to be. A dragged divider, a window
 		// too short for all of them, or a folded neighbour all override it, and
 		// being below required is what lets them.
-		for (pane, wish) in [(anchorPane!, 170.0), (wordsPane!, 200.0), (lookPane!, 230.0)] {
+		for (pane, wish) in [(clipPane!, 200.0), (anchorPane!, 170.0),
+		                     (wordsPane!, 200.0), (lookPane!, 230.0)] {
 			let height = pane.heightAnchor.constraint(equalToConstant: wish)
 			height.priority = preferred
 			height.isActive = true
 		}
 		for (wish, floor) in sizes {
-			wish.priority = wish.relation == .equal ? preferred : .required
-			floor.priority = .required
+			// Floors, not laws — see `asFloor`. Every one of these is on a view
+			// a split view sizes, and the sum of them can exceed the window.
+			wish.priority = wish.relation == .equal ? preferred : .floor
+			floor.priority = .floor
 			wish.isActive = true
 			floor.isActive = true
 		}

@@ -64,13 +64,22 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		// The picture and its clock, one above the other, in a split view —
 		// which is how both of the other windows arrange a picture over a
 		// timeline, and both of those work.
-		let picture = NSSplitView()
+		// A real frame, not zero.
+		//
+		// A split view created at 0x0 has its size turned into a pair of
+		// *required* constraints by its autoresizing mask — `width == 0`,
+		// `height == 0` — and every content minimum inside it is then one half
+		// of a system with no solution. That is the same lesson `TableScroll`
+		// already records for scroll views, and it is what filled the log with
+		// `layout constraints are not satisfiable` before this window had ever
+		// been shown.
+		let picture = NSSplitView(frame: .roomToLayOutIn)
 		picture.isVertical = false
 		picture.dividerStyle = .thin
 		picture.addArrangedSubview(stage)
 		picture.addArrangedSubview(scrubber)
 
-		let middle = NSSplitView()
+		let middle = NSSplitView(frame: .roomToLayOutIn)
 		middle.isVertical = true
 		middle.dividerStyle = .thin
 		middle.addArrangedSubview(parts)
@@ -105,10 +114,12 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 			wish.isActive = true
 		}
 		NSLayoutConstraint.activate([
-			parts.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
-			inspector.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
-			stage.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
-			scrubber.heightAnchor.constraint(greaterThanOrEqualToConstant: 60),
+			// Floors, not laws — see `asFloor`. All four are inside split views,
+			// which are the object that decides how big their children are.
+			parts.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).asFloor,
+			inspector.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).asFloor,
+			stage.heightAnchor.constraint(greaterThanOrEqualToConstant: 200).asFloor,
+			scrubber.heightAnchor.constraint(greaterThanOrEqualToConstant: 60).asFloor,
 		])
 		window.contentView = content
 	}
