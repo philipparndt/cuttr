@@ -1605,16 +1605,20 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			case .card: kind = .card
 			case .group: kind = .section
 			}
+			// The lane's stripe goes against the name, not against the edge of
+			// the row: it is a fact about this clip, and the clip is its name.
+			// Out at the margin it read as belonging to the list, and it moved
+			// every row that had one three points to the right — so a column of
+			// clips was a column of two alignments.
 			var x: CGFloat = 4
-			if let lane {
-				Theme.clipStripe(lane).setFill()
-				NSRect(x: 0, y: 2, width: 3, height: bounds.height - 4).fill()
-				x = 7
-			}
 			if let image = Theme.symbol(kind, size: 13) {
 				Theme.draw(image, in: NSRect(x: x, y: bounds.height / 2 - 8, width: 20, height: 16))
 			}
-			x += 22
+			if let lane {
+				Theme.clipStripe(lane).setFill()
+				NSRect(x: x + 21, y: 2, width: 3, height: bounds.height - 4).fill()
+			}
+			x += 28
 
 			(entry.source.description as NSString).draw(
 				at: NSPoint(x: x, y: bounds.height / 2 - 7),

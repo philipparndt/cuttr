@@ -402,15 +402,19 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 				NSRect(x: 4, y: 3, width: bounds.width - 8, height: 1).fill()
 
 			case .clip(let item):
-				// The lane it was cut on, as a stripe down the leading edge —
-				// the same mark it wears on the cutting timeline and on the
-				// programme strip, so a clip looks like itself in every window.
-				Theme.clipStripe(item.color).setFill()
-				NSRect(x: 0, y: 2, width: 3, height: bounds.height - 4).fill()
+				// The lane it was cut on, as a stripe against the words rather
+				// than against the edge of the row. It is the *clip* that was
+				// cut on that lane, and the clip is its name — a stripe out at
+				// the margin reads as belonging to the list.
+				//
+				// It also keeps the rows aligned: every row's mark and name are
+				// in the same place whether or not there is a colour to show.
 				mark(.clip)
-				primary(item.reference, x: 24, y: bounds.height - 16)
+				Theme.clipStripe(item.color).setFill()
+				NSRect(x: 23, y: 3, width: 3, height: bounds.height - 6).fill()
+				primary(item.reference, x: 30, y: bounds.height - 16)
 				var offset = secondary(
-					item.length > 0 ? Timecode.string(item.length) : "", x: 24,
+					item.length > 0 ? Timecode.string(item.length) : "", x: 30,
 					y: bounds.height - 28, colour: Theme.dimText)
 				offset += 20
 				for tag in item.tags.prefix(3) {
@@ -420,19 +424,19 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 
 			case .tag(let name, let count):
 				mark(.tag)
-				primary("#\(name)", x: 24, y: bounds.height - 16)
-				_ = secondary("\(count) clip\(count == 1 ? "" : "s")", x: 24,
+				primary("#\(name)", x: 30, y: bounds.height - 16)
+				_ = secondary("\(count) clip\(count == 1 ? "" : "s")", x: 30,
 				              y: bounds.height - 28, colour: Theme.dimText)
 
 			case .anchor(let name, let take):
 				mark(.anchor)
-				primary(name, x: 24, y: bounds.height - 16)
-				_ = secondary(take, x: 24, y: bounds.height - 28, colour: Theme.dimText)
+				primary(name, x: 30, y: bounds.height - 16)
+				_ = secondary(take, x: 30, y: bounds.height - 28, colour: Theme.dimText)
 
 			case .scene(let name):
 				mark(.scene)
-				primary(name, x: 24, y: bounds.height - 16)
-				_ = secondary("double-click to edit", x: 24, y: bounds.height - 28,
+				primary(name, x: 30, y: bounds.height - 16)
+				_ = secondary("double-click to edit", x: 30, y: bounds.height - 28,
 				              colour: Theme.dimText)
 			}
 		}
