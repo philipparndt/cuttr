@@ -642,8 +642,6 @@ public final class TimelineView: NSView {
 	private var drag: Drag?
 	/// The speech edge the mark is sitting on, while it is.
 	private var snapped: Double?
-	/// The edges, and what they were worked out from.
-	private var edgeCache: (signature: Signature, edges: [Double])?
 
 	public override func mouseDown(with event: NSEvent) {
 		let point = convert(event.locationInWindow, from: nil)
@@ -787,31 +785,14 @@ public final class TimelineView: NSView {
 		return max(0, nearest)
 	}
 
-	/// Worked out from the envelope this view is drawing, and kept until the
-	/// drawing changes.
+	/// The document's ``TakeDocument/speechMap``, as moments.
 	///
-	/// The separate recorder when there is one: it is the microphone nearest
-	/// whoever is talking, and it is the track the transcript was made from.
-	/// Its edges are shifted onto the programme's clock by the same offset the
-	/// lane is drawn with, so a mark lands where the shape is rather than where
-	/// the file thinks it is.
-	var speechEdges: [Double] {
-		let offset = document?.take.audio?.offset ?? 0
-		let wave = document?.audioWaveform ?? document?.videoWaveform
-		let shift = document?.audioWaveform != nil ? offset : 0
-		guard let wave else { return [] }
-		let signature = Signature(buckets: wave.bucketCount, duration: wave.duration, shift: shift)
-		if let cached = edgeCache, cached.signature == signature { return cached.edges }
-		let found = SpeechEdges.edges(in: wave, shift: shift)
-		edgeCache = (signature, found)
-		return found
-	}
-
-	private struct Signature: Equatable {
-		let buckets: Int
-		let duration: Double
-		let shift: Double
-	}
+	/// It used to be worked out and cached here. It is not any more, and the
+	/// reason is that a clip made out of a sentence is now put on the same
+	/// edges: two copies of one measurement is two chances for the mark ⌥ draws
+	/// and the mark Return gives you to disagree, and nobody would ever see it
+	/// happen — the numbers would simply be a hair apart.
+	var speechEdges: [Double] { document?.speechMap?.edges ?? [] }
 
 	/// Never zero-length: a clip nobody can see is a clip nobody can grab back.
 	private var minimumClip: Double { max(secondsPerPoint * 4, 0.02) }

@@ -499,6 +499,55 @@ public final class TakeDocument {
 	/// The frames a cut mark may land on.
 	public var grid: FrameGrid { videoInfo?.grid ?? .none }
 
+	// MARK: - Where the talking is
+
+	/// Worked out from the envelope, and kept until the envelope changes.
+	///
+	/// The separate recorder when there is one: it is the microphone nearest
+	/// whoever is talking, and it is the track the words were heard from. Its
+	/// edges are shifted onto the video's clock by the take's own offset, so
+	/// everything that comes out of here is on the one clock like everything
+	/// else in a take.
+	///
+	/// It lives on the document rather than on the timeline because it is now
+	/// answering two questions — what ⌥ snaps to, and where a clip made out of
+	/// a sentence goes. Two caches of one measurement is two chances for the
+	/// mark you can see and the mark you get to disagree.
+	public var speechMap: SpeechMap? {
+		let wave = audioWaveform ?? videoWaveform
+		guard let wave else { return nil }
+		let shift = audioWaveform != nil ? (take.audio?.offset ?? 0) : 0
+		let signature = SpeechSignature(buckets: wave.bucketCount, duration: wave.duration, shift: shift)
+		if let cached = speechCache, cached.signature == signature { return cached.map }
+		let made = SpeechMap.of(wave, shift: shift)
+		speechCache = (signature, made)
+		return made
+	}
+
+	private var speechCache: (signature: SpeechSignature, map: SpeechMap)?
+
+	private struct SpeechSignature: Equatable {
+		let buckets: Int
+		let duration: Double
+		let shift: Double
+	}
+
+	/// What a span read off the words should actually be cut as: the marks put
+	/// on the sound, and air taken from the silence around them.
+	///
+	/// The whole ``SpeechMap/Cut`` rather than two numbers, so a caller can say
+	/// what it did. With no envelope decoded yet the span comes back untouched,
+	/// which is what this program did before and is better than making somebody
+	/// wait for a decode to press Return.
+	public func cut(from start: Double, to end: Double,
+	                handle: Double = SpeechMap.handle) -> SpeechMap.Cut {
+		let asked = min(start, end) ... max(start, end)
+		guard let speechMap else { return .unchanged(asked) }
+		let room = transcript.neighbours(of: asked)
+		return speechMap.cut(from: asked.lowerBound, to: asked.upperBound,
+		                     after: room.before, before: room.after, handle: handle)
+	}
+
 	/// Probes both files and decodes their waveforms.
 	///
 	/// Cancels whatever was in flight first. Dropping a second video on the
