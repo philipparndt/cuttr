@@ -93,6 +93,21 @@ public final class ProjectInspector: NSView, NSSplitViewDelegate {
 			self.selection = selection
 			self.properties.reload(self.project, vocabulary: self.vocabulary, selection: selection)
 			self.showWhatItWrites()
+			// And the clock goes to it.
+			//
+			// The bar says where the playhead is at all times, in both windows,
+			// and in the editor that number was about wherever the preview had
+			// last been left rather than about the thing being worked on.
+			// Clicking a row is somebody saying "this one", so the programme's
+			// clock goes to where "this one" begins and the frame in the head of
+			// the properties panel is the frame the clock names.
+			//
+			// Not for `output`, which is the project rather than a moment in it:
+			// selecting it would rewind to nought for no reason anybody asked
+			// for.
+			if case .output = selection { return }
+			guard let moment = selection.moment(in: self.resolved) else { return }
+			self.onScrub?(moment)
 		}
 		properties.onChange = { [weak self] project in self?.onChange?(project) }
 		// The head of the properties panel says what the selection depends on,

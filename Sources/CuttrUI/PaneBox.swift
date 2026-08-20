@@ -42,8 +42,29 @@ public final class PaneBox: NSView {
 		label.font = Theme.heading
 		label.textColor = Theme.faintText
 
+		// The pane's own colour, not the rail's.
+		//
+		// It was `background`, which is exactly what the rail is drawn in — so a
+		// heading strip across the top of the content read as the rail turning a
+		// corner and running along the top of the window. There are two areas
+		// here and they get two colours: the rail is `background`, everything it
+		// opens is `panel`. A heading is part of what it heads, and a hairline
+		// under it is all the separation it needs.
 		head.wantsLayer = true
-		head.layer?.backgroundColor = Theme.background.cgColor
+		head.layer?.backgroundColor = Theme.panel.cgColor
+
+		let rule = NSBox()
+		rule.boxType = .custom
+		rule.borderWidth = 0
+		rule.fillColor = Theme.rule.withAlphaComponent(0.6)
+		rule.translatesAutoresizingMaskIntoConstraints = false
+		head.addSubview(rule)
+		NSLayoutConstraint.activate([
+			rule.leadingAnchor.constraint(equalTo: head.leadingAnchor),
+			rule.trailingAnchor.constraint(equalTo: head.trailingAnchor),
+			rule.bottomAnchor.constraint(equalTo: head.bottomAnchor),
+			rule.heightAnchor.constraint(equalToConstant: 1),
+		])
 
 		label.translatesAutoresizingMaskIntoConstraints = false
 		head.addSubview(label)

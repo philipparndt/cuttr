@@ -41,8 +41,14 @@ public final class Rail: NSView {
 
 	/// The width both windows give it. Stated here because the rail is the only
 	/// thing that has an opinion about how wide a rail is.
-	public static let width: CGFloat = 54
-	private static let itemHeight: CGFloat = 46
+	///
+	/// Narrow, because there are no words on it. A rail is a place to be rather
+	/// than a sentence to read: the symbol says which place, and the words are
+	/// still there on hover for anybody who wants them once. Four labels down
+	/// the left edge of every window, read once and then never again, is the
+	/// same permanence that took the explanations out of the properties panel.
+	public static let width: CGFloat = 44
+	private static let itemHeight: CGFloat = 40
 
 	private let items: [Item]
 	private var images: [NSImage?] = []
@@ -121,21 +127,12 @@ public final class Rail: NSView {
 				             xRadius: 6, yRadius: 6).fill()
 			}
 
+			// The symbol, in the middle of its slot and nothing beside it.
 			let colour = isSelected ? Theme.text : Theme.dimText
 			if let image = images[index]?.withSymbolConfiguration(
-				.init(pointSize: 15, weight: .regular).applying(.init(paletteColors: [colour]))) {
-				Theme.draw(image, in: NSRect(x: slot.minX, y: slot.minY + 6,
-				                             width: slot.width, height: 18))
+				.init(pointSize: 16, weight: .regular).applying(.init(paletteColors: [colour]))) {
+				Theme.draw(image, in: slot)
 			}
-
-			let title = items[index].title as NSString
-			let attributes: [NSAttributedString.Key: Any] = [
-				.font: NSFont.systemFont(ofSize: 9, weight: isSelected ? .semibold : .regular),
-				.foregroundColor: colour,
-			]
-			let size = title.size(withAttributes: attributes)
-			title.draw(at: NSPoint(x: slot.midX - size.width / 2, y: slot.minY + 27),
-			           withAttributes: attributes)
 		}
 	}
 

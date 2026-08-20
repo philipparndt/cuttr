@@ -273,23 +273,7 @@ public final class PropertiesPanel: NSView {
 
 	/// Where on the programme the selection is, for the picture and for the
 	/// `at` link. `nil` when the thing does not occupy time.
-	private var momentOfSelection: Double? {
-		switch selection {
-		case .output:
-			return 0
-		case .entry(let path):
-			if let clip = resolved?.clips.first(where: { $0.entry == path }) { return clip.start }
-			if let card = resolved?.cards.first(where: { $0.entry == path }) { return card.start }
-			if let group = resolved?.groups.first(where: { $0.entry == path }) { return group.start }
-			// A section or a query whose own path is not on the list still has
-			// contents, and the first of them is where it begins.
-			return resolved?.clips.first(where: { $0.entry.starts(with: path) })?.start
-		case .overlay(let origin):
-			return resolved?.overlays.first(where: { $0.origin == origin })?.start
-		case .sound(let origin):
-			return resolved?.sounds.first(where: { $0.origin == origin })?.start
-		}
-	}
+	private var momentOfSelection: Double? { selection.moment(in: resolved) }
 
 	private func showThumbnail(at time: Double?) {
 		thumbnail.image = nil

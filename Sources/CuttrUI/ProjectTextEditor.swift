@@ -22,7 +22,7 @@ public final class ProjectTextEditor: NSView {
 	private let status = NSTextField(labelWithString: "")
 	private let apply = NSButton()
 	private var loaded = ""
-	private var gutter: LineNumberRuler?
+	private var gutter: LineNumbers?
 	/// What the names in the file can point at, for deciding which of them point
 	/// at nothing. Set by the window whenever the project resolves.
 	public var vocabulary = ComposeDocument.Vocabulary() {
@@ -59,11 +59,8 @@ public final class ProjectTextEditor: NSView {
 
 		// Line numbers down the side. The parser says `line 34`, and without a
 		// gutter that sentence is an instruction to count.
-		let ruler = LineNumberRuler(for: text, in: scroll)
-		scroll.verticalRulerView = ruler
-		scroll.hasVerticalRuler = true
-		scroll.rulersVisible = true
-		gutter = ruler
+		let numbers = LineNumbers(for: text, in: scroll)
+		gutter = numbers
 
 		status.font = Theme.monoSmall
 		status.lineBreakMode = .byTruncatingTail
@@ -93,14 +90,25 @@ public final class ProjectTextEditor: NSView {
 		status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
 		addSubview(scroll)
+		addSubview(numbers)
 		addSubview(bar)
+		// The gutter's width and the text's left edge are one measurement, said
+		// once. As an `NSRulerView` inside the scroll view they were two, and
+		// they disagreed: the scroll view did not reserve the ruler's width when
+		// it tiled, so the first forty-two points of every line were printed
+		// under the numbers.
 		NSLayoutConstraint.activate([
+			numbers.topAnchor.constraint(equalTo: scroll.topAnchor),
+			numbers.bottomAnchor.constraint(equalTo: scroll.bottomAnchor),
+			numbers.leadingAnchor.constraint(equalTo: leadingAnchor),
+			numbers.widthAnchor.constraint(equalToConstant: LineNumbers.width),
+
 			bar.topAnchor.constraint(equalTo: topAnchor),
 			bar.leadingAnchor.constraint(equalTo: leadingAnchor),
 			bar.trailingAnchor.constraint(equalTo: trailingAnchor),
 			bar.heightAnchor.constraint(equalToConstant: 30),
 			scroll.topAnchor.constraint(equalTo: bar.bottomAnchor),
-			scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
+			scroll.leadingAnchor.constraint(equalTo: numbers.trailingAnchor),
 			scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
 			scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
 		])

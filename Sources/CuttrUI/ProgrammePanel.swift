@@ -14,6 +14,33 @@ public enum ProjectSelection: Equatable {
 	case sound(Origin)
 }
 
+extension ProjectSelection {
+
+	/// Where on the programme's clock this sits, if it occupies time at all.
+	///
+	/// Asked by the properties panel, to head itself with a frame of the thing
+	/// and to offer `at 00:12.345` as somewhere to go, and by the inspector, to
+	/// take the playhead there when somebody clicks a row. One answer, so the
+	/// picture and the clock cannot disagree about where a selection is.
+	public func moment(in resolved: ResolvedProject?) -> Double? {
+		switch self {
+		case .output:
+			return 0
+		case .entry(let path):
+			if let clip = resolved?.clips.first(where: { $0.entry == path }) { return clip.start }
+			if let card = resolved?.cards.first(where: { $0.entry == path }) { return card.start }
+			if let group = resolved?.groups.first(where: { $0.entry == path }) { return group.start }
+			// A section or a query whose own path is not on the list still has
+			// contents, and the first of them is where it begins.
+			return resolved?.clips.first(where: { $0.entry.starts(with: path) })?.start
+		case .overlay(let origin):
+			return resolved?.overlays.first(where: { $0.origin == origin })?.start
+		case .sound(let origin):
+			return resolved?.sounds.first(where: { $0.origin == origin })?.start
+		}
+	}
+}
+
 /// The programme: what plays, in order, with what is drawn over it.
 ///
 /// An outline rather than a table, because a project nests — a section holds
@@ -397,7 +424,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			self.removeEntry()
 			return true
 		}
-		outline.rowHeight = 26
+		outline.rowHeight = Self.entryRowHeight
 		outline.backgroundColor = Theme.panel
 		outline.gridStyleMask = []
 		outline.headerView = nil
@@ -453,6 +480,19 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			button("minus", #selector(removeSelected), "Take it off"),
 			showsButton,
 		])
+	}
+
+	/// Which lane a clip entry was cut on, out of the vocabulary the takes gave.
+	///
+	/// Only for an entry that names one clip. A query or a list is several
+	/// clips and may be several lanes, and a stripe that picked the first of
+	/// them would be a claim about the rest.
+	private func lane(of entry: TimelineEntry) -> ClipColor? {
+		guard case .clip(let reference) = entry.source else { return nil }
+		return vocabulary.items.first {
+			$0.slug == reference.slug
+				&& (reference.take == nil || $0.take == reference.take)
+		}?.color
 	}
 
 	/// The `as:` name of a placement and whatever hangs on it.
@@ -514,6 +554,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		return found
 	}
 
+
+	/// For the tests: the tree itself, to ask it about a row.
+	var outlineForTesting: NSOutlineView { outline }
 
 	/// For the tests: what the tree holds, as text.
 	var treeRowsForTesting: [String] {
@@ -1136,6 +1179,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		view.entry = node.entry
 		view.count = node.children.count
 		view.carries = carried(by: node.entry)
+		view.lane = lane(of: node.entry)
 		view.needsDisplay = true
 		return view
 	}
@@ -1144,6 +1188,30 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	public func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
 		MarkedRow.make(in: outlineView)
 	}
+
+	/// How tall a row is, by what is in it.
+	///
+	/// A timeline entry is one line — a slug and a badge — and 26 points is
+	/// right for it. An overlay or a sound is two: what it is, and underneath,
+	/// what it stands on and when it is on. Those rows were written for the
+	/// tables that used to list them, which were 34 points, and when the tree
+	/// took the lists over they kept drawing their second line fourteen points
+	/// below the middle of a row that only had thirteen. The line was not
+	/// cramped, it was *outside the row*, and what somebody saw was two rows
+	/// touching with no space between them.
+	///
+	/// So the tree says how tall each kind of row is rather than having one
+	/// number that has to suit all three.
+	public func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+		guard let node = item as? Node else { return Self.entryRowHeight }
+		if node.isOverlayRoot { return Self.entryRowHeight }
+		return node.carried == nil ? Self.entryRowHeight : Self.carriedRowHeight
+	}
+
+	/// One line: a slug, and a badge for what it carries.
+	static let entryRowHeight: CGFloat = 26
+	/// Two: what it is, and what it stands on.
+	static let carriedRowHeight: CGFloat = 36
 
 	public func outlineViewItemDidCollapse(_ notification: Notification) {
 		if let node = notification.userInfo?["NSObject"] as? Node, node.isOverlayRoot {
@@ -1513,6 +1581,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	final class EntryRow: NSTableCellView {
 		var entry = TimelineEntry(clip: ClipReference(""))
 		var count = 0
+		/// The lane this clip was cut on, when the row is a clip and the take it
+		/// came from is readable. A stripe down the leading edge, exactly as on
+		/// the cutting timeline and on the programme strip — a clip should look
+		/// like a clip in every window it appears in.
+		var lane: ClipColor?
 		/// The name this placement was given with `as:`, and what hangs on it.
 		/// Worked out by the panel, which is the only thing that can see the
 		/// overlays as well as the timeline.
@@ -1528,6 +1601,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			case .group: kind = .section
 			}
 			var x: CGFloat = 4
+			if let lane {
+				Theme.clipStripe(lane).setFill()
+				NSRect(x: 0, y: 2, width: 3, height: bounds.height - 4).fill()
+				x = 7
+			}
 			if let image = Theme.symbol(kind, size: 13) {
 				Theme.draw(image, in: NSRect(x: x, y: bounds.height / 2 - 8, width: 20, height: 16))
 			}

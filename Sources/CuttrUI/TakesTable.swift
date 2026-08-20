@@ -351,11 +351,16 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 			case .take(let entry):
 				cell.field.isEditable = entry.path == renaming
 				cell.field.stringValue = entry.name
-				cell.field.textColor = entry.problem == nil ? Theme.clipStroke(.green) : Theme.playhead
+				// The name is text. The symbol beside it already carries the hue
+				// that says what kind of thing this is, and saying it twice
+				// spends a signal to repeat one that was not in doubt. Red is
+				// the exception and is not a kind — it is a take that will not
+				// resolve, which is news.
+				cell.field.textColor = entry.problem == nil ? Theme.text : Theme.playhead
 			case .scene(let name, _):
 				cell.field.isEditable = false
 				cell.field.stringValue = name
-				cell.field.textColor = Theme.color(.scene)
+				cell.field.textColor = Theme.text
 			}
 			cell.needsDisplay = true
 			return cell
@@ -369,7 +374,7 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 			switch tableColumn.identifier.rawValue {
 			case "take":
 				field.stringValue = entry.name
-				field.textColor = entry.problem == nil ? Theme.clipStroke(.green) : Theme.playhead
+				field.textColor = entry.problem == nil ? Theme.text : Theme.playhead
 			case "clips":
 				field.stringValue = entry.problem == nil ? String(entry.clips) : "—"
 				field.textColor = Theme.dimText
@@ -382,7 +387,7 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 			switch tableColumn.identifier.rawValue {
 			case "take":
 				field.stringValue = name
-				field.textColor = Theme.color(.scene)
+				field.textColor = Theme.text
 			case "clips":
 				field.stringValue = String(parts)
 				field.textColor = Theme.dimText

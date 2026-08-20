@@ -1274,3 +1274,62 @@ import Testing
 		#expect(strip.timeForTesting(at: -200) == 0)
 	}
 }
+
+/// Every row is tall enough for what it draws.
+///
+/// The overlay and sound rows were written for the 34-point tables that used to
+/// list them. When the tree took those lists over they kept drawing their second
+/// line fourteen points below the middle of a row that only had thirteen — so
+/// the line was not cramped, it was *outside the row*, and what somebody saw was
+/// two rows touching with no space between them.
+@Suite @MainActor struct RowHeightTests {
+
+	private func panel() -> ProgrammePanel {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 460, height: 600))
+		panel.reload(
+			Project(
+				timeline: [
+					TimelineEntry(clip: ClipReference("intro"), label: "opening"),
+					TimelineEntry(group: "middle", entries: [
+						TimelineEntry(clip: ClipReference("demo")),
+					]),
+				],
+				overlays: [
+					Overlay(kind: .text("a caption", style: nil),
+					        span: .marks(from: .group("opening"), to: .group("opening"))),
+				],
+				sounds: [Sound(file: "music.wav",
+				               span: .marks(from: .group("opening"), to: .group("opening")))]),
+			vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		return panel
+	}
+
+	/// A row that draws two lines gets room for two lines.
+	@Test func aTwoLineRowIsTallerThanAOneLineRow() {
+		#expect(ProgrammePanel.carriedRowHeight > ProgrammePanel.entryRowHeight)
+		// The second line is drawn at `midY - 14` and needs its full height
+		// below that, or it falls out of the row.
+		#expect(ProgrammePanel.carriedRowHeight / 2 - 14 >= 0,
+		        "the second line starts below the row")
+	}
+
+	/// And the tree asks for them by what the row actually is.
+	@Test func theTreeGivesEachKindOfRowItsOwnHeight() {
+		let panel = self.panel()
+		let outline = panel.outlineForTesting
+		var seen: Set<CGFloat> = []
+		var carried = 0
+		for row in 0..<outline.numberOfRows {
+			guard let item = outline.item(atRow: row) else { continue }
+			let height = panel.outlineView(outline, heightOfRowByItem: item)
+			seen.insert(height)
+			if height == ProgrammePanel.carriedRowHeight { carried += 1 }
+			// Whatever it is, the row is at least as tall as what it draws.
+			#expect(height >= ProgrammePanel.entryRowHeight)
+		}
+		#expect(carried >= 2, "no two-line rows in the tree to measure")
+		#expect(seen.count == 2, "the tree has one height for everything: \(seen.sorted())")
+	}
+}

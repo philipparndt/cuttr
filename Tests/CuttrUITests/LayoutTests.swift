@@ -224,18 +224,54 @@ import Testing
 		#expect(bar.progressForTesting.isHidden)
 	}
 
-	/// The setting-up controls are behind the name, and the name only says so
-	/// when there is something there.
+	/// The setting-up controls are behind an ellipsis beside the name, and it is
+	/// only there when there is something behind it.
+	///
+	/// It was a `⌄` glued onto the end of the name with two spaces — so the mark
+	/// sat on the text's baseline rather than on the row's centre, and moved
+	/// every time the name changed length. The name is only ever the name now.
 	@Test func theNameIsAWayIntoTheSetUp() {
 		let bar = self.bar()
 		bar.setName("mia-take-1")
 		#expect(bar.nameForTesting.isEnabled == false)
+		#expect(bar.moreForTesting.isHidden, "an ellipsis with nothing behind it")
 		#expect(bar.nameForTesting.attributedTitle.string == "mia-take-1")
 
 		bar.setUp = TakeSetup()
 		#expect(bar.nameForTesting.isEnabled)
-		#expect(bar.nameForTesting.attributedTitle.string.hasPrefix("mia-take-1"))
-		#expect(bar.nameForTesting.attributedTitle.string != "mia-take-1")
+		#expect(bar.moreForTesting.isHidden == false)
+		// The name is the name, whatever is behind it.
+		#expect(bar.nameForTesting.attributedTitle.string == "mia-take-1")
+
+		// And the ellipsis is on the row's centre, not on the text's baseline.
+		bar.layoutSubtreeIfNeeded()
+		let more = bar.moreForTesting.convert(bar.moreForTesting.bounds, to: bar)
+		// Within half a point: the bar is an even height and the button is not,
+		// so the exact centre lands between two of them. What this is about is
+		// the old mark sitting on the *text's* baseline, which was out by six.
+		#expect(abs(more.midY - bar.bounds.midY) <= 0.5, "the ellipsis is off-centre: \(more)")
+	}
+
+	/// Rolling the tape, from the bar that says where the tape is.
+	@Test func theBarPlaysAndSaysWhichWayRoundItIs() {
+		let bar = self.bar()
+		var asked = 0
+		bar.onPlayPause = { asked += 1 }
+		bar.playForTesting.performClick(nil)
+		#expect(asked == 1)
+
+		bar.setPlaying(true)
+		let playing = bar.playForTesting.image
+		bar.setPlaying(false)
+		#expect(playing != bar.playForTesting.image, "the button looks the same either way")
+
+		// Beside the clock, and the clock is still what is centred.
+		bar.layoutSubtreeIfNeeded()
+		let play = bar.playForTesting.convert(bar.playForTesting.bounds, to: bar)
+		let clock = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
+		#expect(play.maxX <= clock.minX)
+		#expect(abs(clock.midX - bar.bounds.midX) < 12,
+		        "the play button moved the clock: \(clock.midX) against \(bar.bounds.midX)")
 	}
 }
 

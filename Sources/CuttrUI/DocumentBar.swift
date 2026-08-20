@@ -31,12 +31,32 @@ public final class DocumentBar: NSView {
 	public var setUp: NSView? {
 		didSet {
 			name.isEnabled = setUp != nil
+			more.isHidden = setUp == nil
 			setName(documentName)
 		}
 	}
 
+	/// Rolling the tape, from the bar that says where the tape is.
+	///
+	/// Beside the clock rather than anywhere else, because it is the verb that
+	/// changes the number: the two are one control in everything but code. Both
+	/// windows get it — the cutting window has had `space` for this since the
+	/// beginning and the composing window has too, and a keyboard shortcut with
+	/// nothing on screen is a shortcut only the person who wrote it knows.
+	public var onPlayPause: (() -> Void)?
+
 	private var documentName = ""
 	private let name = NSButton()
+	/// The way into the setting-up controls: an ellipsis, which is what a menu
+	/// of more things about the thing beside it looks like everywhere else on
+	/// this machine.
+	///
+	/// It was a `⌄` glued onto the end of the name with two spaces, which put
+	/// the mark on the text's baseline rather than on the row's centre and moved
+	/// it every time the name changed length. A button of its own sits still and
+	/// is a target somebody can hit.
+	private let more = NSButton()
+	private let play = NSButton()
 	private let clock = NSTextField(labelWithString: "00:00.000")
 	private let statusLabel = NSTextField(labelWithString: "")
 	private let progress = NSProgressIndicator()
@@ -78,6 +98,28 @@ public final class DocumentBar: NSView {
 			.size(withAttributes: [.font: clock.font as Any]).width
 		clock.widthAnchor.constraint(equalToConstant: ceil(widest) + 2).isActive = true
 
+		more.isBordered = false
+		more.bezelStyle = .inline
+		more.imagePosition = .imageOnly
+		more.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "more")?
+			.withSymbolConfiguration(.init(pointSize: 12, weight: .semibold)
+				.applying(.init(paletteColors: [Theme.dimText])))
+		more.target = self
+		more.action = #selector(showSetUp)
+		more.isHidden = true
+		more.translatesAutoresizingMaskIntoConstraints = false
+		more.widthAnchor.constraint(equalToConstant: 20).isActive = true
+
+		play.isBordered = false
+		play.bezelStyle = .inline
+		play.imagePosition = .imageOnly
+		play.target = self
+		play.action = #selector(playTapped)
+		play.toolTip = "Play, or stop (space)"
+		play.translatesAutoresizingMaskIntoConstraints = false
+		play.widthAnchor.constraint(equalToConstant: 22).isActive = true
+		setPlaying(false)
+
 		statusLabel.font = Theme.monoSmall
 		statusLabel.textColor = Theme.dimText
 		statusLabel.alignment = .right
@@ -97,7 +139,7 @@ public final class DocumentBar: NSView {
 			stack.alignment = .centerY
 		}
 
-		for view in [name, leading, clock, statusLabel, progress, trailing] as [NSView] {
+		for view in [name, more, leading, play, clock, statusLabel, progress, trailing] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			addSubview(view)
 		}
@@ -117,11 +159,22 @@ public final class DocumentBar: NSView {
 			name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
 			name.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-			leading.leadingAnchor.constraint(equalTo: name.trailingAnchor, constant: 14),
+			// On the row's centre, beside the name, and it does not move when
+			// the name changes length.
+			more.leadingAnchor.constraint(equalTo: name.trailingAnchor, constant: 2),
+			more.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+			leading.leadingAnchor.constraint(equalTo: more.trailingAnchor, constant: 14),
 			leading.centerYAnchor.constraint(equalTo: centerYAnchor),
 
+			// The clock is what is centred, and the button hangs off it. Centring
+			// the pair instead would move the number sideways by half a button,
+			// and the one thing this bar promises is that the clock does not
+			// move.
 			clock.centerYAnchor.constraint(equalTo: centerYAnchor),
-			clock.leadingAnchor.constraint(greaterThanOrEqualTo: leading.trailingAnchor, constant: 12),
+			play.trailingAnchor.constraint(equalTo: clock.leadingAnchor, constant: -6),
+			play.centerYAnchor.constraint(equalTo: centerYAnchor),
+			play.leadingAnchor.constraint(greaterThanOrEqualTo: leading.trailingAnchor, constant: 12),
 
 			trailing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
 			trailing.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -147,17 +200,27 @@ public final class DocumentBar: NSView {
 	/// Which document this window is about.
 	public func setName(_ text: String) {
 		documentName = text
-		let chevron = setUp == nil ? "" : "  ⌄"
 		name.attributedTitle = NSAttributedString(
-			string: text + chevron,
+			string: text,
 			attributes: [.font: Theme.bodyStrong,
 			             .foregroundColor: setUp == nil ? Theme.dimText : Theme.text])
-		name.toolTip = setUp == nil ? nil : "What this take is made of, and how the two line up"
+		let tip = setUp == nil ? nil : "What this take is made of, and how the two line up"
+		name.toolTip = tip
+		more.toolTip = tip
 	}
 
 	/// Where the playhead is. Always, in every mode — that is the point.
 	public func setClock(_ seconds: Double) {
 		clock.stringValue = Timecode.string(seconds)
+	}
+
+	/// Which way round the button is: the shape of what pressing it will do.
+	public func setPlaying(_ playing: Bool) {
+		play.image = NSImage(
+			systemSymbolName: playing ? "pause.fill" : "play.fill",
+			accessibilityDescription: playing ? "pause" : "play")?
+			.withSymbolConfiguration(.init(pointSize: 13, weight: .medium)
+				.applying(.init(paletteColors: [Theme.text])))
 	}
 
 	public func setStatus(_ text: String) { statusLabel.stringValue = text }
@@ -176,9 +239,12 @@ public final class DocumentBar: NSView {
 
 	// MARK: - The popover behind the name
 
+	@objc private func playTapped() { onPlayPause?() }
+
 	@objc private func showSetUp() {
 		guard let content = setUp else { return }
 		if let popover, popover.isShown { popover.close(); return }
+		let from: NSView = more.isHidden ? name : more
 		let holder = NSViewController()
 		holder.view = content
 		let showing = NSPopover()
@@ -186,13 +252,15 @@ public final class DocumentBar: NSView {
 		showing.behavior = .transient
 		showing.appearance = NSAppearance(named: .darkAqua)
 		popover = showing
-		showing.show(relativeTo: name.bounds, of: name, preferredEdge: .maxY)
+		showing.show(relativeTo: from.bounds, of: from, preferredEdge: .maxY)
 	}
 
 	/// For the tests: the clock's own label, so its width can be measured
 	/// without going through the view tree looking for a font.
 	var clockForTesting: NSTextField { clock }
+	var playForTesting: NSButton { play }
 	var nameForTesting: NSButton { name }
+	var moreForTesting: NSButton { more }
 	var statusForTesting: NSTextField { statusLabel }
 	var progressForTesting: NSProgressIndicator { progress }
 }

@@ -472,6 +472,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 
 		bar.setUp = setup
+		bar.onPlayPause = { [weak self] in self?.playSelectionOrToggle() }
+		// The button shows what pressing it will do, so it has to hear about
+		// the tape starting and stopping from anywhere — `space`, a menu item,
+		// a clip playing itself to its end.
+		transport.onRateChange = { [weak self] rate in self?.bar.setPlaying(rate != 0) }
 		setup.onChooseVideo = { [weak self] in self?.chooseMedia(video: true) }
 		setup.onChooseAudio = { [weak self] in self?.chooseMedia(video: false) }
 		setup.onOffsetTyped = { [weak self] value in self?.setOffset(value, commit: true) }

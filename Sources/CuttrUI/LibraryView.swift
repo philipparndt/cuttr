@@ -402,6 +402,11 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 				NSRect(x: 4, y: 3, width: bounds.width - 8, height: 1).fill()
 
 			case .clip(let item):
+				// The lane it was cut on, as a stripe down the leading edge —
+				// the same mark it wears on the cutting timeline and on the
+				// programme strip, so a clip looks like itself in every window.
+				Theme.clipStripe(item.color).setFill()
+				NSRect(x: 0, y: 2, width: 3, height: bounds.height - 4).fill()
 				mark(.clip)
 				primary(item.reference, x: 24, y: bounds.height - 16)
 				var offset = secondary(

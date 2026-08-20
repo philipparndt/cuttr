@@ -276,6 +276,19 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// The bar across the top, the rail down the left, and whatever the rail
 		// has chosen filling the rest. The same three regions as the cutting
 		// window, in the same places, so it is one arrangement to learn.
+		// The content area is one colour and the rail is another.
+		//
+		// The warning line used to sit straight on the window's own ground,
+		// which is what the rail is drawn in — so there was a band of the rail's
+		// colour running along the top of the content, and the rail read as
+		// turning a corner. Two areas, two colours, and this is the ground the
+		// content area stands on.
+		let ground = NSView()
+		ground.wantsLayer = true
+		ground.layer?.backgroundColor = Theme.panel.cgColor
+		ground.translatesAutoresizingMaskIntoConstraints = false
+		content.addSubview(ground)
+
 		for view in [bar, rail, problemLabel, modes] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			content.addSubview(view)
@@ -290,6 +303,11 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			rail.topAnchor.constraint(equalTo: bar.bottomAnchor),
 			rail.leadingAnchor.constraint(equalTo: content.leadingAnchor),
 			rail.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+
+			ground.topAnchor.constraint(equalTo: bar.bottomAnchor),
+			ground.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
+			ground.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+			ground.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
 			problemLabel.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 2),
 			problemLabel.leadingAnchor.constraint(equalTo: rail.trailingAnchor, constant: 10),
@@ -345,13 +363,26 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private func buildBar() {
 		rail.onSelect = { [weak self] index in self?.show(Mode(rawValue: index) ?? .edit) }
 
-		renderButton.title = "Render\u{2026}"
-		renderButton.bezelStyle = .rounded
-		renderButton.controlSize = .small
-		renderButton.font = NSFont.systemFont(ofSize: 11)
+		// A picture rather than the word. It sits beside a clock and a play
+		// button, which are both shapes, and one word among them reads as the
+		// odd one out — `movieclapper` is what this makes: a film, written to a
+		// file. The word is still there on hover and in the File menu.
+		renderButton.isBordered = false
+		renderButton.bezelStyle = .inline
+		renderButton.imagePosition = .imageOnly
+		renderButton.image = NSImage(
+			systemSymbolName: "movieclapper", accessibilityDescription: "render")
+			?? NSImage(systemSymbolName: "film", accessibilityDescription: "render")
+		renderButton.image = renderButton.image?.withSymbolConfiguration(
+			.init(pointSize: 13, weight: .medium).applying(.init(paletteColors: [Theme.text])))
 		renderButton.target = self
 		renderButton.action = #selector(render(_:))
+		renderButton.toolTip = "Render\u{2026} (\u{21E7}\u{2318}R)"
+		renderButton.translatesAutoresizingMaskIntoConstraints = false
+		renderButton.widthAnchor.constraint(equalToConstant: 24).isActive = true
 		bar.addTrailing(renderButton)
+
+		bar.onPlayPause = { [weak self] in self?.togglePlay(nil) }
 	}
 
 	/// The controls that belong to the picture, in the corner of the picture.
@@ -585,7 +616,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			}
 		}
 		transport.onRateChange = { [weak self] rate in
-			guard let self, self.presenting else { return }
+			guard let self else { return }
+			self.bar.setPlaying(rate != 0)
+			guard self.presenting else { return }
 			self.controls.isPlaying = rate != 0
 			// Pausing is a reason to see the controls: somebody has just
 			// reached for them.
