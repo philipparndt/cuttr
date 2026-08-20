@@ -26,6 +26,9 @@ public struct Overlay: Sendable, Equatable {
 		case aberration(Aberration)
 		/// The picture played off a worn tape: tracking, noise, lines.
 		case tape(Tape)
+		/// Somebody saying something, in a drawn bubble with a tail that
+		/// points at them.
+		case bubble(Bubble)
 
 		/// Whether this kind *is* the frame rather than something laid over it.
 		///
@@ -39,7 +42,7 @@ public struct Overlay: Sendable, Equatable {
 		public var changesTheFrame: Bool {
 			switch self {
 			case .film, .aberration, .tape: return true
-			case .text, .spinner, .effect, .scene: return false
+			case .text, .spinner, .effect, .scene, .bubble: return false
 			}
 		}
 	}
@@ -56,6 +59,8 @@ public struct Overlay: Sendable, Equatable {
 		case .film: return "film mode"
 		case .aberration: return "the aberration"
 		case .tape: return "the tape"
+		case .bubble(let bubble):
+			return bubble.text.isEmpty ? "a bubble" : "the bubble \u{201C}\(bubble.text)\u{201D}"
 		}
 	}
 
@@ -112,6 +117,13 @@ public struct Overlay: Sendable, Equatable {
 		case .spinner(var spinner):
 			if let words = appearance.words { spinner.words = words }
 			out.kind = .spinner(spinner)
+		case .bubble(var bubble):
+			// The same key a caption uses, meaning the same thing: one bubble
+			// on three times, saying something different each time, rather than
+			// three bubbles with the same paper, seed and anchor to keep in
+			// step by hand.
+			if let text = appearance.text { bubble.text = text }
+			out.kind = .bubble(bubble)
 		case .effect, .scene, .film, .aberration, .tape:
 			// None of them says anything of its own at an appearance: an effect
 			// is simply on twice, a scene says what its parameters say, and
@@ -149,6 +161,11 @@ public struct Overlay: Sendable, Equatable {
 
 	/// Where it sits. An anchor overrides the style's position and makes the
 	/// overlay follow whatever the anchor follows.
+	///
+	/// A bubble is the exception, and deliberately: there the anchor is what it
+	/// *points at*. The bubble is placed where the anchor was when it came on
+	/// and stays there, because words that move under the reader cannot be
+	/// read; it is the tail that follows the face. See ``Bubble``.
 	public var anchor: String?
 	/// Offset from the anchor, in fractions of the frame **height** — both axes
 	/// in the same unit, so a spinner stays the same distance above a head on a
@@ -453,7 +470,8 @@ public struct TextStyle: Sendable, Equatable {
 	/// says `center` should work — but a menu that lists a style twice under
 	/// two spellings is a menu that makes somebody wonder what the difference
 	/// is. They are read, not offered.
-	public static let offered = ["lower-third", "lower-third-centre", "centre", "title", "caption"]
+	public static let offered = ["lower-third", "lower-third-centre", "centre", "title", "caption",
+	                             "bubble"]
 
 	/// Available without being written down, and overridable by writing one
 	/// down: a project that redefines `lower-third` still gets the others.
@@ -465,6 +483,9 @@ public struct TextStyle: Sendable, Equatable {
 		"center": .centred,
 		"title": .title,
 		"caption": .caption,
+		// Dark ink on nothing, because what is behind a bubble's words is the
+		// bubble. A caption's white would be invisible on paper.
+		"bubble": Bubble.textStyle,
 	]
 }
 

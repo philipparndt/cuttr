@@ -1,0 +1,91 @@
+# cuttr project — speech bubbles, thought bubbles, and a box with an arrow.
+#
+# Every bubble here points at a fixed spot with `at:`, because a programme with
+# no footage in it has no faces to track. In a real one you write `anchor:
+# mia-eye` instead and nothing else changes — and then the interesting half
+# happens: the tail is redrawn for every sample of the tracked face while the
+# words stay exactly where they were put. A bubble is read, and words that move
+# under the reader cannot be.
+#
+# The other thing to look at is that none of these says how big it is. The words
+# wrap to `width` — a fraction of the frame, not a pixel count — and the paper
+# grows to whatever comes out, downwards.
+cuttr-project: 1
+
+output:
+  size: 1280x720
+  fps:  25
+  file: bubbles.mov
+
+styles:
+  # A bubble's words are drawn in the built-in `bubble` style unless it names
+  # another. A style with a name of its own starts from `lower-third` — which is
+  # white, for lettering over footage — so a style meant for the inside of a
+  # bubble has to say what colour the ink is. Louder, in a felt pen, and dark.
+  shouting:
+    font:  Marker Felt Wide
+    size:  0.05
+    color: "#2a1c10"
+    background: none
+    align: centre
+
+timeline:
+  # Two people, so two bubbles. Each is written inside the card it belongs to
+  # and given no range, which means "all of this card" — see
+  # `overlays/placements.cuttrproj` for what that spelling is for.
+  - card:  00:03.000
+    fill:  ["#f6efdf", "#e2d6bc"]
+    overlays:
+      - bubble: still thinks glitter is a colour
+        at:     [0.24, 0.3]
+      - bubble: it is a colour
+        at:     [0.76, 0.34]
+        offset: [-0.12, 0.2]
+        fill:   "#fdf0f2"
+
+  # A thought bubble is the same overlay with `shape:` on it. Its trail is a
+  # line of shrinking puffs going the same way a tail would.
+  - card:  00:03.000
+    fill:  ["#e8eef6", "#cdd8e6"]
+    overlays:
+      - bubble: maybe it is a colour
+        shape:  thought
+        at:     [0.42, 0.26]
+        seed:   7
+
+  # A box with an arrow is for labelling a thing rather than putting words in a
+  # mouth — and the arrow bends, because one drawn with a ruler is the one thing
+  # a hand-drawn callout must not look like.
+  - card:  00:03.000
+    fill:  ["#efeae4", "#d8d0c6"]
+    overlays:
+      - bubble: the good chair
+        shape:  box
+        at:     [0.22, 0.24]
+        seed:   3
+      - bubble: she has been telling this story since nineteen seventy and it gets
+          longer every single year
+        at:     [0.72, 0.22]
+        offset: [-0.08, 0.3]
+        width:  0.3
+        style:  shouting
+        seed:   11
+
+  # The wobble is a seed, and a seed is a promise: the same number draws the
+  # same shaky line on every machine and in every render. Three of them, so the
+  # promise is visible — nothing else about these three differs.
+  - card:  00:03.000
+    fill:  "#f2f0ec"
+    overlays:
+      - bubble: seed 1
+        at:     [0.2, 0.4]
+        offset: [0, 0.16]
+        seed:   1
+      - bubble: seed 2
+        at:     [0.5, 0.4]
+        offset: [0, 0.16]
+        seed:   2
+      - bubble: seed 3
+        at:     [0.8, 0.4]
+        offset: [0, 0.16]
+        seed:   3

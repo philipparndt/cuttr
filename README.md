@@ -603,6 +603,65 @@ minute finding out.
 Not implemented: `method: point`, the non-face tracker. It is in the format and
 currently holds position rather than tracking.
 
+### Bubbles — somebody in the picture saying something
+
+A speech bubble, a thought bubble, or a box with an arrow, drawn by hand and
+pointed at a face. One line to say it, one more to say who it is about:
+
+```yaml
+overlays:
+  - bubble: still thinks glitter is a colour
+    anchor: mia-eye
+    within: mia-close
+    from:   00:02.000
+    to:     00:06.000
+```
+
+**`anchor:` here means what it points at, not where it sits** — the one place in
+this format where that word does something different, and the difference is the
+point. Every other overlay travels with its anchor. A bubble is *read*, and
+words that move under the reader cannot be: so the bubble is placed once, where
+the face was when it came on, and stays there. What follows the face is the
+tail, redrawn at every sample of the tracked path — so she can walk across the
+shot with the tail swinging round to keep up and the sentence never moves.
+
+Where the tracking stops, the tail stops: outside the stretch the anchor was
+actually solved over, the bubble keeps its words and simply loses its tail. A
+tail held on the doorway somebody left through says the tracking is still
+working when it is not. If she is still in the shot but outside the frame, the
+tail lies along the edge she went out by and goes on pointing that way.
+
+`at: [x, y]` points at a fixed spot instead — for the things that are not faces,
+and for a programme with no footage in it at all, which is what lets
+`examples/overlays/bubbles.cuttrproj` render on any machine.
+
+| | |
+|---|---|
+| `bubble:` | what it says. The whole of the common case |
+| `shape:` | `speech` (a tail), `thought` (a trail of shrinking puffs), `box` (a bent arrow) |
+| `style:` | a style from `styles:`; the built-in `bubble` is dark ink on nothing |
+| `fill:` `line:` | the paper and the drawn line |
+| `width:` | how wide the words may get, as a fraction of the frame. **A maximum, not a size** |
+| `seed:` | the wobble |
+| `at:` | a fixed spot to point at, when no anchor does |
+| `offset:` | how far off that spot the bubble stands. Written into the file the first time it is saved, because a default nobody can see is a default nobody can nudge |
+
+**Nothing says how big it is.** The words wrap to `width` and the paper grows to
+whatever comes out — downwards. A long joke gives a taller bubble, never one off
+the side of the screen, and the box is pushed back into frame if it was written
+too near an edge.
+
+**The wobble is a seed**, exactly as an effect's cloud is: the same number draws
+the same shaky line on every machine and in every render, so a bubble somebody
+approved is a bubble they can get back. Two renders of one project decode to the
+same bytes, and the suite checks it by rendering both and comparing.
+
+`keys:` are refused, by name: a bubble has nothing a keyframe could honestly
+move. It arrives and leaves by `in:` and `out:` — a fade, by default, because a
+bubble that slid in from the left would be one whose tail swung across the frame
+looking for the face — and what it says at each of several appearances goes
+under `when:`, the same as a caption's.
+
 ### Levelling and grading
 
 Measured once per recording, applied by every programme.

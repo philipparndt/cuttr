@@ -341,6 +341,7 @@ public final class PropertiesPanel: NSView {
 		case .film: return .film
 		case .aberration: return .aberration
 		case .tape: return .tape
+		case .bubble: return .bubble
 		}
 	}
 
@@ -921,16 +922,17 @@ public final class PropertiesPanel: NSView {
 		}
 
 		section("what it is")
-		let kinds = ["text", "spinner", "effect", "scene", "film", "aberration", "tape"]
+		let kinds = ["text", "spinner", "bubble", "effect", "scene", "film", "aberration", "tape"]
 		let current: Int
 		switch overlay.kind {
 		case .text: current = 0
 		case .spinner: current = 1
-		case .effect: current = 2
-		case .scene: current = 3
-		case .film: current = 4
-		case .aberration: current = 5
-		case .tape: current = 6
+		case .bubble: current = 2
+		case .effect: current = 3
+		case .scene: current = 4
+		case .film: current = 5
+		case .aberration: current = 6
+		case .tape: current = 7
 		}
 		let firstScene = project.scenes.keys.sorted().first ?? "intro"
 		// The shape a new film overlay closes to.
@@ -948,20 +950,42 @@ public final class PropertiesPanel: NSView {
 				switch (pick, overlay.kind) {
 				case (0, .spinner(let spinner)):
 					overlay.kind = .text(spinner.words.first?.text ?? "Caption", style: nil)
+				case (0, .bubble(let bubble)):
+					overlay.kind = .text(bubble.text, style: nil)
 				case (0, .effect):
 					overlay.kind = .text("Caption", style: nil)
 				case (1, .text(let text, _)):
 					overlay.kind = .spinner(Spinner(words: text.isEmpty ? [] : [SpinnerWord(text)]))
+				case (1, .bubble(let bubble)):
+					overlay.kind = .spinner(
+						Spinner(words: bubble.text.isEmpty ? [] : [SpinnerWord(bubble.text)]))
 				case (1, .effect):
 					overlay.kind = .spinner(Spinner())
-				case (2, .text), (2, .spinner), (2, .scene):
+				case (2, .text(let text, let style)):
+					// The words carry over, which is the whole of what somebody
+					// means by turning a caption into a bubble.
+					overlay.kind = .bubble(Bubble(text: text, style: style))
+					overlay.arrival = .fade(over: 0.2)
+					overlay.departure = .fade(over: 0.2)
+					overlay.offset = Bubble.standoff
+				case (2, .spinner(let spinner)):
+					overlay.kind = .bubble(Bubble(text: spinner.words.first?.text ?? ""))
+					overlay.arrival = .fade(over: 0.2)
+					overlay.departure = .fade(over: 0.2)
+					overlay.offset = Bubble.standoff
+				case (2, _):
+					overlay.kind = .bubble(Bubble(text: "still thinks glitter is a colour"))
+					overlay.arrival = .fade(over: 0.2)
+					overlay.departure = .fade(over: 0.2)
+					overlay.offset = Bubble.standoff
+				case (3, .text), (3, .spinner), (3, .scene), (3, .bubble):
 					overlay.kind = .effect(Effect())
 					// It arrives by falling into the frame, not by fading up.
 					overlay.arrival = .cut
 					overlay.departure = .fall(over: 1.5)
-				case (3, _):
-					overlay.kind = .scene(firstScene, with: [:])
 				case (4, _):
+					overlay.kind = .scene(firstScene, with: [:])
+				case (5, _):
 					// The bars have to close on something narrower than the
 					// programme or nothing happens, so the first choice is made
 					// against what this programme actually is.
@@ -970,11 +994,11 @@ public final class PropertiesPanel: NSView {
 					// end and is the whole point of the effect.
 					overlay.arrival = .fade(over: 1)
 					overlay.departure = .fade(over: 1)
-				case (5, _):
+				case (6, _):
 					overlay.kind = .aberration(Aberration())
 					overlay.arrival = .fade(over: 0.5)
 					overlay.departure = .fade(over: 0.5)
-				case (6, _):
+				case (7, _):
 					overlay.kind = .tape(Tape())
 					overlay.arrival = .fade(over: 0.5)
 					overlay.departure = .fade(over: 0.5)
@@ -1170,6 +1194,39 @@ public final class PropertiesPanel: NSView {
 				self.editOverlay(origin) { $0.kind = .text(content, style: self.styleNames[pick]) }
 			}], note: "defined under `styles:`, or one of the built-in four")
 
+		case .bubble(let bubble):
+			field("bubble", [text(bubble.text, width: 260, placeholder: "what they say") {
+				[weak self] value in
+				self?.editBubble(origin) { $0.text = value }
+			}], note: "it wraps to `width` and the bubble grows to fit — no measuring by hand")
+			field("shape", [pop(Bubble.Shape.allCases.map(\.rawValue),
+			                    selected: Bubble.Shape.allCases.firstIndex(of: bubble.shape) ?? 0) {
+				[weak self] pick in
+				self?.editBubble(origin) { $0.shape = Bubble.Shape.allCases[pick] }
+			}], note: "speech has a tail, thought has a trail of puffs, box has an arrow")
+			field("style", [pop(styleNames,
+			                    selected: styleNames.firstIndex(of: bubble.style ?? "bubble") ?? 0) {
+				[weak self] pick in
+				guard let self else { return }
+				self.editBubble(origin) { $0.style = self.styleNames[pick] }
+			}], note: "`bubble` is dark ink on nothing — a caption's white would be invisible")
+			field("fill", [colour(bubble.fill) { [weak self] rgba in
+				self?.editBubble(origin) { $0.fill = rgba }
+			}, label("the paper")])
+			field("line", [colour(bubble.line) { [weak self] rgba in
+				self?.editBubble(origin) { $0.line = rgba }
+			}, label("the drawn line")])
+			field("width", [number(bubble.width, width: 72) { [weak self] value in
+				self?.editBubble(origin) { $0.width = max(0.05, min(1, value)) }
+			}, label("of frame width, at most")])
+			field("seed", [number(Double(bubble.seed), width: 72) { [weak self] value in
+				self?.editBubble(origin) { $0.seed = Int(value) }
+			}], note: "the same number gives the same wobble, every render, on every machine")
+			field("points at", [label(overlay.anchor.map { "the anchor `\($0)`" }
+				?? (bubble.at.map { "the spot [\(Self.trimmed($0.x)), \(Self.trimmed($0.y))]" }
+					?? "nothing — it keeps its words and loses its tail"))],
+			      note: "an anchor is a face and follows it; `at:` is a fixed spot in the frame")
+
 		case .spinner(let spinner):
 			field("style", [pop(Spinner.Style.allCases.map(\.rawValue),
 			                    selected: Spinner.Style.allCases.firstIndex(of: spinner.style) ?? 0) {
@@ -1342,6 +1399,15 @@ public final class PropertiesPanel: NSView {
 			case .text(let content, _):
 				saysControls.append(text(appearance.text ?? "", width: 220,
 				                         placeholder: content.isEmpty ? "text" : content) {
+					[weak self] value in
+					self?.editOverlay(origin) {
+						guard position < $0.appearances.count else { return }
+						$0.appearances[position].text = value.isEmpty ? nil : value
+					}
+				})
+			case .bubble(let bubble):
+				saysControls.append(text(appearance.text ?? "", width: 220,
+				                         placeholder: bubble.text.isEmpty ? "text" : bubble.text) {
 					[weak self] value in
 					self?.editOverlay(origin) {
 						guard position < $0.appearances.count else { return }
@@ -1651,7 +1717,7 @@ public final class PropertiesPanel: NSView {
 		case .aberration:
 			message = "Which kind it is is not here: `radial` and `linear` are two "
 				+ "different things rather than two ends of one."
-		case .text, .spinner, .scene:
+		case .text, .spinner, .scene, .bubble:
 			return
 		}
 		remark(message)
@@ -1697,6 +1763,19 @@ public final class PropertiesPanel: NSView {
 			change(&effect)
 			overlay.kind = .effect(effect)
 		}
+	}
+
+	private func editBubble(_ origin: Origin, _ change: (inout Bubble) -> Void) {
+		editOverlay(origin) { overlay in
+			guard case .bubble(var bubble) = overlay.kind else { return }
+			change(&bubble)
+			overlay.kind = .bubble(bubble)
+		}
+	}
+
+	/// A number as somebody would write it, for the one-line answers above.
+	static func trimmed(_ value: CGFloat) -> String {
+		value == value.rounded() ? String(Int(value)) : String(format: "%g", Double(value))
 	}
 
 	private func editSpinner(_ origin: Origin, _ change: (inout Spinner) -> Void) {
@@ -1945,6 +2024,11 @@ public final class PropertiesPanel: NSView {
 			preview.content = .caption("", TextStyle.caption)
 		case .text(let content, let style):
 			preview.content = .caption(content, project.style(named: style))
+		case .bubble(let bubble):
+			// The words, in the bubble's own style. The paper is not drawn here:
+			// what the picture is for is where the thing sits, and a bubble sits
+			// where its words do.
+			preview.content = .caption(bubble.text, project.style(named: bubble.style ?? "bubble"))
 		case .spinner(let spinner):
 			// The words beside a spinner have a style of their own, and it is
 			// not the caption style: `caption` has no plate behind it, because
@@ -1985,6 +2069,11 @@ public final class PropertiesPanel: NSView {
 		if case .text(_, let style) = overlay.kind {
 			return project.style(named: style).position
 		}
+		// A bubble with a fixed spot to point at stands off from *that*, the
+		// same way an anchored one stands off from the face.
+		if case .bubble(let bubble) = overlay.kind, let at = bubble.at {
+			return CGPoint(x: at.x + overlay.offset.x * ratio, y: at.y + overlay.offset.y)
+		}
 		return CGPoint(x: 0.5 + overlay.offset.x, y: 0.5 + overlay.offset.y)
 	}
 
@@ -2002,6 +2091,12 @@ public final class PropertiesPanel: NSView {
 		if let anchor {
 			editOverlay(origin) {
 				$0.offset = CGPoint(x: (spot.x - anchor.x) * ratio, y: spot.y - anchor.y)
+			}
+			return
+		}
+		if case .bubble(let bubble) = overlay.kind, let at = bubble.at {
+			editOverlay(origin) {
+				$0.offset = CGPoint(x: (spot.x - at.x) * ratio, y: spot.y - at.y)
 			}
 			return
 		}

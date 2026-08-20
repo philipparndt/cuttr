@@ -440,6 +440,24 @@ public enum ProjectWriter {
 						out += "\(indent)  dropouts: \(trim(tape.dropouts))\n"
 					}
 					if tape.seed != plain.seed { out += "\(indent)  seed:    \(tape.seed)\n" }
+				case .bubble(let bubble):
+					// The words are the thing, so they are the value; everything
+					// else is written only where it is no longer what a bubble is
+					// without it. Which is what makes the ordinary one — somebody
+					// saying something, pointing at a face — two lines.
+					let plain = Bubble()
+					out += "\(indent)- bubble: \(scalar(bubble.text))\n"
+					if bubble.shape != plain.shape {
+						out += "\(indent)  shape:  \(bubble.shape.rawValue)\n"
+					}
+					if let style = bubble.style { out += "\(indent)  style:  \(scalar(style))\n" }
+					if bubble.fill != plain.fill { out += "\(indent)  fill:   \(scalar(bubble.fill.hex))\n" }
+					if bubble.line != plain.line { out += "\(indent)  line:   \(scalar(bubble.line.hex))\n" }
+					if bubble.width != plain.width { out += "\(indent)  width:  \(trim(bubble.width))\n" }
+					if bubble.seed != plain.seed { out += "\(indent)  seed:   \(bubble.seed)\n" }
+					if let at = bubble.at {
+						out += "\(indent)  at:     [\(trim(at.x)), \(trim(at.y))]\n"
+					}
 				case .spinner(let spinner):
 					out += "\(indent)- spinner: \(spinner.style.rawValue)\n"
 					if spinner.size != Spinner().size { out += "\(indent)  size:    \(trim(spinner.size))\n" }
@@ -495,6 +513,14 @@ public enum ProjectWriter {
 				}
 				if let anchor = overlay.anchor {
 					out += "\(indent)  anchor: \(scalar(anchor))\n"
+				}
+				// A bubble always writes where it sits, whether or not it points
+				// at a tracked face: the reader gives a bubble that says nothing
+				// a standoff from the thing it is about, and a default nobody can
+				// see is a default nobody can nudge.
+				var placed = overlay.anchor != nil
+				if case .bubble = overlay.kind { placed = true }
+				if placed {
 					out += "\(indent)  offset: [\(trim(overlay.offset.x)), \(trim(overlay.offset.y))]\n"
 				}
 				out += "\(indent)  in:     \(transition(overlay.arrival))\n"

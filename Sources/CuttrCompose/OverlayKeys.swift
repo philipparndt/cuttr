@@ -103,11 +103,13 @@ public extension Overlay.Kind {
 		case .aberration: return [.amount, .angle]
 		case .tape: return [.jitter, .band, .chroma, .scanlines, .dropouts]
 		case .effect: return [.density, .speed, .size, .wind]
-		// A caption, a spinner and a scene are layers rather than pixels, and
-		// two of the three carry their own timing already — a spinner's words
-		// have durations, and a scene's parts have keys. There is nothing here
-		// for a key to move that is not already said better somewhere else.
-		case .text, .spinner, .scene: return []
+		// A caption, a spinner, a scene and a bubble are layers rather than
+		// pixels, and three of the four carry their own timing already — a
+		// spinner's words have durations, a scene's parts have keys, and a
+		// bubble's tail is moved by the face it points at rather than by
+		// anything anybody would write down. There is nothing here for a key to
+		// move that is not already said better somewhere else.
+		case .text, .spinner, .scene, .bubble: return []
 		}
 	}
 
@@ -120,7 +122,7 @@ public extension Overlay.Kind {
 		case .aberration: return .amount
 		case .tape: return .jitter
 		case .effect: return .density
-		case .text, .spinner, .scene: return nil
+		case .text, .spinner, .scene, .bubble: return nil
 		}
 	}
 
@@ -137,7 +139,24 @@ public extension Overlay.Kind {
 		case .film: return "film mode"
 		case .aberration: return "the aberration"
 		case .tape: return "the tape"
+		case .bubble: return "a bubble"
 		}
+	}
+
+	/// How one of these comes on, and goes off, when the file does not say.
+	///
+	/// A slide for nearly everything, which is what an overlay has always done.
+	/// A bubble is the exception: one that slid in from the left would be a
+	/// bubble whose tail swung across the frame to find the face, and what a
+	/// drawn bubble does is appear.
+	var arrives: Overlay.Transition {
+		if case .bubble = self { return .fade(over: 0.2) }
+		return .slide(.left, over: 0.4)
+	}
+
+	var departs: Overlay.Transition {
+		if case .bubble = self { return .fade(over: 0.2) }
+		return .slide(.right, over: 0.4)
 	}
 
 	/// What a parameter is at the moment nobody has said otherwise.
@@ -174,7 +193,7 @@ public extension Overlay.Kind {
 			case .wind: return effect.wind
 			default: return 0
 			}
-		case .text, .spinner, .scene: return 0
+		case .text, .spinner, .scene, .bubble: return 0
 		}
 	}
 }
@@ -257,7 +276,7 @@ public extension Overlay {
 			if let scanlines = now(.scanlines) { tape.scanlines = scanlines }
 			if let dropouts = now(.dropouts) { tape.dropouts = dropouts }
 			return .tape(tape)
-		case .effect, .text, .spinner, .scene:
+		case .effect, .text, .spinner, .scene, .bubble:
 			return kind
 		}
 	}

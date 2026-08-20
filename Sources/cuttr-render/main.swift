@@ -672,6 +672,10 @@ if describe {
 			what = "spinner \(spinner.style.rawValue) size \(spinner.size)"
 				+ (spinner.words.isEmpty ? " (no words)"
 					: " words \(spinner.words.map(\.text).joined(separator: " · "))")
+		case .bubble(let bubble):
+			what = "bubble \(bubble.shape.rawValue) \(bubble.text.debugDescription)"
+				+ " seed \(bubble.seed) width \(bubble.width)"
+				+ (bubble.at.map { " at [\($0.x), \($0.y)]" } ?? "")
 		}
 		print(String(format: "  %7.3f → %7.3f  %@", shown.start, shown.end, what as NSString))
 		if let where_ = writtenIn(shown.origin, of: project,
