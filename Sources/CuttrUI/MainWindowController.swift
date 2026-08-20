@@ -22,8 +22,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	private let clipTable = ClipTable()
 	private let anchorTable = AnchorTable()
 	private let lookPanel = LookPanel()
+	private let transcriptPane = TranscriptPane()
 	private var clipPane: FoldingPane?
 	private var anchorPane: FoldingPane?
+	private var wordsPane: FoldingPane?
 	private var lookPane: FoldingPane?
 	/// A drag on a slider is sixty changes and one undo step: the first one
 	/// registers the undo, and the rest are folded into it.
@@ -32,6 +34,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	private let markers = AnchorMarkerView()
 	private var solveTask: Task<Void, Never>?
 	private var namingTask: Task<Void, Never>?
+	private var wordsTask: Task<Void, Never>?
 
 	private var playhead: Double = 0
 	private var pending: (start: Double, end: Double)?
@@ -107,19 +110,21 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		// The clips above, the anchors below. Both are lists of things the take
 		// contains and both are referenced by name from a project, so they
 		// belong side by side rather than one being a menu.
-		// Three things about the take, each behind a heading that folds it: the
-		// clips, the faces being followed, and the grade. Only one of them is
-		// usually the thing being worked on — a grade is decided once and left
-		// alone — and folding gives the list the room without anybody dragging
-		// dividers about.
+		// Four things about the take, each behind a heading that folds it: the
+		// clips, the faces being followed, what was said, and the grade. Only
+		// one of them is usually the thing being worked on — a grade is decided
+		// once and left alone — and folding gives the list the room without
+		// anybody dragging dividers about.
 		clipPane = FoldingPane("clips", content: clipTable)
 		anchorPane = FoldingPane("anchors", content: anchorTable)
+		wordsPane = FoldingPane("words", content: transcriptPane,
+		                        accessory: transcriptPane.detachedHead())
 		lookPane = FoldingPane("look", content: lookPanel, accessory: lookPanel.detachedHead())
 
 		let lists = NSSplitView()
 		lists.isVertical = false
 		lists.dividerStyle = .thin
-		for pane in [clipPane!, anchorPane!, lookPane!] {
+		for pane in [clipPane!, anchorPane!, wordsPane!, lookPane!] {
 			lists.addArrangedSubview(pane)
 			pane.onFold = { [weak lists] _ in lists?.adjustSubviews() }
 		}
@@ -181,6 +186,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			 lists.widthAnchor.constraint(greaterThanOrEqualToConstant: 260)),
 			(anchorPane!.heightAnchor.constraint(equalToConstant: 170),
 			 anchorPane!.heightAnchor.constraint(greaterThanOrEqualToConstant: 84)),
+			(wordsPane!.heightAnchor.constraint(equalToConstant: 200),
+			 wordsPane!.heightAnchor.constraint(greaterThanOrEqualToConstant: 96)),
 			(lookPane!.heightAnchor.constraint(equalToConstant: 230),
 			 lookPane!.heightAnchor.constraint(greaterThanOrEqualToConstant: 144)),
 			(timeline.heightAnchor.constraint(equalToConstant: 280),
@@ -243,6 +250,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			self.playhead = time
 			self.timeline.playhead = time
 			self.markers.playhead = time
+			// The transcript scrolls itself only while the tape is rolling.
+			// Stopped, somebody is reading it, and text that moves under a
+			// reader is text nobody can read.
+			self.transcriptPane.follows = self.transport.isPlaying
+			self.transcriptPane.playhead = time
 			if self.transport.isPlaying { self.timeline.followPlayhead() }
 			self.header.update(document: self.takeDocument, playhead: time, monitorMode: self.transport.monitor)
 		}
@@ -287,6 +299,23 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			self?.setTime(id, isStart: isStart, text: text)
 		}
 		clipTable.contextMenu = { [weak self] id in self?.clipMenu(for: id, at: nil) }
+
+		// Selecting words is setting in and out. That is the whole claim this
+		// pane makes: a sentence you can read is a cut you can make, and the
+		// key that turns a span into a clip is the one that already did.
+		transcriptPane.onSelectWords = { [weak self] start, end in
+			guard let self else { return }
+			let grid = self.takeDocument.grid
+			self.pending = (grid.snap(start), grid.snap(end))
+			self.timeline.pending = self.pending
+			self.timeline.reveal(from: start - 0.5, to: end + 0.5)
+		}
+		transcriptPane.onMoveTo = { [weak self] time in
+			self?.move(to: time)
+			self?.timeline.followPlayhead()
+		}
+		transcriptPane.onTranscribe = { [weak self] in self?.transcribe() }
+		transcriptPane.onStatus = { [weak self] note in self?.header.setStatus(note) }
 
 		anchorTable.onRename = { [weak self] old, new in self?.renameAnchor(old, to: new) }
 		anchorTable.onActivate = { [weak self] name in
@@ -491,6 +520,89 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 	}
 
+	// MARK: - The words
+
+	/// Asks for the take's transcript, once.
+	///
+	/// Once, because it is a minute of somebody's machine and the answer does
+	/// not change: the words are written beside the take and read back when it
+	/// is opened. Pressing the button again is a deliberate act — a re-align, a
+	/// swapped-in re-export — and it says "Again" so that it looks like one.
+	private func transcribe() {
+		guard wordsTask == nil else { return }
+		guard let source = Transcriber.Source.forTake(
+			takeDocument.take, videoURL: takeDocument.videoURL,
+			audioURL: takeDocument.audioURL, duration: takeDocument.duration)
+		else {
+			header.setStatus("nothing to listen to — give this take a video or an audio file first")
+			return
+		}
+		// The language this take was transcribed in last time, if it has been.
+		// Somebody working through a German shoot should not have to say so
+		// once per take, and the file already knows.
+		let recorded = takeDocument.take.words?.locale ?? ""
+		let locale = recorded.isEmpty ? Locale.current : Locale(identifier: recorded)
+
+		header.setStatus("listening to \(source.url.lastPathComponent)"
+			+ " — on this Mac, and nothing is uploaded")
+		header.setProgress(0)
+		transcriptPane.setBusy(true)
+		wordsTask = Task { [weak self] in
+			do {
+				let made = try await Transcriber.transcribe(
+					source, locale: locale,
+					onProgress: { step in
+						Task { @MainActor in
+							self?.header.setProgress(step.fraction)
+							self?.transcriptPane.setNote(step.note)
+						}
+					})
+				guard !Task.isCancelled, let self else { return }
+				try self.takeDocument.setTranscript(
+					made.transcript, recogniser: made.recogniser, locale: made.locale)
+				self.wordsTask = nil
+				self.header.setProgress(nil)
+				self.header.setStatus(
+					"\(made.transcript.count) words · \(made.recogniser.rawValue) · \(made.locale)"
+						+ " — select a sentence and press ⏎")
+				self.refresh()
+			} catch {
+				guard let self else { return }
+				self.wordsTask = nil
+				self.header.setProgress(nil)
+				self.header.setStatus(error.localizedDescription)
+				self.refresh()
+			}
+		}
+	}
+
+	/// Names the selected clip after the first words spoken in it.
+	///
+	/// The keystroke that turns `clip-7` into `so-the-driver-installs`. The
+	/// name is the sentence as it was said and the slug falls out of it, which
+	/// is the same route a name typed by hand takes — including the rule that a
+	/// slug somebody has written themselves is theirs and stays.
+	private func nameFromWords() {
+		guard let id = selectedClip,
+		      let clip = takeDocument.take.clips.first(where: { $0.id == id })
+		else {
+			header.setStatus("select a clip first — W names it after its first words")
+			return
+		}
+		guard !takeDocument.transcript.isEmpty else {
+			header.setStatus("no words yet — transcribe this take first")
+			return
+		}
+		let phrase = takeDocument.transcript.phrase(covering: clip.start ... clip.end)
+		guard !phrase.isEmpty else {
+			header.setStatus("nothing is said in \(clip.slug)")
+			return
+		}
+		takeDocument.setName(phrase, for: id, actionName: "Name from Words")
+		let named = takeDocument.take.clips.first(where: { $0.id == id })?.slug ?? ""
+		header.setStatus("\(named) — “\(phrase)”")
+	}
+
 	private func refresh() {
 		guard let window else { return }
 		window.title = takeDocument.displayName + (takeDocument.isDirty ? " — edited" : "")
@@ -507,6 +619,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		                   paths: takeDocument.anchorPaths,
 		                   selected: selectedAnchor)
 		markers.videoSize = takeDocument.videoInfo?.naturalSize ?? .zero
+		transcriptPane.show(takeDocument.transcript, words: takeDocument.take.words)
+		transcriptPane.setBusy(wordsTask != nil,
+		                       enabled: takeDocument.videoURL != nil || takeDocument.audioURL != nil)
 		clipTable.reload(takeDocument.take.clips, selected: selectedClip)
 		header.update(document: takeDocument, playhead: playhead, monitorMode: transport.monitor)
 		header.setColor(currentColor)
@@ -519,6 +634,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		playhead = max(0, time)
 		timeline.playhead = playhead
 		markers.playhead = playhead
+		transcriptPane.playhead = playhead
 		transport.seek(to: playhead)
 		header.update(document: takeDocument, playhead: playhead, monitorMode: transport.monitor)
 	}
@@ -955,6 +1071,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	@objc public func setInAction(_ sender: Any? = nil) { setIn() }
 	@objc public func setOutAction(_ sender: Any? = nil) { setOut() }
 	@objc public func alignAction(_ sender: Any? = nil) { autoAlign() }
+	@objc public func transcribeAction(_ sender: Any? = nil) { transcribe() }
+	@objc public func nameFromWordsAction(_ sender: Any? = nil) { nameFromWords() }
 	@objc public func zoomIn(_ sender: Any? = nil) { timeline.zoomAroundPlayhead(by: 1 / 1.6) }
 	@objc public func zoomOut(_ sender: Any? = nil) { timeline.zoomAroundPlayhead(by: 1.6) }
 	@objc public func zoomFit(_ sender: Any? = nil) { timeline.zoomToFit() }
@@ -1254,6 +1372,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			return takeDocument.take.audio != nil
 		case #selector(commitPendingAction(_:)):
 			return pending != nil
+		case #selector(transcribeAction(_:)):
+			return wordsTask == nil
+				&& (takeDocument.videoURL != nil || takeDocument.audioURL != nil)
+		case #selector(nameFromWordsAction(_:)):
+			return selectedClip != nil && !takeDocument.transcript.isEmpty
 		default:
 			return true
 		}
@@ -1277,6 +1400,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	public func windowWillClose(_ notification: Notification) {
 		solveTask?.cancel()
 		namingTask?.cancel()
+		wordsTask?.cancel()
 		if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
 		keyMonitor = nil
 		transport.pause()
@@ -1292,12 +1416,21 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	/// depending on where somebody clicked last, which is the sort of thing that
 	/// is blamed on the app being slow.
 	///
-	/// The one exception is a field being edited, which gets every key: `S` in
-	/// a clip name is an `s`.
+	/// The one exception is a field being *edited*, which gets every key: `S`
+	/// in a clip name is an `s`.
+	///
+	/// Editable, not merely a text view. The transcript is an `NSTextView` too
+	/// — it has to be, because a transcript is prose and wraps like prose — and
+	/// it is where somebody selects the sentence they want to cut. If having
+	/// the selection there swallowed the keyboard, the `⏎` that turns that
+	/// selection into a clip would do nothing, having been handed to a view
+	/// that takes no input. Nobody is typing into it, so it is not a field.
 	private func installKeyMonitor() {
 		keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
 			guard let self, event.window === self.window else { return event }
-			if self.window?.firstResponder is NSTextView { return event }
+			if let editing = self.window?.firstResponder as? NSTextView, editing.isEditable {
+				return event
+			}
 			return self.handle(event) ? nil : event
 		}
 	}
@@ -1387,6 +1520,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			}
 			return true
 		case "a": autoAlign(); return true
+		case "w": nameFromWords(); return true
 		// `,` and `.` alongside `[` and `]`: both are unshifted on every layout
 		// this is likely to meet, and they are where an editor's trim keys live
 		// anyway.

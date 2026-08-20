@@ -55,6 +55,26 @@ import Testing
 		#expect(window.contentView?.frame.height ?? 0 >= 900)
 	}
 
+	/// The cutting window, with four panes down its right-hand side.
+	///
+	/// Each of them states a required minimum height, and a fourth one was
+	/// added when the transcript arrived. Four required minimums that together
+	/// exceed the column would be constraints autolayout cannot satisfy, which
+	/// it announces by breaking one at random and logging about it — at the
+	/// smallest size the window will go to, which is where this asks.
+	@Test func theCuttingWindowFitsItsPanesAtTheSmallestSizeItAllows() {
+		_ = NSApplication.shared
+		let controller = MainWindowController(document: TakeDocument())
+		guard let window = controller.window else { return }
+		window.setContentSize(window.minSize)
+		window.layoutIfNeeded()
+		#expect(window.contentView?.frame.height ?? 0 > 0)
+		window.setContentSize(NSSize(width: 1600, height: 1000))
+		window.layoutIfNeeded()
+		#expect(window.contentView?.frame.width ?? 0 >= 1500)
+		window.close()
+	}
+
 	@Test func theLibraryTakesTheSizeItIsGiven() {
 		let library = LibraryView()
 		library.reload(ComposeDocument.Vocabulary())

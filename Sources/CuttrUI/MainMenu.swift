@@ -129,6 +129,10 @@ enum MainMenu {
 		clip.addItem(command("Set Out", #selector(MainWindowController.setOutAction(_:)), ""))
 		clip.addItem(.separator())
 		clip.addItem(command("Rename…", #selector(MainWindowController.renameSelected(_:)), "r"))
+		// The bare `W` is the real shortcut; this is where somebody finds out
+		// that it exists.
+		clip.addItem(command("Name from Words",
+		                     #selector(MainWindowController.nameFromWordsAction(_:)), ""))
 		clip.addItem(command("Edit Slug…", #selector(MainWindowController.editSlugOfSelected(_:)), "R", [.command, .shift]))
 		clip.addItem(command("Edit Tags…", #selector(MainWindowController.editTagsOfSelected(_:)), "t"))
 		let tagItem = NSMenuItem(title: "Tags", action: nil, keyEquivalent: "")
@@ -187,6 +191,15 @@ enum MainMenu {
 		                      "\u{f703}", [.command, .option]))
 		audio.addItem(.separator())
 		audio.addItem(command("Cycle What You Hear", #selector(MainWindowController.cycleMonitor(_:)), "u"))
+		audio.addItem(.separator())
+		// With the audio, because that is what it listens to. ⌥⌘T rather than
+		// ⌘T, which is already the clip's tags.
+		let transcribe = command("Transcribe This Take",
+		                         #selector(MainWindowController.transcribeAction(_:)), "t",
+		                         [.command, .option])
+		transcribe.toolTip = "Reads the audio on this Mac and writes the words beside the take.\n"
+			+ "Nothing is uploaded. The answer is kept, so this is asked once."
+		audio.addItem(transcribe)
 		audioItem.submenu = audio
 		main.addItem(audioItem)
 
@@ -339,6 +352,13 @@ enum MainMenu {
 	  ⌫            delete the selected clip
 	  esc          drop the in/out span
 	  right-click a clip for trim, colour and delete
+
+	The words
+	  ⌥⌘T          transcribe this take — on this Mac, nothing uploaded
+	  drag across the transcript to set in and out; ⏎ makes it a clip
+	  click a word to go there; the word being said is lit as it plays
+	  W            name the selected clip after its first words
+	  type in the pane's field to find a phrase and be taken to it
 
 	Aligning the separate audio
 	  A            find the offset automatically
