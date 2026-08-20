@@ -78,6 +78,16 @@ enum MainMenu {
 		let saveAs = NSMenuItem(title: "Save As…", action: #selector(AppDelegate.saveAs(_:)), keyEquivalent: "S")
 		saveAs.keyEquivalentModifierMask = [.command, .shift]
 		file.addItem(saveAs)
+		// Under the two ways of saving, because it is what saving has been
+		// quietly doing: every pause in the editing leaves a version in the
+		// repository the project lives in. This is where they are read and where
+		// one is brought back.
+		let versions = NSMenuItem(title: "Versions…",
+		                          action: #selector(AppDelegate.showVersions(_:)),
+		                          keyEquivalent: "y")
+		versions.keyEquivalentModifierMask = [.command, .shift]
+		versions.toolTip = "Versions kept on refs/cuttr/saves every time the editing went quiet"
+		file.addItem(versions)
 		file.addItem(.separator())
 		file.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
 		fileItem.submenu = file
@@ -409,6 +419,8 @@ enum MainMenu {
 
 	Files
 	  ⌘S           save the cut list
+	  ⇧⌘Y          versions of the project — every pause in the editing leaves
+	               one, on refs/cuttr/saves, and this is the way back to one
 	  ⇧⌘I          import subclips from a Resolve EDL or XML
 	               (or drop the .edl / .xml on the window)
 
