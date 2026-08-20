@@ -306,12 +306,15 @@ public final class PropertiesPanel: NSView {
 
 		switch entry.source {
 		case .clip(let reference):
-			field("clip", [combo(reference.description,
-			                     values: vocabulary.items.map(\.reference), width: 210) {
-				[weak self] value in
-				self?.replace(path, TimelineEntry(clip: ClipReference(value),
-				                                  transition: entry.transition))
-			}], note: "a slug, or take/slug when two takes share one")
+			// The same dialog the `when:` fields use, and for the same reason:
+			// a combo box offers `clip-4`, which is what the file writes, and
+			// with four takes open that names four different clips.
+			field("clip", [endpoint(.clip(reference), only: [.clip]) { [weak self] value in
+				self?.replace(path, TimelineEntry(
+					clip: ClipReference(value), transition: entry.transition,
+					label: entry.label, trim: entry.trim))
+			}], note: "a slug, or take/slug when two takes share one — "
+				+ "the dialog shows every clip under its take")
 			field("as", [text(entry.label ?? "", width: 210, placeholder: "a name for this use") {
 				[weak self] value in
 				let name = value.trimmingCharacters(in: .whitespaces)
@@ -1753,8 +1756,10 @@ public final class PropertiesPanel: NSView {
 	/// needs to point at. Both are the picker's problem now; this is the button
 	/// that opens it, showing take and clip whatever the file says.
 	private func endpoint(_ mark: Overlay.Span.Endpoint,
+	                      only kinds: Set<EndpointCatalogue.Entry.Kind>? = nil,
 	                      onPick: @escaping (String) -> Void) -> NSButton {
-		let catalogue = EndpointCatalogue(vocabulary)
+		let catalogue = kinds.map { EndpointCatalogue(vocabulary).only($0) }
+			?? EndpointCatalogue(vocabulary)
 		let button = NSButton()
 		// The ellipsis is a picture on the trailing edge rather than three dots
 		// on the end of the name — which is what a truncated name looks like,

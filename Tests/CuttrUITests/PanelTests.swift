@@ -594,3 +594,47 @@ import Testing
 		#expect(panel.overlaysOver(.entry([0])) == [0])
 	}
 }
+
+/// Overlays shown in the timeline tree, under what they hang on.
+@Suite @MainActor struct TreeOverlayTests {
+
+	private func panel() -> ProgrammePanel {
+		_ = NSApplication.shared
+		var project = Project(timeline: [
+			TimelineEntry(clip: ClipReference("intro"), label: "opening"),
+			TimelineEntry(group: "middle", entries: [
+				TimelineEntry(clip: ClipReference("demo")),
+			]),
+		])
+		project.overlays = [
+			Overlay(kind: .text("on the opening", style: nil),
+			        span: .marks(from: .group("opening"), to: .group("opening"))),
+			Overlay(kind: .text("on the section", style: nil),
+			        span: .marks(from: .group("middle"), to: .group("middle"))),
+			Overlay(kind: .text("on the clip", style: nil),
+			        span: .clips(from: ClipReference("demo"), to: ClipReference("demo"))),
+			Overlay(kind: .text("on the clock", style: nil), span: .times(from: 0, to: 2)),
+		]
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 600))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		return panel
+	}
+
+	/// An overlay is filed under whatever it names — a placement, a section, or
+	/// a clip — and the ones that name nothing go under a heading of their own.
+	@Test func eachOverlayIsFiledUnderWhatItNames() {
+		let panel = self.panel()
+		#expect(panel.treeRowsForTesting.contains("entry opening → overlay 0"))
+		#expect(panel.treeRowsForTesting.contains("entry middle → overlay 1"))
+		#expect(panel.treeRowsForTesting.contains("entry demo → overlay 2"))
+		#expect(panel.treeRowsForTesting.contains("loose → overlay 3"))
+	}
+
+	/// The heading for those is closed to begin with: they are the exception,
+	/// and an open one pushes the timeline off the top of the pane.
+	@Test func theLooseHeadingStartsClosed() {
+		let panel = self.panel()
+		#expect(panel.looseHeadingIsOpenForTesting == false)
+	}
+}

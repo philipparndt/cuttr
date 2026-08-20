@@ -92,6 +92,13 @@ public struct EndpointCatalogue: Sendable {
 		return entries.contains { $0.path == address || $0.reference == endpoint.description }
 	}
 
+	/// Only the kinds asked for. A timeline entry names a *clip*: a section is
+	/// not something `- clip:` can point at, and offering one is offering a
+	/// mistake.
+	public func only(_ kinds: Set<Entry.Kind>) -> EndpointCatalogue {
+		EndpointCatalogue(entries: entries.filter { kinds.contains($0.kind) })
+	}
+
 	/// Everything whose address or name contains what was typed, word by word,
 	/// so `mia 4` finds `mia-take-1/clip-4`.
 	public func matching(_ query: String) -> [Entry] {

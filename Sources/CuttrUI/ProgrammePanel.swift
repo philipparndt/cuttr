@@ -83,11 +83,22 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		let path: [Int]
 		let entry: TimelineEntry
 		let children: [Node]
+		/// Which overlay this row is, when it is an overlay rather than an
+		/// entry — the tree shows both, because an overlay hung on a clip is
+		/// part of the structure of the programme and looking for it in a
+		/// second list is how somebody loses it.
+		let overlay: Int?
+		/// The heading the overlays that hang on nothing in particular live
+		/// under. Closed to begin with: they are the exception.
+		let isOverlayRoot: Bool
 
-		init(path: [Int], entry: TimelineEntry, children: [Node]) {
+		init(path: [Int], entry: TimelineEntry, children: [Node],
+		     overlay: Int? = nil, isOverlayRoot: Bool = false) {
 			self.path = path
 			self.entry = entry
 			self.children = children
+			self.overlay = overlay
+			self.isOverlayRoot = isOverlayRoot
 		}
 
 		var groupName: String? {
@@ -419,6 +430,33 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		return (first, last)
 	}
 
+	/// For the tests: what the tree holds, as text.
+	var treeRowsForTesting: [String] {
+		var out: [String] = []
+		func name(_ node: Node) -> String {
+			if node.isOverlayRoot { return "loose" }
+			if let label = node.entry.label { return "entry \(label)" }
+			if case .group(let group, _) = node.entry.source { return "entry \(group)" }
+			return "entry \(node.entry.source.description)"
+		}
+		func walk(_ nodes: [Node], under parent: String?) {
+			for node in nodes {
+				if let index = node.overlay {
+					out.append("\(parent ?? "?") → overlay \(index)")
+				} else {
+					walk(node.children, under: name(node))
+				}
+			}
+		}
+		walk(roots, under: nil)
+		return out
+	}
+
+	var looseHeadingIsOpenForTesting: Bool {
+		guard let root = roots.first(where: { $0.isOverlayRoot }) else { return false }
+		return outline.isItemExpanded(root)
+	}
+
 	/// For the tests: click a row without a mouse.
 	func selectRow(_ row: Int) {
 		guard row >= 0, row < outline.numberOfRows else { return }
@@ -426,7 +464,14 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	}
 
 	private var selectedPath: [Int]? {
-		(outline.item(atRow: outline.selectedRow) as? Node)?.path
+		let node = outline.item(atRow: outline.selectedRow) as? Node
+		guard node?.overlay == nil, node?.isOverlayRoot == false else { return nil }
+		return node?.path
+	}
+
+	/// The overlay selected in the tree, if that is what is selected.
+	private var selectedTreeOverlay: Int? {
+		(outline.item(atRow: outline.selectedRow) as? Node)?.overlay
 	}
 
 	/// Every entry selected, in the order they appear.
@@ -746,6 +791,18 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		self.project = project
 		self.vocabulary = vocabulary
 		roots = tree(project.timeline, at: [])
+		// And the ones that hang on nothing in particular, under a heading of
+		// their own at the end, closed unless somebody opened it.
+		let loose = looseOverlays()
+		if !loose.isEmpty {
+			roots.append(Node(
+				path: [], entry: TimelineEntry(clip: ClipReference("")),
+				children: loose.map {
+					Node(path: [], entry: TimelineEntry(clip: ClipReference("")),
+					     children: [], overlay: $0)
+				},
+				isOverlayRoot: true))
+		}
 
 		let keep = pending ?? selection
 		pending = nil
@@ -788,11 +845,65 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	private func tree(_ entries: [TimelineEntry], at prefix: [Int]) -> [Node] {
 		entries.enumerated().map { index, entry in
 			let path = prefix + [index]
+			var children: [Node] = []
 			if case .group(_, let inner) = entry.source {
-				return Node(path: path, entry: entry, children: tree(inner, at: path))
+				children = tree(inner, at: path)
 			}
-			return Node(path: path, entry: entry, children: [])
+			// The overlays hung on this entry, under it. Structural rather than
+			// by the clock: an overlay that names this clip or this section
+			// *belongs* to it, while one that merely happens to be on while it
+			// plays belongs to whatever it does name.
+			children += overlaysNaming(entry).map {
+				Node(path: path, entry: entry, children: [], overlay: $0)
+			}
+			return Node(path: path, entry: entry, children: children)
 		}
+	}
+
+	/// The overlays that name an entry — by its `as:` label, by the section it
+	/// is, or by the clip it plays.
+	private func overlaysNaming(_ entry: TimelineEntry) -> [Int] {
+		var names: Set<String> = []
+		if let label = entry.label { names.insert("@" + label) }
+		if case .group(let name, _) = entry.source { names.insert("@" + name) }
+		if case .clip(let reference) = entry.source {
+			names.insert(reference.description)
+			names.insert(reference.slug)
+		}
+		return project.overlays.indices.filter { index in
+			Self.endpoints(of: project.overlays[index]).contains { names.contains($0) }
+		}
+	}
+
+	/// Every name an overlay's spans point at.
+	static func endpoints(of overlay: Overlay) -> Set<String> {
+		var found: Set<String> = []
+		for appearance in overlay.appearances {
+			switch appearance.span {
+			case .marks(let from, let to):
+				found.insert(from.description)
+				found.insert(to.description)
+			case .within(let mark, _, _):
+				found.insert(mark.description)
+			case .times:
+				break
+			}
+		}
+		return found
+	}
+
+	/// The overlays that hang on nothing the timeline names: written in
+	/// programme times, or pointing at something that is not there.
+	private func looseOverlays() -> [Int] {
+		var named: Set<Int> = []
+		func walk(_ entries: [TimelineEntry]) {
+			for entry in entries {
+				named.formUnion(overlaysNaming(entry))
+				if case .group(_, let inner) = entry.source { walk(inner) }
+			}
+		}
+		walk(project.timeline)
+		return project.overlays.indices.filter { !named.contains($0) }
 	}
 
 	private func row(for path: [Int]) -> Int? {
@@ -808,7 +919,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	private func expandAll() {
 		func walk(_ nodes: [Node]) {
 			for node in nodes where !node.children.isEmpty {
-				if let name = node.groupName, collapsed.contains(name) {
+				// The loose overlays are the exception: they hang on the
+				// programme's own clock rather than on anything in the tree, so
+				// they are filed at the end and closed until asked for.
+				if node.isOverlayRoot, !collapsed.contains("") {
+					outline.collapseItem(node)
+				} else if let name = node.groupName, collapsed.contains(name) {
 					outline.collapseItem(node)
 				} else {
 					outline.expandItem(node)
@@ -830,11 +946,30 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	}
 
 	public func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-		(item as? Node)?.groupName != nil
+		guard let node = item as? Node else { return false }
+		return !node.children.isEmpty && node.overlay == nil
 	}
 
 	public func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
 		guard let node = item as? Node else { return nil }
+		// An overlay under the entry it hangs on, drawn as the overlay list
+		// draws it, so the two agree about what a caption looks like.
+		if let index = node.overlay, index < project.overlays.count {
+			let row = (outlineView.makeView(withIdentifier: .init("treeOverlay"), owner: self)
+				as? OverlayRow)
+				?? { let made = OverlayRow(); made.identifier = .init("treeOverlay"); return made }()
+			row.overlay = project.overlays[index]
+			row.stack = ""
+			row.plays = false
+			row.needsDisplay = true
+			return row
+		}
+		if node.isOverlayRoot {
+			let label = NSTextField(labelWithString: "OVERLAYS ON THE PROGRAMME'S OWN CLOCK")
+			label.font = Theme.heading
+			label.textColor = Theme.faintText
+			return label
+		}
 		let view = (outlineView.makeView(withIdentifier: .init("entry"), owner: self) as? EntryRow)
 			?? { let view = EntryRow(); view.identifier = .init("entry"); return view }()
 		view.entry = node.entry
@@ -845,17 +980,26 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	}
 
 	public func outlineViewItemDidCollapse(_ notification: Notification) {
+		if let node = notification.userInfo?["NSObject"] as? Node, node.isOverlayRoot {
+			collapsed.remove("")
+		}
 		if let name = (notification.userInfo?["NSObject"] as? Node)?.groupName { collapsed.insert(name) }
 	}
 
 	public func outlineViewItemDidExpand(_ notification: Notification) {
+		if let node = notification.userInfo?["NSObject"] as? Node, node.isOverlayRoot {
+			// Opened by hand: it stays open until it is closed again.
+			collapsed.insert("")
+		}
 		if let name = (notification.userInfo?["NSObject"] as? Node)?.groupName { collapsed.remove(name) }
 	}
 
 	// MARK: - Dragging
 
 	public func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
-		guard let node = item as? Node else { return nil }
+		// An overlay is shown here but not moved here: where it goes is what it
+		// hangs on, which is the `when:` field, not a position in a list.
+		guard let node = item as? Node, node.overlay == nil, !node.isOverlayRoot else { return nil }
 		let pasteboardItem = NSPasteboardItem()
 		pasteboardItem.setString(node.path.map(String.init).joined(separator: "."), forType: Self.entryType)
 		pasteboardItem.setString(node.entry.source.description, forType: .string)
@@ -1024,6 +1168,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	// MARK: - Selection
 
 	public func outlineViewSelectionDidChange(_ notification: Notification) {
+		if let index = selectedTreeOverlay, index < project.overlays.count {
+			if overlayTable.selectedRow >= 0 { overlayTable.deselectAll(nil) }
+			if soundTable.selectedRow >= 0 { soundTable.deselectAll(nil) }
+			selection = .overlay(index)
+			onSelect?(selection)
+			return
+		}
 		guard let path = selectedPath else { return }
 		if overlayTable.selectedRow >= 0 { overlayTable.deselectAll(nil) }
 		if soundTable.selectedRow >= 0 { soundTable.deselectAll(nil) }
