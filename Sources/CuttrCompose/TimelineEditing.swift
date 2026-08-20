@@ -237,6 +237,16 @@ extension Project {
 		recurse(&timeline, path[...])
 	}
 
+	/// Changes one entry where it stands.
+	///
+	/// `modify(at:)` hands out the array and the index because most of what
+	/// happens here is inserting and removing; this is for the cases that only
+	/// want the entry — reordering the overlays or the sounds written inside it,
+	/// which is what the tree's arrows do now that both live there.
+	public mutating func editEntry(at path: [Int], _ change: (inout TimelineEntry) -> Void) {
+		modify(at: path) { list, at in change(&list[at]) }
+	}
+
 	// MARK: - Overlays, wherever they are written
 
 	/// The overlay an origin names, from the top-level list or from an entry.
