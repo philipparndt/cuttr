@@ -599,22 +599,71 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 
 	// MARK: - Whose line is it
 
+	/// What a line's margin has to say: who it is down as, and who it is
+	/// offered as instead.
+	///
+	/// `offered` is filled in only when the offer *differs*. A guess that
+	/// agrees with the name already there changes nothing, and drawing it as a
+	/// change would be forty arrows saying "Mia becomes Mia".
+	struct Head: Equatable {
+		var current: String?
+		var offered: String?
+
+		var changes: Bool { offered != nil }
+	}
+
+	func head(of line: Range<Int>) -> Head {
+		let current = transcript.speaker(ofLine: line)
+		let offered = suggestions[line.lowerBound]
+		return Head(current: current, offered: offered == current ? nil : offered)
+	}
+
+	/// A name, short enough that two of them and an arrow fit in the margin.
+	private static func short(_ name: String) -> String {
+		guard name.count > 8 else { return name }
+		return name.prefix(7).trimmingCharacters(in: .whitespaces) + "…"
+	}
+
+	/// What the margin reads, as plain text. The one place the three shapes a
+	/// head can take are written down, so the column's width and the column's
+	/// contents cannot disagree.
+	static func label(_ head: Head, title: (String) -> String) -> String {
+		switch (head.current, head.offered) {
+		case (let current?, let offered?):
+			return short(title(current)) + " → " + short(title(offered))
+		case (let current?, nil): return title(current)
+		case (nil, let offered?): return "(" + title(offered) + ")"
+		case (nil, nil): return ""
+		}
+	}
+
 	/// How wide the names' column is, in characters.
 	///
 	/// The longest name that has to fit, and no wider: a pane four hundred
 	/// characters of German wide cannot spare ten columns to say `mia`. A
-	/// suggestion is written in brackets and so needs two more.
+	/// suggestion is written in brackets and so needs two more; a suggestion
+	/// *over* a name needs room for both of them and the arrow between, which
+	/// is worth the width for as long as the offer is standing.
 	private func labelWidth() -> Int {
 		var longest = 0
+		var changes = false
 		for line in laidOutLines {
-			if let slug = transcript.speaker(ofLine: line) {
-				longest = max(longest, title(slug).count)
-			} else if let slug = suggestions[line.lowerBound] {
-				longest = max(longest, title(slug).count + 2)
-			}
+			let head = head(of: line)
+			changes = changes || (head.changes && head.current != nil)
+			longest = max(longest, Self.label(head, title: title).count)
 		}
 		guard longest > 0 else { return 0 }
-		return min(longest, 12) + 1
+		return min(longest, changes ? 20 : 12) + 1
+	}
+
+	/// How many lines the offer would actually change.
+	///
+	/// Not `suggestions.count`: a pass proposes a name for every line it could
+	/// measure, including the ones somebody has already answered the same way.
+	/// A button that says "keep 40 guesses" when 3 of them are news is a button
+	/// nobody can weigh.
+	var changedLines: Int {
+		laidOutLines.filter { head(of: $0).changes }.count
 	}
 
 	/// One character of the transcript's own font. It is monospaced, which is
@@ -642,27 +691,47 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// suggestion is visibly a suggestion" — an offer does not get to paint
 	/// the page, because a colour that is wrong a third of the time makes
 	/// somebody stop believing the ones that are right.
+	/// A guess *over* a name is drawn as what it is: `Jonas → Emilia`, the
+	/// name that is written down, an arrow, and the name being offered
+	/// instead. Keeping an offer used to rename such a line without ever
+	/// having shown which name was going — the count on the button was the
+	/// only sign anything was happening.
 	private func name(for line: Range<Int>, width: Int) -> NSAttributedString {
 		guard width > 0 else { return NSAttributedString() }
-		var label = ""
-		var colour = Theme.dimText
-		if let slug = transcript.speaker(ofLine: line) {
-			label = title(slug)
-			colour = colours[slug].map(Theme.speakerLabel) ?? Theme.text
-		} else if let slug = suggestions[line.lowerBound] {
-			label = "(" + title(slug) + ")"
-			colour = colours[slug].map(Theme.suggestedLabel) ?? Theme.dimText
+		let head = head(of: line)
+		let out = NSMutableAttributedString()
+		func put(_ string: String, _ colour: NSColor) {
+			out.append(NSAttributedString(string: string, attributes: [
+				.font: Theme.transcript, .foregroundColor: colour,
+			]))
 		}
-		if label.count > width - 1 {
-			// Trimmed before the ellipsis, so `Die grosse …` does not carry the
-			// space where the next word was going to be.
-			label = label.prefix(width - 2)
-				.trimmingCharacters(in: .whitespaces) + "…"
+		func laid(_ slug: String) -> NSColor { colours[slug].map(Theme.speakerLabel) ?? Theme.text }
+		func guessed(_ slug: String) -> NSColor {
+			colours[slug].map(Theme.suggestedLabel) ?? Theme.dimText
 		}
-		let padded = label.padding(toLength: width, withPad: " ", startingAt: 0)
-		return NSAttributedString(string: padded, attributes: [
-			.font: Theme.transcript, .foregroundColor: colour,
-		])
+
+		switch (head.current, head.offered) {
+		case (let current?, let offered?):
+			put(Self.short(title(current)), laid(current))
+			put(" → ", Theme.dimText)
+			put(Self.short(title(offered)), guessed(offered))
+		case (let current?, nil):
+			put(trim(title(current), to: width), laid(current))
+		case (nil, let offered?):
+			put(trim("(" + title(offered) + ")", to: width), guessed(offered))
+		case (nil, nil): break
+		}
+
+		let written = out.string.count
+		if written < width { put(String(repeating: " ", count: width - written), Theme.dimText) }
+		return out
+	}
+
+	/// Cut to the column. Trimmed before the ellipsis, so `Die grosse …` does
+	/// not carry the space where the next word was going to be.
+	private func trim(_ label: String, to width: Int) -> String {
+		guard label.count > width - 1, width >= 2 else { return label }
+		return label.prefix(width - 2).trimmingCharacters(in: .whitespaces) + "…"
 	}
 
 	/// The mark a pause leaves: dim, so it reads as the shape of the take
@@ -822,9 +891,10 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		add.toolTip = "Add somebody to this take. N does the same from the words."
 		castRow.addArrangedSubview(add)
 
-		if !suggestions.isEmpty {
-			let accept = NSButton(title: suggestions.count == 1
-			                      ? "Keep 1 guess" : "Keep \(suggestions.count) guesses", target: self,
+		if changedLines > 0 {
+			let changed = changedLines
+			let accept = NSButton(title: changed == 1
+			                      ? "Keep 1 change" : "Keep \(changed) changes", target: self,
 			                      action: #selector(acceptPressed))
 			accept.bezelStyle = .inline
 			accept.controlSize = .small
@@ -1232,6 +1302,16 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	func colourOfWord(_ index: Int) -> NSColor? {
 		guard let piece = wordPieces[safe: index].flatMap({ pieces[safe: $0] }) else { return nil }
 		return text.textStorage?.attribute(.foregroundColor, at: piece.range.location,
+		                                   effectiveRange: nil) as? NSColor
+	}
+
+	/// For the tests: the colour a character of a line's margin came out, so
+	/// `Papa → Mia` can be checked as two names and not as one string.
+	func colourOfMargin(_ line: Int, at offset: Int) -> NSColor? {
+		guard let piece = pieces.first(where: { $0.lineIndex == line }),
+		      offset < piece.range.length else { return nil }
+		return text.textStorage?.attribute(.foregroundColor,
+		                                   at: piece.range.location + offset,
 		                                   effectiveRange: nil) as? NSColor
 	}
 

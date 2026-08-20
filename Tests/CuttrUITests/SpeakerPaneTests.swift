@@ -215,8 +215,59 @@ import Testing
 	/// The offer to write the guesses down is beside the cast, and only while
 	/// there are guesses.
 	@Test func theGuessesCanBeKept() {
-		#expect(pane(cast: [], suggestions: [0: "papa"]).chipTitles.last == "Keep 1 guess")
+		#expect(pane(cast: [], suggestions: [0: "papa"]).chipTitles.last == "Keep 1 change")
 		#expect(pane().chipTitles.contains { $0.hasPrefix("Keep") } == false)
+	}
+
+	/// The button counts what would change, not what was proposed.
+	///
+	/// A pass proposes a name for every line it could measure, and on a take
+	/// somebody has half answered most of those agree with the name already
+	/// there. Counting them as guesses to keep made the button a number nobody
+	/// could weigh — and, when every one of them agreed, offered to write down
+	/// a change that did not exist.
+	@Test func onlyChangesAreCounted() {
+		var said = said()
+		said.assign("papa", from: 0)
+		said.assign("mia", from: 2)
+		// Line one agrees, line two does not.
+		let one = pane(said, suggestions: [0: "papa", 2: "papa"])
+		#expect(one.changedLines == 1)
+		#expect(one.chipTitles.last == "Keep 1 change")
+		// A pass that agrees with everything has nothing to offer.
+		let none = pane(said, suggestions: [0: "papa", 2: "mia"])
+		#expect(none.changedLines == 0)
+		#expect(none.chipTitles.contains { $0.hasPrefix("Keep") } == false)
+	}
+
+	/// A guess over a name somebody typed reads as a change: the name that is
+	/// there, an arrow, and the name being offered instead.
+	///
+	/// Keeping the offer renames the line either way. Before this the margin
+	/// showed the old name alone, so `Keep 12 changes` was the only sign that
+	/// twelve names were about to go — which is the thing somebody wanted to
+	/// read *before* pressing it.
+	@Test func aGuessOverANameShowsBothNames() {
+		var said = said()
+		said.assign("papa", from: 0)
+		said.assign("mia", from: 2)
+		let pane = pane(said, suggestions: [0: "mia", 2: "mia"])
+		let shown = pane.shownText
+		#expect(shown.hasPrefix("Papa → Mia Wie geht's?\n"))
+		// Line two's guess agrees with it, so it is a name and not an arrow.
+		#expect(shown.contains("\nMia        Gut.\n"))
+	}
+
+	/// Both halves of a change are drawn as what they are: the name that is
+	/// written down in its own colour, the one being offered in the offer's.
+	@Test func theTwoHalvesOfAChangeAreColouredApart() {
+		var said = said()
+		said.assign("papa", from: 0)
+		let pane = pane(said, suggestions: [0: "mia"])
+		let colours = Speaker.colors(for: ["papa", "mia"])
+		#expect(pane.colourOfMargin(0, at: 0) == Theme.speakerLabel(colours["papa"]!))
+		// Past `Papa → `: the offered name.
+		#expect(pane.colourOfMargin(0, at: 7) == Theme.suggestedLabel(colours["mia"]!))
 	}
 
 	/// Nothing said is no chips at all: an empty pane offers to transcribe, not

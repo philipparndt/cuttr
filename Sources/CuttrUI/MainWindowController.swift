@@ -858,10 +858,27 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 				return
 			}
 			self.takeDocument.suggest(offer.byLine)
-			self.say(String(
-				format: "%d lines guessed, %d left alone — the bracketed names."
-					+ " Keep them, or answer a line yourself. (separation %.2f)",
-				offer.byLine.count, offer.skipped, offer.separation))
+			// Counted as changes, not as guesses. A pass proposes a name for
+			// every line it could measure, so on a take somebody has half
+			// answered most of the offer agrees with what is already there —
+			// and "68 lines guessed" over three actual changes is a number
+			// nobody can act on.
+			let lines = self.takeDocument.transcript.lines
+			let changed = lines.filter { line in
+				guard let slug = offer.byLine[line.lowerBound] else { return false }
+				return slug != self.takeDocument.transcript.speaker(ofLine: line)
+			}.count
+			if changed == 0 {
+				self.say(String(
+					format: "the guess agrees with every name already there —"
+						+ " nothing to change (separation %.2f)", offer.separation))
+			} else {
+				self.say(String(
+					format: "%d lines to change, %d already agree, %d left alone —"
+						+ " shown as old → new. Keep them, or answer a line yourself."
+						+ " (separation %.2f)",
+					changed, offer.byLine.count - changed, offer.skipped, offer.separation))
+			}
 			self.refresh()
 		}
 	}
