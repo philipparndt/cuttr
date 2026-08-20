@@ -97,13 +97,6 @@ public struct Transcript: Sendable, Equatable {
 		return first..<(last + 1)
 	}
 
-	/// When a run of words was said, on the video's clock.
-	public func span(of range: Range<Int>) -> (start: Double, end: Double)? {
-		guard range.lowerBound >= 0, range.upperBound <= words.count, !range.isEmpty
-		else { return nil }
-		return (words[range.lowerBound].start, words[range.upperBound - 1].end)
-	}
-
 	/// The word being said at `time`, or `nil` in the gaps.
 	///
 	/// `nil` in a pause rather than the nearest word, because the marker in the

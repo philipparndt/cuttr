@@ -33,12 +33,16 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	public var onLanguage: ((String) -> Void)?
 	/// Play exactly these words, and stop at the end of them.
 	public var onPlayWords: ((_ start: Double, _ end: Double) -> Void)?
+	/// Space was pressed with the cursor in the text. What that means is the
+	/// window's business — it is the one that knows whether the tape is
+	/// already rolling — and ``selectedSpan`` is what it should play.
+	public var onSpace: (() -> Void)?
 	/// Make a clip of exactly these words.
 	public var onClipWords: ((_ start: Double, _ end: Double) -> Void)?
 	/// Something worth saying in the window's status line.
 	public var onStatus: ((String) -> Void)?
 
-	private let text = NSTextView()
+	private let text = TranscriptText()
 	private let scroll = NSScrollView()
 	private let search = NSSearchField()
 	private let provenance = NSTextField(labelWithString: "")
@@ -48,6 +52,10 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	private var transcript = Transcript()
 	/// Where each word sits in the text, parallel to `transcript.words`.
 	private var ranges: [NSRange] = []
+	/// Where each pause mark sits, and the silence it stands for. A pause is
+	/// not a word — it is the *absence* of one — but it is a real stretch of
+	/// the take, and somebody who selects it means it.
+	private var marks: [(range: NSRange, after: Int, start: Double, end: Double)] = []
 	/// The word the playhead is in, if any.
 	private var marked: Int?
 	/// Set while the selection is being changed from here, so that redrawing
@@ -95,6 +103,14 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		text.textColor = Theme.text
 		text.font = Theme.transcript
 		text.delegate = self
+		// Space plays what is selected. A non-editable text view otherwise
+		// treats it as "scroll down a page", which in a pane somebody is
+		// reading alongside a picture is not what their thumb meant.
+		text.onSpace = { [weak self] in
+			guard let self, self.onSpace != nil else { return false }
+			self.onSpace?()
+			return true
+		}
 		text.textContainerInset = NSSize(width: 4, height: 6)
 		text.isVerticallyResizable = true
 		text.isHorizontallyResizable = false
@@ -224,6 +240,7 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		marked = nil
 		searchedTo = 0
 		ranges = []
+		marks = []
 
 		let body = NSMutableAttributedString()
 		if transcript.isEmpty {
@@ -253,10 +270,18 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 						body.append(NSAttributedString(
 							string: " ", attributes: [.font: Theme.transcript]))
 					}
-				case .beat:
-					body.append(pause("\n"))
-				case .rest:
-					body.append(pause("\n\n"))
+				case .beat, .rest:
+					let mark = body.length
+					body.append(pause(transcript.silence(after: index) == .rest ? "\n\n" : "\n"))
+					// Only as far as the ellipsis: the newlines after it belong
+					// to the layout rather than to the silence, and a selection
+					// that runs to the end of a line should not be read as
+					// reaching into the next one.
+					marks.append((
+						range: NSRange(location: mark, length: 2),
+						after: index,
+						start: transcript.words[index].end,
+						end: transcript.words[index + 1].start))
 				}
 			}
 		}
@@ -310,6 +335,14 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		                   attributes: [.font: Theme.transcript, .foregroundColor: Theme.dimText])
 	}
 
+	/// What is selected, on the video's clock: a run of words, a silence, or
+	/// both. `nil` when nothing is.
+	public var selectedSpan: (start: Double, end: Double)? {
+		let selected = text.selectedRange()
+		guard selected.length > 0, let touched = touched(by: selected) else { return nil }
+		return (touched.start, touched.end)
+	}
+
 	// MARK: - The menu on the words
 
 	/// What a right-click means, which is not what one usually means in a text
@@ -324,18 +357,15 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	public func textView(
 		_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int
 	) -> NSMenu? {
-		guard !transcript.isEmpty, let words = clicked(at: charIndex),
-		      let span = transcript.span(of: words) else { return nil }
+		guard !transcript.isEmpty, let about = clicked(at: charIndex) else { return nil }
 		// Shown as chosen, so what the menu is about is what is lit.
-		highlight(words)
-		pointed = span
+		highlight(about.characters)
+		pointed = (about.start, about.end)
 
 		let made = NSMenu()
-		let count = words.count
-		let length = String(format: "%.1fs", span.end - span.start)
-		made.addItem(item("Play \(count == 1 ? "this word" : "these \(count) words") · \(length)",
-		                  #selector(playPointed)))
-		made.addItem(item("Make a clip of \(count == 1 ? "it" : "them")", #selector(clipPointed)))
+		let length = String(format: "%.1fs", about.end - about.start)
+		made.addItem(item("Play \(about.name) · \(length)", #selector(playPointed)))
+		made.addItem(item("Make a clip of \(about.count == 1 ? "it" : "them")", #selector(clipPointed)))
 		made.addItem(.separator())
 		made.addItem(item("Copy", #selector(NSText.copy(_:)), target: view))
 		return made
@@ -347,19 +377,42 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		return made
 	}
 
-	/// The words a click is about: the selection when it covers any, and the
-	/// line under the pointer when it does not.
-	private func clicked(at charIndex: Int) -> Range<Int>? {
+	/// What a click is about: whatever is selected when the click is inside the
+	/// selection, then the pause under the pointer, then the line it is in.
+	///
+	/// The pause comes before the line because clicking an ellipsis is somebody
+	/// pointing at the silence itself, and answering with the sentence beside
+	/// it would be answering a different question.
+	private func clicked(at charIndex: Int)
+		-> (start: Double, end: Double, characters: NSRange, name: String, count: Int)?
+	{
 		let selected = text.selectedRange()
-		if selected.length > 0,
-		   let first = word(containing: selected.location, orBefore: false),
-		   let last = word(containing: NSMaxRange(selected) - 1, orBefore: true),
-		   first <= last,
-		   NSLocationInRange(charIndex, selected) {
-			return first..<(last + 1)
+		if selected.length > 0, NSLocationInRange(charIndex, selected),
+		   let touched = touched(by: selected) {
+			let count = touched.words?.count ?? 1
+			return (touched.start, touched.end, selected,
+			        touched.words == nil ? "this pause"
+			            : (count == 1 ? "this word" : "these \(count) words"),
+			        count)
+		}
+		if let mark = mark(containing: charIndex) {
+			let silence = marks[mark]
+			return (silence.start, silence.end, silence.range, "this pause", 1)
 		}
 		guard let index = word(containing: charIndex, orBefore: true) else { return nil }
-		return transcript.segment(around: index)
+		let line = transcript.segment(around: index)
+		guard let span = transcript.span(line), let characters = characters(of: line)
+		else { return nil }
+		return (span.start, span.end, characters,
+		        line.count == 1 ? "this word" : "these \(line.count) words", line.count)
+	}
+
+	/// Where a run of words sits in the text.
+	private func characters(of range: Range<Int>) -> NSRange? {
+		guard let first = ranges[safe: range.lowerBound],
+		      let last = ranges[safe: range.upperBound - 1] else { return nil }
+		return NSRange(location: first.location,
+		               length: NSMaxRange(last) - first.location)
 	}
 
 	@objc private func playPointed() {
@@ -391,14 +444,15 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 
 	/// Selects a run of words in the text, without reporting it back.
 	private func highlight(_ range: Range<Int>) {
-		guard let first = ranges[safe: range.lowerBound],
-		      let last = ranges[safe: range.upperBound - 1] else { return }
-		let whole = NSRange(location: first.location,
-		                    length: last.location + last.length - first.location)
+		guard let whole = characters(of: range) else { return }
+		highlight(whole)
+	}
+
+	private func highlight(_ characters: NSRange) {
 		quiet = true
-		text.setSelectedRange(whole)
+		text.setSelectedRange(characters)
 		quiet = false
-		text.scrollRangeToVisible(whole)
+		text.scrollRangeToVisible(characters)
 	}
 
 	/// Finds a phrase and goes to it. The hook the search field calls, and the
@@ -454,13 +508,48 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			// A click. A non-editable text view answers one with an empty
 			// selection where the caret would have gone, which is the only
 			// thing about it worth knowing.
-			if let index = word(containing: selected.location, orBefore: true) { clickWord(at: index) }
+			if let mark = mark(containing: selected.location) {
+				onMoveTo?(marks[mark].start)
+			} else if let index = word(containing: selected.location, orBefore: true) {
+				clickWord(at: index)
+			}
 			return
 		}
-		guard let first = word(containing: selected.location, orBefore: false),
-		      let last = word(containing: NSMaxRange(selected) - 1, orBefore: true)
-		else { return }
-		selectWords(first ..< (last + 1))
+		guard let touched = touched(by: selected) else { return }
+		onSelectWords?(touched.start, touched.end)
+		let what = touched.words.map { transcript.phrase($0, limit: 4) }
+			?? String(format: "a pause of %.1fs", touched.end - touched.start)
+		onStatus?("\(Timecode.string(touched.start))–\(Timecode.string(touched.end))"
+			+ (what.isEmpty ? "" : " · \(what) — ⏎ to make a clip"))
+	}
+
+	/// Everything a selection covers, words and silences alike.
+	///
+	/// A pause is selectable because a pause is part of the take: the beat
+	/// before an answer is often the thing that has to go, or the thing that
+	/// has to stay, and either way somebody has to be able to point at it. So
+	/// the span runs from the earliest thing the selection touches to the
+	/// latest, whether those are words or the silence between them — which is
+	/// also what the highlight on screen already says it is.
+	func touched(by selected: NSRange) -> (start: Double, end: Double, words: Range<Int>?)? {
+		let first = word(containing: selected.location, orBefore: false)
+		let last = word(containing: NSMaxRange(selected) - 1, orBefore: true)
+		var covered: Range<Int>?
+		if let first, let last, first <= last { covered = first ..< (last + 1) }
+		let silences = marks.filter { NSIntersectionRange($0.range, selected).length > 0 }
+		var start: Double?
+		var end: Double?
+		if let covered, let span = transcript.span(covered) { start = span.start; end = span.end }
+		for silence in silences {
+			start = min(start ?? silence.start, silence.start)
+			end = max(end ?? silence.end, silence.end)
+		}
+		guard let start, let end else { return nil }
+		return (start, end, covered)
+	}
+
+	private func mark(containing location: Int) -> Int? {
+		marks.firstIndex { NSLocationInRange(location, $0.range) }
 	}
 
 	/// Which word a character belongs to. A character in the space between two
@@ -474,6 +563,24 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			if location < NSMaxRange(range) { return index }
 		}
 		return orBefore ? ranges.count - 1 : nil
+	}
+
+	/// For the tests: a real selection in the text view, the way dragging makes
+	/// one — which is what `selectedSpan` reads.
+	func selectForTest(_ characters: NSRange) {
+		text.setSelectedRange(characters)
+		selectionChanged(to: characters)
+	}
+
+	/// For the tests: the space bar, without the responder chain. Only the key
+	/// the view claims is ever sent — an unclaimed one reaches `NSResponder`
+	/// and beeps on somebody's machine.
+	func pressSpaceForTest() {
+		let event = NSEvent.keyEvent(
+			with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+			windowNumber: 0, context: nil, characters: " ",
+			charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)!
+		text.keyDown(with: event)
 	}
 
 	/// For the tests: the laid-out text, and the menu without a mouse.
@@ -496,5 +603,24 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 private extension Array {
 	subscript(safe index: Int) -> Element? {
 		index >= 0 && index < count ? self[index] : nil
+	}
+}
+
+/// The transcript's text view, which claims the space bar.
+///
+/// A subclass for one key, because the alternative is a monitor on the window
+/// that has to work out whether the text view is first responder — and that
+/// question has one honest answer here and it is this class.
+@MainActor
+final class TranscriptText: NSTextView {
+	/// Returns true when it has dealt with it.
+	var onSpace: (() -> Bool)?
+
+	override func keyDown(with event: NSEvent) {
+		if event.charactersIgnoringModifiers == " ", event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+		   onSpace?() == true {
+			return
+		}
+		super.keyDown(with: event)
 	}
 }

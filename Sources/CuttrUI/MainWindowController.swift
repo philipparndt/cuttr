@@ -327,6 +327,22 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			self.timeline.pending = self.pending
 			self.commitPending()
 		}
+		// Space, with the cursor in the words: play what is selected. Reading is
+		// the point of the pane, and asking somebody to leave it to hear the
+		// sentence they are reading undoes that.
+		transcriptPane.onSpace = { [weak self] in
+			guard let self else { return }
+			if self.transport.isPlaying {
+				self.transport.pause()
+				return
+			}
+			if let span = self.transcriptPane.selectedSpan {
+				self.transport.play(from: span.start, to: span.end)
+				self.timeline.followPlayhead()
+			} else {
+				self.transport.play()
+			}
+		}
 		transcriptPane.onTranscribe = { [weak self] locale in self?.transcribe(in: locale) }
 		// Somebody working through a German shoot says so once, not once per
 		// take: the choice is remembered, and a take that has been transcribed

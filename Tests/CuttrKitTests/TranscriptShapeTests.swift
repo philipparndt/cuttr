@@ -33,14 +33,6 @@ import Testing
 		#expect(said.segment(around: 99) == 3..<4)
 	}
 
-	@Test func aRunOfWordsKnowsWhenItWasSaid() {
-		let span = said.span(of: 0..<3)
-		#expect(span?.start == 0.0)
-		#expect(span?.end == 1.8)
-		#expect(said.span(of: 0..<0) == nil)
-		#expect(said.span(of: 2..<9) == nil)
-	}
-
 	/// One long take is one paragraph, which is the thing this replaced.
 	@Test func wordsWithNoSilenceInThemAreOneLine() {
 		let solid = Transcript(words: (0..<20).map {

@@ -63,6 +63,59 @@ import Testing
 		#expect(clipped?.1 == 5.3)
 	}
 
+	/// The silence is part of the take: the beat before an answer is often the
+	/// thing that has to go, and somebody has to be able to point at it.
+	@Test func aPauseCanBeSelected() {
+		let (pane, _) = pane()
+		var span: (Double, Double)?
+		pane.onSelectWords = { span = ($0, $1) }
+		let shown = pane.shownText as NSString
+		let ellipsis = shown.range(of: "…")
+		pane.selectionChanged(to: NSRange(location: ellipsis.location, length: 1))
+		// From the end of "zwei" to the start of "drei" — the silence itself.
+		#expect(span?.0 == 0.8)
+		#expect(span?.1 == 1.4)
+	}
+
+	/// And a selection that runs across one carries it: what is highlighted is
+	/// what is played.
+	@Test func aSelectionAcrossAPauseIncludesIt() {
+		let (pane, _) = pane()
+		var span: (Double, Double)?
+		pane.onSelectWords = { span = ($0, $1) }
+		let shown = pane.shownText as NSString
+		pane.selectionChanged(to: NSRange(location: 0, length: shown.range(of: "drei").location + 4))
+		#expect(span?.0 == 0.0)
+		#expect(span?.1 == 1.8)
+	}
+
+	/// Right-clicking the ellipsis is pointing at the silence, not at the
+	/// sentence beside it.
+	@Test func theMenuOnAPauseIsAboutThePause() {
+		let (pane, _) = pane()
+		var played: (Double, Double)?
+		pane.onPlayWords = { played = ($0, $1) }
+		let shown = pane.shownText as NSString
+		let menu = pane.menuForTest(at: shown.range(of: "…").location)
+		#expect(menu?.items.first?.title.contains("this pause") == true)
+		if let action = menu?.items.first?.action { _ = pane.perform(action) }
+		#expect(played?.0 == 0.8)
+		#expect(played?.1 == 1.4)
+	}
+
+	/// Space plays what is selected. The key is claimed, so it never reaches
+	/// the responder chain — a text view would otherwise scroll a page.
+	@Test func spacePlaysTheSelection() {
+		let (pane, _) = pane()
+		var asked = false
+		pane.onSpace = { asked = true }
+		let shown = pane.shownText as NSString
+		pane.selectForTest(NSRange(location: 0, length: shown.range(of: "zwei").location + 4))
+		pane.pressSpaceForTest()
+		#expect(asked)
+		#expect(pane.selectedSpan?.start == 0.0)
+	}
+
 	/// A transcript with no words has nothing to offer, and offers nothing
 	/// rather than an empty menu.
 	@Test func nothingSaidIsNoMenu() {
