@@ -96,7 +96,11 @@ public final class DocumentBar: NSView {
 	/// this document made of", and putting the second behind the first is what
 	/// made it wrong. The rule the bar follows now — the leading group is the
 	/// document you are in, the trailing group is what this window does with it.
-	public var documents: (() -> NSMenu?)?
+	public var onProject: (() -> Void)?
+	/// Asked to show what can be done about the repository this document sits
+	/// in, and which branch it is on. `nil` when the folder is not a work tree,
+	/// which is the ordinary case for footage.
+	public var onBranch: (() -> Void)?
 
 	/// Rolling the tape, from the bar that says where the tape is.
 	///
@@ -108,7 +112,8 @@ public final class DocumentBar: NSView {
 	public var onPlayPause: (() -> Void)?
 
 	private var documentName = ""
-	private let name = NSButton()
+	/// Which project on the left, which branch on the right, and `⇧⌘P`.
+	private let capsule = DocumentCapsule()
 	/// The way into the setting-up controls: an ellipsis, which is what a menu
 	/// of more things about the thing beside it looks like everywhere else on
 	/// this machine.
@@ -167,13 +172,14 @@ public final class DocumentBar: NSView {
 			edge.heightAnchor.constraint(equalToConstant: 1),
 		])
 
-		name.isBordered = false
-		name.isEnabled = true
-		name.bezelStyle = .inline
-		name.imagePosition = .noImage
-		name.target = self
-		name.action = #selector(showDocuments)
-		name.setContentCompressionResistancePriority(
+		capsule.onHalf = { [weak self] half in
+			guard let self else { return }
+			switch half {
+			case .project: self.onProject?()
+			case .branch: self.onBranch?()
+			}
+		}
+		capsule.setContentCompressionResistancePriority(
 			NSLayoutConstraint.Priority(1), for: .horizontal)
 
 		// Tabular figures, and a width that never changes.
@@ -241,7 +247,7 @@ public final class DocumentBar: NSView {
 			divider.heightAnchor.constraint(equalToConstant: 16),
 		])
 
-		for view in [name, divider, group, play, clock, statusLabel, progress, trailing] as [NSView] {
+		for view in [capsule, divider, group, play, clock, statusLabel, progress, trailing] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			addSubview(view)
 		}
@@ -258,13 +264,14 @@ public final class DocumentBar: NSView {
 		// and then every message that arrives with one arrives in a different
 		// place.
 		NSLayoutConstraint.activate([
-			name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.trafficLights),
-			name.centerYAnchor.constraint(equalTo: centerYAnchor),
+			capsule.leadingAnchor.constraint(equalTo: leadingAnchor,
+			                                 constant: Self.trafficLights),
+			capsule.centerYAnchor.constraint(equalTo: centerYAnchor),
 
 			// The rule, then the group: a clear gap either side of it, so the
 			// cluster is plainly separate from the name at one end and from the
 			// clock at the other.
-			divider.leadingAnchor.constraint(equalTo: name.trailingAnchor, constant: 14),
+			divider.leadingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: 14),
 			divider.centerYAnchor.constraint(equalTo: centerYAnchor),
 
 			group.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 14),
@@ -304,12 +311,30 @@ public final class DocumentBar: NSView {
 	/// Which document this window is about.
 	public func setName(_ text: String) {
 		documentName = text
-		name.attributedTitle = NSAttributedString(
-			string: text,
-			attributes: [.font: Theme.bodyStrong, .foregroundColor: Theme.text])
-		name.toolTip = "Which document this is \u{2014} and every other one that is open"
+		capsule.show(project: text, branch: branchName)
+		capsule.toolTip = "Which document this is \u{2014} and every other one that is open"
 		more.toolTip = setUp == nil
 			? nil : "What this take is made of, and how the two line up"
+	}
+
+	private var branchName: String?
+
+	/// Which branch the folder this document sits in is on. `nil` takes the
+	/// right half away altogether, which is what a folder outside a work tree
+	/// should look like: not an empty box, no box.
+	public func setBranch(_ branch: String?) {
+		branchName = branch
+		capsule.show(project: documentName, branch: branch)
+	}
+
+	/// Lights the half whose list is up, and puts it out again after.
+	public func setOpenHalf(_ half: DocumentCapsule.Half?) {
+		capsule.openHalf = half
+	}
+
+	/// Where a list should hang from, for the half that was clicked.
+	public func anchor(for half: DocumentCapsule.Half) -> (NSView, NSRect) {
+		(capsule, half == .project ? capsule.projectRect : capsule.branchRect)
 	}
 
 	/// Where the playhead is. Always, in every mode — that is the point.
@@ -356,16 +381,10 @@ public final class DocumentBar: NSView {
 
 	@objc private func playTapped() { onPlayPause?() }
 
-	@objc private func showDocuments() {
-		guard let menu = documents?(), !menu.items.isEmpty else { return }
-		let below = NSPoint(x: 0, y: name.bounds.maxY + 4)
-		menu.popUp(positioning: nil, at: below, in: name)
-	}
-
 	@objc private func showSetUp() {
 		guard let content = setUp else { return }
 		if let popover, popover.isShown { popover.close(); return }
-		let from: NSView = more.isHidden ? name : more
+		let from: NSView = more.isHidden ? capsule : more
 		let holder = NSViewController()
 		holder.view = content
 		let showing = NSPopover()
@@ -380,7 +399,7 @@ public final class DocumentBar: NSView {
 	/// without going through the view tree looking for a font.
 	var clockForTesting: NSTextField { clock }
 	var playForTesting: NSButton { play }
-	var nameForTesting: NSButton { name }
+	var capsuleForTesting: DocumentCapsule { capsule }
 	var moreForTesting: NSButton { more }
 	var groupForTesting: NSStackView { group }
 	var dividerForTesting: NSView { divider }

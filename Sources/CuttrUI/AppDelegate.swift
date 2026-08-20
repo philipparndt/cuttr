@@ -21,8 +21,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// file, because two untitled projects have the same URL — none — and would
 	/// otherwise share one scene window between them.
 	private var sceneOwners: [ObjectIdentifier: ObjectIdentifier] = [:]
-	/// The palette on `⇧⌘P`, while it is up.
-	private var palette: DocumentPalette?
 
 	func applicationDidFinishLaunching(_ notification: Notification) {
 		NSApp.mainMenu = MainMenu.build()
@@ -39,6 +37,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				      let group = window.tabGroup, group.windows.count > 1
 				else { return }
 				window.moveTabToNewWindow(nil)
+			}
+		}
+
+		// Which open documents a checkout would pull the ground out from under.
+		//
+		// A `ComposeDocument` writes on every edit and re-reads its file, so a
+		// work tree moving under it is a reload and nothing is lost. A
+		// `TakeDocument` does neither: it holds its cuts in memory until
+		// somebody saves, and it never watches the file. Switch a branch under
+		// an open take and the window is unaware — the next save writes the
+		// stale take over the branch's own. So the branch menu asks, and offers
+		// no checkout while any take from that repository is open.
+		BranchMenu.documentsInTheWay = { [weak self] root in
+			let inside = root.standardizedFileURL.path
+			return (self?.controllers ?? []).compactMap { controller in
+				guard let url = controller.takeDocument.url,
+				      url.standardizedFileURL.path.hasPrefix(inside)
+				else { return nil }
+				return controller.takeDocument.displayName
 			}
 		}
 		NotificationCenter.default.addObserver(
@@ -283,6 +300,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		/// The project a take belongs to, when one that is open owns it.
 		var project: String?
 		var window: NSWindow?
+		/// Its file, so a row can say where it is and a recent one that is
+		/// already open can be left out of the second group.
+		var url: URL?
 	}
 
 	/// Every document open: the projects, and under each the takes it is made
@@ -298,7 +318,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 		for composer in composers {
 			out.append(OpenDocument(name: composer.composeDocument.displayName,
-			                        kind: .scene, project: nil, window: composer.window))
+			                        kind: .scene, project: nil, window: composer.window,
+			                        url: composer.composeDocument.url))
 			let paths = Set(composer.composeDocument.takes.map(\.url.standardizedFileURL))
 			for controller in controllers
 			where controller.takeDocument.url.map({ paths.contains($0.standardizedFileURL) }) == true {
@@ -306,7 +327,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				out.append(OpenDocument(name: controller.takeDocument.displayName,
 				                        kind: .take,
 				                        project: composer.composeDocument.displayName,
-				                        window: controller.window))
+				                        window: controller.window,
+				                        url: controller.takeDocument.url))
 			}
 		}
 		// And the takes no open project owns. Said plainly rather than filed
@@ -314,11 +336,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		// is not a fault.
 		for controller in controllers where !owned.contains(ObjectIdentifier(controller)) {
 			out.append(OpenDocument(name: controller.takeDocument.displayName,
-			                        kind: .take, project: nil, window: controller.window))
+			                        kind: .take, project: nil, window: controller.window,
+			                        url: controller.takeDocument.url))
 		}
 		for scene in scenes {
 			out.append(OpenDocument(name: scene.sceneDocument.name,
-			                        kind: .section, project: nil, window: scene.window))
+			                        kind: .section, project: nil, window: scene.window,
+			                        url: scene.sceneDocument.baseURL))
 		}
 		return out
 	}
@@ -375,28 +399,91 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// The keyboard path, which must not regress now that the tabs are gone:
 	/// `⌘⇧[` and `⌘⇧]` still walk the open documents in the order the menu
 	/// lists them.
+	/// The list behind the capsule's left half and behind `⇧⌘P`: what is open,
+	/// then what was open before.
+	///
+	/// Two groups rather than one flat pile. "Open" and "Recent" answer two
+	/// different questions — which of these am I already in, and which did I
+	/// work on last week — and a list that mixes them makes somebody read every
+	/// row to find out which kind each one is.
+	func switcherGroups() -> [DocumentSwitcher.Group] {
+		var groups: [DocumentSwitcher.Group] = []
+
+		let open = openDocuments().map { document in
+			DocumentSwitcher.Entry(
+				name: document.name,
+				path: document.project.map { "in \($0)" } ?? shortPath(document.url),
+				kind: document.kind,
+				open: { [weak self] in
+					guard let window = document.window else { return }
+					_ = self
+					NSApp.activate(ignoringOtherApps: true)
+					window.makeKeyAndOrderFront(nil)
+				})
+		}
+		if !open.isEmpty { groups.append(.init("Open", open)) }
+
+		// What was open before. `remember(_:)` already files these with the
+		// document controller, so the list is there for the taking — but a
+		// remembered file can have moved since, and a row offering a path that
+		// opens nothing is worse than a row that says so.
+		let alreadyOpen = Set(openDocuments().compactMap { $0.url?.standardizedFileURL.path })
+		let recent = NSDocumentController.shared.recentDocumentURLs
+			.filter { !alreadyOpen.contains($0.standardizedFileURL.path) }
+			.prefix(12)
+			.map { url -> DocumentSwitcher.Entry in
+				let there = FileManager.default.fileExists(atPath: url.path)
+				return DocumentSwitcher.Entry(
+					name: url.deletingPathExtension().lastPathComponent,
+					path: shortPath(url),
+					kind: url.pathExtension == "cuttr" ? .take : .scene,
+					missing: !there,
+					open: there ? { [weak self] in self?.open(url) } : nil)
+			}
+		if !recent.isEmpty { groups.append(.init("Recent", Array(recent))) }
+		return groups
+	}
+
+	/// A path as somebody would say it: under the home folder, `~` stands in.
+	private func shortPath(_ url: URL?) -> String {
+		guard let url else { return "" }
+		let path = url.deletingLastPathComponent().path
+		let home = FileManager.default.homeDirectoryForCurrentUser.path
+		return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+	}
+
+	/// Shows it under a part of a view — a half of the capsule.
+	func showDocumentSwitcher(from view: NSView, rect: NSRect, onClose: @escaping () -> Void) {
+		let groups = switcherGroups()
+		guard !groups.isEmpty else { onClose(); return }
+		DocumentSwitcher.show(groups, from: view, rect: rect, onClose: onClose)
+	}
+
 	/// `⇧⌘P`: the same list, for a hand on the keyboard.
 	///
-	/// Held while it is up, because a panel whose only reference is the window
-	/// it put itself in front of is deallocated the moment it is ordered out —
-	/// the same lesson the window controllers above record.
+	/// The same list, and that is the point — the capsule prints this key, so
+	/// pressing it has to arrive at what clicking the capsule arrives at. It
+	/// hangs from the capsule of whichever window is key, so the popover appears
+	/// where the eye already is rather than in the middle of the screen.
 	@objc func showDocumentPalette(_ sender: Any?) {
-		guard let host = NSApp.keyWindow ?? openDocuments().compactMap(\.window).first else { return }
-		let entries = openDocuments().map { document in
-			DocumentPalette.Entry(
-				name: document.name,
-				detail: document.project.map { "in \($0)" } ?? kindName(document.kind),
-				kind: document.kind, window: document.window)
+		guard let window = NSApp.keyWindow ?? openDocuments().compactMap(\.window).first,
+		      let bar = documentBar(in: window)
+		else { return }
+		bar.setOpenHalf(.project)
+		let (view, rect) = bar.anchor(for: .project)
+		showDocumentSwitcher(from: view, rect: rect) { bar.setOpenHalf(nil) }
+	}
+
+	/// The bar at the top of a window, whichever kind of window it is.
+	private func documentBar(in window: NSWindow) -> DocumentBar? {
+		func find(_ view: NSView) -> DocumentBar? {
+			for sub in view.subviews {
+				if let bar = sub as? DocumentBar { return bar }
+				if let found = find(sub) { return found }
+			}
+			return nil
 		}
-		guard !entries.isEmpty else { return }
-		let palette = DocumentPalette(entries) { [weak self] entry in
-			guard let window = entry.window else { return }
-			NSApp.activate(ignoringOtherApps: true)
-			window.makeKeyAndOrderFront(nil)
-			self?.palette = nil
-		}
-		self.palette = palette
-		palette.show(over: host)
+		return window.contentView.flatMap(find)
 	}
 
 	/// What a document is, when it is not filed under something else.

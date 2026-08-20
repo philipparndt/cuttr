@@ -141,9 +141,29 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		sceneDocument.onChange = { [weak self] in self?.reload() }
 
 		bar.setUp = setup
-		bar.documents = { [weak self] in
-			AppDelegate.shared?.documentsMenu(for: self?.window)
+		// The two halves of the capsule: the documents on the left, and what can
+		// be done about the repository this one sits in on the right.
+		bar.onProject = { [weak self] in
+			guard let self else { return }
+			self.bar.setOpenHalf(.project)
+			let (view, rect) = self.bar.anchor(for: .project)
+			AppDelegate.shared?.showDocumentSwitcher(from: view, rect: rect) {
+				self.bar.setOpenHalf(nil)
+			}
 		}
+		bar.onBranch = { [weak self] in
+			guard let self, let root = self.repositoryRoot else { return }
+			self.bar.setOpenHalf(.branch)
+			guard let menu = BranchMenu.menu(for: root,
+			                                 branch: GitRepository.branch(in: root)) else {
+				self.bar.setOpenHalf(nil)
+				return
+			}
+			let (view, rect) = self.bar.anchor(for: .branch)
+			menu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY + 4), in: view)
+			self.bar.setOpenHalf(nil)
+		}
+
 		bar.onPlayPause = { [weak self] in self?.togglePlay(nil) }
 		setup.onScene = { [weak self] name in
 			self?.sceneDocument.show(name)
@@ -329,10 +349,23 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		inspector.reload(document.scene, project: document.project,
 		                 part: document.selectedPart, key: document.selectedKey)
 
+		findRepository()
 		bar.setName(document.name)
+		bar.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
 		bar.setClock(document.playhead)
 		bar.setPlaying(playing != nil)
 		setup.show(names: document.sceneNames, current: document.name, length: document.length)
+	}
+
+	/// The work tree the project this scene belongs to sits in, if any.
+	private var repositoryRoot: URL?
+	private var repositoryFor: URL?
+
+	private func findRepository() {
+		let url = sceneDocument.baseURL
+		guard url != repositoryFor else { return }
+		repositoryFor = url
+		repositoryRoot = url.flatMap { GitRepository.root(for: $0) }
 	}
 
 	private func seek(to time: Double) {

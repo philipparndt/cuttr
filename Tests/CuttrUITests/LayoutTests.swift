@@ -236,7 +236,7 @@ import Testing
 		bar.setStatus("saved")
 		bar.layoutSubtreeIfNeeded()
 
-		let name = bar.nameForTesting.convert(bar.nameForTesting.bounds, to: bar)
+		let name = bar.capsuleForTesting.convert(bar.capsuleForTesting.bounds, to: bar)
 		let clock = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
 		let status = bar.statusForTesting.convert(bar.statusForTesting.bounds, to: bar)
 
@@ -311,7 +311,7 @@ import Testing
 		#expect(bar.progressForTesting.isHidden)
 	}
 
-	/// The name is the way to the other documents; the ellipsis is the way to
+	/// The capsule is the way to the other documents; the ellipsis is the way to
 	/// this take's files, and it is only there when there are some.
 	///
 	/// The two used to be one control: a `⌄` glued onto the end of the name with
@@ -322,15 +322,13 @@ import Testing
 	@Test func theNameIsAWayIntoTheSetUp() {
 		let bar = self.bar()
 		bar.setName("mia-take-1")
-		// Always a way in: every window has documents, only a take has files.
-		#expect(bar.nameForTesting.isEnabled)
 		#expect(bar.moreForTesting.isHidden, "an ellipsis with nothing behind it")
-		#expect(bar.nameForTesting.attributedTitle.string == "mia-take-1")
+		#expect(bar.capsuleForTesting.projectForTesting == "mia-take-1")
 
 		bar.setUp = TakeSetup()
 		#expect(bar.moreForTesting.isHidden == false)
 		// The name is the name, whatever is behind it.
-		#expect(bar.nameForTesting.attributedTitle.string == "mia-take-1")
+		#expect(bar.capsuleForTesting.projectForTesting == "mia-take-1")
 
 		// And the ellipsis is on the row's centre, not on the text's baseline.
 		bar.layoutSubtreeIfNeeded()
@@ -362,7 +360,7 @@ import Testing
 		// The `…` is last: it is the way to *more* of the same.
 		#expect(bar.groupForTesting.arrangedSubviews.last === bar.moreForTesting)
 
-		let name = bar.nameForTesting.convert(bar.nameForTesting.bounds, to: bar)
+		let name = bar.capsuleForTesting.convert(bar.capsuleForTesting.bounds, to: bar)
 		let rule = bar.dividerForTesting.convert(bar.dividerForTesting.bounds, to: bar)
 		let group = bar.groupForTesting.convert(bar.groupForTesting.bounds, to: bar)
 		let clock = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
