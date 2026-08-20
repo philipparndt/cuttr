@@ -358,11 +358,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		// key that turns a span into a clip is the one that already did.
 		transcriptPane.onSelectWords = { [weak self] start, end in
 			guard let self else { return }
-			let grid = self.takeDocument.grid
-			self.pending = (grid.snap(start), grid.snap(end))
+			let span = self.cutForWords(start, end)
+			self.pending = span
 			self.pendingFromWords = true
-			self.timeline.pending = self.pending
-			self.timeline.reveal(from: start - 0.5, to: end + 0.5)
+			self.timeline.pending = span
+			self.timeline.reveal(from: span.start - 0.5, to: span.end + 0.5)
 		}
 		transcriptPane.onMoveTo = { [weak self] time in
 			self?.move(to: time)
@@ -376,8 +376,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 		transcriptPane.onClipWords = { [weak self] start, end in
 			guard let self else { return }
-			let grid = self.takeDocument.grid
-			self.pending = (grid.snap(start), grid.snap(end))
+			self.pending = self.cutForWords(start, end)
 			self.pendingFromWords = true
 			self.timeline.pending = self.pending
 			self.commitPending()
@@ -1109,6 +1108,40 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		if fromWords { propose(for: clip.id) }
 	}
 
+	/// What a span read off the words becomes on the timeline.
+	///
+	/// The marks are put on the sound and given what air the silence around
+	/// them can spare — see ``SpeechMap/cut(from:to:after:before:handle:reach:)``
+	/// — and only then snapped to a frame. That order matters: a cut has to
+	/// land on a frame whatever else is true, so the grid is the last word, and
+	/// it moves a mark by less than half a frame. Two clips that met exactly
+	/// still meet exactly afterwards, because the same time snaps to the same
+	/// frame from either side of it.
+	private func cutForWords(_ start: Double, _ end: Double) -> (start: Double, end: Double) {
+		let cut = takeDocument.cut(from: start, to: end,
+		                           handle: Self.wantsAir ? SpeechMap.handle : 0)
+		let grid = takeDocument.grid
+		return (grid.snap(cut.span.lowerBound), grid.snap(cut.span.upperBound))
+	}
+
+	/// Whether a clip cut out of a sentence takes air with it.
+	///
+	/// On, and the amount is ``SpeechMap/handle``. Off is a hard cut against
+	/// the refined marks, which is what somebody wants when the handles are
+	/// going to be put on later by whatever assembles the programme — there is
+	/// no sense in two of them.
+	static var wantsAir: Bool {
+		get {
+			guard UserDefaults.standard.object(forKey: airKey) != nil else { return true }
+			return UserDefaults.standard.bool(forKey: airKey)
+		}
+		set { UserDefaults.standard.set(newValue, forKey: airKey) }
+	}
+
+	private static let airKey = "de.rnd7.cuttr.clip.air"
+
+	@objc public func toggleAirAction(_ sender: Any? = nil) { Self.wantsAir.toggle() }
+
 	private func setIn() {
 		let t = takeDocument.grid.snap(playhead)
 		pending = (t, max(pending?.end ?? t, t))
@@ -1692,6 +1725,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			return takeDocument.take.audio != nil
 		case #selector(commitPendingAction(_:)):
 			return pending != nil
+		case #selector(toggleAirAction(_:)):
+			item.state = Self.wantsAir ? .on : .off
+			return true
 		case #selector(transcribeAction(_:)):
 			return wordsTask == nil
 				&& (takeDocument.videoURL != nil || takeDocument.audioURL != nil)
