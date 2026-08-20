@@ -386,15 +386,22 @@ public enum Resolver {
 				if case .group(let name, let inner) = entry.source {
 					let start = cursor
 					try lay(out: inner, depth: depth + 1, at: path)
-					// An empty section is a section somebody has just made.
-					// It contributes nothing and is skipped; the name is not
-					// registered, so anything hung on it is dropped with a
-					// word about it rather than taking the programme down.
-					guard cursor > start else {
-						warnings.append("The section `@\(name)` has nothing in it, "
-							+ "so it was skipped.")
-						continue
-					}
+					// An empty section is a section somebody has just made,
+					// and making one is half of an act whose other half is
+					// filling it. It contributes nothing and is skipped, and
+					// that is not worth saying: a programme built question by
+					// question is thirteen empty sections for most of an
+					// afternoon, and thirteen lines of warning about work in
+					// progress is a program complaining that somebody has not
+					// finished yet.
+					//
+					// The tree already says it, quietly and in the right place:
+					// the section is there with nothing under it.
+					//
+					// An overlay hung on the name is a different matter — the
+					// name is not registered, so it is dropped, and *that* is
+					// warned about where it happens.
+					guard cursor > start else { continue }
 					// A name used twice extends the first one rather than
 					// replacing it: two `@interview` sections are one section
 					// with something in between, which is what an overlay hung

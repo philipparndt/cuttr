@@ -13,6 +13,19 @@ public enum CuttrApp {
 	@MainActor
 	public static func run() {
 		let app = NSApplication.shared
+		// Off for the whole application, not just per window.
+		//
+		// Every window already says `tabbingMode = .disallowed`, and that is
+		// enough to stop one *joining* a group — but macOS restores the window
+		// arrangement from the last launch, and a group made before that
+		// setting existed comes back with its tab bar. Under a title bar the
+		// program draws itself, that bar lands on top of the content.
+		//
+		// This is the switch that turns the mechanism off rather than
+		// declining it one window at a time. Restored groups are broken up in
+		// `AppDelegate` as the windows appear, because this alone does not
+		// undo an arrangement that is already on disk.
+		NSWindow.allowsAutomaticWindowTabbing = false
 		let delegate = AppDelegate()
 		app.delegate = delegate
 		app.setActivationPolicy(.regular)
