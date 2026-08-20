@@ -33,6 +33,17 @@ func usage() -> Never {
 	            back into the take files. Do this once per recording; every
 	            project that uses it then levels and matches for free.
 
+	  --silence <take.cuttr> [--clips] [--from t --to t] [--handle t]
+	            where the quiet is in that take, measured off the audio rather
+	            than guessed from the word times. Three questions:
+	            on its own, every stretch of quiet and how long it is, with the
+	            words on either side of it;
+	            --clips, how each existing clip's marks sit against the speech —
+	            whether it has air or is cutting through a word;
+	            --from/--to, what that span would become once its marks are put
+	            on the sound and given handles. Times may be seconds or
+	            timecode. --handle 0 for a hard cut. See docs/silence.md.
+
 	  --speaking <take.cuttr> --from s --to s
 	            who, of the take's tracked people, is talking over that span.
 	            An anchor is a person: rename one to `mia` and clips she speaks
@@ -73,6 +84,10 @@ var voices = 2
 var mouthSamples = SpeakerProposal.mouthSamples
 var spanFrom = 0.0
 var spanTo = 0.0
+var spanAsked = false
+var silenceIn: String?
+var showClips = false
+var handle = SpeechMap.handle
 var index = 0
 while index < arguments.count {
 	switch arguments[index] {
@@ -111,14 +126,29 @@ while index < arguments.count {
 		index += 1
 		guard index < arguments.count else { usage() }
 		speakingIn = arguments[index]
+	case "--silence":
+		index += 1
+		guard index < arguments.count else { usage() }
+		silenceIn = arguments[index]
+	case "--clips":
+		showClips = true
+	case "--handle":
+		index += 1
+		guard index < arguments.count,
+		      let value = Timecode.parse(arguments[index]), value >= 0 else { usage() }
+		handle = value
+	// Timecode as well as bare seconds, so a span can be copied straight out of
+	// a take file: that is where somebody reading one gets their numbers.
 	case "--from":
 		index += 1
-		guard index < arguments.count, let value = Double(arguments[index]) else { usage() }
+		guard index < arguments.count, let value = Timecode.parse(arguments[index]) else { usage() }
 		spanFrom = value
+		spanAsked = true
 	case "--to":
 		index += 1
-		guard index < arguments.count, let value = Double(arguments[index]) else { usage() }
+		guard index < arguments.count, let value = Timecode.parse(arguments[index]) else { usage() }
 		spanTo = value
+		spanAsked = true
 	case "--at":
 		index += 1
 		guard index < arguments.count, let value = Double(arguments[index]) else { usage() }
@@ -222,6 +252,147 @@ if let speakersIn {
 			print(String(format: "  %@  said %@ truth %@", Timecode.string(line.at),
 			             (line.said ?? "\u{2014}").padding(toLength: 12, withPad: " ", startingAt: 0),
 			             line.truth))
+		}
+	} catch {
+		fail(error.localizedDescription)
+	}
+	exit(0)
+}
+
+// Where the quiet is.
+//
+// Computed on the spot, every time, and deliberately not written anywhere. A
+// sidecar would be a fourth file to keep in step with the media — the take
+// already has a transcript and a path per anchor — and the thing that earns a
+// sidecar is being expensive: recognising five minutes of German is a minute of
+// somebody's afternoon. This is a decode and 50 ms of arithmetic. A file that
+// can go stale is a worse answer than one that cannot, when re-asking is free.
+if let silenceIn {
+	let takeURL = URL(fileURLWithPath: silenceIn).standardizedFileURL
+	let directory = takeURL.deletingLastPathComponent()
+	do {
+		let take = try TakeReader.read(try String(contentsOf: takeURL, encoding: .utf8))
+
+		// The separate recorder when there is one, with the take's offset
+		// relating its clock to the video's — the same choice `Transcriber` and
+		// `--speakers` make, because it is the better microphone and it is the
+		// one the words were heard from. Everything printed below is on the
+		// video's clock, like every time in a take file.
+		let listenTo: URL
+		let shift: Double
+		if let audio = take.audio {
+			listenTo = URL(fileURLWithPath: audio.file, relativeTo: directory).standardizedFileURL
+			shift = take.video == nil ? 0 : audio.offset
+		} else if let video = take.video {
+			listenTo = URL(fileURLWithPath: video, relativeTo: directory).standardizedFileURL
+			shift = 0
+		} else {
+			fail("that take has nothing to listen to")
+		}
+
+		let said: Transcript = take.words.flatMap { words in
+			try? Transcript.read(String(
+				contentsOf: URL(fileURLWithPath: words.path, relativeTo: directory),
+				encoding: .utf8))
+		} ?? Transcript()
+
+		let wave = try await WaveformExtractor.extract(url: listenTo)
+		let clock = Date()
+		let map = SpeechMap.of(wave, shift: shift)
+		// The decode is not counted. It is the expensive half and the timeline
+		// has already paid for it; what is worth knowing is whether *this* is
+		// cheap enough to ask again rather than write down, which is the whole
+		// argument against a sidecar.
+		let took = Date().timeIntervalSince(clock)
+
+		/// The last few words to have finished by a moment, and the first few to
+		/// start after one. What makes a list of gaps navigable: a stretch of
+		/// quiet with nothing said around it is a number nobody can place.
+		func before(_ time: Double, _ count: Int = 5) -> String {
+			said.words.filter { $0.end <= time + 0.001 }.suffix(count)
+				.map(\.text).joined(separator: " ")
+		}
+		func after(_ time: Double, _ count: Int = 5) -> String {
+			said.words.filter { $0.start >= time - 0.001 }.prefix(count)
+				.map(\.text).joined(separator: " ")
+		}
+		func fit(_ text: String, _ width: Int) -> String {
+			let trimmed = text.isEmpty ? "\u{2014}" : text
+			if trimmed.count <= width { return trimmed.padding(toLength: width, withPad: " ", startingAt: 0) }
+			return String(trimmed.prefix(width - 1)) + "\u{2026}"
+		}
+		/// Right-aligned, because a column of times is read by its decimal
+		/// point. `%10@` does not pad a Swift string, whatever it looks like.
+		func at(_ time: Double, _ width: Int = 10) -> String {
+			let written = Timecode.string(time)
+			return String(repeating: " ", count: Swift.max(0, width - written.count)) + written
+		}
+		/// How a mark sits against the speech, said in one phrase.
+		func standing(_ time: Double, air: Double) -> String {
+			let inside = map.depthIntoSpeech(at: time)
+			// A mark under a millisecond inside a run is on the edge of it, and
+			// saying it cuts 0.000 s into the speech is a way of being precise
+			// and wrong at the same time.
+			if inside >= 0.001 { return String(format: "cuts %.3f s into speech", inside) }
+			if inside > 0 { return "on the edge" }
+			return String(format: "air %.3f s", air)
+		}
+
+		print("\(takeURL.deletingPathExtension().lastPathComponent)"
+			+ " \u{2014} \(listenTo.lastPathComponent), \(Timecode.string(wave.duration))"
+			+ (shift == 0 ? ", the video's own clock"
+				: ", shifted \(Timecode.offsetString(shift)) onto the video's clock"))
+		print(String(format: "%d runs of speech, %d stretches of quiet, %d words, %.0f ms to measure",
+		             map.runs.count, map.quiet.count, said.count, took * 1000))
+		print(String(format: "handle %.3f s, reach %.3f s", handle, SpeechMap.reach))
+		print("a mark is put on the sound within the reach, then takes air up to the handle"
+			+ " and never past the middle of the pause it is in \u{2014} so two clips cut either side"
+			+ " of one gap meet exactly and cannot overlap")
+
+		if spanAsked {
+			let asked = Swift.min(spanFrom, spanTo) ... Swift.max(spanFrom, spanTo)
+			let room = said.neighbours(of: asked)
+			let cut = map.cut(from: asked.lowerBound, to: asked.upperBound,
+			                  after: room.before, before: room.after, handle: handle)
+			print("")
+			print("asked   \(at(cut.asked.lowerBound)) \u{2192} \(at(cut.asked.upperBound))"
+				+ String(format: "   (%.3f s)", cut.asked.upperBound - cut.asked.lowerBound))
+			let words = said.text(covering: cut.asked, limit: 14)
+			if !words.isEmpty { print("words   \(words)") }
+			print("refined \(at(cut.refined.lowerBound)) \u{2192} \(at(cut.refined.upperBound))"
+				+ String(format: "   in %+.3f s, out %+.3f s", cut.startMoved, cut.endMoved))
+			print(String(format: "quiet   %.3f s before, %.3f s after \u{2014} took %.3f s and %.3f s",
+			             cut.quietBefore, cut.quietAfter, cut.startHandle, cut.endHandle))
+			print("cut     \(at(cut.span.lowerBound)) \u{2192} \(at(cut.span.upperBound))"
+				+ String(format: "   (%.3f s)", cut.duration))
+			exit(0)
+		}
+
+		if showClips {
+			guard !take.clips.isEmpty else {
+				print("")
+				print("no clips in that take yet")
+				exit(0)
+			}
+			print("")
+			print("clips \u{2014} where each mark sits against the speech")
+			print("  " + fit("slug", 22) + "        in         out  "
+				+ fit("at the in", 26) + "  at the out")
+			for clip in take.clips {
+				print("  " + fit(clip.slug, 22) + "  " + at(clip.start) + "  " + at(clip.end) + "  "
+					+ fit(standing(clip.start, air: map.quiet(before: clip.start)), 26)
+					+ "  " + standing(clip.end, air: map.quiet(after: clip.end)))
+			}
+			exit(0)
+		}
+
+		print("")
+		print("quiet")
+		print("        from          to   length  " + fit("after", 34) + "  before")
+		for gap in map.quiet {
+			print("  " + at(gap.lowerBound) + "  " + at(gap.upperBound)
+				+ String(format: "  %7.3f  ", gap.upperBound - gap.lowerBound)
+				+ fit(before(gap.lowerBound), 34) + "  " + fit(after(gap.upperBound), 34))
 		}
 	} catch {
 		fail(error.localizedDescription)

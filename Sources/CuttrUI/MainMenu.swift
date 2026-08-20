@@ -119,6 +119,13 @@ enum MainMenu {
 		// marking loop runs on, and it does not need a modifier.
 		clip.addItem(command("Split at Playhead", #selector(MainWindowController.splitAction(_:)), "b"))
 		clip.addItem(command("New Clip from In/Out", #selector(MainWindowController.commitPendingAction(_:)), "\r"))
+		// A clip made out of a sentence takes a little of the quiet on either
+		// side of it, so a row of them assembled later is not glued together.
+		// Here because somebody whose programme puts its own handles on wants
+		// to turn it off, and would otherwise have no way of knowing it was
+		// happening at all.
+		clip.addItem(command("Air Around Word Clips",
+		                     #selector(MainWindowController.toggleAirAction(_:)), ""))
 		clip.addItem(.separator())
 		// No key equivalent, deliberately. `[` and `]` as menu equivalents render
 		// as whatever the layout puts on those physical keys — on a German

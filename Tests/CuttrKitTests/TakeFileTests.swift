@@ -361,3 +361,46 @@ import Testing
 		#expect(AnchorPath.union([0.0 ... 1.0, 3.0 ... 4.0]).count == 2)
 	}
 }
+
+/// The comment beside a clip's `end:` says how long it is, and it has to agree
+/// with the two numbers printed above it.
+@Suite struct ClipLengthCommentTests {
+
+	/// Times whose difference in seconds rounds one way and whose *written*
+	/// milliseconds differ the other. Before the comment was derived from what
+	/// was written, re-saving an untouched take changed a character in it.
+	@Test func theLengthIsTheDifferenceOfTheTimesAsWritten() throws {
+		let take = Take(video: "a.mov", clips: [
+			Clip(slug: "one", start: 192.8565, end: 199.8615),
+			Clip(slug: "two", start: 0.0004, end: 1.0006),
+		])
+		let text = TakeWriter.write(take)
+		let lines = text.components(separatedBy: "\n")
+
+		var starts: [Double] = []
+		var ends: [Double] = []
+		var lengths: [Double] = []
+		for line in lines {
+			let trimmed = line.trimmingCharacters(in: .whitespaces)
+			if trimmed.hasPrefix("start:") {
+				starts.append(Timecode.parse(String(trimmed.dropFirst(6))
+					.trimmingCharacters(in: .whitespaces)) ?? -1)
+			}
+			guard trimmed.hasPrefix("end:") else { continue }
+			let parts = trimmed.dropFirst(4).components(separatedBy: "#")
+			ends.append(Timecode.parse(parts[0].trimmingCharacters(in: .whitespaces)) ?? -1)
+			lengths.append(Timecode.parse(parts[1].trimmingCharacters(in: .whitespaces)) ?? -1)
+		}
+
+		#expect(starts.count == 2)
+		#expect(ends.count == 2)
+		for index in lengths.indices {
+			// In milliseconds, because that is the unit the file is written in
+			// and comparing seconds would be asking the wrong question.
+			#expect(Timecode.milliseconds(lengths[index])
+				== Timecode.milliseconds(ends[index]) - Timecode.milliseconds(starts[index]))
+		}
+		// Written, read back, written again, unchanged.
+		#expect(TakeWriter.write(try TakeReader.read(text)) == text)
+	}
+}

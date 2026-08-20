@@ -232,6 +232,23 @@ public struct Transcript: Sendable, Equatable {
 		return (words[clamped.lowerBound].start, words[clamped.upperBound - 1].end)
 	}
 
+	/// Where the words on either side of a span are — what a mark may not cross.
+	///
+	/// The head of a span may be put on the sound rather than on the word time
+	/// (see ``SpeechMap/cut(from:to:after:before:handle:reach:)``), and this is
+	/// what stops that from quietly taking in the word before it. `nil` at
+	/// either end of the take, where there is nothing to run into.
+	///
+	/// Word times rather than speech edges, deliberately: this is a claim about
+	/// what was *selected*, and the selection is a run of words. Two words with
+	/// no silence between them return each other's times, refinement is pinned
+	/// and does nothing, which is the right answer — there is no moment the
+	/// sound started in the middle of a word.
+	public func neighbours(of span: ClosedRange<Double>) -> (before: Double?, after: Double?) {
+		(words.last { $0.end <= span.lowerBound }?.end,
+		 words.first { $0.start >= span.upperBound }?.start)
+	}
+
 	/// The words as spoken, for naming a clip after them.
 	///
 	/// Cut off at `limit` words, and the cut is not apologised for with an

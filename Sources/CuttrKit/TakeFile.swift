@@ -456,7 +456,15 @@ public enum TakeWriter {
 			// an input: it is `end - start`, and a key would be a second place
 			// for it to be wrong. As a comment it is there when somebody is
 			// reading the file and cannot contradict the times above it.
-			out += "   # \(Timecode.string(clip.duration))\n"
+			//
+			// Taken from the two times as *written* rather than from the ones
+			// they came from. `end - start` in seconds and then rounded can
+			// land a millisecond either side of the difference between the two
+			// numbers printed above it — which is the one thing this comment
+			// exists not to do, and which made re-saving an untouched take
+			// change a character.
+			let length = Timecode.milliseconds(clip.end) - Timecode.milliseconds(clip.start)
+			out += "   # \(Timecode.string(Double(length) / 1000))\n"
 			if clip.color != .default {
 				out += "    color: \(clip.color.rawValue)\n"
 			}
