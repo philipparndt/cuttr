@@ -46,8 +46,15 @@ enum Frame {
 
 		for shown in work.overlays where time >= shown.start && time <= shown.end {
 			let intensity = fade(shown, at: time)
-
-			switch shown.overlay.kind {
+			// The overlay's parameters as they stand at this moment. `t` is
+			// measured from the start of *this appearance*, as a scene's keys
+			// are measured from the start of the scene — an overlay that is on
+			// three times runs its keys three times.
+			//
+			// It composes with the fade rather than replacing it: `intensity`
+			// still says how far into the thing the programme is, and the
+			// numbers it scales are now the ones the keys have moved to.
+			switch shown.overlay.kind(at: time - shown.start) {
 			case .film(let film):
 				image = Filming.applied(film, to: image, intensity: intensity,
 				                        size: size, time: time)

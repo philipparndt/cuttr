@@ -442,6 +442,11 @@ public enum ProjectWriter {
 						}
 					}
 				}
+				// The keys, if anything moves, straight after the knobs they
+				// move — so a reader's eye goes from `amount: 0.2` to the list
+				// of what happens to it. An overlay with none writes nothing at
+				// all here, which is what every project already on disk is.
+				out += keys(overlay)
 				// One range that says nothing of its own keeps the shape every
 				// project already has; anything else goes under `when:`, which
 				// is the same keys in a list.
@@ -476,6 +481,28 @@ public enum ProjectWriter {
 				out += "    in:     \(transition(overlay.arrival))\n"
 				out += "    out:    \(transition(overlay.departure))\n"
 			}
+		return out
+	}
+
+	/// What an overlay's parameters do over its span.
+	///
+	/// The same flow form a scene's keys are written in, for the same reason:
+	/// a key is three or four short things and reads as one line. Fields go in
+	/// ``Overlay/Parameter``'s own order rather than the order somebody typed
+	/// them, so a file written twice is the same file twice.
+	private static func keys(_ overlay: Overlay) -> String {
+		guard !overlay.keys.isEmpty else { return "" }
+		let allowed = overlay.kind.animatable
+		var out = "    keys:\n"
+		for key in overlay.keys {
+			var fields = ["t: \(trim(key.t))"]
+			for parameter in allowed {
+				guard let value = key[parameter] else { continue }
+				fields.append("\(parameter.rawValue): \(trim(value))")
+			}
+			if key.ease != .inOut { fields.append("ease: \(key.ease.rawValue)") }
+			out += "      - {" + fields.joined(separator: ", ") + "}\n"
+		}
 		return out
 	}
 

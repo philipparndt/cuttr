@@ -108,7 +108,17 @@ public struct Effect: Sendable, Equatable {
 	}
 
 	/// How many pieces are in the air at once.
-	public var count: Int {
+	public var count: Int { count(for: density) }
+
+	/// The same, for a density other than the declared one.
+	///
+	/// Wanted because keys can move the density and the cloud cannot be rebuilt
+	/// half way through a render: it is built for the most it is ever asked for
+	/// and thinned by hiding, which is what ``EffectMotion`` explains at length.
+	/// A cloud built for a bigger number keeps the first of its pieces exactly
+	/// where they were, because they come off the same seeded sequence in the
+	/// same order.
+	public func count(for density: Double) -> Int {
 		let base: Int
 		switch style {
 		case .confetti: base = finish == .glitter ? 320 : 160
