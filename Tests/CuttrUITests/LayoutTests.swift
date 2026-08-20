@@ -456,3 +456,132 @@ import Testing
 		#expect(bar.timeForTesting(at: CGFloat(5000)) == 100)
 	}
 }
+
+
+/// Collapsing a pane in the cutting window, and everything else staying put.
+///
+/// A folded pane is exactly its heading, and it says so with a *required*
+/// constraint so that a split view cannot hand it room it does not want. The
+/// window used to state a required floor on the same panes — how short each may
+/// be squeezed — and the two cannot both hold: `height >= 96` and `height == 24`
+/// is a system autolayout cannot solve. What it does instead is break one, log
+/// `layout constraints are not satisfiable`, and go round the display cycle
+/// again looking for an arrangement that works. Through four nested split views
+/// and the scroll views inside them that is a great many passes for one click,
+/// and AppKit raises out of the layout pass when a window has had more of them
+/// than it has views.
+///
+/// Both of the things somebody sees when that happens are asserted here: a pane
+/// that will not fold because a floor beat it, and panes that come back shorter
+/// than they were because a constraint that got broken stays broken.
+@Suite @MainActor struct CollapsingPanesTests {
+
+	private func opened() -> (MainWindowController, NSWindow, [FoldingPane]) {
+		_ = NSApplication.shared
+		var clips: [Clip] = []
+		for i in 0..<30 {
+			clips.append(Clip(slug: "clip-\(i)", name: "clip number \(i)",
+			                  start: Double(i) * 3, end: Double(i) * 3 + 2.5))
+		}
+		var take = Take(video: "a.mov", clips: clips)
+		for i in 0..<6 {
+			_ = take.add(Anchor(name: "anchor-\(i)", from: Double(i), to: Double(i) + 5,
+			                    markedAt: Double(i), point: CGPoint(x: 0.5, y: 0.5)))
+		}
+		let controller = MainWindowController(document: TakeDocument(take: take))
+		let window = controller.window!
+		window.setContentSize(NSSize(width: 1500, height: 1100))
+		window.layoutIfNeeded()
+
+		func panes(in view: NSView) -> [FoldingPane] {
+			view.subviews.flatMap { sub -> [FoldingPane] in
+				((sub as? FoldingPane).map { [$0] } ?? []) + panes(in: sub)
+			}
+		}
+		return (controller, window, panes(in: window.contentView!))
+	}
+
+	@Test func everyPaneCanBeCollapsedToItsHeading() {
+		let (_, window, panes) = opened()
+		#expect(panes.count == 4)
+		for height in [1100.0, 900.0, 740.0, 640.0, window.minSize.height] {
+			window.setContentSize(NSSize(width: 1500, height: height))
+			window.layoutIfNeeded()
+			for (index, pane) in panes.enumerated() {
+				pane.fold(true)
+				window.layoutIfNeeded()
+				#expect(pane.frame.height == FoldingPane.headHeight,
+				        "at \(height), pane \(index) folded to \(pane.frame.height)")
+				pane.fold(false)
+				window.layoutIfNeeded()
+			}
+		}
+		window.close()
+	}
+
+	/// At every height the column is worth having, because the sizes that show
+	/// this are the ones where the panes are already near their floors — which
+	/// is most of them, on a laptop screen.
+	///
+	/// Not at the very smallest the window goes to. There the column has only a
+	/// few points of slack over the sum of the floors, and which pane gets them
+	/// is a tie: a split view remembers a dragged divider with a constraint of
+	/// its own at priority 250, and the panes ask for their preferred heights at
+	/// the same 250. A tie is decided by whatever the engine did last, so it
+	/// comes out differently after a fold. That is untidy and it long predates
+	/// this; it is not what crashed, and raising the panes above the split
+	/// view would stop a dragged divider from staying where it was put.
+	@Test func thePanesComeBackTheSizeTheyWere() {
+		let (_, window, panes) = opened()
+		for height in [1100.0, 980.0, 900.0, 820.0, 740.0, 680.0, 640.0] {
+			window.setContentSize(NSSize(width: 1500, height: height))
+			window.layoutIfNeeded()
+			let before = panes.map(\.frame.height)
+			for pane in panes {
+				pane.fold(true)
+				window.layoutIfNeeded()
+				pane.fold(false)
+				window.layoutIfNeeded()
+			}
+			let after = panes.map(\.frame.height)
+			#expect(before == after,
+			        "at \(height) the column shrank: \(before) became \(after)")
+		}
+		window.close()
+	}
+
+	/// The rule underneath both of those, stated directly.
+	///
+	/// Autolayout has no opinion about *where* two contradictory required
+	/// constraints came from, so the only way to be sure they can never
+	/// contradict is for there to be one of them. A second required word about a
+	/// pane's height — from the window, from a split view delegate, from
+	/// anywhere — is the bug coming back, whether or not it happens to be
+	/// satisfiable on the day it is added.
+	@Test func onlyOneRequiredThingIsSaidAboutAPanesHeight() {
+		let (_, window, panes) = opened()
+		func requiredHeights(on pane: FoldingPane) -> [NSLayoutConstraint] {
+			let mine = pane.constraints.filter { ($0.firstItem as? NSView) === pane }
+			let theirs = pane.superview?.constraints.filter {
+				($0.firstItem as? NSView) === pane || ($0.secondItem as? NSView) === pane
+			} ?? []
+			// A split view's own stacking and edge constraints are how the
+			// column is assembled and are not an opinion about one pane's
+			// height; what is being counted is height stated as a size.
+			return (mine + theirs).filter {
+				$0.priority == .required && $0.firstAttribute == .height
+					&& $0.secondItem == nil
+			}
+		}
+		for state in [false, true, false] {
+			for pane in panes { pane.fold(state) }
+			window.layoutIfNeeded()
+			for (index, pane) in panes.enumerated() {
+				let said = requiredHeights(on: pane)
+				#expect(said.count <= 1,
+				        "pane \(index) \(state ? "folded" : "open") has \(said.count) required heights: \(said)")
+			}
+		}
+		window.close()
+	}
+}
