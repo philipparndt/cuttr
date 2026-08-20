@@ -219,7 +219,7 @@ extension Project {
 	}
 
 	/// Runs `change` on the array that owns `path`, with the index in it.
-	private mutating func modify(at path: [Int], _ change: (inout [TimelineEntry], Int) -> Void) {
+	mutating func modify(at path: [Int], _ change: (inout [TimelineEntry], Int) -> Void) {
 		func recurse(_ list: inout [TimelineEntry], _ path: ArraySlice<Int>) {
 			guard let index = path.first, index < list.count else { return }
 			if path.count == 1 {

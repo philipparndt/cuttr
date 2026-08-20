@@ -407,7 +407,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// resolved programme is the only thing that knows.
 	func overlaysOver(_ selection: ProjectSelection) -> Set<Int> {
 		guard let resolved, case .entry(let path) = selection else { return [] }
-		guard let span = span(of: path, in: resolved) else { return [] }
+		guard let span = Project.extent(of: path, in: resolved) else { return [] }
 		var found: Set<Int> = []
 		for shown in resolved.overlays
 		where shown.start < span.end - 1e-6 && shown.end > span.start + 1e-6 {
@@ -419,22 +419,6 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		return found
 	}
 
-	/// Where an entry sits on the programme's clock — a clip, a card, or a
-	/// section with everything inside it.
-	private func span(of path: [Int], in resolved: ResolvedProject) -> (start: Double, end: Double)? {
-		if let clip = resolved.clips.first(where: { $0.entry == path }) {
-			return (clip.start, clip.end)
-		}
-		if let card = resolved.cards.first(where: { $0.entry == path }) {
-			return (card.start, card.end)
-		}
-		// A section: from the first thing inside it to the last, whatever those
-		// are and however deeply they nest.
-		let inside = resolved.clips.filter { $0.entry.starts(with: path) }.map { ($0.start, $0.end) }
-			+ resolved.cards.filter { $0.entry.starts(with: path) }.map { ($0.start, $0.end) }
-		guard let first = inside.map(\.0).min(), let last = inside.map(\.1).max() else { return nil }
-		return (first, last)
-	}
 
 	/// For the tests: what the tree holds, as text.
 	var treeRowsForTesting: [String] {
