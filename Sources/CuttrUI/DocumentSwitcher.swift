@@ -1,4 +1,5 @@
 import AppKit
+import CuttrKit
 
 /// The list that drops out of the capsule: what is open, what was open before,
 /// and a field to type at.
@@ -16,22 +17,42 @@ public enum DocumentSwitcher {
 	/// One row.
 	public struct Entry {
 		public var name: String
-		/// Where it is on disk, shown dim and truncated at the head.
+		/// The folder it is in, shown dim and truncated at the head.
+		///
+		/// The single most useful column in the list, and the one ours was
+		/// missing: two takes called `take-1` are told apart by where they are
+		/// and by nothing else.
 		public var path: String
 		public var kind: Theme.Kind
+		/// A take is drawn under the project it belongs to.
+		public var indented: Bool
+		/// Whether this is the document the window is already showing.
+		public var isCurrent: Bool
 		/// What to do about it. `nil` for a document whose file has gone.
 		public var open: (() -> Void)?
 		/// Said instead of the path when the file is not where it was.
 		public var missing: Bool
 
 		public init(name: String, path: String, kind: Theme.Kind,
+		            indented: Bool = false, isCurrent: Bool = false,
 		            missing: Bool = false, open: (() -> Void)?) {
 			self.name = name
 			self.path = path
 			self.kind = kind
+			self.indented = indented
+			self.isCurrent = isCurrent
 			self.missing = missing
 			self.open = open
 		}
+
+		/// The hue that stands for this document, derived from its name.
+		///
+		/// The same derivation speakers use — `Speaker.color(of:)`, which is
+		/// FNV-1a written out rather than `hashValue`, because Swift seeds
+		/// `Hashable` per process and a project that is violet this morning and
+		/// green this afternoon is a colour nobody trusts. Reused rather than
+		/// copied: one hash, one palette, two lists that agree.
+		public var hue: NSColor { Theme.base(Speaker.color(of: name)) }
 	}
 
 	/// A heading and the rows under it.
@@ -66,8 +87,27 @@ public enum DocumentSwitcher {
 		switcher.onClose = onClose
 		showing = popover
 		controller = switcher
-		popover.show(relativeTo: rect, of: view, preferredEdge: .maxY)
+		popover.show(relativeTo: inside(rect, of: view), of: view, preferredEdge: .maxY)
 		switcher.focus()
+	}
+
+	/// Keeps the panel inside the window it belongs to.
+	///
+	/// A popover is centred on the middle of the rectangle it is given and is
+	/// clamped to the *screen*, not to the window — so one hung under a capsule
+	/// that starts eighty points in went off the window's left edge and sat on
+	/// the desktop. The rectangle is nudged right by however much it takes, and
+	/// no further: the beak has to stay on the half of the capsule that opened
+	/// it, so the nudge stops twelve points short of that half's own edge.
+	static func inside(_ rect: NSRect, of view: NSView) -> NSRect {
+		guard view.window != nil else { return rect }
+		// The window's left edge, in the view's own coordinates.
+		let edge = view.convert(NSPoint(x: 0, y: 0), from: nil).x
+		let wanted = edge + Switcher.width / 2 + 8
+		guard rect.midX < wanted else { return rect }
+		var moved = rect
+		moved.origin.x = min(rect.maxX - 12, rect.origin.x + (wanted - rect.midX))
+		return moved
 	}
 
 	public static func close() {
@@ -120,21 +160,29 @@ public enum DocumentSwitcher {
 		@available(*, unavailable) required init?(coder: NSCoder) { nil }
 
 		override func loadView() {
-			let ground = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 360))
+			let ground = NSView(frame: NSRect(x: 0, y: 0, width: Self.width, height: 360))
 			ground.wantsLayer = true
-			ground.layer?.backgroundColor = Theme.panel.cgColor
+			// The darkest ground, so the panel reads as belonging to the window
+			// rather than as a sheet laid on top of it.
+			ground.layer?.backgroundColor = Theme.background.cgColor
 
 			// A visible field, so what is typed is on screen and obviously a
 			// filter — rather than an invisible jump-to-match to be guessed at.
-			field.placeholderString = "Search a project or a take"
-			field.font = NSFont.systemFont(ofSize: 13)
+			// Named for what to do with it rather than for what it is. There is
+			// no `>` or `:` syntax here to teach — inventing one would be a
+			// feature rather than a label — so it teaches the two keys that
+			// matter.
+			field.placeholderString = "Type to filter  \u{00B7}  \u{21A9} to open"
+			field.font = NSFont.systemFont(ofSize: 12)
 			field.delegate = self
 			field.focusRingType = .none
+			field.drawsBackground = false
+			field.isBezeled = false
 			field.translatesAutoresizingMaskIntoConstraints = false
 
 			table.dataSource = self
 			table.delegate = self
-			table.rowHeight = 26
+			table.rowHeight = Self.rowHeight
 			table.backgroundColor = .clear
 			table.gridStyleMask = []
 			table.headerView = nil
@@ -142,21 +190,24 @@ public enum DocumentSwitcher {
 			table.selectionHighlightStyle = .regular
 			table.addTableColumn(NSTableColumn(identifier: .init("document")))
 			table.target = self
-			table.doubleAction = #selector(take)
+			// A single click, not a double one. This is a switcher, not a file
+			// browser: pointing at a row *is* the choice, and a list where
+			// clicking a row does nothing is the bug this control shipped with.
+			table.action = #selector(take)
 			let scroll = TableScroll.fitting(table)
 			scroll.drawsBackground = false
 			scroll.translatesAutoresizingMaskIntoConstraints = false
 
 			for view in [field, scroll] as [NSView] { ground.addSubview(view) }
 			NSLayoutConstraint.activate([
-				field.topAnchor.constraint(equalTo: ground.topAnchor, constant: 10),
-				field.leadingAnchor.constraint(equalTo: ground.leadingAnchor, constant: 10),
-				field.trailingAnchor.constraint(equalTo: ground.trailingAnchor, constant: -10),
+				field.topAnchor.constraint(equalTo: ground.topAnchor, constant: 7),
+				field.leadingAnchor.constraint(equalTo: ground.leadingAnchor, constant: 8),
+				field.trailingAnchor.constraint(equalTo: ground.trailingAnchor, constant: -8),
 
-				scroll.topAnchor.constraint(equalTo: field.bottomAnchor, constant: 8),
+				scroll.topAnchor.constraint(equalTo: field.bottomAnchor, constant: 6),
 				scroll.leadingAnchor.constraint(equalTo: ground.leadingAnchor),
 				scroll.trailingAnchor.constraint(equalTo: ground.trailingAnchor),
-				scroll.bottomAnchor.constraint(equalTo: ground.bottomAnchor, constant: -8),
+				scroll.bottomAnchor.constraint(equalTo: ground.bottomAnchor, constant: -6),
 			])
 			view = ground
 			resize()
@@ -167,11 +218,20 @@ public enum DocumentSwitcher {
 			selectFirstDocument()
 		}
 
+		/// One line of text and a little, which is what a row of a list you are
+		/// scanning should be.
+		static let rowHeight: CGFloat = 26
+		/// Narrow enough to sit inside the window it belongs to. It was 560,
+		/// which hung off the left edge onto the desktop when anchored under a
+		/// capsule that starts eighty points in.
+		static let width: CGFloat = 380
+
 		/// Height follows the content up to a cap, so a short list is a short
 		/// popover rather than a tall one mostly full of nothing.
 		private func resize() {
-			let content = CGFloat(rows.count) * 26 + 58
-			preferredContentSize = NSSize(width: 560, height: min(max(content, 120), 460))
+			let content = CGFloat(rows.count) * Self.rowHeight + 44
+			preferredContentSize = NSSize(width: Self.width,
+			                              height: min(max(content, 110), 560))
 		}
 
 		private func rebuild(filter: String) {
@@ -194,6 +254,18 @@ public enum DocumentSwitcher {
 			resize()
 			selectFirstDocument()
 		}
+
+		/// For the tests: the list itself, to ask what a click is wired to.
+		var tableForTesting: NSTableView? { table }
+
+		/// For the tests: choose a row without an `NSEvent` — a synthesised one
+		/// that nothing handles walks up the responder chain and beeps.
+		func selectForTesting(_ row: Int) {
+			guard row >= 0, row < rows.count else { return }
+			table.selectRowIndexes([row], byExtendingSelection: false)
+		}
+
+		func chooseForTesting() { take() }
 
 		var shownForTesting: [String] {
 			rows.map {
@@ -263,7 +335,7 @@ public enum DocumentSwitcher {
 		func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
 		func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-			MarkedRow.make(in: tableView)
+			ChosenRow.make(in: tableView)
 		}
 
 		func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
@@ -279,6 +351,7 @@ public enum DocumentSwitcher {
 					as? HeadingCell)
 					?? { let made = HeadingCell(); made.identifier = .init("heading"); return made }()
 				view.title = title
+				view.isFirst = row == 0
 				view.needsDisplay = true
 				return view
 			case .entry(let entry):
@@ -286,21 +359,65 @@ public enum DocumentSwitcher {
 					as? EntryCell)
 					?? { let made = EntryCell(); made.identifier = .init("entry"); return made }()
 				view.entry = entry
+				view.isChosen = row == tableView.selectedRow
 				view.needsDisplay = true
 				return view
 			}
 		}
 	}
 
-	/// A group heading: grey, semibold, small.
+	/// The selected row, which in a list already carrying a colour per document
+	/// is a *lift* rather than a slab.
+	///
+	/// `MarkedRow` — the rule everywhere else in this program — fills the row
+	/// and puts an accent mark down its leading edge. Here the leading edge is
+	/// already spoken for by the document's own hue, and a full-width grey bar
+	/// over a list of coloured rails is the loudest thing on the panel for the
+	/// least information in it. So the ground barely lifts and the rail brightens
+	/// instead; the cell does that part, since it is the one holding the colour.
+	final class ChosenRow: NSTableRowView {
+		override func drawSelection(in dirtyRect: NSRect) {
+			guard selectionHighlightStyle != .none else { return }
+			NSColor.white.withAlphaComponent(0.07).setFill()
+			bounds.fill()
+		}
+
+		override var isEmphasized: Bool {
+			get { false }
+			set { _ = newValue }
+		}
+
+		static func make(in table: NSTableView) -> NSTableRowView {
+			if let found = table.makeView(withIdentifier: identifier, owner: nil) as? ChosenRow {
+				return found
+			}
+			let made = ChosenRow()
+			made.identifier = identifier
+			return made
+		}
+
+		private static let identifier = NSUserInterfaceItemIdentifier("switcher-row")
+	}
+
+	/// A group heading: grey, semibold, and separated from the group above it by
+	/// a hairline — except at the very top, where there is nothing to separate
+	/// it from.
 	final class HeadingCell: NSTableCellView {
 		var title = ""
+		var isFirst = false
+
+		override var isFlipped: Bool { true }
 
 		override func draw(_ dirtyRect: NSRect) {
-			(title as NSString).draw(
-				at: NSPoint(x: 13, y: bounds.midY - 6),
-				withAttributes: [.font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-				                 .foregroundColor: Theme.faintText])
+			if !isFirst {
+				Theme.rule.setFill()
+				NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
+			}
+			let text = NSAttributedString(string: title, attributes: [
+				.font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+				.foregroundColor: Theme.faintText,
+			])
+			text.draw(at: NSPoint(x: 12, y: bounds.height - text.size().height - 4))
 		}
 	}
 
@@ -313,18 +430,29 @@ public enum DocumentSwitcher {
 	/// into a column that can be read down.
 	final class EntryCell: NSTableCellView {
 		var entry: Entry?
+		var isChosen = false
+
+		private static let rail: CGFloat = 3
+		private static let leading: CGFloat = 13
+		private static let indent: CGFloat = 16
+		private static let trailing: CGFloat = 12
 
 		override func draw(_ dirtyRect: NSRect) {
 			guard let entry else { return }
-			Theme.color(entry.kind).setFill()
-			NSRect(x: 0, y: 0, width: 3, height: bounds.height).fill()
+			// A hue per document rather than one colour for every row, so the
+			// list can be scanned before it is read. Full strength for the one
+			// selected, a little back for the rest.
+			entry.hue.withAlphaComponent(isChosen ? 1 : 0.7).setFill()
+			NSRect(x: 0, y: 0, width: Self.rail, height: bounds.height).fill()
 
+			let x = Self.leading + (entry.indented ? Self.indent : 0)
 			let name = NSAttributedString(string: entry.name, attributes: [
-				.font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-				.foregroundColor: entry.open == nil ? Theme.dimText : Theme.text,
+				.font: NSFont.systemFont(ofSize: 13,
+				                         weight: entry.isCurrent ? .semibold : .regular),
+				.foregroundColor: entry.open == nil ? Theme.faintText : Theme.text,
 			])
 			let size = name.size()
-			name.draw(at: NSPoint(x: 13, y: bounds.midY - size.height / 2))
+			name.draw(at: NSPoint(x: x, y: bounds.midY - size.height / 2))
 
 			// A fixed face, right-aligned, truncated at the *head*: the tail of
 			// a path is what says which one this is, and `/Volumes/500G/…` never
@@ -340,8 +468,8 @@ public enum DocumentSwitcher {
 					.foregroundColor: entry.missing ? Theme.playhead : Theme.faintText,
 					.paragraphStyle: paragraph,
 				])
-			let left = 13 + ceil(size.width) + 12
-			let available = bounds.maxX - 12 - left
+			let left = x + ceil(size.width) + 12
+			let available = bounds.maxX - Self.trailing - left
 			guard available > 30 else { return }
 			detail.draw(in: NSRect(x: left, y: bounds.midY - detail.size().height / 2,
 			                       width: available, height: detail.size().height))
