@@ -23,6 +23,27 @@ final class KeyTable: NSTableView {
 	override func menu(for event: NSEvent) -> NSMenu? {
 		onMenu?(event) ?? super.menu(for: event)
 	}
+
+	/// One column, as wide as the list.
+	///
+	/// `NSTableColumn` starts at a hundred points and `uniformColumnAutoresizing`
+	/// only redistributes width when the table is *resized* — a table given its
+	/// size by Auto Layout, as every list here is, may never be. So a cell drawn
+	/// against `bounds.maxX` had a hundred points to work with in a pane three
+	/// times that: in the document switcher there was no room left for a path
+	/// after the name, so most rows showed none and a couple showed four
+	/// characters of one.
+	override func layout() {
+		super.layout()
+		guard tableColumns.count == 1 else { return }
+		// The *visible* width, from the scroll view rather than from this
+		// table's own bounds: the table's width follows its columns, so sizing
+		// a column to it is a circle that ends up wider than the pane and
+		// clipped. `contentSize` is what the clip view will show, scrollers
+		// taken off.
+		let want = max(40, enclosingScrollView?.contentSize.width ?? bounds.width)
+		if abs(tableColumns[0].width - want) > 0.5 { tableColumns[0].width = want }
+	}
 }
 
 /// An outline that does the same. `NSOutlineView` is an `NSTableView`, but not

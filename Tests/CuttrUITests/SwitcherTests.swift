@@ -204,3 +204,76 @@ import Testing
 		        "the cap is \(cap) on a screen \(screen.visibleFrame.height) tall")
 	}
 }
+
+/// What the filter field matches, and what it must not.
+@MainActor @Suite struct SwitcherFilterTests {
+
+	/// Typing `mia` kept the whole list. Letters-in-order is right for a name —
+	/// `mt1` should find `mia-take-1` — and wrong for a path: every document on
+	/// the machine sits under something like `/Volumes/500G/dingsda`, which has
+	/// an m, an i and an a in that order.
+	@Test func aPathIsNotMatchedByItsLettersInOrder() {
+		let path = "/Volumes/500G/dingsda/takes/Lilly, Annelie, Chris 1.cuttr"
+		#expect(DocumentSwitcher.matches("mia", in: "Mia 1"))
+		#expect(!DocumentSwitcher.contains("mia", in: path))
+		// The name of that take does not contain the letters either, so the row
+		// goes — which is the whole point.
+		#expect(!DocumentSwitcher.matches("mia", in: "Lilly, Annelie, Chris 1"))
+	}
+
+	/// And a name still matches loosely, which is what the field is for.
+	@Test func aNameMatchesItsLettersInOrder() {
+		#expect(DocumentSwitcher.matches("mt1", in: "mia-take-1"))
+		#expect(DocumentSwitcher.matches("jem", in: "Jonas Emilia 2"))
+		#expect(!DocumentSwitcher.matches("zz", in: "Mia 1"))
+	}
+
+	/// A path matches when somebody types a folder, because that is what typing
+	/// a folder means.
+	@Test func aPathMatchesWhatItReads() {
+		let path = "/Volumes/500G/dingsda/takes/Mia 1.cuttr"
+		#expect(DocumentSwitcher.contains("dingsda", in: path))
+		#expect(DocumentSwitcher.contains("500G", in: path))
+		#expect(DocumentSwitcher.contains("", in: path))
+		#expect(!DocumentSwitcher.contains("nowhere", in: path))
+	}
+}
+
+/// The width of a row, which is what leaves room for the path.
+@MainActor @Suite struct SwitcherRowWidthTests {
+
+	/// A single column starts at a hundred points and only redistributes when
+	/// the table is *resized* — and a table given its size by Auto Layout never
+	/// is. So a cell drawing its path against `bounds.maxX` had a hundred
+	/// points in a pane of three hundred and eighty: most rows showed no path
+	/// at all and a couple showed four characters of one.
+	@Test func aRowIsAsWideAsTheList() throws {
+		let switcher = DocumentSwitcher.Switcher([
+			.init("In dingsda", [
+				.init(name: "Mia 1", path: "/Volumes/500G/dingsda/takes/Mia 1.cuttr",
+				      kind: .take, indented: true, open: {}),
+			]),
+		])
+		switcher.loadView()
+		switcher.view.frame = NSRect(x: 0, y: 0,
+		                             width: DocumentSwitcher.Switcher.width, height: 400)
+		switcher.view.layoutSubtreeIfNeeded()
+
+		func find<T: NSView>(_ kind: T.Type, in view: NSView) -> T? {
+			if let hit = view as? T { return hit }
+			for sub in view.subviews { if let hit = find(kind, in: sub) { return hit } }
+			return nil
+		}
+		guard let clip = find(NSClipView.self, in: switcher.view),
+		      let table = find(NSTableView.self, in: switcher.view)
+		else {
+			Issue.record("no list in the panel")
+			return
+		}
+		#expect(table.tableColumns.count == 1)
+		// The column fills what the clip view shows, so a cell has the whole
+		// width to place a right-aligned path in.
+		#expect(abs(table.tableColumns[0].width - clip.bounds.width) < 1)
+		#expect(table.tableColumns[0].width > 300)
+	}
+}

@@ -175,6 +175,12 @@ public enum DocumentSwitcher {
 
 	/// Matched on what somebody would type: the letters in order, not
 	/// necessarily together, so `mt1` finds `mia-take-1`.
+	///
+	/// **For a name only.** Letters-in-order over a *path* matches almost
+	/// everything: every document on this machine sits under something like
+	/// `/Volumes/500G/dingsda`, which contains an m, an i and an a in that
+	/// order — so typing `mia` kept the whole list and the filter looked
+	/// broken. A path is matched as plain text by ``contains(_:in:)``.
 	static func matches(_ wanted: String, in text: String) -> Bool {
 		let lowered = text.lowercased()
 		var here = lowered.startIndex
@@ -183,6 +189,15 @@ public enum DocumentSwitcher {
 			here = lowered.index(after: found)
 		}
 		return true
+	}
+
+	/// A path is matched as it reads, because letters-in-order over a path is
+	/// not a search, it is a coincidence waiting to happen. Somebody typing a
+	/// folder means that folder.
+	static func contains(_ wanted: String, in text: String) -> Bool {
+		let trimmed = wanted.trimmingCharacters(in: .whitespaces)
+		guard !trimmed.isEmpty else { return true }
+		return text.range(of: trimmed, options: [.caseInsensitive, .diacriticInsensitive]) != nil
 	}
 
 	// MARK: - The thing itself
@@ -354,7 +369,7 @@ public enum DocumentSwitcher {
 			rows = []
 			for group in groups {
 				let kept = filter.isEmpty ? group.entries : group.entries.filter {
-					matches(filter, in: $0.name) || matches(filter, in: $0.path)
+					matches(filter, in: $0.name) || contains(filter, in: $0.path)
 				}
 				// A heading with nothing under it is a heading about nothing.
 				guard !kept.isEmpty else { continue }
