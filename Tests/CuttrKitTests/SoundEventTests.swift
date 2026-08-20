@@ -140,10 +140,23 @@ import Testing
 		#expect(SoundEvent.kind(forClassifier: "sneeze") == nil)
 	}
 
-	/// The identifier is the fact and the label is the presentation of it. A
-	/// kind this version has never heard of still shows something true.
+	/// The identifier is the fact and the label is the presentation of it. What
+	/// goes in the file must not change meaning with the system language, so
+	/// these two are deliberately not the same string.
+	@Test func theLabelIsTranslatedAndTheIdentifierIsNot() {
+		let laugh = SoundEvent(kind: "laughter", start: 0, end: 1)
+		#expect(laugh.label(in: Locale(identifier: "de-DE")) == "Lachen")
+		#expect(laugh.label(in: Locale(identifier: "en-GB")) == "laughter")
+		// A language nobody has written a table for shows the identifier, which
+		// is English and is at least true.
+		#expect(laugh.label(in: Locale(identifier: "fi-FI")) == "laughter")
+		#expect(laugh.kind == "laughter")
+	}
+
+	/// And a kind this version has never heard of still shows something true.
 	@Test func anUnknownKindLabelsItself() {
-		#expect(SoundEvent(kind: "sigh", start: 0, end: 1).label == "sigh")
+		#expect(SoundEvent(kind: "sigh", start: 0, end: 1)
+			.label(in: Locale(identifier: "de-DE")) == "sigh")
 	}
 }
 

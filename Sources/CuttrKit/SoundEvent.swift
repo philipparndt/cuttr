@@ -104,9 +104,11 @@ public struct SoundEvent: Sendable, Equatable {
 	/// The identifier is the fact and this is the presentation of it. Only the
 	/// languages this program is actually used in are here; anything else gets
 	/// the identifier, which is English and is at least true.
-	public var label: String {
-		let language = Locale.current.language.languageCode?.identifier ?? "en"
-		guard let table = Self.labels[language] else { return kind }
+	public var label: String { label(in: .current) }
+
+	public func label(in locale: Locale) -> String {
+		guard let language = locale.language.languageCode?.identifier,
+		      let table = Self.labels[language] else { return kind }
 		return table[kind] ?? kind
 	}
 
