@@ -45,6 +45,65 @@ public struct Transcript: Sendable, Equatable {
 	/// Everything said, as one line of prose. For a search that spans words.
 	public var text: String { words.map(\.text).joined(separator: " ") }
 
+	// MARK: - Where the silences are
+
+	/// What sits between two words when nobody was speaking.
+	///
+	/// Speech is not a stream of words, it is sentences with air between them,
+	/// and a transcript laid out as one paragraph makes somebody read the whole
+	/// take to find the sentence they meant. The silences are already in the
+	/// file — this is only the decision about how long a silence has to be
+	/// before it is worth seeing.
+	public enum Silence: Sendable, Equatable {
+		/// The same breath. A space.
+		case none
+		/// A beat: the end of a sentence, or somebody thinking. A new line.
+		case beat
+		/// Long enough that something else happened — a question asked, a
+		/// camera moved, nobody speaking at all. A new paragraph.
+		case rest
+	}
+
+	/// Half a second. Measured rather than chosen: on a five-minute take of
+	/// four people talking, the word times come back in two clumps with nothing
+	/// between them — nine gaps in ten are exactly zero, and the next one up is
+	/// a fifth of a second. Anything from a tenth to a second draws the same
+	/// twenty-nine lines, so the number is not delicate and there is no point
+	/// pretending it is.
+	public static let beat = 0.5
+	/// Two and a half seconds. The same take gives thirteen of these, which is
+	/// thirteen paragraphs in five minutes: about what somebody would write.
+	public static let rest = 2.5
+
+	/// What follows the word at `index`.
+	public func silence(after index: Int) -> Silence {
+		guard index >= 0, index + 1 < words.count else { return .none }
+		let gap = words[index + 1].start - words[index].end
+		if gap >= Self.rest { return .rest }
+		if gap >= Self.beat { return .beat }
+		return .none
+	}
+
+	/// The run of words around `index` with no break in it — the line somebody
+	/// sees, which is the unit they mean when they point at one and say "play
+	/// that".
+	public func segment(around index: Int) -> Range<Int> {
+		guard !words.isEmpty else { return 0..<0 }
+		let index = min(max(index, 0), words.count - 1)
+		var first = index
+		while first > 0, silence(after: first - 1) == .none { first -= 1 }
+		var last = index
+		while last + 1 < words.count, silence(after: last) == .none { last += 1 }
+		return first..<(last + 1)
+	}
+
+	/// When a run of words was said, on the video's clock.
+	public func span(of range: Range<Int>) -> (start: Double, end: Double)? {
+		guard range.lowerBound >= 0, range.upperBound <= words.count, !range.isEmpty
+		else { return nil }
+		return (words[range.lowerBound].start, words[range.upperBound - 1].end)
+	}
+
 	/// The word being said at `time`, or `nil` in the gaps.
 	///
 	/// `nil` in a pause rather than the nearest word, because the marker in the

@@ -314,6 +314,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			self?.move(to: time)
 			self?.timeline.followPlayhead()
 		}
+		// The two things the menu on the words offers, which are the two things
+		// somebody does with a sentence they have found.
+		transcriptPane.onPlayWords = { [weak self] start, end in
+			self?.transport.play(from: start, to: end)
+			self?.timeline.followPlayhead()
+		}
+		transcriptPane.onClipWords = { [weak self] start, end in
+			guard let self else { return }
+			let grid = self.takeDocument.grid
+			self.pending = (grid.snap(start), grid.snap(end))
+			self.timeline.pending = self.pending
+			self.commitPending()
+		}
 		transcriptPane.onTranscribe = { [weak self] locale in self?.transcribe(in: locale) }
 		// Somebody working through a German shoot says so once, not once per
 		// take: the choice is remembered, and a take that has been transcribed

@@ -165,6 +165,10 @@ public enum Theme {
 
 	public static let mono = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 	public static let monoSmall = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+	/// A true fixed-width face, for text that is the *material* rather than the
+	/// interface: what somebody said, laid out so it reads as a document and
+	/// not as another label in a panel.
+	public static let transcript = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
 	public static let label = NSFont.systemFont(ofSize: 11, weight: .medium)
 	public static let heading = NSFont.systemFont(ofSize: 10, weight: .semibold)
 	public static let body = NSFont.systemFont(ofSize: 12, weight: .regular)

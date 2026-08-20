@@ -31,6 +31,10 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	public var onTranscribe: ((Locale) -> Void)?
 	/// Somebody chose a language. Worth remembering for the next take.
 	public var onLanguage: ((String) -> Void)?
+	/// Play exactly these words, and stop at the end of them.
+	public var onPlayWords: ((_ start: Double, _ end: Double) -> Void)?
+	/// Make a clip of exactly these words.
+	public var onClipWords: ((_ start: Double, _ end: Double) -> Void)?
 	/// Something worth saying in the window's status line.
 	public var onStatus: ((String) -> Void)?
 
@@ -58,6 +62,8 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	private var shownWords: Words?
 	/// The languages offered, parallel to the pop-up's items.
 	private var known: [Transcriber.Language] = []
+	/// What the menu that is open is about, on the video's clock.
+	private var pointed: (start: Double, end: Double)?
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
@@ -87,7 +93,7 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		text.drawsBackground = true
 		text.backgroundColor = Theme.panel
 		text.textColor = Theme.text
-		text.font = Theme.body
+		text.font = Theme.transcript
 		text.delegate = self
 		text.textContainerInset = NSSize(width: 4, height: 6)
 		text.isVerticallyResizable = true
@@ -228,13 +234,30 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 					+ " of it, W to name a clip after its first words.",
 				attributes: [.font: Theme.body, .foregroundColor: Theme.dimText]))
 		} else {
+			// Laid out by its silences: a line for a beat, a paragraph for a
+			// rest, and an ellipsis at the end of the line so the pause itself
+			// is on the page rather than merely implied by the white space.
+			//
+			// `ranges` stays parallel to the *words* — the ellipses and the
+			// newlines are not words, and every other thing this pane does
+			// (the lit word, the selection, the find) counts in words.
 			for (index, word) in transcript.words.enumerated() {
-				if index > 0 { body.append(NSAttributedString(string: " ")) }
 				let start = body.length
 				body.append(NSAttributedString(
 					string: word.text,
-					attributes: [.font: Theme.body, .foregroundColor: Theme.text]))
+					attributes: [.font: Theme.transcript, .foregroundColor: Theme.text]))
 				ranges.append(NSRange(location: start, length: body.length - start))
+				switch transcript.silence(after: index) {
+				case .none:
+					if index + 1 < transcript.count {
+						body.append(NSAttributedString(
+							string: " ", attributes: [.font: Theme.transcript]))
+					}
+				case .beat:
+					body.append(pause("\n"))
+				case .rest:
+					body.append(pause("\n\n"))
+				}
 			}
 		}
 
@@ -278,6 +301,75 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		text.textStorage?.addAttribute(
 			.backgroundColor, value: Theme.playhead.withAlphaComponent(0.35), range: ranges[index])
 		if follows { text.scrollRangeToVisible(ranges[index]) }
+	}
+
+	/// The mark a pause leaves: dim, so it reads as the shape of the take
+	/// rather than as something somebody said.
+	private func pause(_ ending: String) -> NSAttributedString {
+		NSAttributedString(string: " …" + ending,
+		                   attributes: [.font: Theme.transcript, .foregroundColor: Theme.dimText])
+	}
+
+	// MARK: - The menu on the words
+
+	/// What a right-click means, which is not what one usually means in a text
+	/// view.
+	///
+	/// The system's menu here offers to look the word up in a dictionary and to
+	/// speak it aloud — for a transcript of somebody speaking, the second is a
+	/// joke. What is wanted is the two things this pane exists for, aimed at
+	/// whatever was clicked: a selection if there is one, and otherwise the line
+	/// under the pointer, which is the run of words between two silences and is
+	/// what somebody means when they point at it.
+	public func textView(
+		_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int
+	) -> NSMenu? {
+		guard !transcript.isEmpty, let words = clicked(at: charIndex),
+		      let span = transcript.span(of: words) else { return nil }
+		// Shown as chosen, so what the menu is about is what is lit.
+		highlight(words)
+		pointed = span
+
+		let made = NSMenu()
+		let count = words.count
+		let length = String(format: "%.1fs", span.end - span.start)
+		made.addItem(item("Play \(count == 1 ? "this word" : "these \(count) words") · \(length)",
+		                  #selector(playPointed)))
+		made.addItem(item("Make a clip of \(count == 1 ? "it" : "them")", #selector(clipPointed)))
+		made.addItem(.separator())
+		made.addItem(item("Copy", #selector(NSText.copy(_:)), target: view))
+		return made
+	}
+
+	private func item(_ title: String, _ action: Selector, target: AnyObject? = nil) -> NSMenuItem {
+		let made = NSMenuItem(title: title, action: action, keyEquivalent: "")
+		made.target = target ?? self
+		return made
+	}
+
+	/// The words a click is about: the selection when it covers any, and the
+	/// line under the pointer when it does not.
+	private func clicked(at charIndex: Int) -> Range<Int>? {
+		let selected = text.selectedRange()
+		if selected.length > 0,
+		   let first = word(containing: selected.location, orBefore: false),
+		   let last = word(containing: NSMaxRange(selected) - 1, orBefore: true),
+		   first <= last,
+		   NSLocationInRange(charIndex, selected) {
+			return first..<(last + 1)
+		}
+		guard let index = word(containing: charIndex, orBefore: true) else { return nil }
+		return transcript.segment(around: index)
+	}
+
+	@objc private func playPointed() {
+		guard let pointed else { return }
+		onPlayWords?(pointed.start, pointed.end)
+	}
+
+	@objc private func clipPointed() {
+		guard let pointed else { return }
+		onClipWords?(pointed.start, pointed.end)
 	}
 
 	// MARK: - What it does
@@ -382,6 +474,17 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			if location < NSMaxRange(range) { return index }
 		}
 		return orBefore ? ranges.count - 1 : nil
+	}
+
+	/// For the tests: the laid-out text, and the menu without a mouse.
+	var shownText: String { text.string }
+
+	func menuForTest(at charIndex: Int) -> NSMenu? {
+		let event = NSEvent.mouseEvent(
+			with: .rightMouseDown, location: .zero, modifierFlags: [],
+			timestamp: 0, windowNumber: 0, context: nil,
+			eventNumber: 0, clickCount: 1, pressure: 1)!
+		return textView(text, menu: NSMenu(), for: event, at: charIndex)
 	}
 
 	/// For the tests: what the pane is showing.
