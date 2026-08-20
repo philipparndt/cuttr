@@ -18,8 +18,10 @@ import Foundation
 ///
 /// `anchor:` means something slightly different here than it does anywhere
 /// else, and the difference is worth knowing. Every other overlay *sits* on its
-/// anchor. A bubble stands off from it by its ``Overlay/offset`` and points at
-/// it — and it travels with the face, which is the whole reason a tail can stay
+/// anchor. A bubble stands off from it by its ``Overlay/offset`` and points near
+/// it by its ``tail`` — two positions rather than one, because the point a
+/// tracker can follow is an eye and the point an arrow should land on is a head.
+/// Both of them travel with the face, which is the whole reason a tail can stay
 /// short.
 ///
 /// What a bubble does not do is follow the anchor *exactly*. Words that move
@@ -108,6 +110,26 @@ public struct Bubble: Sendable, Equatable {
 	/// is the best thing.
 	public var follow: Bool
 
+	/// Where the tail's tip goes, measured from the thing the bubble is about.
+	///
+	/// **Two positions, not one.** A tracked anchor is a point a tracker can
+	/// follow, which in practice means an eye. Where the tail should *land* is
+	/// usually somewhere else: the mouth, the top of the head, the hand, the
+	/// thing she is holding. Before this there was one point doing both jobs and
+	/// an arrow labelling a chair would land on the chair's owner's eye.
+	///
+	/// In fractions of the frame **height** on both axes, as every offset in this
+	/// format is, and from the same origin as ``Overlay/offset`` — the anchor's
+	/// tracked point, or ``at`` where there is no anchor. So the two numbers a
+	/// bubble may carry are measured from one place and named for what they move:
+	/// `offset:` moves the paper, `tail:` moves the tip.
+	///
+	/// Nought by default, which is the anchor itself, so the common case writes
+	/// nothing. And it travels with the anchor rather than being a spot in the
+	/// frame: `tail: [0, 0.08]` on an eye is *her head*, and it stays her head as
+	/// she walks.
+	public var tail: CGPoint
+
 	/// A fixed point to point at, normalised, origin bottom-left.
 	///
 	/// For the things that are not faces — a hat on a table, a corner of a
@@ -126,6 +148,7 @@ public struct Bubble: Sendable, Equatable {
 		seed: Int = 1,
 		breath: Double = 1,
 		follow: Bool = true,
+		tail: CGPoint = .zero,
 		at: CGPoint? = nil
 	) {
 		self.shape = shape
@@ -137,6 +160,7 @@ public struct Bubble: Sendable, Equatable {
 		self.seed = seed
 		self.breath = max(0, breath)
 		self.follow = follow
+		self.tail = tail
 		self.at = at
 	}
 

@@ -260,6 +260,10 @@ public enum ProjectReader {
 			// Whether the paper travels with the anchor. It does unless somebody
 			// says not to.
 			if let follow = m["follow"] as? Bool { bubble.follow = follow }
+			// Where the tail's tip goes, from the same origin as `offset:`. The
+			// second of the two positions a bubble carries: `offset:` moves the
+			// paper, this moves the tip.
+			bubble.tail = try point(m["tail"], key: "tail") ?? .zero
 			// A spot in the frame to point at, for the things that are not
 			// faces — and for a programme with no footage in it at all.
 			bubble.at = try point(m["at"], key: "at")

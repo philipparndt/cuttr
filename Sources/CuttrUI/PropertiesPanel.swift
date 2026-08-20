@@ -1236,6 +1236,15 @@ public final class PropertiesPanel: NSView {
 				?? (bubble.at.map { "the spot [\(Self.trimmed($0.x)), \(Self.trimmed($0.y))]" }
 					?? "nothing — it keeps its words and loses its tail"))],
 			      note: "an anchor is a face and follows it; `at:` is a fixed spot in the frame")
+			field("tail", [
+				number(bubble.tail.x, width: 72) { [weak self] value in
+					self?.editBubble(origin) { $0.tail.x = value }
+				},
+				number(bubble.tail.y, width: 72) { [weak self] value in
+					self?.editBubble(origin) { $0.tail.y = value }
+				},
+				label("from there, of frame height"),
+			], note: "the tip, not the paper — `[0, 0.08]` on an eye is the head above it")
 
 		case .spinner(let spinner):
 			field("style", [pop(Spinner.Style.allCases.map(\.rawValue),

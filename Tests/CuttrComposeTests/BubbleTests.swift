@@ -276,6 +276,37 @@ struct BubbleCanvas {
 			.contains("follow"))
 	}
 
+	/// The two positions, written down: which is which has to be legible in the
+	/// file, so they are two different words and neither of them is a bare pair
+	/// of numbers under the other.
+	@Test func theTwoPositionsAreSpelledApart() throws {
+		let project = try ProjectReader.read("""
+			overlays:
+			  - bubble: the good chair
+			    shape:  box
+			    anchor: mia-eye
+			    offset: [0.14, 0.2]
+			    tail:   [0, 0.09]
+			    from:   0
+			    to:     2
+			""")
+		let overlay = try #require(project.overlays.first)
+		guard case .bubble(let bubble) = overlay.kind else {
+			Issue.record("not a bubble")
+			return
+		}
+		#expect(overlay.offset == CGPoint(x: 0.14, y: 0.2))
+		#expect(bubble.tail == CGPoint(x: 0, y: 0.09))
+		let written = ProjectWriter.write(project)
+		#expect(written.contains("tail:   [0, 0.09]"), "it did not write it:\n\(written)")
+		#expect(ProjectWriter.write(try ProjectReader.read(written)) == written)
+		// And the common case — the tail on the anchor itself — writes nothing.
+		#expect(Bubble().tail == .zero)
+		#expect(!ProjectWriter.fragment(for: Overlay(
+			kind: .bubble(Bubble(text: "hello")), span: .times(from: 0, to: 1)))
+			.contains("tail"))
+	}
+
 	/// A shape nobody has heard of is an error with the offending word in it,
 	/// which is the rule everywhere else in this format.
 	@Test func anUnknownShapeIsRefusedByName() {
@@ -918,6 +949,113 @@ struct BubbleCanvas {
 		        "the paper crept inside its own drawing")
 		#expect(try painted(travelling, path: path, at: 1 + beat).bytes != held.bytes,
 		        "it did not move on the beat")
+	}
+}
+
+// MARK: - Where it points
+
+/// The second of the two positions: the tail's tip goes where `tail:` says, and
+/// moving it does not move the paper.
+@Suite struct BubbleTailTests {
+
+	private let size = CGSize(width: 1280, height: 720)
+
+	private func shown(_ bubble: Bubble, path: AnchorPath? = nil) -> ResolvedOverlay {
+		ResolvedOverlay(
+			overlay: Overlay(kind: .bubble(bubble), span: .times(from: 0, to: 4),
+			                 arrival: .cut, departure: .cut,
+			                 anchor: path == nil ? nil : "mia-eye", offset: Bubble.standoff),
+			origin: .project(0), appearance: 0, start: 0, end: 4, path: path)
+	}
+
+	private func painted(_ bubble: Bubble, path: AnchorPath? = nil,
+	                     at time: Double) throws -> BubbleCanvas {
+		BubbleCanvas(try #require(OverlayPainter.bubbleImage(
+			bubble, resolved: shown(bubble, path: path), project: Project(),
+			size: size, at: time)))
+	}
+
+	/// How close ink has to land to count as pointing at something.
+	///
+	/// The tail stops a little short of what it points at on purpose — a
+	/// hundredth and a half of the frame's height — because a tail that reaches
+	/// past its target is a tail turned inside out, which is a dent. Add the
+	/// wobble on the outline the spike grows out of and "it lands there" is
+	/// within about twenty pixels at 720p. "It does not" is a hundred and more,
+	/// so nothing turns on the exact figure.
+	private var reaches: Double { 0.03 * size.height }
+
+	/// **The tip lands where the second point says**, and the anchor is not where
+	/// it lands. The mouth, a fifth of the frame below the eye that is tracked.
+	@Test func theTailLandsWhereItIsToldAndNotOnTheAnchor() throws {
+		let eye = CGPoint(x: 0.4, y: 0.5)
+		let drop = -0.2
+		let spot = CGPoint(x: eye.x * size.width, y: eye.y * size.height)
+		let mouth = CGPoint(x: spot.x, y: spot.y + drop * size.height)
+
+		let onTheEye = try painted(Bubble(text: "glitter", seed: 4, breath: 0, at: eye), at: 1)
+		let onTheMouth = try painted(
+			Bubble(text: "glitter", seed: 4, breath: 0, tail: CGPoint(x: 0, y: drop), at: eye),
+			at: 1)
+
+		#expect(onTheMouth.nearest(to: mouth) < reaches,
+		        "the tail missed the mouth by \(onTheMouth.nearest(to: mouth))")
+		// The one that was not aimed does not come anywhere near it: it stops at
+		// the anchor, which is what the anchor used to mean on its own.
+		#expect(onTheEye.nearest(to: mouth) > 100,
+		        "the unaimed tail is already there: \(onTheEye.nearest(to: mouth))")
+		#expect(onTheEye.nearest(to: spot) < reaches,
+		        "the unaimed tail missed the eye by \(onTheEye.nearest(to: spot))")
+		// And the drawing grew downwards by the whole of the aim, rather than the
+		// tail having been bent somewhere on the way.
+		#expect(onTheMouth.extent.minY < onTheEye.extent.minY - 100,
+		        "\(onTheMouth.extent) against \(onTheEye.extent)")
+	}
+
+	/// **It moves the tip and nothing else.** The paper stands off from the same
+	/// place it always did — `offset:` moves that, and only that — so a bubble
+	/// re-aimed at somebody's hand does not also jump across the frame.
+	@Test func aimingTheTailDoesNotMoveThePaper() throws {
+		let eye = CGPoint(x: 0.5, y: 0.4)
+		let plain = Bubble(text: "glitter", seed: 4, breath: 0, at: eye)
+		let aimed = Bubble(text: "glitter", seed: 4, breath: 0,
+		                   tail: CGPoint(x: -0.2, y: -0.1), at: eye)
+		let style = Project().style(named: "bubble")
+		func paper(_ bubble: Bubble) -> CGRect {
+			let words = Bubbling.words(bubble.text, style: style, frame: size, width: bubble.width)
+			return Bubbling.box(
+				words: words?.size ?? .zero, shape: bubble.shape, style: style,
+				home: OverlayLayers.bubbleHome(bubble, resolved: shown(bubble), style: style,
+				                               size: size, at: 1),
+				frame: size)
+		}
+		#expect(paper(plain) == paper(aimed), "the paper moved with the tail")
+
+		// Measured on the picture as well, at the middle of the paper, where the
+		// tail never reaches either way.
+		let box = paper(plain)
+		let before = try painted(plain, at: 1)
+		let after = try painted(aimed, at: 1)
+		#expect(before.darkness(x: Int(box.midX), y: Int(box.midY))
+			== after.darkness(x: Int(box.midX), y: Int(box.midY)))
+	}
+
+	/// **It travels with the anchor**, which is what makes it a point on a person
+	/// rather than a spot in the frame: aimed at her mouth, it stays on her mouth
+	/// as she walks.
+	@Test func theAimedPointTravelsWithTheAnchor() throws {
+		let path = AnchorPath(samples: [(0, CGPoint(x: 0.25, y: 0.5)),
+		                                (2, CGPoint(x: 0.7, y: 0.54))])
+		let drop = -0.18
+		let bubble = Bubble(text: "glitter", seed: 4, breath: 0, tail: CGPoint(x: 0, y: drop))
+		for at in [0.0, 1.0, 2.0] {
+			let eye = try #require(path.point(at: at))
+			let mouth = CGPoint(x: eye.x * size.width,
+			                    y: eye.y * size.height + drop * size.height)
+			let canvas = try painted(bubble, path: path, at: at)
+			#expect(canvas.nearest(to: mouth) < reaches,
+			        "at \(at)s the tail missed the mouth by \(canvas.nearest(to: mouth))")
+		}
 	}
 }
 

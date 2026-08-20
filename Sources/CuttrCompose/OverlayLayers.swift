@@ -695,6 +695,16 @@ public enum OverlayLayers {
 
 	/// What the bubble points at, at one moment, in frame coordinates.
 	///
+	/// The anchor's own point plus the bubble's ``Bubble/tail`` — the second of
+	/// the two positions a bubble carries, and the reason an arrow can land on a
+	/// head while the thing being tracked is an eye. Added to the tracked point
+	/// rather than to the frame, so it goes on being her head as she walks.
+	///
+	/// The *raw* anchor, not the smoothed one the paper uses. A tail is allowed
+	/// to be lively — it is a line, not a sentence — and a tail that lagged the
+	/// face by the width of the smoothing would visibly miss the mouth it is
+	/// meant to be coming out of.
+	///
 	/// `nil` where there is nothing to point at: outside the stretch the anchor
 	/// was actually solved over, and for a bubble with no anchor and no `at:`.
 	/// The bubble keeps its words and loses its tail, which is the honest thing
@@ -703,11 +713,17 @@ public enum OverlayLayers {
 	static func bubbleTarget(
 		_ bubble: Bubble, resolved: ResolvedOverlay, at time: Double, size: CGSize
 	) -> CGPoint? {
+		// In fractions of the frame height on both axes, as every offset in this
+		// format is — so a tail asked for the top of a head is the same tail in a
+		// 4:3 frame and a 21:9 one.
+		let tail = CGPoint(x: bubble.tail.x * size.height, y: bubble.tail.y * size.height)
 		if let path = resolved.path, !path.isEmpty {
 			guard path.covers(time), let point = path.point(at: time) else { return nil }
-			return CGPoint(x: point.x * size.width, y: point.y * size.height)
+			return CGPoint(x: point.x * size.width + tail.x, y: point.y * size.height + tail.y)
 		}
-		return bubble.at.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) }
+		return bubble.at.map {
+			CGPoint(x: $0.x * size.width + tail.x, y: $0.y * size.height + tail.y)
+		}
 	}
 
 	/// How long the anchor is averaged over to place a travelling bubble, in

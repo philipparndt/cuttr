@@ -76,6 +76,36 @@ timeline:
         style:  shouting
         seed:   11
 
+  # Two positions, and two words for them. `offset:` is where the paper sits and
+  # `tail:` is where the tip goes — both measured from the same spot, both in
+  # fractions of the frame height. Three bubbles standing off from one spot by
+  # exactly the same offset: the tip on the spot, further down, and away to the
+  # left. The paper does not move when the tip does, which is the point of there
+  # being two of them.
+  #
+  # On a real shot the spot is `anchor: mia-eye`, because an eye is what a tracker
+  # can follow, and `tail: [0, -0.1]` is then her mouth — and it stays her mouth
+  # as she walks, because it is measured from the anchor and not from the frame.
+  # Aim the tip *into* the paper and the tail goes away rather than turning
+  # inside out: a tail pointing at the middle of its own bubble is a dent.
+  - card:  00:04.000
+    fill:  "#eef0ea"
+    overlays:
+      - bubble: on the spot
+        at:     [0.2, 0.5]
+        offset: [0, 0.18]
+        seed:   2
+      - bubble: lower down
+        at:     [0.5, 0.5]
+        offset: [0, 0.18]
+        tail:   [0, -0.1]
+        seed:   2
+      - bubble: over there
+        at:     [0.8, 0.5]
+        offset: [0, 0.18]
+        tail:   [-0.16, -0.02]
+        seed:   2
+
   # The wobble is a seed, and a seed is a promise: the same number draws the
   # same shaky line on every machine and in every render. Three of them, so the
   # promise is visible — nothing else about these three differs.

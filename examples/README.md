@@ -17,7 +17,7 @@ effects, no footage — so every one of them renders on any machine:
 | `effects/coming-on.cuttrproj` | `keys:` — a drizzle becoming a downpour, bars closing in, a lens giving up and recovering |
 | `overlays/placements.cuttrproj` | captions written inside the entries they cover, and one on the programme's own clock |
 | `overlays/at-the-mark.cuttrproj` | `at:` — the same fade placed before, across and after the mark, at both ends of a span |
-| `overlays/bubbles.cuttrproj` | speech, thought and a box with an arrow — drawn by hand, redrawn eight times a second, and the same hand on every render |
+| `overlays/bubbles.cuttrproj` | speech, thought and a box with an arrow — drawn by hand, redrawn eight times a second, aimed by two points, and the same hand on every render |
 
 Three things these are meant to teach, all of which cost a render to learn:
 
@@ -52,3 +52,10 @@ which is the comparison worth pausing on. Frozen, the three differ by about a
 pixel. Running, the first is a sticker, the second is drawn, and the third is
 having a seizure. Twenty-five drawings a second looks like the third one; that is
 why the rate is eight and not the frame rate.
+
+The card before it is the other thing a still cannot show you, and this one it
+almost can: **a bubble has two positions, and they are two words.** Three bubbles
+standing off from one spot by the same `offset:`, with `tail:` sending the tip to
+three different places. The papers are level with each other and the tails are
+not, which is the whole claim — on a real shot the spot is the eye a tracker can
+follow and the tip is her mouth, and moving one must not move the other.

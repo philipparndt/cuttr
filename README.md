@@ -685,6 +685,31 @@ tail lies along the edge she went out by and goes on pointing that way.
 and for a programme with no footage in it at all, which is what lets
 `examples/overlays/bubbles.cuttrproj` render on any machine.
 
+**Two positions, and they are two words.** A tracker follows what a tracker can
+follow, which in practice is an eye. Where the tail should *land* is usually
+somewhere else — the mouth, the top of the head, the hand, the thing she is
+holding — so a bubble carries both:
+
+```yaml
+overlays:
+  - bubble: the good chair
+    shape:  box
+    anchor: mia-eye
+    offset: [0.14, 0.2]     # where the paper sits
+    tail:   [0, -0.18]      # where the tip goes — her mouth, below the eye
+```
+
+Both are measured from the same place, the thing the bubble is about, and both
+are in fractions of the frame **height** on each axis, as every offset in this
+format is. `offset:` moves the paper; `tail:` moves the tip; neither moves the
+other. `tail:` is nought by default — the anchor itself — so the two-line bubble
+stays two lines, and because it is measured from the anchor rather than from the
+frame, a tail aimed at her mouth is still on her mouth once she has walked.
+
+The tail follows the raw anchor rather than the smoothed one the paper uses: a
+tail is a line and is allowed to be lively, and one lagging the face by the width
+of the smoothing would visibly miss the mouth it is coming out of.
+
 | | |
 |---|---|
 | `bubble:` | what it says. The whole of the common case |
@@ -696,7 +721,8 @@ and for a programme with no footage in it at all, which is what lets
 | `breath:` | how much the line breathes. 1 by default, 0 for the still drawing |
 | `follow:` | whether the paper travels with the anchor. It does; `false` leaves it where it was put |
 | `at:` | a fixed spot to point at, when no anchor does |
-| `offset:` | how far off that spot the bubble stands. Written into the file the first time it is saved, because a default nobody can see is a default nobody can nudge |
+| `offset:` | **where the paper sits**, from that spot. Written into the file the first time it is saved, because a default nobody can see is a default nobody can nudge |
+| `tail:` | **where the tip goes**, from the same spot. `[0, 0.08]` on an eye is the head above it |
 
 **Nothing says how big it is.** The words wrap to `width` and the paper grows to
 whatever comes out — downwards. A long joke gives a taller bubble, never one off

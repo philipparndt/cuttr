@@ -678,6 +678,9 @@ if describe {
 				+ (bubble.breath == 1 ? "" : bubble.breath == 0
 					? " still" : " breath \(bubble.breath)")
 				+ (bubble.at.map { " at [\($0.x), \($0.y)]" } ?? "")
+				+ (bubble.tail == .zero ? ""
+					: " tail [\(bubble.tail.x), \(bubble.tail.y)]")
+				+ (bubble.follow ? "" : " pinned")
 		}
 		/// Where a movement sits, said only when it is not where it usually
 		/// sits — the defaults differ between the two ends, and printing them
