@@ -372,59 +372,6 @@ import Testing
 	}
 }
 
-/// A pane that folds away to its heading.
-@Suite @MainActor struct FoldingPaneTests {
-
-	private func pane() -> FoldingPane {
-		_ = NSApplication.shared
-		let content = NSView()
-		content.translatesAutoresizingMaskIntoConstraints = false
-		content.heightAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
-		return FoldingPane("clips", content: content)
-	}
-
-	@Test func foldingLeavesTheHeadingAndNothingElse() {
-		let pane = self.pane()
-		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 400),
-		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
-		window.contentView = pane
-		pane.layoutSubtreeIfNeeded()
-		#expect(pane.frame.height > 120)
-		#expect(pane.content.isHidden == false)
-
-		pane.fold(true)
-		pane.layoutSubtreeIfNeeded()
-		#expect(pane.content.isHidden)
-		#expect(pane.frame.height == FoldingPane.headHeight)
-
-		pane.fold(false)
-		pane.layoutSubtreeIfNeeded()
-		#expect(pane.content.isHidden == false)
-		#expect(pane.frame.height > 120)
-	}
-
-	/// A click on the heading folds it; a click in the content does not.
-	@Test func theHeadingIsWhatFolds() {
-		let pane = self.pane()
-		pane.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
-		pane.layoutSubtreeIfNeeded()
-		var told: [Bool] = []
-		pane.onFold = { told.append($0) }
-
-		func click(at point: NSPoint) -> NSEvent {
-			NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
-			                   timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
-			                   clickCount: 1, pressure: 1)!
-		}
-		// The heading is at the top of the pane, which in AppKit's coordinates
-		// is the highest y.
-		pane.mouseDown(with: click(at: NSPoint(x: 40, y: pane.bounds.maxY - 8)))
-		#expect(told == [true])
-		pane.mouseDown(with: click(at: NSPoint(x: 40, y: 40)))
-		#expect(told == [true], "a click in the content should not fold it")
-	}
-}
-
 /// Every sheet opens at a size somebody can work in.
 ///
 /// A window whose `contentViewController` is set takes its size from the view's
@@ -514,25 +461,23 @@ import Testing
 }
 
 
-/// Collapsing a pane in the cutting window, and everything else staying put.
+/// One pane at a time, chosen from the rail, and nothing arguing about a size.
 ///
-/// A folded pane is exactly its heading, and it says so with a *required*
-/// constraint so that a split view cannot hand it room it does not want. The
-/// window used to state a required floor on the same panes — how short each may
-/// be squeezed — and the two cannot both hold: `height >= 96` and `height == 24`
-/// is a system autolayout cannot solve. What it does instead is break one, log
+/// This replaces the suite that drove the four folding panes down the side of
+/// the cutting window. Those panes are gone: the rail chooses which of the four
+/// has the column, and exactly one of them is in the view hierarchy at a time.
+///
+/// The rule the old suite was defending is the one that matters and it is
+/// asserted here directly. Two *required* constraints about one dimension is a
+/// system autolayout cannot solve; what it does instead is break one, log
 /// `layout constraints are not satisfiable`, and go round the display cycle
-/// again looking for an arrangement that works. Through four nested split views
-/// and the scroll views inside them that is a great many passes for one click,
-/// and AppKit raises out of the layout pass when a window has had more of them
-/// than it has views.
-///
-/// Both of the things somebody sees when that happens are asserted here: a pane
-/// that will not fold because a floor beat it, and panes that come back shorter
-/// than they were because a constraint that got broken stays broken.
-@Suite @MainActor struct CollapsingPanesTests {
+/// again looking for an arrangement that works — and through several nested
+/// split views that is a great many passes for one click. The four-pane version
+/// had a required floor from the window and a required folded height from the
+/// pane, and could not help but have both. One pane in the hierarchy cannot.
+@Suite @MainActor struct RailPaneTests {
 
-	private func opened() -> (MainWindowController, NSWindow, [FoldingPane]) {
+	private func opened() -> (MainWindowController, NSWindow) {
 		_ = NSApplication.shared
 		var clips: [Clip] = []
 		for i in 0..<30 {
@@ -548,104 +493,110 @@ import Testing
 		let window = controller.window!
 		window.setContentSize(NSSize(width: 1500, height: 1100))
 		window.layoutIfNeeded()
-
-		func panes(in view: NSView) -> [FoldingPane] {
-			view.subviews.flatMap { sub -> [FoldingPane] in
-				((sub as? FoldingPane).map { [$0] } ?? []) + panes(in: sub)
-			}
-		}
-		return (controller, window, panes(in: window.contentView!))
+		return (controller, window)
 	}
 
-	@Test func everyPaneCanBeCollapsedToItsHeading() {
-		let (_, window, panes) = opened()
-		#expect(panes.count == 4)
+	/// Four places to be, and clicking one puts you there.
+	@Test func theRailOpensEachPaneInTurn() {
+		let (controller, window) = opened()
+		let rail = controller.railForTesting
+		#expect(rail.countForTesting == 4)
+		var seen: [ObjectIdentifier] = []
+		for index in 0..<4 {
+			rail.clickForTesting(index)
+			window.layoutIfNeeded()
+			#expect(rail.selected == index)
+			let showing = try! #require(controller.panesForTesting?.current)
+			seen.append(ObjectIdentifier(showing))
+			#expect(showing.frame.height > 40,
+			        "pane \(index) came up \(showing.frame.height) tall")
+		}
+		#expect(Set(seen).count == 4, "the rail showed the same pane twice")
+		window.close()
+	}
+
+	/// Only one of them is in the window, at every size the window goes to.
+	///
+	/// This is the whole reason the arrangement changed. A pane that is not
+	/// showing is not laid out, not measured and not negotiated with, so there
+	/// is exactly one opinion about the height of that column.
+	@Test func onlyOnePaneIsEverInTheWindow() {
+		let (controller, window) = opened()
+		let rail = controller.railForTesting
+		func boxes(in view: NSView) -> [PaneBox] {
+			view.subviews.flatMap { sub -> [PaneBox] in
+				((sub as? PaneBox).map { [$0] } ?? []) + boxes(in: sub)
+			}
+		}
 		for height in [1100.0, 900.0, 740.0, 640.0, window.minSize.height] {
 			window.setContentSize(NSSize(width: 1500, height: height))
 			window.layoutIfNeeded()
-			for (index, pane) in panes.enumerated() {
-				pane.fold(true)
+			for index in 0..<4 {
+				rail.clickForTesting(index)
 				window.layoutIfNeeded()
-				#expect(pane.frame.height == FoldingPane.headHeight,
-				        "at \(height), pane \(index) folded to \(pane.frame.height)")
-				pane.fold(false)
-				window.layoutIfNeeded()
+				let found = boxes(in: window.contentView!)
+				#expect(found.count == 1,
+				        "at \(height), pane \(index): \(found.count) panes in the window")
 			}
 		}
 		window.close()
 	}
 
-	/// At every height the column is worth having, because the sizes that show
-	/// this are the ones where the panes are already near their floors — which
-	/// is most of them, on a laptop screen.
-	///
-	/// Not at the very smallest the window goes to. There the column has only a
-	/// few points of slack over the sum of the floors, and which pane gets them
-	/// is a tie: a split view remembers a dragged divider with a constraint of
-	/// its own at priority 250, and the panes ask for their preferred heights at
-	/// the same 250. A tie is decided by whatever the engine did last, so it
-	/// comes out differently after a fold. That is untidy and it long predates
-	/// this; it is not what crashed, and raising the panes above the split
-	/// view would stop a dragged divider from staying where it was put.
-	@Test func thePanesComeBackTheSizeTheyWere() {
-		let (_, window, panes) = opened()
-		for height in [1100.0, 980.0, 900.0, 820.0, 740.0, 680.0, 640.0] {
-			window.setContentSize(NSSize(width: 1500, height: height))
+	/// And nothing says a required thing about that column's height twice.
+	@Test func onlyOneRequiredThingIsSaidAboutThePanesHeight() {
+		let (controller, window) = opened()
+		let rail = controller.railForTesting
+		for index in 0..<4 {
+			rail.clickForTesting(index)
 			window.layoutIfNeeded()
-			let before = panes.map(\.frame.height)
-			for pane in panes {
-				pane.fold(true)
-				window.layoutIfNeeded()
-				pane.fold(false)
-				window.layoutIfNeeded()
-			}
-			let after = panes.map(\.frame.height)
-			// Within a few points, not to the point. Which pane gets the last
-			// of the slack is a tie — a split view remembers a dragged divider
-			// at priority 250 and the panes ask for their preferred heights at
-			// the same 250 — so a fold can move a point or two between
-			// neighbours. What this is looking for is a pane that lost its
-			// room: the bug shrank one by 52 points, and left another at its
-			// heading.
-			let moved = zip(before, after).map { abs($0 - $1) }.max() ?? 0
-			#expect(moved <= 4,
-			        "at \(height) the column shifted by \(moved): \(before) became \(after)")
-		}
-		window.close()
-	}
-
-	/// The rule underneath both of those, stated directly.
-	///
-	/// Autolayout has no opinion about *where* two contradictory required
-	/// constraints came from, so the only way to be sure they can never
-	/// contradict is for there to be one of them. A second required word about a
-	/// pane's height — from the window, from a split view delegate, from
-	/// anywhere — is the bug coming back, whether or not it happens to be
-	/// satisfiable on the day it is added.
-	@Test func onlyOneRequiredThingIsSaidAboutAPanesHeight() {
-		let (_, window, panes) = opened()
-		func requiredHeights(on pane: FoldingPane) -> [NSLayoutConstraint] {
-			let mine = pane.constraints.filter { ($0.firstItem as? NSView) === pane }
-			let theirs = pane.superview?.constraints.filter {
-				($0.firstItem as? NSView) === pane || ($0.secondItem as? NSView) === pane
+			guard let stack = controller.panesForTesting else { continue }
+			let mine = stack.constraints.filter { ($0.firstItem as? NSView) === stack }
+			let theirs = stack.superview?.constraints.filter {
+				($0.firstItem as? NSView) === stack || ($0.secondItem as? NSView) === stack
 			} ?? []
-			// A split view's own stacking and edge constraints are how the
-			// column is assembled and are not an opinion about one pane's
-			// height; what is being counted is height stated as a size.
-			return (mine + theirs).filter {
-				$0.priority == .required && $0.firstAttribute == .height
-					&& $0.secondItem == nil
+			let said = (mine + theirs).filter {
+				$0.priority == .required && $0.firstAttribute == .height && $0.secondItem == nil
 			}
-		}
-		for state in [false, true, false] {
-			for pane in panes { pane.fold(state) }
-			window.layoutIfNeeded()
-			for (index, pane) in panes.enumerated() {
-				let said = requiredHeights(on: pane)
-				#expect(said.count <= 1,
-				        "pane \(index) \(state ? "folded" : "open") has \(said.count) required heights: \(said)")
-			}
+			#expect(said.count <= 1, "pane \(index) has \(said.count) required heights: \(said)")
 		}
 		window.close()
+	}
+
+	/// Switching panes twice over settles: the second layout is the first one.
+	@Test func switchingPanesSettles() {
+		let (controller, window) = opened()
+		let rail = controller.railForTesting
+		for index in [0, 2, 0] {
+			rail.clickForTesting(index)
+			window.layoutIfNeeded()
+		}
+		let first = controller.panesForTesting?.current?.frame
+		window.contentView?.needsLayout = true
+		window.layoutIfNeeded()
+		#expect(controller.panesForTesting?.current?.frame == first,
+		        "the pane moved on its own")
+		window.close()
+	}
+
+	/// The rail is in the same place and the same width in both windows, which
+	/// is the point of there being one of them.
+	@Test func bothWindowsPutTheRailInTheSamePlace() {
+		_ = NSApplication.shared
+		let cutting = MainWindowController(document: TakeDocument())
+		let composing = ComposeWindowController(document: ComposeDocument())
+		var frames: [NSRect] = []
+		for (controller, rail) in [(cutting as NSWindowController, cutting.railForTesting),
+		                           (composing as NSWindowController, composing.railForTesting)] {
+			guard let window = controller.window, let content = window.contentView else { continue }
+			window.setContentSize(NSSize(width: 1400, height: 900))
+			window.layoutIfNeeded()
+			frames.append(rail.convert(rail.bounds, to: content))
+		}
+		#expect(frames.count == 2)
+		#expect(frames[0] == frames[1], "the rails are at \(frames)")
+		#expect(frames[0].minX == 0, "the rail is not at the left edge: \(frames[0])")
+		#expect(frames[0].width == Rail.width)
+		cutting.window?.close()
+		composing.window?.close()
 	}
 }

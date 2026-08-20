@@ -163,6 +163,13 @@ enum MainMenu {
 		                     #selector(ComposeWindowController.toggleFullScreenPreview(_:)),
 		                     "f", [.command, .control]))
 		view.addItem(.separator())
+		// And the cutting window's four, in the same place in this menu as the
+		// project window's three, because they are the same rail.
+		view.addItem(bare("Clips", #selector(MainWindowController.showClips(_:))))
+		view.addItem(bare("Faces", #selector(MainWindowController.showFaces(_:))))
+		view.addItem(bare("Words", #selector(MainWindowController.showWords(_:))))
+		view.addItem(bare("Look", #selector(MainWindowController.showLook(_:))))
+		view.addItem(.separator())
 		view.addItem(command("Zoom In", #selector(MainWindowController.zoomIn(_:)), "+"))
 		view.addItem(command("Zoom Out", #selector(MainWindowController.zoomOut(_:)), "-"))
 		view.addItem(command("Zoom to Fit", #selector(MainWindowController.zoomFit(_:)), "0"))
@@ -261,6 +268,12 @@ enum MainMenu {
 		let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
 		item.keyEquivalentModifierMask = modifiers
 		return item
+	}
+
+	/// A menu item with no key equivalent, for the things that have no room for
+	/// one.
+	private static func bare(_ title: String, _ action: Selector) -> NSMenuItem {
+		NSMenuItem(title: title, action: action, keyEquivalent: "")
 	}
 
 	/// Fills Open Recent from the document controller's list.

@@ -30,10 +30,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	private let anchorTable = AnchorTable()
 	private let lookPanel = LookPanel()
 	private let transcriptPane = TranscriptPane()
-	private var clipPane: FoldingPane?
-	private var anchorPane: FoldingPane?
-	private var wordsPane: FoldingPane?
-	private var lookPane: FoldingPane?
+	/// The four things this window knows about the take, one at a time, chosen
+	/// from the rail down the left edge.
+	private let rail = Rail([
+		Rail.Item("Clips", "timeline.selection", "What has been cut out of this take"),
+		Rail.Item("Faces", "scope", "The faces being followed, for an overlay to hang on"),
+		Rail.Item("Words", "text.alignleft", "What was said, and what was heard"),
+		Rail.Item("Look", "circle.lefthalf.filled", "The grade this take is shown through"),
+	])
+	private var panes: PaneStack?
 	/// A drag on a slider is sixty changes and one undo step: the first one
 	/// registers the undo, and the rest are folded into it.
 	private var gradingSince: Take?
@@ -139,34 +144,38 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		// one of them is usually the thing being worked on — a grade is decided
 		// once and left alone — and folding gives the list the room without
 		// anybody dragging dividers about.
-		clipPane = FoldingPane("clips", content: clipTable, accessory: swatches)
-		anchorPane = FoldingPane("anchors", content: anchorTable)
-		wordsPane = FoldingPane("words", content: transcriptPane,
-		                        accessory: transcriptPane.detachedHead())
-		lookPane = FoldingPane("look", content: lookPanel, accessory: lookPanel.detachedHead())
-
-		// A real frame, not zero.
+		// One pane at a time, and the rail says which.
 		//
-		// A split view created at 0x0 has its size turned into a pair of
-		// *required* constraints by its autoresizing mask — `width == 0`,
-		// `height == 0` — and every content minimum inside it is then one half
-		// of a system with no solution. That is the same lesson `TableScroll`
-		// already records for scroll views, and it is what filled the log with
-		// `layout constraints are not satisfiable` before this window had ever
-		// been shown.
-		let lists = NSSplitView(frame: .roomToLayOutIn)
-		lists.isVertical = false
-		lists.dividerStyle = .thin
-		for pane in [clipPane!, anchorPane!, wordsPane!, lookPane!] {
-			lists.addArrangedSubview(pane)
-			pane.onFold = { [weak lists] _ in lists?.adjustSubviews() }
-		}
+		// They were four panes stacked down a split view, each folding away
+		// behind its heading — and the comment above them said the truth about
+		// it: "only one of them is usually the thing being worked on — a grade
+		// is decided once and left alone". Four headings, three of them folded,
+		// and four heights negotiating with each other every time one was
+		// clicked. The rail is one heading, in the place both windows now put
+		// the question "what are you doing".
+		//
+		// A real frame on everything that holds something, not zero. A view
+		// created at 0x0 has its size turned into a pair of *required*
+		// constraints by its autoresizing mask, and every content minimum
+		// inside it is then one half of a system with no solution.
+		let lists = PaneStack([
+			PaneBox("clips", content: clipTable, accessory: swatches),
+			PaneBox("faces", content: anchorTable),
+			PaneBox("words", content: transcriptPane,
+			        accessory: transcriptPane.detachedHead()),
+			PaneBox("look", content: lookPanel, accessory: lookPanel.detachedHead()),
+		])
+		panes = lists
+		rail.onSelect = { [weak self] index in self?.panes?.show(index) }
 
+		// The list beside the rail and the picture in the middle, which is the
+		// order the whole design reads in: the left edge says what you are
+		// doing, the middle is the thing.
 		let top = NSSplitView(frame: .roomToLayOutIn)
 		top.isVertical = true
 		top.dividerStyle = .thin
-		top.addArrangedSubview(picture)
 		top.addArrangedSubview(lists)
+		top.addArrangedSubview(picture)
 
 		let outer = NSSplitView(frame: .roomToLayOutIn)
 		outer.isVertical = false
@@ -179,7 +188,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		content.wantsLayer = true
 		content.layer?.backgroundColor = Theme.background.cgColor
 
-		for view in [bar, outer] as [NSView] {
+		for view in [bar, rail, outer] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			content.addSubview(view)
 		}
@@ -188,8 +197,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			bar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
 			bar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
 			bar.heightAnchor.constraint(equalToConstant: DocumentBar.height),
+
+			// The rail says how wide it is; this only says where.
+			rail.topAnchor.constraint(equalTo: bar.bottomAnchor),
+			rail.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+			rail.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+
 			outer.topAnchor.constraint(equalTo: bar.bottomAnchor),
-			outer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+			outer.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
 			outer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
 			outer.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 		])
@@ -214,27 +229,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		// are required, so no pane can be collapsed to nothing by a small
 		// window.
 		//
-		// How short a *folding* pane may be squeezed is the pane's own business,
-		// though, and stating it from here was the bug: folded, a pane is
-		// exactly its heading and says so with a required constraint, so a
-		// required floor from out here is a second required opinion about the
-		// same height. `height >= 96` and `height == 24` cannot both hold.
-		// Autolayout answers that by breaking one and going round the display
-		// cycle again — and through four nested split views and their scroll
-		// views that is a great many passes for one click on a chevron.
-		// The clips pane gets both of these too, and used to get neither.
-		//
-		// It is the main list in this window, and with nothing said about its
-		// height it was whatever the other three left over — which at an
-		// ordinary window size was its heading and nothing else. It also meant
-		// that folding it was a one-way door: nothing pulled it back open,
-		// because the only thing left saying how tall it was was the split
-		// view's own memory of the height it had while folded.
-		clipPane!.minimumHeight = 96
-		anchorPane!.minimumHeight = 84
-		wordsPane!.minimumHeight = 96
-		lookPane!.minimumHeight = 144
-
+		// There are three of them now rather than seven. The four heights that
+		// used to be negotiated down the side of this window are gone with the
+		// panes: `PaneStack` keeps exactly one in the view hierarchy, so there is
+		// one opinion about the height of that column and it is the split
+		// view's. A pane that is not showing is not laid out — which `isHidden`
+		// never achieved, and that was the crash.
 		let preferred = NSLayoutConstraint.Priority(250)
 		let sizes: [(NSLayoutConstraint, NSLayoutConstraint)] = [
 			(lists.widthAnchor.constraint(equalToConstant: 430),
@@ -244,15 +244,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			(picture.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
 			 picture.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)),
 		]
-		// What each folding pane would like to be. A dragged divider, a window
-		// too short for all of them, or a folded neighbour all override it, and
-		// being below required is what lets them.
-		for (pane, wish) in [(clipPane!, 200.0), (anchorPane!, 170.0),
-		                     (wordsPane!, 200.0), (lookPane!, 230.0)] {
-			let height = pane.heightAnchor.constraint(equalToConstant: wish)
-			height.priority = preferred
-			height.isActive = true
-		}
 		for (wish, floor) in sizes {
 			// Floors, not laws — see `asFloor`. Every one of these is on a view
 			// a split view sizes, and the sum of them can exceed the window.
@@ -269,6 +260,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			window.makeFirstResponder(self.timeline)
 		}
 	}
+
+	/// For the tests: the rail and the pane it opens.
+	var railForTesting: Rail { rail }
+	var panesForTesting: PaneStack? { panes }
 
 	// MARK: - Wiring
 
@@ -1438,6 +1433,23 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	}
 	@objc public func nameFromWordsAction(_ sender: Any? = nil) { nameFromWords() }
 	@objc public func findSoundsAction(_ sender: Any? = nil) { findSounds() }
+	/// The rail, from the menu bar.
+	///
+	/// No key equivalents: the composing window already has `⌘1`–`⌘3` for its
+	/// own three, and two menu items with one key equivalent means only the
+	/// first of them ever gets the key. Four more of those would be a shortcut
+	/// that works in one window and silently does nothing in the other, which is
+	/// worse than a menu item somebody has to find once.
+	@objc public func showClips(_ sender: Any? = nil) { showPane(0) }
+	@objc public func showFaces(_ sender: Any? = nil) { showPane(1) }
+	@objc public func showWords(_ sender: Any? = nil) { showPane(2) }
+	@objc public func showLook(_ sender: Any? = nil) { showPane(3) }
+
+	private func showPane(_ index: Int) {
+		rail.select(index)
+		panes?.show(index)
+	}
+
 	@objc public func zoomIn(_ sender: Any? = nil) { timeline.zoomAroundPlayhead(by: 1 / 1.6) }
 	@objc public func zoomOut(_ sender: Any? = nil) { timeline.zoomAroundPlayhead(by: 1.6) }
 	@objc public func zoomFit(_ sender: Any? = nil) { timeline.zoomToFit() }

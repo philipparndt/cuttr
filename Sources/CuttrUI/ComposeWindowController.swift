@@ -60,9 +60,13 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// `nil` means "whichever one, or a new one".
 	public var onEditScene: ((ComposeDocument, String?) -> Void)?
 	private let bar = DocumentBar()
-	/// Which of the three has the window. In the bar for now; it becomes the
-	/// rail down the left edge, in the same place as the cutting window's.
-	private let modeSwitch = NSSegmentedControl()
+	/// Which of the three has the window, down the left edge — the same shape
+	/// and the same place as the cutting window's.
+	private let rail = Rail([
+		Rail.Item("Edit", "list.bullet.indent", "The programme, and everything about it (\u{2318}1)"),
+		Rail.Item("Text", "curlybraces", "The project file as it stands (\u{2318}2)"),
+		Rail.Item("Play", "play.rectangle", "What it comes to, played (\u{2318}3)"),
+	])
 	private let renderButton = NSButton()
 	/// The two controls that belong to the picture, over the picture: the anchor
 	/// markers, and the way to give the picture the screen. Neither is true of
@@ -269,7 +273,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		content.wantsLayer = true
 		content.layer?.backgroundColor = Theme.background.cgColor
 
-		for view in [bar, problemLabel, modes] as [NSView] {
+		// The bar across the top, the rail down the left, and whatever the rail
+		// has chosen filling the rest. The same three regions as the cutting
+		// window, in the same places, so it is one arrangement to learn.
+		for view in [bar, rail, problemLabel, modes] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			content.addSubview(view)
 		}
@@ -277,15 +284,20 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			bar.topAnchor.constraint(equalTo: content.topAnchor),
 			bar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
 			bar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-			bar.heightAnchor.constraint(equalToConstant: 38),
+			bar.heightAnchor.constraint(equalToConstant: DocumentBar.height),
+
+			// The rail says how wide it is; this only says where.
+			rail.topAnchor.constraint(equalTo: bar.bottomAnchor),
+			rail.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+			rail.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
 			problemLabel.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 2),
-			problemLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+			problemLabel.leadingAnchor.constraint(equalTo: rail.trailingAnchor, constant: 10),
 			problemLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
 			problemLabel.heightAnchor.constraint(equalToConstant: 14),
 
 			modes.topAnchor.constraint(equalTo: problemLabel.bottomAnchor, constant: 2),
-			modes.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+			modes.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
 			modes.trailingAnchor.constraint(equalTo: content.trailingAnchor),
 			modes.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 		])
@@ -320,6 +332,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// window, where the footage is. This window shows what was found.
 	}
 
+	/// For the tests: the rail, so its place can be compared with the other
+	/// window's.
+	var railForTesting: Rail { rail }
+
 	/// The bar: the project's name, the clock, what just happened — and two
 	/// things that are true whatever mode is showing.
 	///
@@ -327,18 +343,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// not belong to a mode. The mode switch is the other, and only until the
 	/// rail takes it; `⌘1`/`⌘2`/`⌘3` already do the same thing.
 	private func buildBar() {
-		for (index, title) in ["Edit", "Text", "Preview"].enumerated() {
-			modeSwitch.segmentCount = max(modeSwitch.segmentCount, index + 1)
-			modeSwitch.setLabel(title, forSegment: index)
-			modeSwitch.setWidth(62, forSegment: index)
-		}
-		modeSwitch.trackingMode = .selectOne
-		modeSwitch.controlSize = .small
-		modeSwitch.selectedSegment = 0
-		modeSwitch.target = self
-		modeSwitch.action = #selector(modeChanged)
-		modeSwitch.toolTip = "\u{2318}1 the editor \u{00B7} \u{2318}2 the file \u{00B7} \u{2318}3 the picture"
-		bar.addLeading(modeSwitch)
+		rail.onSelect = { [weak self] index in self?.show(Mode(rawValue: index) ?? .edit) }
 
 		renderButton.title = "Render\u{2026}"
 		renderButton.bezelStyle = .rounded
@@ -347,10 +352,6 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		renderButton.target = self
 		renderButton.action = #selector(render(_:))
 		bar.addTrailing(renderButton)
-	}
-
-	@objc private func modeChanged() {
-		show(Mode(rawValue: modeSwitch.selectedSegment) ?? .edit)
 	}
 
 	/// The controls that belong to the picture, in the corner of the picture.
@@ -747,7 +748,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	public func show(_ mode: Mode) {
 		self.mode = mode
 		modes.selectTabViewItem(at: mode.rawValue)
-		modeSwitch.selectedSegment = mode.rawValue
+		rail.select(mode.rawValue)
 		if mode == .preview {
 			// Now that the picture is in the window it has a layer to sit on.
 			attachOverlays()
@@ -799,6 +800,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		presenting.toggle()
 		if presenting { show(.preview) }
 		bar.isHidden = presenting
+		rail.isHidden = presenting
 		strip.isHidden = presenting
 		pictureControls.isHidden = presenting
 		window.toggleFullScreen(nil)
@@ -837,6 +839,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		presenting = false
 		stopWatchingThePointer()
 		bar.isHidden = false
+		rail.isHidden = false
 		strip.isHidden = false
 		pictureControls.isHidden = false
 	}
