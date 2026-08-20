@@ -62,8 +62,20 @@ public final class ProgrammeStrip: NSView {
 
 	private var duration: Double { max(resolved?.duration ?? 0, 0.001) }
 
-	private func x(for time: Double) -> CGFloat { CGFloat(time / duration) * bounds.width }
-	private func time(forX x: CGFloat) -> Double { Double(x / max(bounds.width, 1)) * duration }
+	/// The room down the left for the lane names.
+	///
+	/// Four bands of bars stacked with nothing to say which is which: a caption
+	/// and a sting are the same shape, and the only thing that distinguished
+	/// them was a hue somebody had to have learned. Named, the strip reads
+	/// without being explained — and that is worth sixty points of a strip that
+	/// is two hundred wide.
+	private let gutter: CGFloat = 62
+	private var track: CGFloat { max(bounds.width - gutter, 1) }
+
+	private func x(for time: Double) -> CGFloat { gutter + CGFloat(time / duration) * track }
+	private func time(forX x: CGFloat) -> Double {
+		max(0, min(duration, Double((x - gutter) / track) * duration))
+	}
 
 	public override func draw(_ dirtyRect: NSRect) {
 		Theme.background.setFill()
@@ -85,7 +97,14 @@ public final class ProgrammeStrip: NSView {
 		// The sections, above the clips, one row per depth. This is the shape
 		// of the programme — the thing an overlay is hung on — and seeing it is
 		// most of why a project bothers with groups at all.
+		// Where each band is, gathered as it is drawn, so the names are placed
+		// from the same numbers the bars are.
+		var lanes: [(String, CGFloat, CGFloat)] = []
+
 		let depths = (resolved.groups.map(\.depth).max() ?? -1) + 1
+		if depths > 0 {
+			lanes.append(("sections", rulerHeight, CGFloat(depths) * groupRowHeight))
+		}
 		for group in resolved.groups {
 			let a = x(for: group.start), b = x(for: group.end)
 			let y = rulerHeight + CGFloat(group.depth) * groupRowHeight
@@ -109,6 +128,7 @@ public final class ProgrammeStrip: NSView {
 		// not the block, or a strip of forty shots is forty coloured rectangles
 		// and the slugs on them cannot be read.
 		let top = rulerHeight + groupsHeight
+		lanes.append(("programme", top, clipRowHeight))
 		for clip in resolved.clips {
 			let a = x(for: clip.start), b = x(for: clip.end)
 			let rect = NSRect(x: a, y: top + 2, width: max(b - a - 1, 1), height: clipRowHeight - 4)
@@ -214,6 +234,11 @@ public final class ProgrammeStrip: NSView {
 		// beneath the programme rather than over it. Shown and not dragged —
 		// a sound is bound to a clip or a section like an overlay is, but there
 		// is no picture to place it against, so it is edited in the panel.
+		if !rows.isEmpty {
+			lanes.append(("overlays", top + clipRowHeight,
+			              CGFloat(rows.count) * overlayRowHeight))
+		}
+
 		var soundRows: [Double] = []
 		let soundTop = top + clipRowHeight + CGFloat(rows.count) * overlayRowHeight + 2
 		for sound in resolved.sounds {
@@ -238,6 +263,11 @@ public final class ProgrammeStrip: NSView {
 			}
 		}
 
+		if !soundRows.isEmpty {
+			lanes.append(("sound", soundTop, CGFloat(soundRows.count) * overlayRowHeight))
+		}
+		drawLaneNames(lanes)
+
 		let px = x(for: playhead).rounded() + 0.5
 		Theme.playhead.setStroke()
 		let line = NSBezierPath()
@@ -246,8 +276,43 @@ public final class ProgrammeStrip: NSView {
 		line.stroke()
 	}
 
+	/// For the tests: the time axis, which now starts after the lane names
+	/// rather than at the left edge.
+	func timeForTesting(at x: CGFloat) -> Double { time(forX: x) }
+	func xForTesting(_ time: Double) -> CGFloat { self.x(for: time) }
+	var gutterForTesting: CGFloat { gutter }
+
 	private static func colour(_ value: RGBA) -> NSColor {
 		NSColor(calibratedRed: value.r, green: value.g, blue: value.b, alpha: value.a)
+	}
+
+	/// The lane names, and the rule that keeps them out of the bars.
+	///
+	/// Drawn last, over everything, so a bar that starts at nought cannot print
+	/// itself into the names — and the ground behind them is opaque for the same
+	/// reason.
+	private func drawLaneNames(_ lanes: [(String, CGFloat, CGFloat)]) {
+		Theme.background.setFill()
+		NSRect(x: 0, y: rulerHeight, width: gutter, height: bounds.height - rulerHeight).fill()
+		Theme.rule.withAlphaComponent(0.6).setFill()
+		NSRect(x: gutter - 1, y: 0, width: 1, height: bounds.height).fill()
+
+		for (name, top, height) in lanes where height > 6 {
+			let attributes: [NSAttributedString.Key: Any] = [
+				.font: Theme.monoSmall, .foregroundColor: Theme.faintText,
+			]
+			let size = (name as NSString).size(withAttributes: attributes)
+			(name as NSString).draw(
+				at: NSPoint(x: gutter - 8 - size.width,
+				            y: top + max(0, (min(height, 18) - size.height) / 2)),
+				withAttributes: attributes)
+			// A hairline between the lanes, so a name is plainly about the band
+			// beside it rather than about the whole strip.
+			if top > rulerHeight + 1 {
+				Theme.rule.withAlphaComponent(0.4).setFill()
+				NSRect(x: 6, y: top.rounded(), width: bounds.width - 6, height: 1).fill()
+			}
+		}
 	}
 
 	private func drawRuler() {
@@ -270,7 +335,7 @@ public final class ProgrammeStrip: NSView {
 	}
 
 	private func tickStep() -> Double {
-		let target = duration * Double(90 / max(bounds.width, 1))
+		let target = duration * Double(90 / track)
 		let candidates: [Double] = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
 		return candidates.first { $0 >= target } ?? 600
 	}

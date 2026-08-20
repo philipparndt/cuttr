@@ -1230,3 +1230,47 @@ import Testing
 		        "a file path was marked as a broken reference")
 	}
 }
+
+/// The programme strip's lanes are named, and the clock still agrees with the
+/// pointer.
+///
+/// Making room down the left for the names moved the time axis, and every click
+/// on this strip goes through the two functions that were changed. A strip whose
+/// playhead lands a lane's width away from where somebody clicked is worse than
+/// one with unnamed lanes.
+@Suite @MainActor struct ProgrammeStripLanesTests {
+
+	private func strip() -> ProgrammeStrip {
+		_ = NSApplication.shared
+		let strip = ProgrammeStrip(frame: NSRect(x: 0, y: 0, width: 800, height: 200))
+		strip.resolved = try? Resolver.resolve(
+			Project(timeline: [TimelineEntry(card: Card(duration: 8))]),
+			baseURL: URL(fileURLWithPath: "/tmp"))
+		return strip
+	}
+
+	/// Time to a place and back again.
+	@Test func theClockAndThePointerAgree() {
+		let strip = self.strip()
+		// A card of eight seconds, so there is a duration to divide by: the axis
+		// starts after the names and ends at the right edge.
+		for time in [0.0, 2.0, 4.0, 7.9] {
+			let at = strip.xForTesting(time)
+			#expect(at >= strip.gutterForTesting, "\(time) is drawn in the lane names")
+			#expect(at <= 800.5)
+			// And back again: a click where a moment is drawn is that moment.
+			#expect(abs(strip.timeForTesting(at: at) - time) < 0.01,
+			        "\(time) is drawn at \(at), which reads back as \(strip.timeForTesting(at: at))")
+		}
+		#expect(abs(strip.xForTesting(0) - strip.gutterForTesting) < 0.001,
+		        "nought is not at the head of the axis")
+	}
+
+	/// A click in the lane names is the beginning, not a negative time.
+	@Test func aClickInTheNamesIsTheBeginning() {
+		let strip = self.strip()
+		#expect(strip.timeForTesting(at: 0) == 0)
+		#expect(strip.timeForTesting(at: strip.gutterForTesting / 2) == 0)
+		#expect(strip.timeForTesting(at: -200) == 0)
+	}
+}
