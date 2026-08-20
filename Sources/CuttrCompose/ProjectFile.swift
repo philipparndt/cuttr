@@ -236,7 +236,28 @@ public enum ProjectReader {
 	/// list has no placement to cover, so it drops those.
 	static func readOverlay(_ m: [String: Any]) throws -> Overlay? {
 		let kind: Overlay.Kind
-		if let text = m["text"] as? String {
+		// Before `text:`, because a bubble's words are on `bubble:` and its
+		// `text:` — if it has one — belongs to an appearance under `when:`.
+		// A mapping with both at the top level is still a bubble: the key that
+		// names the kind wins, as it does for every other kind here.
+		if let said = m["bubble"] {
+			var bubble = Bubble(text: spoken(said))
+			if let named = (m["shape"] as? String).flatMap(nonEmpty) {
+				guard let shape = Bubble.Shape(rawValue: named.lowercased()) else {
+					throw ProjectError.badValue(key: "shape", value: named)
+				}
+				bubble.shape = shape
+			}
+			bubble.style = (m["style"] as? String).flatMap(nonEmpty)
+			if let fill = (m["fill"] as? String).flatMap(RGBA.init(hex:)) { bubble.fill = fill }
+			if let line = (m["line"] as? String).flatMap(RGBA.init(hex:)) { bubble.line = line }
+			if let width = number(m["width"]) { bubble.width = width }
+			if let seed = m["seed"] as? Int { bubble.seed = seed }
+			// A spot in the frame to point at, for the things that are not
+			// faces — and for a programme with no footage in it at all.
+			bubble.at = try point(m["at"], key: "at")
+			kind = .bubble(bubble)
+		} else if let text = m["text"] as? String {
 			kind = .text(text, style: (m["style"] as? String).flatMap(nonEmpty))
 		} else if let spinnerValue = m["spinner"] {
 			var spinner = Spinner()
@@ -354,16 +375,35 @@ public enum ProjectReader {
 			appearances = [Overlay.Appearance(span)]
 		}
 
+		// A bubble that says nothing about where it sits stands off from what it
+		// points at, rather than being drawn over the face it is about. Filled
+		// in here rather than at render time so that the file, once saved, says
+		// where the bubble is: the offset is the number somebody will nudge.
+		var offset = try point(m["offset"], key: "offset") ?? .zero
+		if case .bubble = kind, m["offset"] == nil { offset = Bubble.standoff }
+
 		return Overlay(
 			kind: kind,
 			appearances: appearances,
-			arrival: try transition(m["in"], key: "in") ?? .slide(.left, over: 0.4),
-			departure: try transition(m["out"], key: "out") ?? .slide(.right, over: 0.4),
+			arrival: try transition(m["in"], key: "in") ?? kind.arrives,
+			departure: try transition(m["out"], key: "out") ?? kind.departs,
 			behind: (m["behind"] as? String).flatMap { Overlay.Occlusion(rawValue: $0) } ?? .nothing,
 			anchor: (m["anchor"] as? String).flatMap(nonEmpty),
-			offset: try point(m["offset"], key: "offset") ?? .zero,
+			offset: offset,
 			keys: try overlayKeys(m["keys"], of: kind)
 		)
+	}
+
+	/// What a `bubble:` says, however it was written.
+	///
+	/// Nearly always a string. A bubble whose words are a bare number — a
+	/// caption reading `1970`, which is the sort of thing a family film is full
+	/// of — comes through YAML as an `Int`, and refusing it would be refusing
+	/// something perfectly sensible.
+	private static func spoken(_ value: Any) -> String {
+		if let text = value as? String { return text }
+		if value is NSNull { return "" }
+		return "\(value)"
 	}
 
 	/// One sound, read from the mapping that says it.
@@ -492,9 +532,10 @@ public enum ProjectReader {
 		guard !allowed.isEmpty else {
 			throw ProjectError.cannotAnimate(
 				parameter: "keys",
-				reason: "\(kind.named) has nothing that moves. A caption and a spinner "
-					+ "arrive and leave by `in:` and `out:`, and a scene's parts carry "
-					+ "keys of their own.")
+				reason: "\(kind.named) has nothing that moves. A caption, a spinner and "
+					+ "a bubble arrive and leave by `in:` and `out:`, a scene's parts "
+					+ "carry keys of their own, and a bubble's tail is moved by the face "
+					+ "it points at.")
 		}
 		var keys: [Overlay.Key] = []
 		for entry in entries {

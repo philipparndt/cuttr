@@ -223,6 +223,7 @@ public final class ProgrammeStrip: NSView {
 			case .aberration(let aberration): label = "aberration · \(aberration.kind.rawValue)"
 			case .tape(let tape): label = "tape · \(tape.condition.rawValue)"
 			case .scene(let name, _): label = name
+			case .bubble(let bubble): label = bubble.text
 			}
 			let attributes: [NSAttributedString.Key: Any] = [.font: Theme.monoSmall, .foregroundColor: Theme.text]
 			if (label as NSString).size(withAttributes: attributes).width < rect.width - 6 {

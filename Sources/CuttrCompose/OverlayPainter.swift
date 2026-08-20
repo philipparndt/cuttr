@@ -55,11 +55,50 @@ public enum OverlayPainter {
 			// A scene carries its own positions, so it is already frame-sized.
 			return faded(CIImage(cgImage: drawn), by: opacity)
 
+		case .bubble(let bubble):
+			guard let drawn = bubbleImage(bubble, resolved: resolved, project: project,
+			                              size: size, at: time) else { return nil }
+			// Drawn in the frame's own coordinates, like a scene, so there is
+			// nothing to place: the tail already reaches where it reaches.
+			return faded(CIImage(cgImage: drawn), by: opacity)
+
 		case .effect, .film, .aberration, .tape:
 			// All of them are the frame itself rather than something over it,
 			// and none of them is drawn here.
 			return nil
 		}
+	}
+
+	// MARK: - A bubble
+
+	/// A bubble at one moment, over the whole frame.
+	///
+	/// Every number in here comes from ``OverlayLayers`` and ``Bubbling`` — where
+	/// the paper sits, what the tail points at, the paths themselves — so a
+	/// bubble that goes behind somebody is the same bubble as one that does not,
+	/// drawn a second way because the mask needs it in the frame pass.
+	static func bubbleImage(
+		_ bubble: Bubble, resolved: ResolvedOverlay, project: Project,
+		size: CGSize, at time: Double
+	) -> CGImage? {
+		guard size.width >= 1, size.height >= 1, let context = CGContext(
+			data: nil, width: Int(size.width), height: Int(size.height),
+			bitsPerComponent: 8, bytesPerRow: 0,
+			space: CGColorSpace(name: CGColorSpace.sRGB)!,
+			bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+		else { return nil }
+		let style = project.style(named: bubble.style ?? "bubble")
+		let words = Bubbling.words(bubble.text, style: style, frame: size, width: bubble.width)
+		let box = Bubbling.box(
+			words: words?.size ?? .zero, shape: bubble.shape, style: style,
+			home: OverlayLayers.bubbleHome(bubble, resolved: resolved, style: style, size: size),
+			frame: size)
+		Bubbling.draw(
+			bubble, box: box, words: words?.image, wordSize: words?.size ?? .zero,
+			pointingAt: OverlayLayers.bubbleTarget(bubble, resolved: resolved,
+			                                       at: time, size: size),
+			frame: size, into: context)
+		return context.makeImage()
 	}
 
 	/// Where the overlay's anchor point sits, in the frame.

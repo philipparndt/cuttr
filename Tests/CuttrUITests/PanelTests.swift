@@ -33,6 +33,17 @@ import Testing
 				Overlay(kind: .spinner(Spinner(words: [SpinnerWord("one"), SpinnerWord("two", duration: 2)])),
 				        spans: [.times(from: 1, to: 4), .marks(from: .group("middle"), to: .group("middle"))],
 				        anchor: "mia-eye", offset: CGPoint(x: 0.02, y: -0.18)),
+				// One pointing at a tracked face and one at a fixed spot: the
+				// two placements the panel has to draw a picture for, and they
+				// are not the same picture.
+				Overlay(kind: .bubble(Bubble(text: "still thinks glitter is a colour", seed: 4)),
+				        span: .times(from: 2, to: 5), arrival: .fade(over: 0.2),
+				        departure: .fade(over: 0.2),
+				        anchor: "mia-eye", offset: Bubble.standoff),
+				Overlay(kind: .bubble(Bubble(shape: .thought, text: "maybe it is",
+				                             at: CGPoint(x: 0.4, y: 0.3))),
+				        span: .times(from: 6, to: 8), arrival: .fade(over: 0.2),
+				        departure: .fade(over: 0.2), offset: Bubble.standoff),
 			],
 			sounds: [
 				Sound(file: "music/opening.wav",
@@ -67,7 +78,8 @@ import Testing
 		let project = self.project()
 		let selections: [ProjectSelection] = [
 			.output, .entry([0]), .entry([1]), .entry([1, 0]), .entry([1, 1]), .entry([2]),
-			.entry([3]), .overlay(.project(0)), .overlay(.project(1)), .sound(.project(0)), .sound(.project(1)), .output,
+			.entry([3]), .overlay(.project(0)), .overlay(.project(1)), .overlay(.project(2)),
+			.overlay(.project(3)), .sound(.project(0)), .sound(.project(1)), .output,
 			// Gone: a selection that outlived the thing it named.
 			.entry([9]), .overlay(.project(9)), .sound(.project(9)),
 		]

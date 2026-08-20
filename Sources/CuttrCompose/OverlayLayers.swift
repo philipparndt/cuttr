@@ -134,6 +134,16 @@ public enum OverlayLayers {
 			content = built.layer
 			contentSize = built.size
 			contentAnchor = built.anchor
+		case .bubble(let bubble):
+			// Frame-sized, like a scene, because a bubble's geometry is in the
+			// frame's own coordinates: it is clamped to the edges, and its tail
+			// reaches a point somewhere else entirely. Placing a small layer and
+			// then drawing a tail out of it would mean a layer that has to grow
+			// every time somebody walks further away.
+			content = bubbleLayer(bubble, project: project, size: size,
+			                      resolved: resolved, host: host)
+			contentSize = size
+			contentAnchor = CGPoint(x: 0.5, y: 0.5)
 		}
 
 		mover.frame = CGRect(origin: .zero, size: contentSize)
@@ -144,7 +154,16 @@ public enum OverlayLayers {
 		// Where it sits, and what the slide is measured against.
 		let anchorPoint: CGPoint
 		let home: CGPoint
-		if let path = resolved.path {
+		if case .bubble = overlay.kind {
+			// A bubble does not follow its anchor, and that is the one thing
+			// about it that is not like every other overlay. It is placed where
+			// the face was when it came on and stays there — words that move
+			// under the reader cannot be read — and it is the tail, drawn inside
+			// this layer, that goes after the face. So no `follow`, and the
+			// layer sits over the frame it was drawn in.
+			anchorPoint = CGPoint(x: 0.5, y: 0.5)
+			home = CGPoint(x: size.width / 2, y: size.height / 2)
+		} else if let path = resolved.path {
 			// Following something. The point that sits on the anchor is the
 			// *spinner*, not the middle of the spinner-and-its-words — a
 			// progress spinner over somebody's head should be over their head,
@@ -456,6 +475,163 @@ public enum OverlayLayers {
 		layer.contents = context.makeImage()
 		layer.contentsGravity = .resize
 		return (layer, plateSize)
+	}
+
+	// MARK: - A bubble
+
+	/// A bubble, as shape layers over the frame.
+	///
+	/// The paper and the words are drawn once. The tail is keyframed, at the
+	/// anchor's own sample times, from the same ``Bubbling/paths(_:box:pointingAt:frame:pass:)``
+	/// the painter calls — so what somebody watches in the window is what the
+	/// export encodes, which is the rule this whole file exists to keep.
+	///
+	/// For a speech bubble the tail is *in* the outline, so it is the body path
+	/// that is keyframed; the body's own points do not change, so nothing but
+	/// the tail moves. The other two shapes keep their tail in a second path,
+	/// which is what lets a thought bubble's puffs be paper and a box's arrow be
+	/// only a line.
+	private static func bubbleLayer(
+		_ bubble: Bubble, project: Project, size: CGSize,
+		resolved: ResolvedOverlay, host: Host
+	) -> CALayer {
+		let container = CALayer()
+		container.frame = CGRect(origin: .zero, size: size)
+		let style = project.style(named: bubble.style ?? "bubble")
+		let drawn = Bubbling.words(bubble.text, style: style, frame: size, width: bubble.width)
+		let box = Bubbling.box(words: drawn?.size ?? .zero, shape: bubble.shape,
+		                       style: style, home: bubbleHome(bubble, resolved: resolved,
+		                                                      style: style, size: size),
+		                       frame: size)
+
+		// When the tail is redrawn: at every sample the anchor has inside this
+		// appearance, with the ends pinned — the same list ``follow(_:…)`` uses,
+		// and for the same reason.
+		let moments = tailMoments(resolved)
+		func target(at time: Double) -> CGPoint? {
+			bubbleTarget(bubble, resolved: resolved, at: time, size: size)
+		}
+		let span = max(resolved.duration, 0.0001)
+
+		func animate(_ layer: CAShapeLayer, _ path: @escaping (Double) -> CGPath?) {
+			guard moments.count > 1 else {
+				layer.path = path(resolved.start)
+				return
+			}
+			let animation = CAKeyframeAnimation(keyPath: "path")
+			animation.values = moments.map { path($0) ?? CGMutablePath() }
+			animation.keyTimes = moments.map { NSNumber(value: ($0 - resolved.start) / span) }
+			animation.calculationMode = .linear
+			animation.beginTime = host.beginTime(resolved.start)
+			animation.duration = span
+			animation.fillMode = .both
+			animation.isRemovedOnCompletion = false
+			layer.path = animation.values?.first as! CGPath?
+			layer.add(animation, forKey: "path")
+		}
+
+		let weight = Bubbling.lineWidth(for: size)
+		for pass in 0 ..< 2 {
+			func made() -> CAShapeLayer {
+				let layer = CAShapeLayer()
+				layer.frame = container.bounds
+				layer.strokeColor = Bubbling.cg(bubble.line, alpha: pass == 0 ? 1 : 0.5)
+				layer.lineWidth = weight * (pass == 0 ? 1 : 0.72)
+				layer.lineJoin = .round
+				layer.lineCap = .round
+				layer.fillColor = nil
+				return layer
+			}
+			// The tail first, so the puffs of a thought bubble sit under the
+			// paper rather than over it — the same order the painter draws in.
+			if !Bubbling.tailIsInTheBody(bubble.shape) {
+				let tail = made()
+				let paths = Bubbling.paths(bubble, box: box, pointingAt: target(at: resolved.start),
+				                           frame: size, pass: pass)
+				if paths.tailIsPaper, pass == 0 { tail.fillColor = Bubbling.cg(bubble.fill) }
+				animate(tail) { time in
+					Bubbling.paths(bubble, box: box, pointingAt: target(at: time),
+					               frame: size, pass: pass).tail
+				}
+				container.addSublayer(tail)
+			}
+			let body = made()
+			if pass == 0 { body.fillColor = Bubbling.cg(bubble.fill) }
+			if Bubbling.tailIsInTheBody(bubble.shape) {
+				animate(body) { time in
+					Bubbling.paths(bubble, box: box, pointingAt: target(at: time),
+					               frame: size, pass: pass).body
+				}
+			} else {
+				body.path = Bubbling.paths(bubble, box: box, pointingAt: nil,
+				                           frame: size, pass: pass).body
+			}
+			container.addSublayer(body)
+		}
+
+		if let drawn {
+			let words = CALayer()
+			words.frame = CGRect(x: box.midX - drawn.size.width / 2,
+			                     y: box.midY - drawn.size.height / 2,
+			                     width: drawn.size.width, height: drawn.size.height)
+			words.contents = drawn.image
+			words.contentsGravity = .resize
+			words.contentsScale = 2
+			container.addSublayer(words)
+		}
+		return container
+	}
+
+	/// The times a bubble's tail is redrawn at.
+	///
+	/// Nothing at all for a bubble pointing at a fixed spot: there is one
+	/// drawing and it is the same all the way through. A bubble on a face gets
+	/// the anchor's own samples, which is ten a second — finer than the tail
+	/// moves and coarser than the frame rate, exactly as the anchor was solved.
+	static func tailMoments(_ resolved: ResolvedOverlay) -> [Double] {
+		guard let path = resolved.path, !path.isEmpty else { return [resolved.start] }
+		var times: [Double] = [resolved.start]
+		times += path.samples.map(\.time).filter { $0 > resolved.start && $0 < resolved.end }
+		times.append(resolved.end)
+		return times
+	}
+
+	/// What the bubble points at, at one moment, in frame coordinates.
+	///
+	/// `nil` where there is nothing to point at: outside the stretch the anchor
+	/// was actually solved over, and for a bubble with no anchor and no `at:`.
+	/// The bubble keeps its words and loses its tail, which is the honest thing
+	/// — a tail held on the last place a face was seen says the tracking is
+	/// still working when it is not.
+	static func bubbleTarget(
+		_ bubble: Bubble, resolved: ResolvedOverlay, at time: Double, size: CGSize
+	) -> CGPoint? {
+		if let path = resolved.path, !path.isEmpty {
+			guard path.covers(time), let point = path.point(at: time) else { return nil }
+			return CGPoint(x: point.x * size.width, y: point.y * size.height)
+		}
+		return bubble.at.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) }
+	}
+
+	/// Where the middle of the paper goes: beside the thing it points at, or
+	/// where the style says for a bubble that points at nothing.
+	static func bubbleHome(
+		_ bubble: Bubble, resolved: ResolvedOverlay, style: TextStyle, size: CGSize
+	) -> CGPoint {
+		let offset = resolved.overlay.offset
+		// Where the face was when the bubble came on — clamped rather than
+		// covered, because placing it once is a different question from pointing
+		// at it, and a bubble that refuses to appear because the tracking has a
+		// hole at that exact instant is no use to anybody.
+		if let path = resolved.path, let point = path.point(at: resolved.start) {
+			return CGPoint(x: point.x * size.width + offset.x * size.height,
+			               y: point.y * size.height + offset.y * size.height)
+		}
+		if let at = bubble.at {
+			return CGPoint(x: at.x * size.width + offset.x * size.height,
+			               y: at.y * size.height + offset.y * size.height)
+		}
+		return CGPoint(x: style.position.x * size.width, y: style.position.y * size.height)
 	}
 
 	private static func spinnerLayer(

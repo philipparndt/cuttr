@@ -71,7 +71,7 @@ enum Frame {
 				image = thrown(shown, renderer: renderer, over: image, under: picture,
 				               at: time, opacity: intensity, size: size, work: work)
 
-			case .text, .spinner, .scene:
+			case .text, .spinner, .scene, .bubble:
 				// Layers, unless they go behind somebody — in which case they
 				// are painted here, because the mask that knows where she is
 				// lives in the pass that has the pixels.
