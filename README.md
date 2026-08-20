@@ -292,6 +292,10 @@ leaves every project still correct. That is what the slug is for.
 | `- group: name` + `clips:` | a named section; they nest |
 | `- card: 00:04.000` | time with no take behind it |
 
+Any of them may carry `overlays:`, which is the list below written two levels
+in.
+
+
 Queries are over the tags you put on clips in the cutting window: `#tag`,
 `take-01/#tag`, `take-01/*`, a bare slug, combined with `and`, `or`, `not` and
 brackets. Two terms side by side mean `and`. What a query returns is ordered by
@@ -305,6 +309,32 @@ introduction`, or `from: @a to: @b`, or `from: intro to: demo`. The in and out
 animations are taken from inside the span, so two overlays whose spans meet
 cross at the boundary — the first slides out to the right exactly as the second
 slides in from the left, with nothing to keep in step by hand.
+
+**An overlay can also be written inside the entry it is drawn over.** Given no
+range of its own it covers exactly that placement — which is the one thing a
+name cannot say, because `from: intro` finds *every* use of `intro`:
+
+```yaml
+timeline:
+  - clip: intro
+    overlays:
+      - text: The first time
+  - clip: demo
+  - clip: intro
+    overlays:
+      - text: And the second
+
+overlays:            # still here, for the ones on the programme's own clock
+  - text: Chapter one
+    from: 00:10.000
+    to:   00:14.000
+```
+
+Two placements of one shot, a different caption on each, and no names invented
+to tell them apart. A nested overlay that *does* write a range — `within:`,
+`from:`/`to:`, `when:` — means exactly what it would mean at the top level;
+being written there is then only a statement about where it is filed. The same
+keys either way, so there is one shape to learn.
 
 ### Scenes — intro screens and title cards
 
