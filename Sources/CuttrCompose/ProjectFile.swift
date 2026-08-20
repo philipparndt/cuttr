@@ -382,11 +382,15 @@ public enum ProjectReader {
 		var offset = try point(m["offset"], key: "offset") ?? .zero
 		if case .bubble = kind, m["offset"] == nil { offset = Bubble.standoff }
 
+		let arrival = try transition(m["in"], key: "in") ?? kind.arrives
+		let departure = try transition(m["out"], key: "out") ?? kind.departs
 		return Overlay(
 			kind: kind,
 			appearances: appearances,
-			arrival: try transition(m["in"], key: "in") ?? kind.arrives,
-			departure: try transition(m["out"], key: "out") ?? kind.departs,
+			arrival: arrival,
+			departure: departure,
+			arrivalPlacement: try placement(m["in"], key: "in", of: arrival, default: .after),
+			departurePlacement: try placement(m["out"], key: "out", of: departure, default: .before),
 			behind: (m["behind"] as? String).flatMap { Overlay.Occlusion(rawValue: $0) } ?? .nothing,
 			anchor: (m["anchor"] as? String).flatMap(nonEmpty),
 			offset: offset,
@@ -745,6 +749,31 @@ public enum ProjectReader {
 		// A shower that runs out rather than one somebody switched off.
 		if m["fall"] != nil { return .fall(over: number(m["over"]) ?? 1.5) }
 		return .cut
+	}
+
+	/// Where the movement sits against the mark: `in: {fade: true, over: 0.4,
+	/// at: before}`.
+	///
+	/// Three short keys, one question each — `in:` says how, `over:` says how
+	/// long, `at:` says where — and the three words read against the mark, so
+	/// the same one means the same thing at either end. See
+	/// ``Overlay/Transition/Placement``.
+	///
+	/// Nothing to place on a cut, which has no length, so `at:` on one is read
+	/// and dropped rather than kept as a value that could never be seen. That
+	/// also keeps the file it writes back the file it would have written: a cut
+	/// is spelt `cut`, and always was.
+	private static func placement(
+		_ value: Any?, key: String, of transition: Overlay.Transition,
+		default fallback: Overlay.Transition.Placement
+	) throws -> Overlay.Transition.Placement {
+		guard transition.duration > 0, let m = mapping(value), let said = m["at"] else {
+			return fallback
+		}
+		guard let text = said as? String,
+		      let placement = Overlay.Transition.Placement(rawValue: text.lowercased())
+		else { throw ProjectError.badValue(key: "\(key).at", value: describe(said)) }
+		return placement
 	}
 
 	/// When something is on: `within:` a clip, over a `group:`, between two

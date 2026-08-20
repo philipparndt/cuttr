@@ -523,8 +523,11 @@ public enum ProjectWriter {
 				if placed {
 					out += "\(indent)  offset: [\(trim(overlay.offset.x)), \(trim(overlay.offset.y))]\n"
 				}
-				out += "\(indent)  in:     \(transition(overlay.arrival))\n"
-				out += "\(indent)  out:    \(transition(overlay.departure))\n"
+				out += "\(indent)  in:     "
+					+ transition(overlay.arrival, at: overlay.arrivalPlacement, default: .after) + "\n"
+				out += "\(indent)  out:    "
+					+ transition(overlay.departure, at: overlay.departurePlacement,
+					             default: .before) + "\n"
 			}
 		return out
 	}
@@ -551,12 +554,24 @@ public enum ProjectWriter {
 		return out
 	}
 
-	private static func transition(_ value: Overlay.Transition) -> String {
+	/// `in:` and `out:`, in the shape they are read in.
+	///
+	/// `at:` goes last and only when there is something to say: a placement that
+	/// is the default is what the file has always meant, and a cut has no length
+	/// to put anywhere. Both of those write exactly the line this wrote before
+	/// placements existed, which is the whole of what a project that does not
+	/// use one is entitled to.
+	private static func transition(
+		_ value: Overlay.Transition, at placement: Overlay.Transition.Placement,
+		default fallback: Overlay.Transition.Placement
+	) -> String {
+		let sits = placement == fallback ? "" : ", at: \(placement.rawValue)"
 		switch value {
 		case .cut: return "cut"
-		case .fade(let over): return "{fade: true, over: \(trim(over))}"
-		case .fall(let over): return "{fall: true, over: \(trim(over))}"
-		case .slide(let edge, let over): return "{slide: \(edge.rawValue), over: \(trim(over))}"
+		case .fade(let over): return "{fade: true, over: \(trim(over))\(sits)}"
+		case .fall(let over): return "{fall: true, over: \(trim(over))\(sits)}"
+		case .slide(let edge, let over):
+			return "{slide: \(edge.rawValue), over: \(trim(over))\(sits)}"
 		}
 	}
 

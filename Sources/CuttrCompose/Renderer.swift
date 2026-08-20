@@ -750,29 +750,6 @@ public enum Renderer {
 		                to: url, progress: progress)
 	}
 
-	/// How far in or out an overlay is at a moment: one at the middle, nothing
-	/// at either edge if it fades.
-	///
-	/// The same in and out an overlay's layers use, in arithmetic rather than
-	/// keyframes, because an effect is composited by hand and there is nothing
-	/// for Core Animation to interpolate.
-	private static func fade(_ shown: ResolvedOverlay, at time: Double) -> Double {
-		let span = max(shown.duration, 0.0001)
-		let arrive = min(shown.overlay.arrival.duration, span / 2)
-		let depart = min(shown.overlay.departure.duration, span / 2)
-		var opacity = 1.0
-		// Only a fade fades. An effect cannot slide — it is the whole frame —
-		// so anything else simply starts, which for confetti means the first
-		// pieces arriving over the top edge.
-		if case .fade = shown.overlay.arrival, arrive > 0, time < shown.start + arrive {
-			opacity = min(opacity, (time - shown.start) / arrive)
-		}
-		if case .fade = shown.overlay.departure, depart > 0, time > shown.end - depart {
-			opacity = min(opacity, (shown.end - time) / depart)
-		}
-		return max(0, min(1, opacity))
-	}
-
 	/// Done with a build: the compositor can forget what it was told.
 	public static func forget(_ session: UUID?) {
 		guard let session else { return }

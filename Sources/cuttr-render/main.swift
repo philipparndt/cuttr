@@ -677,6 +677,15 @@ if describe {
 				+ " seed \(bubble.seed) width \(bubble.width)"
 				+ (bubble.at.map { " at [\($0.x), \($0.y)]" } ?? "")
 		}
+		/// Where a movement sits, said only when it is not where it usually
+		/// sits — the defaults differ between the two ends, and printing them
+		/// would be noise on every line of every project.
+		func placed(
+			_ placement: Overlay.Transition.Placement,
+			_ usual: Overlay.Transition.Placement
+		) -> String {
+			placement == usual ? "" : " at \(placement.rawValue)"
+		}
 		print(String(format: "  %7.3f → %7.3f  %@", shown.start, shown.end, what as NSString))
 		if let where_ = writtenIn(shown.origin, of: project,
 		                          covering: shown.overlay.appearances.isEmpty) {
@@ -685,7 +694,8 @@ if describe {
 		print("           anchor \(shown.overlay.anchor ?? "none")"
 			+ (shown.overlay.anchor != nil && shown.path == nil
 				? "  — NOT FOUND: it will sit where its style says" : "")
-			+ "  in \(shown.overlay.arrival)  out \(shown.overlay.departure)")
+			+ "  in \(shown.overlay.arrival)\(placed(shown.overlay.arrivalPlacement, .after))"
+			+ "  out \(shown.overlay.departure)\(placed(shown.overlay.departurePlacement, .before))")
 	}
 	exit(0)
 }

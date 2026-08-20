@@ -492,17 +492,19 @@ public enum OverlayPainter {
 
 	/// In and out, as the keyframes would have it — a fade fades, and anything
 	/// else is either a slide or simply there.
+	///
+	/// Eased where the layer path's own envelope is eased, and told when each
+	/// movement happens by ``OverlayTiming``, which is the same answer the
+	/// keyframes are built from. The two used to work it out separately and
+	/// would have disagreed about an overlay drawn before its span: this one is
+	/// asked for a frame at a time and would have gone on ramping up from
+	/// nothing after the mark.
 	private static func fade(_ resolved: ResolvedOverlay, at time: Double) -> Double {
-		let span = max(resolved.duration, 0.0001)
-		let arrive = min(resolved.overlay.arrival.duration, span / 2)
-		let depart = min(resolved.overlay.departure.duration, span / 2)
+		let timing = resolved.timing
+		guard timing.drawn(at: time) else { return 0 }
 		var opacity = 1.0
-		if case .fade = resolved.overlay.arrival, arrive > 0, time < resolved.start + arrive {
-			opacity = min(opacity, ease(.out, (time - resolved.start) / arrive))
-		}
-		if case .fade = resolved.overlay.departure, depart > 0, time > resolved.end - depart {
-			opacity = min(opacity, ease(.in, (resolved.end - time) / depart))
-		}
+		if timing.arrivesByFading { opacity = min(opacity, ease(.out, timing.arriving(at: time))) }
+		if timing.departsByFading { opacity = min(opacity, ease(.in, 1 - timing.departing(at: time))) }
 		return max(0, min(1, opacity))
 	}
 
@@ -510,9 +512,7 @@ public enum OverlayPainter {
 	private static func slide(
 		_ resolved: ResolvedOverlay, plate: CGSize, frame: CGSize, at time: Double
 	) -> CGPoint {
-		let span = max(resolved.duration, 0.0001)
-		let arrive = min(resolved.overlay.arrival.duration, span / 2)
-		let depart = min(resolved.overlay.departure.duration, span / 2)
+		let timing = resolved.timing
 
 		func offscreen(_ transition: Overlay.Transition) -> CGPoint {
 			guard case .slide(let edge, _) = transition else { return .zero }
@@ -524,14 +524,14 @@ public enum OverlayPainter {
 			}
 		}
 
-		if arrive > 0, time < resolved.start + arrive {
+		if time < timing.arriveTo {
 			let from = offscreen(resolved.overlay.arrival)
-			let progress = ease(.out, (time - resolved.start) / arrive)
+			let progress = ease(.out, timing.arriving(at: time))
 			return CGPoint(x: from.x * (1 - progress), y: from.y * (1 - progress))
 		}
-		if depart > 0, time > resolved.end - depart {
+		if time > timing.departFrom {
 			let to = offscreen(resolved.overlay.departure)
-			let progress = ease(.in, 1 - (resolved.end - time) / depart)
+			let progress = ease(.in, timing.departing(at: time))
 			return CGPoint(x: to.x * progress, y: to.y * progress)
 		}
 		return .zero

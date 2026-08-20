@@ -1471,11 +1471,17 @@ public final class PropertiesPanel: NSView {
 		section("how it arrives and leaves")
 		let isEffect: Bool
 		if case .effect = overlay.kind { isEffect = true } else { isEffect = false }
-		transitionRow("arrival", overlay.arrival, { [weak self] transition in
+		transitionRow("arrival", overlay.arrival, at: overlay.arrivalPlacement,
+		              usually: .after, { [weak self] transition in
 			self?.editOverlay(origin) { $0.arrival = transition }
+		}, sits: { [weak self] placement in
+			self?.editOverlay(origin) { $0.arrivalPlacement = placement }
 		}, canFall: false)
-		transitionRow("departure", overlay.departure, { [weak self] transition in
+		transitionRow("departure", overlay.departure, at: overlay.departurePlacement,
+		              usually: .before, { [weak self] transition in
 			self?.editOverlay(origin) { $0.departure = transition }
+		}, sits: { [weak self] placement in
+			self?.editOverlay(origin) { $0.departurePlacement = placement }
 		}, canFall: isEffect)
 
 		section("where it sits")
@@ -1506,8 +1512,24 @@ public final class PropertiesPanel: NSView {
 		Array(Set(project.styles.keys).union(TextStyle.offered)).sorted()
 	}
 
+	/// One end of an overlay: how it moves, for how long, and where that
+	/// movement sits against the mark.
+	///
+	/// The placement popup is offered beside the length and only where there is
+	/// a length — a cut is an instant and has nothing to place, which is the
+	/// same reason the file leaves `at:` off one.
+	///
+	/// `usually` is where this end's movement sits when nobody says, and it is a
+	/// different word at the two ends — `after` the first mark, `before` the
+	/// last. The note is written from it rather than from the row's name,
+	/// because that asymmetry is the one thing somebody will meet and not
+	/// believe, and it deserves saying where the choice is made rather than
+	/// being measured out of a render.
 	private func transitionRow(_ name: String, _ transition: Overlay.Transition,
+	                           at placement: Overlay.Transition.Placement,
+	                           usually: Overlay.Transition.Placement,
 	                           _ set: @escaping (Overlay.Transition) -> Void,
+	                           sits: @escaping (Overlay.Transition.Placement) -> Void,
 	                           canFall: Bool = false) {
 		// "Fall" is offered for effects only: a caption cannot run out, and a
 		// spinner has nothing to run out of.
@@ -1544,8 +1566,21 @@ public final class PropertiesPanel: NSView {
 			})
 			controls.append(label(
 				{ if case .fall = transition { return "seconds to empty" } else { return "seconds" } }()))
+			let places = Overlay.Transition.Placement.allCases
+			controls.append(pop(places.map(\.title),
+			                    selected: places.firstIndex(of: placement) ?? 0) { pick in
+				sits(places[pick])
+			})
 		}
-		field(name, controls)
+		field(name, controls, note: transition.duration > 0
+			? (usually == .after
+				? "`\(usually.title)` by default: it starts moving when the clip does. "
+					+ "`before` finishes it there, so the overlay is already fully on for "
+					+ "the clip's first frame"
+				: "`\(usually.title)` by default: it has finished leaving by the time the "
+					+ "clip ends. `after` starts it there, so the overlay is still going "
+					+ "when the next one is up")
+			: "an instant, so there is nothing to place either side of the mark")
 	}
 
 	// MARK: - what moves
