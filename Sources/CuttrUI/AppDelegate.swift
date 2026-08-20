@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// file, because two untitled projects have the same URL — none — and would
 	/// otherwise share one scene window between them.
 	private var sceneOwners: [ObjectIdentifier: ObjectIdentifier] = [:]
+	/// The palette on `⇧⌘P`, while it is up.
+	private var palette: DocumentPalette?
 
 	func applicationDidFinishLaunching(_ notification: Notification) {
 		NSApp.mainMenu = MainMenu.build()
@@ -250,6 +252,160 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// two different URLs, and noting both puts the same document in the menu
 	/// twice under the same name — which looks like a bug in the menu and is
 	/// really a bug at the call site.
+	// MARK: - Which document am I in
+
+	/// The delegate, for the windows that need to ask it something.
+	static var shared: AppDelegate? { NSApp.delegate as? AppDelegate }
+
+	/// One document open, as anything that lists them needs it.
+	///
+	/// One enumeration, because there are two things that show this list — the
+	/// menu behind the document's name and the palette on `⇧⌘P` — and two
+	/// enumerations of the same thing come apart.
+	struct OpenDocument {
+		var name: String
+		var kind: Theme.Kind
+		/// The project a take belongs to, when one that is open owns it.
+		var project: String?
+		var window: NSWindow?
+	}
+
+	/// Every document open: the projects, and under each the takes it is made
+	/// of, then the takes no open project owns, then the scenes.
+	///
+	/// This is what replaced the window tab bar. A tab bar spends a permanent
+	/// row of every window answering a question somebody asks a few times an
+	/// hour, and it answers it in the one place the bar already says: the
+	/// document's name, top left.
+	func openDocuments() -> [OpenDocument] {
+		var out: [OpenDocument] = []
+		var owned = Set<ObjectIdentifier>()
+
+		for composer in composers {
+			out.append(OpenDocument(name: composer.composeDocument.displayName,
+			                        kind: .scene, project: nil, window: composer.window))
+			let paths = Set(composer.composeDocument.takes.map(\.url.standardizedFileURL))
+			for controller in controllers
+			where controller.takeDocument.url.map({ paths.contains($0.standardizedFileURL) }) == true {
+				owned.insert(ObjectIdentifier(controller))
+				out.append(OpenDocument(name: controller.takeDocument.displayName,
+				                        kind: .take,
+				                        project: composer.composeDocument.displayName,
+				                        window: controller.window))
+			}
+		}
+		// And the takes no open project owns. Said plainly rather than filed
+		// under an empty parenthesis: a take can be opened on its own, and that
+		// is not a fault.
+		for controller in controllers where !owned.contains(ObjectIdentifier(controller)) {
+			out.append(OpenDocument(name: controller.takeDocument.displayName,
+			                        kind: .take, project: nil, window: controller.window))
+		}
+		for scene in scenes {
+			out.append(OpenDocument(name: scene.sceneDocument.name,
+			                        kind: .section, project: nil, window: scene.window))
+		}
+		return out
+	}
+
+	func documentsMenu(for current: NSWindow?) -> NSMenu {
+		let menu = NSMenu()
+		var wasTake = false
+		for document in openDocuments() {
+			// A separator where the takes stop belonging to anything.
+			if document.kind == .take, document.project == nil, wasTake, !menu.items.isEmpty {
+				menu.addItem(.separator())
+				wasTake = false
+			}
+			if document.kind == .take, document.project != nil { wasTake = true }
+			menu.addItem(item(for: document.window, name: document.name, kind: document.kind,
+			                  under: document.project, current: current))
+		}
+		return menu
+	}
+
+	private func item(for window: NSWindow?, name: String, kind: Theme.Kind,
+	                  under project: String?, current: NSWindow?) -> NSMenuItem {
+		let item = NSMenuItem(title: name, action: #selector(goToDocument(_:)), keyEquivalent: "")
+		item.target = self
+		item.representedObject = window
+		item.image = Theme.symbol(kind, size: 12)
+		// The tick has to be readable at a glance, including when the list is a
+		// list of one: with a single document open the menu should still look
+		// like an answer to "which am I in" rather than like a stray item.
+		item.state = window === current ? .on : .off
+		if let project {
+			item.indentationLevel = 1
+			item.toolTip = "in \(project)"
+		}
+		return item
+	}
+
+	/// For the tests: a delegate holding these windows, without the application
+	/// having opened them.
+	func adoptForTesting(composers: [ComposeWindowController] = [],
+	                     controllers: [MainWindowController] = [],
+	                     scenes: [SceneWindowController] = []) {
+		self.composers = composers
+		self.controllers = controllers
+		self.scenes = scenes
+	}
+
+	@objc func goToDocument(_ sender: NSMenuItem) {
+		guard let window = sender.representedObject as? NSWindow else { return }
+		NSApp.activate(ignoringOtherApps: true)
+		window.makeKeyAndOrderFront(nil)
+	}
+
+	/// The keyboard path, which must not regress now that the tabs are gone:
+	/// `⌘⇧[` and `⌘⇧]` still walk the open documents in the order the menu
+	/// lists them.
+	/// `⇧⌘P`: the same list, for a hand on the keyboard.
+	///
+	/// Held while it is up, because a panel whose only reference is the window
+	/// it put itself in front of is deallocated the moment it is ordered out —
+	/// the same lesson the window controllers above record.
+	@objc func showDocumentPalette(_ sender: Any?) {
+		guard let host = NSApp.keyWindow ?? openDocuments().compactMap(\.window).first else { return }
+		let entries = openDocuments().map { document in
+			DocumentPalette.Entry(
+				name: document.name,
+				detail: document.project.map { "in \($0)" } ?? kindName(document.kind),
+				kind: document.kind, window: document.window)
+		}
+		guard !entries.isEmpty else { return }
+		let palette = DocumentPalette(entries) { [weak self] entry in
+			guard let window = entry.window else { return }
+			NSApp.activate(ignoringOtherApps: true)
+			window.makeKeyAndOrderFront(nil)
+			self?.palette = nil
+		}
+		self.palette = palette
+		palette.show(over: host)
+	}
+
+	/// What a document is, when it is not filed under something else.
+	private func kindName(_ kind: Theme.Kind) -> String {
+		switch kind {
+		case .take: return "take"
+		case .scene: return "project"
+		case .section: return "scene"
+		default: return ""
+		}
+	}
+
+	@objc func nextDocument(_ sender: Any?) { step(by: 1) }
+	@objc func previousDocument(_ sender: Any?) { step(by: -1) }
+
+	private func step(by offset: Int) {
+		let open = openDocuments().compactMap(\.window)
+		guard open.count > 1 else { return }
+		let here = open.firstIndex { $0.isKeyWindow } ?? 0
+		let landing = (here + offset + open.count) % open.count
+		NSApp.activate(ignoringOtherApps: true)
+		open[landing].makeKeyAndOrderFront(nil)
+	}
+
 	static func remember(_ url: URL) {
 		guard url.pathExtension.lowercased() == "cuttrproj" else { return }
 		NSDocumentController.shared.noteNewRecentDocumentURL(url.standardizedFileURL.resolvingSymlinksInPath())

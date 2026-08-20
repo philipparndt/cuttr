@@ -113,22 +113,31 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		self.composeDocument = document
 		let window = NSWindow(
 			contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
-			styleMask: [.titled, .closable, .miniaturizable, .resizable],
+			styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
 			backing: .buffered, defer: false)
+		window.titlebarAppearsTransparent = true
 		window.appearance = NSAppearance(named: .darkAqua)
 		window.backgroundColor = Theme.background
 		window.minSize = NSSize(width: 900, height: 600)
-		// Takes and projects are tabs of one window rather than windows of
-		// their own.
+		// Each document is a plain window, and the bar says which one.
 		//
-		// The system's own tabbing rather than a tab bar of this program's
-		// making: it is the bar everybody already knows, it comes with the
-		// keyboard shortcuts and the tab-overview gesture, and it costs two
-		// lines against a view-controller hierarchy. What it fixes is not
-		// tidiness — two windows the same size, both centred, sit exactly on
-		// top of each other, and the one underneath may as well not exist.
-		window.tabbingIdentifier = "cuttr"
-		window.tabbingMode = .preferred
+		// These were tabs of one window, on the system's own tabbing. What that
+		// fixed was real — two windows the same size, both centred, sit exactly
+		// on top of each other and the one underneath may as well not exist —
+		// but it cost a permanent row in every window to answer a question
+		// somebody asks a few times an hour, and the bar already answers it in
+		// the one place anybody looks: the document's name, top left. So the
+		// name lists every document open and takes you to one.
+		//
+		// This is a change in how the program behaves in the system, and worth
+		// knowing about: there is no tab bar, no tab overview and no dragging a
+		// tab out. In their place macOS's own window handling does the work —
+		// `⌘\`` cycles the windows and the Window menu lists them — and
+		// `⌘⇧[` / `⌘⇧]` walk the documents in the order the name's menu shows
+		// them, so the keyboard path is the one it was.
+		window.tabbingMode = .disallowed
+		// One band at the top, and the bar is it. See `DocumentBar.height`.
+		window.titleVisibility = .hidden
 		super.init(window: window)
 		window.delegate = self
 		build()
@@ -423,6 +432,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		bar.addTrailing(renderButton)
 
 		bar.onPlayPause = { [weak self] in self?.playPressed() }
+		bar.documents = { [weak self] in
+			AppDelegate.shared?.documentsMenu(for: self?.window)
+		}
 	}
 
 	/// The controls that belong to the picture, in the corner of the picture.

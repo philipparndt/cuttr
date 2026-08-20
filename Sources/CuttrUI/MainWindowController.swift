@@ -84,26 +84,37 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		self.takeDocument = document
 		let window = NSWindow(
 			contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
-			// No `.fullSizeContentView`: the bar along the top is a real strip
-			// with the clock in it, and under a transparent titlebar the
-			// document's name ends up behind the traffic lights.
-			styleMask: [.titled, .closable, .miniaturizable, .resizable],
+			// `.fullSizeContentView`, so the content runs to the top of the
+			// frame and the bar stands in the whole title band — see
+			// `DocumentBar.height`. The old objection to this was that controls
+			// ended up behind the traffic lights; the answer is
+			// `DocumentBar.trafficLights`, which is where the first of them
+			// starts.
+			styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
 			backing: .buffered, defer: false)
-		window.titlebarAppearsTransparent = false
+		window.titlebarAppearsTransparent = true
 		window.appearance = NSAppearance(named: .darkAqua)
 		window.backgroundColor = Theme.background
 		window.minSize = NSSize(width: 900, height: 600)
-		// Takes and projects are tabs of one window rather than windows of
-		// their own.
+		// Each document is a plain window, and the bar says which one.
 		//
-		// The system's own tabbing rather than a tab bar of this program's
-		// making: it is the bar everybody already knows, it comes with the
-		// keyboard shortcuts and the tab-overview gesture, and it costs two
-		// lines against a view-controller hierarchy. What it fixes is not
-		// tidiness — two windows the same size, both centred, sit exactly on
-		// top of each other, and the one underneath may as well not exist.
-		window.tabbingIdentifier = "cuttr"
-		window.tabbingMode = .preferred
+		// These were tabs of one window, on the system's own tabbing. What that
+		// fixed was real — two windows the same size, both centred, sit exactly
+		// on top of each other and the one underneath may as well not exist —
+		// but it cost a permanent row in every window to answer a question
+		// somebody asks a few times an hour, and the bar already answers it in
+		// the one place anybody looks: the document's name, top left. So the
+		// name lists every document open and takes you to one.
+		//
+		// This is a change in how the program behaves in the system, and worth
+		// knowing about: there is no tab bar, no tab overview and no dragging a
+		// tab out. In their place macOS's own window handling does the work —
+		// `⌘\`` cycles the windows and the Window menu lists them — and
+		// `⌘⇧[` / `⌘⇧]` walk the documents in the order the name's menu shows
+		// them, so the keyboard path is the one it was.
+		window.tabbingMode = .disallowed
+		// One band at the top, and the bar is it. See `DocumentBar.height`.
+		window.titleVisibility = .hidden
 		super.init(window: window)
 		window.delegate = self
 		build()
@@ -472,6 +483,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 
 		bar.setUp = setup
+		bar.documents = { [weak self] in
+			AppDelegate.shared?.documentsMenu(for: self?.window)
+		}
 		bar.onPlayPause = { [weak self] in self?.playSelectionOrToggle() }
 		// The button shows what pressing it will do, so it has to hear about
 		// the tape starting and stopping from anywhere — `space`, a menu item,

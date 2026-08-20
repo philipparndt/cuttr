@@ -20,8 +20,22 @@ import CuttrKit
 @MainActor
 public final class DocumentBar: NSView {
 
-	/// The height both windows give it.
-	public static let height: CGFloat = 38
+	/// The height every window gives it.
+	///
+	/// Tall, because it *is* the title bar. The window draws no separate one:
+	/// the content runs to the top of the frame, the titlebar is transparent,
+	/// and this strip stands in the whole of that band. One row of furniture
+	/// where there were two, and the document's name sits where a window's
+	/// title has always sat.
+	public static let height: CGFloat = 52
+
+	/// How far in the first thing starts, so it clears the traffic lights.
+	///
+	/// This is the reason the program refused `.fullSizeContentView` for so
+	/// long — under a transparent titlebar the alignment field ended up behind
+	/// the close button. The controls have moved since, and the answer to the
+	/// old objection is one number rather than a different window style.
+	public static let trafficLights: CGFloat = 78
 
 	/// The setting-up controls, shown in a popover from the document's name.
 	///
@@ -30,7 +44,6 @@ public final class DocumentBar: NSView {
 	/// checked occasionally, and in the way for the rest of the session.
 	public var setUp: NSView? {
 		didSet {
-			name.isEnabled = setUp != nil
 			more.isHidden = setUp == nil
 			showGroup()
 			setName(documentName)
@@ -45,6 +58,16 @@ public final class DocumentBar: NSView {
 		group.isHidden = !anything
 		divider.isHidden = !anything
 	}
+
+	/// Every document open, for the menu behind the name.
+	///
+	/// A document's name opening a list of documents is what a name is *for*.
+	/// The take's files and its alignment were behind it until now, and they
+	/// were never that: one is "which document am I in", the other is "what is
+	/// this document made of", and putting the second behind the first is what
+	/// made it wrong. The rule the bar follows now — the leading group is the
+	/// document you are in, the trailing group is what this window does with it.
+	public var documents: (() -> NSMenu?)?
 
 	/// Rolling the tape, from the bar that says where the tape is.
 	///
@@ -116,11 +139,11 @@ public final class DocumentBar: NSView {
 		])
 
 		name.isBordered = false
-		name.isEnabled = false
+		name.isEnabled = true
 		name.bezelStyle = .inline
 		name.imagePosition = .noImage
 		name.target = self
-		name.action = #selector(showSetUp)
+		name.action = #selector(showDocuments)
 		name.setContentCompressionResistancePriority(
 			NSLayoutConstraint.Priority(1), for: .horizontal)
 
@@ -206,7 +229,7 @@ public final class DocumentBar: NSView {
 		// and then every message that arrives with one arrives in a different
 		// place.
 		NSLayoutConstraint.activate([
-			name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+			name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.trafficLights),
 			name.centerYAnchor.constraint(equalTo: centerYAnchor),
 
 			// The rule, then the group: a clear gap either side of it, so the
@@ -254,11 +277,10 @@ public final class DocumentBar: NSView {
 		documentName = text
 		name.attributedTitle = NSAttributedString(
 			string: text,
-			attributes: [.font: Theme.bodyStrong,
-			             .foregroundColor: setUp == nil ? Theme.dimText : Theme.text])
-		let tip = setUp == nil ? nil : "What this take is made of, and how the two line up"
-		name.toolTip = tip
-		more.toolTip = tip
+			attributes: [.font: Theme.bodyStrong, .foregroundColor: Theme.text])
+		name.toolTip = "Which document this is \u{2014} and every other one that is open"
+		more.toolTip = setUp == nil
+			? nil : "What this take is made of, and how the two line up"
 	}
 
 	/// Where the playhead is. Always, in every mode — that is the point.
@@ -304,6 +326,12 @@ public final class DocumentBar: NSView {
 	// MARK: - The popover behind the name
 
 	@objc private func playTapped() { onPlayPause?() }
+
+	@objc private func showDocuments() {
+		guard let menu = documents?(), !menu.items.isEmpty else { return }
+		let below = NSPoint(x: 0, y: name.bounds.maxY + 4)
+		menu.popUp(positioning: nil, at: below, in: name)
+	}
 
 	@objc private func showSetUp() {
 		guard let content = setUp else { return }

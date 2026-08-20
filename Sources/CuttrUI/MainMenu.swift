@@ -245,6 +245,16 @@ enum MainMenu {
 		let window = NSMenu(title: "Window")
 		window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
 		window.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+		window.addItem(.separator())
+		// The keyboard path through the open documents, which the tab bar used
+		// to own. It walks them in the order the name's menu lists them:
+		// projects, each with its takes under it.
+		window.addItem(command("Go to Document…",
+		                       #selector(AppDelegate.showDocumentPalette(_:)), "p", [.command, .shift]))
+		window.addItem(command("Previous Document",
+		                       #selector(AppDelegate.previousDocument(_:)), "[", [.command, .shift]))
+		window.addItem(command("Next Document",
+		                       #selector(AppDelegate.nextDocument(_:)), "]", [.command, .shift]))
 		windowItem.submenu = window
 		main.addItem(windowItem)
 		NSApp.windowsMenu = window

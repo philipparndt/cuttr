@@ -157,7 +157,11 @@ import Testing
 		let clock = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
 		let status = bar.statusForTesting.convert(bar.statusForTesting.bounds, to: bar)
 
-		#expect(name.minX < 20, "the name is not on the left: \(name)")
+		// After the traffic lights, because the bar *is* the title bar now: the
+		// content runs to the top of the frame and this strip stands in the
+		// whole of that band.
+		#expect(abs(name.minX - DocumentBar.trafficLights) < 1,
+		        "the name is not clear of the traffic lights: \(name)")
 		#expect(abs(clock.midX - bar.bounds.midX) < 12,
 		        "the clock is not centred: \(clock.midX) against \(bar.bounds.midX)")
 		#expect(status.maxX > bar.bounds.width - 140, "the news is not on the right: \(status)")
@@ -224,21 +228,23 @@ import Testing
 		#expect(bar.progressForTesting.isHidden)
 	}
 
-	/// The setting-up controls are behind an ellipsis beside the name, and it is
-	/// only there when there is something behind it.
+	/// The name is the way to the other documents; the ellipsis is the way to
+	/// this take's files, and it is only there when there are some.
 	///
-	/// It was a `⌄` glued onto the end of the name with two spaces — so the mark
-	/// sat on the text's baseline rather than on the row's centre, and moved
-	/// every time the name changed length. The name is only ever the name now.
+	/// The two used to be one control: a `⌄` glued onto the end of the name with
+	/// two spaces, opening the take's files. That was wrong twice over — the
+	/// mark sat on the text's baseline rather than the row's centre, and a
+	/// document's name opening "what is this document made of" is not what a
+	/// name is for. A name opening a list of documents is.
 	@Test func theNameIsAWayIntoTheSetUp() {
 		let bar = self.bar()
 		bar.setName("mia-take-1")
-		#expect(bar.nameForTesting.isEnabled == false)
+		// Always a way in: every window has documents, only a take has files.
+		#expect(bar.nameForTesting.isEnabled)
 		#expect(bar.moreForTesting.isHidden, "an ellipsis with nothing behind it")
 		#expect(bar.nameForTesting.attributedTitle.string == "mia-take-1")
 
 		bar.setUp = TakeSetup()
-		#expect(bar.nameForTesting.isEnabled)
 		#expect(bar.moreForTesting.isHidden == false)
 		// The name is the name, whatever is behind it.
 		#expect(bar.nameForTesting.attributedTitle.string == "mia-take-1")

@@ -1560,3 +1560,128 @@ import Testing
 		window.close()
 	}
 }
+
+/// The document's name is the switcher.
+///
+/// A tab bar spends a permanent row of every window answering a question
+/// somebody asks a few times an hour, and it answers it in the one place the bar
+/// already says: the name, top left. So the name lists every document open.
+///
+/// A document's name opening a list of documents is what a name is *for*. The
+/// take's files and its alignment were behind it until now, and they were never
+/// that: one is "which document am I in", the other is "what is this document
+/// made of".
+@Suite @MainActor struct DocumentSwitcherTests {
+
+	/// The name is the way to the list; the `…` is the way to the take's files,
+	/// and they are two different controls.
+	@Test func theNameAndTheEllipsisAreDifferentDoors() {
+		_ = NSApplication.shared
+		let bar = DocumentBar()
+		bar.setName("mia-take-1")
+		bar.setUp = TakeSetup()
+
+		// The name is a way in whether or not the window has a set-up popover:
+		// every window has documents, only a take has files.
+		#expect(bar.nameForTesting.isEnabled)
+		#expect(bar.nameForTesting.action != bar.moreForTesting.action,
+		        "the name and the ellipsis do the same thing")
+
+		let plain = DocumentBar()
+		plain.setName("dingsda")
+		#expect(plain.nameForTesting.isEnabled, "a window with no set-up still has documents")
+		#expect(plain.moreForTesting.isHidden)
+	}
+
+	/// One document open is still a list, and the tick still says which.
+	@Test func theTickIsReadableEvenInAListOfOne() {
+		_ = NSApplication.shared
+		let delegate = AppDelegate()
+		let controller = ComposeWindowController(document: ComposeDocument())
+		defer { controller.window?.close() }
+		delegate.adoptForTesting(composers: [controller])
+
+		let menu = delegate.documentsMenu(for: controller.window)
+		#expect(menu.items.count == 1)
+		#expect(menu.items.first?.state == .on, "the one document open is not ticked")
+		#expect(menu.items.first?.image != nil, "no kind symbol on the row")
+
+		// And from somewhere that is not it, nothing is ticked.
+		let elsewhere = delegate.documentsMenu(for: nil)
+		#expect(elsewhere.items.allSatisfy { $0.state == .off })
+	}
+
+	/// A take shows the project it belongs to, and a take that belongs to none
+	/// says so by standing on its own rather than under an empty heading.
+	@Test func aTakeSitsUnderItsProjectOrOnItsOwn() throws {
+		_ = NSApplication.shared
+		let delegate = AppDelegate()
+		let take = MainWindowController(document: TakeDocument())
+		defer { take.window?.close() }
+		let project = ComposeWindowController(document: ComposeDocument())
+		defer { project.window?.close() }
+		delegate.adoptForTesting(composers: [project], controllers: [take])
+
+		let menu = delegate.documentsMenu(for: take.window)
+		// The take is not in the project, so it is listed on its own — after a
+		// separator, at no indent, and with no claim about a project.
+		let rows = menu.items.filter { !$0.isSeparatorItem }
+		#expect(rows.count == 2)
+		let orphan = try #require(rows.last)
+		#expect(orphan.indentationLevel == 0, "an unowned take was indented under something")
+		#expect(orphan.toolTip == nil, "an unowned take claims a project")
+		#expect(orphan.state == .on, "the take we are in is not ticked")
+	}
+}
+
+/// The palette on ⇧⌘P: type three letters, press return.
+@Suite @MainActor struct DocumentPaletteTests {
+
+	private func entries() -> [DocumentPalette.Entry] {
+		[
+			.init(name: "dingsda", detail: "project", kind: .scene, window: nil),
+			.init(name: "mia-take-1", detail: "in dingsda", kind: .take, window: nil),
+			.init(name: "walter-take-2", detail: "in dingsda", kind: .take, window: nil),
+			.init(name: "intro", detail: "scene", kind: .section, window: nil),
+		]
+	}
+
+	/// The letters in order, not necessarily together — which is the whole
+	/// point of typing at a list instead of reading it.
+	@Test func itMatchesTheLettersInOrder() {
+		#expect(DocumentPalette.matches("mt1", in: "mia-take-1"))
+		#expect(DocumentPalette.matches("wt2", in: "walter-take-2"))
+		#expect(DocumentPalette.matches("ding", in: "dingsda"))
+		#expect(!DocumentPalette.matches("1tm", in: "mia-take-1"),
+		        "the order does not matter, and it should")
+		#expect(!DocumentPalette.matches("zz", in: "mia-take-1"))
+	}
+
+	@Test func typingNarrowsItAndEmptyShowsEverything() {
+		_ = NSApplication.shared
+		let palette = DocumentPalette(entries()) { _ in }
+		#expect(palette.shownForTesting.count == 4)
+
+		palette.filter("mt1")
+		#expect(palette.shownForTesting.map(\.name) == ["mia-take-1"])
+
+		// The detail is matched too, so "dingsda" finds the project and
+		// everything filed under it.
+		palette.filter("dingsda")
+		#expect(palette.shownForTesting.count == 3)
+
+		palette.filter("")
+		#expect(palette.shownForTesting.count == 4)
+
+		palette.filter("qqq")
+		#expect(palette.shownForTesting.isEmpty)
+	}
+
+	/// A take says which project it is in; anything else says what it is, rather
+	/// than showing an empty parenthesis.
+	@Test func everyRowSaysWhatItIs() {
+		for entry in entries() {
+			#expect(!entry.detail.isEmpty, "\(entry.name) says nothing about itself")
+		}
+	}
+}

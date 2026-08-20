@@ -43,8 +43,10 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		self.projectURL = projectURL
 		let window = NSWindow(
 			contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
-			styleMask: [.titled, .closable, .miniaturizable, .resizable],
+			styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
 			backing: .buffered, defer: false)
+		window.titlebarAppearsTransparent = true
+		window.titleVisibility = .hidden
 		window.appearance = NSAppearance(named: .darkAqua)
 		window.backgroundColor = Theme.background
 		window.minSize = NSSize(width: 860, height: 560)
@@ -135,6 +137,9 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		sceneDocument.onChange = { [weak self] in self?.reload() }
 
 		bar.setUp = setup
+		bar.documents = { [weak self] in
+			AppDelegate.shared?.documentsMenu(for: self?.window)
+		}
 		bar.onPlayPause = { [weak self] in self?.togglePlay(nil) }
 		setup.onScene = { [weak self] name in
 			self?.sceneDocument.show(name)
