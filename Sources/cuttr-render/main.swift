@@ -38,6 +38,16 @@ func usage() -> Never {
 	            An anchor is a person: rename one to `mia` and clips she speaks
 	            in are named after her.
 
+	  --speakers <take.cuttr> [--truth labels] [--method m] [--voices n]
+	            work out who is speaking in each line of that take's transcript,
+	            and print it. With --truth, score it against a file of hand-made
+	            labels — a time and a name per line, see Tests/Fixtures — and
+	            print the accuracy, which is the only honest way to decide
+	            whether a method is worth offering at all.
+	            Methods: timbre (the default; no model, nothing fetched),
+	            voice-analytics, embedding, mouth. See docs/speakers.md for what
+	            each one scored on the take this was built against.
+
 	  --faces   what Vision can see in one frame, and where. Answers "is there
 	            a face here for an anchor to lock on to?" before spending a
 	            minute finding out, and prints the coordinates an anchor's
@@ -56,6 +66,11 @@ var facesOf: String?
 var facesAt = 0.0
 var analyse = false
 var speakingIn: String?
+var speakersIn: String?
+var truthPath: String?
+var method = SpeakerProposal.Method.timbre
+var voices = 2
+var mouthSamples = SpeakerProposal.mouthSamples
 var spanFrom = 0.0
 var spanTo = 0.0
 var index = 0
@@ -71,6 +86,27 @@ while index < arguments.count {
 		index += 1
 		guard index < arguments.count else { usage() }
 		facesOf = arguments[index]
+	case "--speakers":
+		index += 1
+		guard index < arguments.count else { usage() }
+		speakersIn = arguments[index]
+	case "--mouth-samples":
+		index += 1
+		guard index < arguments.count, let value = Int(arguments[index]) else { usage() }
+		mouthSamples = value
+	case "--truth":
+		index += 1
+		guard index < arguments.count else { usage() }
+		truthPath = arguments[index]
+	case "--method":
+		index += 1
+		guard index < arguments.count,
+		      let chosen = SpeakerProposal.Method(rawValue: arguments[index]) else { usage() }
+		method = chosen
+	case "--voices":
+		index += 1
+		guard index < arguments.count, let value = Int(arguments[index]), value >= 2 else { usage() }
+		voices = value
 	case "--speaking":
 		index += 1
 		guard index < arguments.count else { usage() }
@@ -100,6 +136,97 @@ while index < arguments.count {
 func fail(_ message: String) -> Never {
 	FileHandle.standardError.write("cuttr-render: \(message)\n".data(using: .utf8)!)
 	exit(1)
+}
+
+if let speakersIn {
+	let takeURL = URL(fileURLWithPath: speakersIn).standardizedFileURL
+	let directory = takeURL.deletingLastPathComponent()
+	do {
+		let take = try TakeReader.read(try String(contentsOf: takeURL, encoding: .utf8))
+		guard let wordsPath = take.words?.path else { fail("that take has no words to label") }
+		let sidecar = URL(fileURLWithPath: wordsPath, relativeTo: directory).standardizedFileURL
+		let said = Transcript.read(try String(contentsOf: sidecar, encoding: .utf8))
+		guard !said.isEmpty else { fail("that take's sidecar is empty") }
+
+		// The recorder when there is one, on its own clock, with the take's
+		// offset relating it to the video's — the same choice `Transcriber`
+		// makes, for the same reason: it is the better microphone.
+		let listenTo: URL
+		let offset: Double
+		if let audio = take.audio {
+			listenTo = URL(fileURLWithPath: audio.file, relativeTo: directory).standardizedFileURL
+			offset = take.video == nil ? 0 : audio.offset
+		} else if let video = take.video {
+			listenTo = URL(fileURLWithPath: video, relativeTo: directory).standardizedFileURL
+			offset = 0
+		} else {
+			fail("that take has nothing to listen to")
+		}
+
+		// The people this take already follows, for the method that looks at
+		// the picture rather than listening to it.
+		var faces: [SpeakerDetector.Candidate] = []
+		if method.watchesThePicture {
+			faces = take.anchors.compactMap { anchor in
+				guard let sidecar = anchor.path,
+				      let text = try? String(
+					      contentsOf: URL(fileURLWithPath: sidecar, relativeTo: directory),
+					      encoding: .utf8)
+				else { return nil }
+				return SpeakerDetector.Candidate(name: anchor.name, path: AnchorPath.read(text))
+			}
+			guard !faces.isEmpty else { fail("that take has no solved anchors to watch") }
+		}
+		let videoURL = take.video.map {
+			URL(fileURLWithPath: $0, relativeTo: directory).standardizedFileURL
+		}
+
+		let clock = Date()
+		let offer = try await SpeakerProposal.propose(
+			for: said, audio: listenTo, offset: offset, method: method, voices: voices,
+			locale: take.words?.locale ?? "", video: videoURL, faces: faces,
+			samples: mouthSamples)
+		let took = Date().timeIntervalSince(clock)
+
+		let lines = said.lines
+		print("\(method.rawValue): \(lines.count) lines, \(offer.byLine.count) placed,"
+			+ " \(offer.skipped) too short or too quiet,"
+			+ String(format: " separation %.3f, %.1fs", offer.separation, took))
+
+		guard let truthPath else {
+			for line in lines {
+				let who = offer.byLine[line.lowerBound] ?? "\u{2014}"
+				print(who.padding(toLength: 12, withPad: " ", startingAt: 0)
+					+ " " + said.phrase(line, limit: 9))
+			}
+			exit(0)
+		}
+
+		// Labels are a time and a name, with no words in them — see
+		// `SpeakerLabels`. They are matched to the take by time, so a change to
+		// how lines are divided cannot silently shift every label by one.
+		let truth = SpeakerLabels.read(
+			try String(contentsOf: URL(fileURLWithPath: truthPath), encoding: .utf8))
+		guard !truth.isEmpty else { fail("no labels in \(truthPath)") }
+		let score = truth.score(offer.byLine, against: said)
+		guard score.labelled > 0 else {
+			fail("none of the \(truth.count) labels line up with this take's lines —"
+				+ " are they the same recording?")
+		}
+		print(String(format: "accuracy %.1f%% of the %d lines labelled, %.1f%% of the %d it placed",
+		             score.accuracy * 100, score.labelled,
+		             score.accuracyWherePlaced * 100, score.placed))
+		print(String(format: "always answering the commonest: %.1f%%", truth.commonest * 100))
+		print("wrong lines:")
+		for line in score.wrong {
+			print(String(format: "  %@  said %@ truth %@", Timecode.string(line.at),
+			             (line.said ?? "\u{2014}").padding(toLength: 12, withPad: " ", startingAt: 0),
+			             line.truth))
+		}
+	} catch {
+		fail(error.localizedDescription)
+	}
+	exit(0)
 }
 
 if let speakingIn {

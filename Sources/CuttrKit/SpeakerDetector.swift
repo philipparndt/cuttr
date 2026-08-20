@@ -39,7 +39,7 @@ public enum SpeakerDetector {
 	/// Samples at this rate. Speech opens and closes a mouth several times a
 	/// second; ten samples a second catches that without decoding every frame.
 	private static let sampleRate: Double = 10
-	private static let maximumSamples = 80
+	public static let maximumSamples = 80
 
 	/// A mouth that moves less than this is a face, not a speaker.
 	private static let stillness = 0.006
@@ -55,7 +55,34 @@ public enum SpeakerDetector {
 	public static func speaking(
 		videoURL: URL, among candidates: [Candidate], from: Double, to: Double
 	) async throws -> Finding? {
-		guard candidates.count >= 1, to > from else { return nil }
+		let scores = try await movement(
+			videoURL: videoURL, among: candidates, from: from, to: to)
+			.sorted { $0.movement > $1.movement }
+		guard let best = scores.first, best.movement > stillness else { return nil }
+		let runnerUp = scores.count > 1 ? scores[1].movement : 0
+		let margin = runnerUp > 0 ? best.movement / runnerUp : .infinity
+		guard margin >= decisiveness else { return nil }
+		return Finding(name: best.name, movement: best.movement, margin: margin)
+	}
+
+	/// How much each of these people moved their mouth, without judging it.
+	///
+	/// The number behind ``speaking(videoURL:among:from:to:)``, offered
+	/// separately because a *run* of spans is a different question from one
+	/// span. Asked line by line over a whole take, the interesting thing is not
+	/// whether any single line clears a fixed threshold — it is where the
+	/// take's own two clumps of movement lie, which is a question for
+	/// ``SpeakerClustering`` and cannot be answered a span at a time.
+	///
+	/// `samples` caps the frames decoded per span. Sixty-eight lines at eighty
+	/// samples each is five thousand seeks into a half-gigabyte file; two dozen
+	/// is enough to see a mouth open and close several times and is a minute
+	/// rather than ten.
+	public static func movement(
+		videoURL: URL, among candidates: [Candidate], from: Double, to: Double,
+		samples: Int = maximumSamples
+	) async throws -> [(name: String, movement: Double, seen: Int)] {
+		guard candidates.count >= 1, to > from else { return [] }
 		let asset = AVURLAsset(url: videoURL)
 		guard try await asset.loadTracks(withMediaType: .video).first != nil else {
 			throw AnchorError.noVideoTrack(videoURL)
@@ -66,14 +93,20 @@ public enum SpeakerDetector {
 		generator.requestedTimeToleranceAfter = .zero
 		generator.maximumSize = CGSize(width: 1280, height: 1280)
 
-		let count = min(Int((to - from) * sampleRate), maximumSamples)
-		guard count >= 4 else { return nil }
+		// At ten a second from the head of the span, not spread across it.
+		// Spread, a twelve-second line was sampled every half second — and the
+		// difference between one sample and the next is then a fact about two
+		// unrelated moments rather than about a mouth opening and closing. The
+		// cap therefore shortens *what is watched*, which is honest, instead of
+		// quietly making the measurement meaningless.
+		let count = min(Int((to - from) * sampleRate), samples)
+		guard count >= 4 else { return [] }
 
 		// One series of mouth openings per candidate.
 		var openings = [[Double]](repeating: [], count: candidates.count)
 		for index in 0 ..< count {
-			if Task.isCancelled { return nil }
-			let time = from + (to - from) * Double(index) / Double(count - 1)
+			if Task.isCancelled { return [] }
+			let time = from + Double(index) / sampleRate
 			guard let image = try? await generator.image(
 				at: CMTime(seconds: time, preferredTimescale: 600)).image else { continue }
 			let request = VNDetectFaceLandmarksRequest()
@@ -93,19 +126,17 @@ public enum SpeakerDetector {
 		// Movement, not openness: a wide smile held for a second is a big mouth
 		// that is not saying anything. What speech looks like is the *change*
 		// from one sample to the next.
-		var scores: [(name: String, movement: Double)] = []
-		for (index, series) in openings.enumerated() where series.count >= 4 {
+		var scores: [(name: String, movement: Double, seen: Int)] = []
+		for (index, series) in openings.enumerated() {
+			guard series.count >= 4 else {
+				scores.append((candidates[index].name, 0, series.count))
+				continue
+			}
 			var total = 0.0
 			for step in 1 ..< series.count { total += abs(series[step] - series[step - 1]) }
-			scores.append((candidates[index].name, total / Double(series.count - 1)))
+			scores.append((candidates[index].name, total / Double(series.count - 1), series.count))
 		}
-		scores.sort { $0.movement > $1.movement }
-
-		guard let best = scores.first, best.movement > stillness else { return nil }
-		let runnerUp = scores.count > 1 ? scores[1].movement : 0
-		let margin = runnerUp > 0 ? best.movement / runnerUp : .infinity
-		guard margin >= decisiveness else { return nil }
-		return Finding(name: best.name, movement: best.movement, margin: margin)
+		return scores
 	}
 
 	/// The face whose eyes are nearest where this person is expected to be.

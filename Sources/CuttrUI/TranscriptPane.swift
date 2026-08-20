@@ -41,6 +41,17 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	public var onClipWords: ((_ start: Double, _ end: Double) -> Void)?
 	/// Something worth saying in the window's status line.
 	public var onStatus: ((String) -> Void)?
+	/// Somebody said who is talking from this word's line on. `nil` is nobody.
+	public var onAssign: ((_ wordIndex: Int, _ slug: String?) -> Void)?
+	/// A name that is not in the cast yet, typed into the pane.
+	public var onAddSpeaker: ((_ name: String, _ wordIndex: Int?) -> Void)?
+	/// A speaker's prose name changed. Their slug does not.
+	public var onRenameSpeaker: ((_ slug: String, _ name: String) -> Void)?
+	public var onRemoveSpeaker: ((_ slug: String) -> Void)?
+	/// Work out who is speaking, and offer it.
+	public var onSuggestSpeakers: (() -> Void)?
+	/// Write down what was offered.
+	public var onAcceptSuggestions: (() -> Void)?
 
 	private let text = TranscriptText()
 	private let scroll = NSScrollView()
@@ -73,6 +84,16 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			/// ``sounds``. Selectable exactly like a word, because a laugh is
 			/// as much a thing to play or cut as a sentence is.
 			case sound(Int)
+			/// Who is speaking, at the head of the line they are speaking on,
+			/// by that line's number.
+			///
+			/// The one thing in this text that nobody said and nobody heard —
+			/// it is a label the pane writes in the margin. It is a piece all
+			/// the same, because it has the two answers every piece has: where
+			/// it sits, and what stretch of the take it is about. It stands for
+			/// its whole line, so clicking a name means that line and costs no
+			/// special case anywhere.
+			case name(line: Int)
 		}
 
 		var what: What
@@ -89,6 +110,11 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 
 		var soundIndex: Int? {
 			if case .sound(let index) = what { return index }
+			return nil
+		}
+
+		var lineIndex: Int? {
+			if case .name(let line) = what { return line }
 			return nil
 		}
 
@@ -117,6 +143,29 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	private var known: [Transcriber.Language] = []
 	/// What the menu that is open is about, on the video's clock.
 	private var pointed: (start: Double, end: Double)?
+
+	/// Who is in this take, as the take says. Parallel to the chips, and the
+	/// numbers on the chips are the keys that assign them.
+	private var cast: [Speaker] = []
+	private var shownCast: [Speaker] = []
+	/// What a model proposed, keyed by the first word of each line.
+	private var suggestions: [Int: String] = [:]
+	private var shownSuggestions: [Int: String] = [:]
+	/// One colour per speaker, worked out from the slugs. Never stored.
+	private var colours: [String: ClipColor] = [:]
+	/// The first word of each line, so a keystroke knows what it is about.
+	private var laidOutLines: [Range<Int>] = []
+	/// Where to put the caret once the pane has been laid out again.
+	///
+	/// Assigning a speaker changes the transcript, which redraws the pane and
+	/// drops the selection — so without this the second keystroke would have
+	/// nothing to be about, and labelling a take would be press-a-key,
+	/// click-a-line, press-a-key. With it, the caret walks to the next line by
+	/// itself and an interview is a run of keystrokes and nothing else.
+	private var wantedCaret: Int?
+
+	private let castRow = NSStackView()
+	private let castScroll = NSScrollView()
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
@@ -171,7 +220,20 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		scroll.drawsBackground = false
 		scroll.borderType = .noBorder
 
-		let stack = NSStackView(views: [search, scroll])
+		castRow.orientation = .horizontal
+		castRow.spacing = 4
+		castRow.alignment = .centerY
+		castRow.edgeInsets = NSEdgeInsets(top: 0, left: 2, bottom: 0, right: 2)
+		castScroll.documentView = castRow
+		castScroll.drawsBackground = false
+		castScroll.borderType = .noBorder
+		castScroll.hasHorizontalScroller = false
+		castScroll.horizontalScrollElasticity = .allowed
+		castScroll.verticalScrollElasticity = .none
+		castScroll.translatesAutoresizingMaskIntoConstraints = false
+		castScroll.heightAnchor.constraint(equalToConstant: 22).isActive = true
+
+		let stack = NSStackView(views: [search, castScroll, scroll])
 		stack.orientation = .vertical
 		stack.spacing = 6
 		stack.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
@@ -184,6 +246,7 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			stack.leadingAnchor.constraint(equalTo: leadingAnchor),
 			stack.trailingAnchor.constraint(equalTo: trailingAnchor),
 			search.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
+			castScroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
 			scroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16),
 		])
 
@@ -283,26 +346,52 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// so it returns early unless something here has actually changed. Laying
 	/// four hundred words out again on every keystroke would be waste, and it
 	/// would also drop the selection somebody was in the middle of making.
-	public func show(_ transcript: Transcript, words: Words?, sounds: [SoundEvent] = []) {
+	public func show(
+		_ transcript: Transcript, words: Words?, sounds: [SoundEvent] = [],
+		cast: [Speaker] = [], suggestions: [Int: String] = [:]
+	) {
 		let heard = sounds.sorted { $0.start < $1.start }
 		guard !shown || transcript != self.transcript || words != shownWords
-			|| heard != self.sounds else { return }
+			|| heard != self.sounds || cast != shownCast
+			|| suggestions != shownSuggestions else { return }
 		shown = true
 		shownWords = words
+		shownCast = cast
+		shownSuggestions = suggestions
 		self.transcript = transcript
 		self.sounds = heard
+		self.cast = cast
+		self.suggestions = suggestions
+		// Everybody the take names and everybody the sidecar names, in that
+		// order: a hand-edited file may name somebody the cast has not caught
+		// up with, and a speaker with no colour is worse than an extra chip.
+		var slugs = cast.map(\.slug)
+		for slug in transcript.speakers + suggestions.values.sorted()
+			where !slugs.contains(slug) { slugs.append(slug) }
+		colours = Speaker.colors(for: slugs)
 		marked = nil
 		searchedTo = 0
 		pieces = []
 		wordPieces = []
+		laidOutLines = transcript.lines
 
 		let body = NSMutableAttributedString()
 
-		/// A space before whatever comes next, unless a pause has just ended
+		/// A space before whatever comes next, unless something has just ended
 		/// the line for us.
+		///
+		/// Three ways that happens. A pause leaves a piece behind whose text
+		/// ends in a newline. A name is the margin itself and carries its own
+		/// padding. A sentence break leaves *nothing* behind — that is the
+		/// point of it — so it says so with `brokeLine`, which the next piece
+		/// clears.
+		var brokeLine = false
+
 		func separate() {
+			if brokeLine { return }
 			guard let last = pieces.last else { return }
 			if case .pause = last.what { return }
+			if case .name = last.what { return }
 			body.append(NSAttributedString(string: " ", attributes: [.font: Theme.transcript]))
 		}
 
@@ -317,6 +406,7 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			pieces.append(Piece(what: what,
 			                    range: NSRange(location: at, length: length ?? (body.length - at)),
 			                    start: start, end: end))
+			brokeLine = false
 		}
 
 		if transcript.isEmpty, heard.isEmpty {
@@ -327,14 +417,35 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 					+ " of it, W to name a clip after what is said in it.",
 				attributes: [.font: Theme.body, .foregroundColor: Theme.dimText]))
 		} else {
-			// Laid out by its silences: a line for a beat, a paragraph for a
-			// rest, and an ellipsis at the end of the line so the pause itself
-			// is on the page rather than merely implied by the white space.
+			// Laid out by its silences and its full stops — see
+			// `Transcript.silence(after:)` — with an ellipsis at the end of the
+			// line so the pause itself is on the page rather than merely implied
+			// by the white space.
+			//
+			// Every line begins with who is speaking. That is what makes the
+			// colours safe: hue alone cannot carry an identity to somebody who
+			// cannot tell rose from teal, and a name in the margin is what a
+			// transcript has looked like since transcripts were typed.
+			//
+			// The name is a fourth kind of piece, not a side-table beside them.
+			// Everything this pane does asks a piece the same two questions —
+			// where are you in the text, and what stretch of the take are you —
+			// and a name has both answers: it sits in the margin, and it stands
+			// for the line it heads. Which is also what makes clicking one mean
+			// "this line" for nothing.
 			//
 			// The sounds go in among the words at the moment they happened,
 			// which is usually in one of those silences — people laugh between
 			// sentences — so a laugh reads as the thing that came between two
-			// lines, which is what it was.
+			// lines, which is what it was. A sound keeps its own colour under
+			// somebody's name: the name says who was *speaking*, and nobody has
+			// claimed the laugh.
+			let width = labelWidth()
+			var startsALine: [Int: Int] = [:]
+			for (number, line) in laidOutLines.enumerated() {
+				startsALine[line.lowerBound] = number
+			}
+
 			var next = 0
 			func soundsBefore(_ time: Double) {
 				while next < heard.count, heard[next].start < time {
@@ -348,16 +459,37 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 				}
 			}
 
+			var onLine = 0
 			for (index, word) in transcript.words.enumerated() {
+				if let number = startsALine[index] {
+					onLine = number
+					if width > 0 {
+						let line = laidOutLines[number]
+						let span = transcript.span(line)
+						add(.name(line: number), name(for: line, width: width),
+						    from: span?.start ?? word.start, to: span?.end ?? word.end)
+					}
+				}
 				soundsBefore(word.start)
 				separate()
 				add(.word(index),
 				    NSAttributedString(string: word.text,
 				                       attributes: [.font: Theme.transcript,
-				                                    .foregroundColor: Theme.text]),
+				                                    .foregroundColor: colour(of: laidOutLines[onLine])]),
 				    from: word.start, to: word.end)
+				// What ends the line, and whether there is anything in it to
+				// point at. A silence is a stretch of the take and gets an
+				// ellipsis somebody can select, play and cut; a full stop with
+				// no air after it gets a plain newline and no piece, because
+				// there is no pause there to be about.
 				let silence = transcript.silence(after: index)
 				guard silence != .none else { continue }
+				if silence == .sentence {
+					body.append(NSAttributedString(
+						string: "\n", attributes: [.font: Theme.transcript]))
+					brokeLine = true
+					continue
+				}
 				// Only as far as the ellipsis: the newlines after it belong to
 				// the layout rather than to the silence, and a selection that
 				// runs to the end of a line should not be read as reaching into
@@ -368,12 +500,27 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			// Anything heard after the last word, or in a take where nobody
 			// said anything at all.
 			soundsBefore(.infinity)
+
+			// One paragraph style for the whole thing, so a line that wraps
+			// keeps its words under the words above and not under the name.
+			if width > 0 {
+				let style = NSMutableParagraphStyle()
+				style.lineBreakMode = .byWordWrapping
+				style.headIndent = CGFloat(width) * columnWidth
+				body.addAttribute(.paragraphStyle, value: style,
+				                  range: NSRange(location: 0, length: body.length))
+			}
 		}
 
 		quiet = true
 		text.textStorage?.setAttributedString(body)
 		text.setSelectedRange(NSRange(location: 0, length: 0))
 		quiet = false
+		if let wanted = wantedCaret {
+			wantedCaret = nil
+			putCaret(at: wanted)
+		}
+		rebuildCast()
 
 		// A take that has words says which language they were heard in, and that
 		// is a fact about this take rather than a preference: showing anything
@@ -424,11 +571,287 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		if follows { text.scrollRangeToVisible(pieces[index].range) }
 	}
 
+	// MARK: - Whose line is it
+
+	/// How wide the names' column is, in characters.
+	///
+	/// The longest name that has to fit, and no wider: a pane four hundred
+	/// characters of German wide cannot spare ten columns to say `mia`. A
+	/// suggestion is written in brackets and so needs two more.
+	private func labelWidth() -> Int {
+		var longest = 0
+		for line in laidOutLines {
+			if let slug = transcript.speaker(ofLine: line) {
+				longest = max(longest, title(slug).count)
+			} else if let slug = suggestions[line.lowerBound] {
+				longest = max(longest, title(slug).count + 2)
+			}
+		}
+		guard longest > 0 else { return 0 }
+		return min(longest, 12) + 1
+	}
+
+	/// One character of the transcript's own font. It is monospaced, which is
+	/// what lets the names line up with spaces rather than with tab stops.
+	private var columnWidth: CGFloat {
+		("0" as NSString).size(withAttributes: [.font: Theme.transcript]).width
+	}
+
+	private func title(_ slug: String) -> String {
+		cast.first { $0.slug == slug }?.title ?? slug
+	}
+
+	/// What a name is drawn in, and what its words are drawn in.
+	private func colour(of line: Range<Int>) -> NSColor {
+		guard let slug = transcript.speaker(ofLine: line),
+		      let colour = colours[slug] else { return Theme.text }
+		return Theme.speakerText(colour)
+	}
+
+	/// The name at the head of a line, padded to the column.
+	///
+	/// Confirmed: the name, in their colour, and the words after it in their
+	/// colour too. Proposed: the name in brackets and dimmed, and the words
+	/// left exactly as they were. That difference is the whole of "a
+	/// suggestion is visibly a suggestion" — an offer does not get to paint
+	/// the page, because a colour that is wrong a third of the time makes
+	/// somebody stop believing the ones that are right.
+	private func name(for line: Range<Int>, width: Int) -> NSAttributedString {
+		guard width > 0 else { return NSAttributedString() }
+		var label = ""
+		var colour = Theme.dimText
+		if let slug = transcript.speaker(ofLine: line) {
+			label = title(slug)
+			colour = colours[slug].map(Theme.speakerLabel) ?? Theme.text
+		} else if let slug = suggestions[line.lowerBound] {
+			label = "(" + title(slug) + ")"
+			colour = colours[slug].map(Theme.suggestedLabel) ?? Theme.dimText
+		}
+		if label.count > width - 1 {
+			// Trimmed before the ellipsis, so `Die grosse …` does not carry the
+			// space where the next word was going to be.
+			label = label.prefix(width - 2)
+				.trimmingCharacters(in: .whitespaces) + "…"
+		}
+		let padded = label.padding(toLength: width, withPad: " ", startingAt: 0)
+		return NSAttributedString(string: padded, attributes: [
+			.font: Theme.transcript, .foregroundColor: colour,
+		])
+	}
+
 	/// The mark a pause leaves: dim, so it reads as the shape of the take
 	/// rather than as something somebody said.
 	private func pause(_ ending: String) -> NSAttributedString {
 		NSAttributedString(string: " …" + ending,
 		                   attributes: [.font: Theme.transcript, .foregroundColor: Theme.dimText])
+	}
+
+	// MARK: - Naming who is speaking
+
+	/// A key pressed while the words have the focus.
+	///
+	/// Asked before the window's own monitor, and answers `false` unless the
+	/// caret is actually in this text — otherwise `1` would stop choosing a
+	/// clip lane everywhere else in the window. Nothing here is claimed on a
+	/// modifier, so ⌘1 goes to the menu as it always did.
+	///
+	/// Every digit is claimed once the focus is here, including one with no
+	/// speaker behind it: falling through would change the clip lane while
+	/// somebody is reading a transcript, which is a silent edit in another
+	/// pane. It says what happened instead.
+	@discardableResult
+	public func handleKey(_ event: NSEvent) -> Bool {
+		guard hasWordFocus, !transcript.isEmpty else { return false }
+		guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
+		else { return false }
+		guard let typed = event.charactersIgnoringModifiers?.lowercased(),
+		      let character = typed.first, typed.count == 1 else { return false }
+
+		if let digit = Int(String(character)), digit >= 0, digit <= 9 {
+			assignFromKey(digit)
+			return true
+		}
+		// `n` for a name nobody has typed yet, which is how the first two
+		// speakers of every take get made.
+		if character == "n" { askForNewSpeaker(); return true }
+		return false
+	}
+
+	/// Whether the caret is in the words. Public so the window can say so.
+	public var hasWordFocus: Bool {
+		guard let responder = text.window?.firstResponder else { return false }
+		return responder === text
+	}
+
+	/// What a digit means: the nth chip, and `0` for nobody.
+	func assignFromKey(_ digit: Int) {
+		guard let word = caretWord else { return }
+		if digit == 0 { assign(nil, from: word); return }
+		guard digit <= cast.count else {
+			onStatus?(cast.isEmpty
+				? "nobody in this take yet — N adds a speaker"
+				: "there is no speaker \(digit) — N adds one")
+			return
+		}
+		assign(cast[digit - 1].slug, from: word)
+	}
+
+	/// Names the line under the caret, and walks to the next one.
+	func assign(_ slug: String?, from word: Int) {
+		guard let line = laidOutLines.firstIndex(where: { $0.contains(word) }) else { return }
+		// Where the caret goes once the pane has been laid out again. Worked
+		// out here, from the lines as they are now, because assigning does not
+		// change how many there are.
+		if line + 1 < laidOutLines.count { wantedCaret = laidOutLines[line + 1].lowerBound }
+		onAssign?(word, slug)
+	}
+
+	/// Puts the caret at the head of a word, and shows the line it is in.
+	private func putCaret(at word: Int) {
+		guard let piece = wordPieces[safe: word].flatMap({ pieces[safe: $0] }) else { return }
+		let range = piece.range
+		quiet = true
+		text.setSelectedRange(NSRange(location: range.location, length: 0))
+		quiet = false
+		text.scrollRangeToVisible(range)
+	}
+
+	/// The word the caret is in, which is the line a keystroke is about.
+	///
+	/// A caret in a speaker's name means the line that name is at the head of,
+	/// which is what somebody who clicked it meant — and not the line above,
+	/// which is the word that happens to sit before it in the text.
+	var caretWord: Int? {
+		let location = text.selectedRange().location
+		if let line = line(named: location) { return laidOutLines[line].lowerBound }
+		return word(containing: location, orBefore: true)
+	}
+
+	/// Which line's name a character is in.
+	private func line(named location: Int) -> Int? {
+		for piece in pieces where NSLocationInRange(location, piece.range) {
+			return piece.lineIndex
+		}
+		return nil
+	}
+
+	/// The chips: one per speaker, numbered with the key that assigns them.
+	///
+	/// A row of buttons rather than a menu, because the number *is* the
+	/// shortcut and somebody has to be able to see what `2` will do before
+	/// they press it on forty lines.
+	private func rebuildCast() {
+		for view in castRow.arrangedSubviews { castRow.removeArrangedSubview(view); view.removeFromSuperview() }
+		guard !transcript.isEmpty else { castScroll.isHidden = true; return }
+		castScroll.isHidden = false
+
+		for (index, speaker) in cast.enumerated() {
+			let chip = NSButton(title: "\(index + 1) \(speaker.title)", target: self,
+			                    action: #selector(chipPressed(_:)))
+			chip.bezelStyle = .inline
+			chip.controlSize = .small
+			chip.font = Theme.label
+			chip.tag = index
+			chip.contentTintColor = colours[speaker.slug].map(Theme.speakerLabel) ?? Theme.text
+			chip.toolTip = "Press \(index + 1) in the words to say \(speaker.title) is speaking,"
+				+ " from that line on."
+			let menu = NSMenu()
+			menu.addItem(item("Rename \(speaker.title)…", #selector(renameChip(_:))))
+			menu.addItem(item("Remove \(speaker.title)", #selector(removeChip(_:))))
+			for entry in menu.items { entry.tag = index }
+			chip.menu = menu
+			castRow.addArrangedSubview(chip)
+		}
+
+		if !suggestions.isEmpty || cast.count >= 2 {
+			let guess = NSButton(title: "Guess", target: self, action: #selector(guessPressed))
+			guess.bezelStyle = .inline
+			guess.controlSize = .small
+			guess.font = Theme.label
+			guess.contentTintColor = Theme.dimText
+			guess.toolTip = "Works out who is speaking, on this Mac, and offers it in brackets."
+				+ "\nNothing is written until you keep it, and nothing is uploaded."
+			castRow.addArrangedSubview(guess)
+		}
+
+		let add = NSButton(title: cast.isEmpty ? "N  Add a speaker" : "+", target: self,
+		                   action: #selector(addPressed))
+		add.bezelStyle = .inline
+		add.controlSize = .small
+		add.font = Theme.label
+		add.contentTintColor = Theme.dimText
+		add.toolTip = "Add somebody to this take. N does the same from the words."
+		castRow.addArrangedSubview(add)
+
+		if !suggestions.isEmpty {
+			let accept = NSButton(title: suggestions.count == 1
+			                      ? "Keep 1 guess" : "Keep \(suggestions.count) guesses", target: self,
+			                      action: #selector(acceptPressed))
+			accept.bezelStyle = .inline
+			accept.controlSize = .small
+			accept.font = Theme.label
+			accept.contentTintColor = Theme.accent
+			accept.toolTip = "Writes the bracketed names into the file, as though they had been"
+				+ " typed. Until then they are a guess and nothing else."
+			castRow.addArrangedSubview(accept)
+		}
+		castRow.layoutSubtreeIfNeeded()
+		castRow.frame.size = castRow.fittingSize
+	}
+
+	@objc private func chipPressed(_ sender: NSButton) {
+		guard sender.tag < cast.count, let word = caretWord else {
+			onStatus?("click a line first — a speaker is assigned to a line")
+			return
+		}
+		assign(cast[sender.tag].slug, from: word)
+	}
+
+	@objc private func addPressed() { askForNewSpeaker() }
+
+	@objc private func acceptPressed() { onAcceptSuggestions?() }
+
+	@objc private func guessPressed() { onSuggestSpeakers?() }
+
+	@objc private func renameChip(_ sender: NSMenuItem) {
+		guard sender.tag < cast.count else { return }
+		let speaker = cast[sender.tag]
+		guard let typed = ask("Rename this speaker", note:
+			"The name is what you read. What the file points at — `\(speaker.slug)` — does not"
+			+ " change, so renaming costs one line and breaks nothing.",
+			value: speaker.title) else { return }
+		onRenameSpeaker?(speaker.slug, typed)
+	}
+
+	@objc private func removeChip(_ sender: NSMenuItem) {
+		guard sender.tag < cast.count else { return }
+		onRemoveSpeaker?(cast[sender.tag].slug)
+	}
+
+	private func askForNewSpeaker() {
+		guard let typed = ask("Who is talking?", note:
+			"A name — Mia, Oma, the interviewer. It gets the next number, and pressing that"
+			+ " number in the words says they are speaking from that line on.",
+			value: "") else { return }
+		onAddSpeaker?(typed, caretWord)
+	}
+
+	/// One field and two buttons. Split out so the two callers ask the same
+	/// way, and so a test never has to meet a modal sheet: everything above
+	/// goes through `onAddSpeaker` and `onRenameSpeaker`, which a test calls.
+	private func ask(_ title: String, note: String, value: String) -> String? {
+		let alert = NSAlert()
+		alert.messageText = title
+		alert.informativeText = note
+		alert.addButton(withTitle: "OK")
+		alert.addButton(withTitle: "Cancel")
+		let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+		field.stringValue = value
+		alert.accessoryView = field
+		alert.window.initialFirstResponder = field
+		guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+		let typed = field.stringValue.trimmingCharacters(in: .whitespaces)
+		return typed.isEmpty ? nil : typed
 	}
 
 	/// What is selected, on the video's clock: a run of words, a silence, or
@@ -481,6 +904,9 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// ellipsis is somebody pointing at the silence itself and clicking
 	/// `[laughter]` is somebody pointing at the laugh — answering either with
 	/// the sentence beside it would be answering a different question.
+	///
+	/// A name is the other way round: it *is* the line, so it falls through to
+	/// the line branch rather than being a thing of its own.
 	private func clicked(at charIndex: Int)
 		-> (start: Double, end: Double, characters: NSRange, name: String, count: Int)?
 	{
@@ -490,13 +916,16 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			let count = touched.words?.count ?? 1
 			return (touched.start, touched.end, selected, describe(selected), count)
 		}
-		if let at = pieces.firstIndex(where: { NSLocationInRange(charIndex, $0.range) }),
+		let named = line(named: charIndex)
+		if named == nil,
+		   let at = pieces.firstIndex(where: { NSLocationInRange(charIndex, $0.range) }),
 		   pieces[at].wordIndex == nil {
 			let piece = pieces[at]
 			return (piece.start, piece.end, piece.range,
 			        piece.soundIndex.map { "[\(sounds[$0].label)]" } ?? "this pause", 1)
 		}
-		guard let index = word(containing: charIndex, orBefore: true) else { return nil }
+		guard let index = named.map({ laidOutLines[$0].lowerBound })
+			?? word(containing: charIndex, orBefore: true) else { return nil }
 		let line = transcript.segment(around: index)
 		guard let span = transcript.span(line), let characters = characters(of: line)
 		else { return nil }
@@ -507,14 +936,35 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// What a selection is, said out loud: the words in it, else the sounds in
 	/// it, else how long the silence was.
 	private func describe(_ selected: NSRange) -> String {
-		let hit = pieces.filter { NSIntersectionRange($0.range, selected).length > 0 }
-		let spoken = hit.compactMap(\.wordIndex)
-		if let first = spoken.min(), let last = spoken.max() {
-			return spoken.count == 1 ? "this word" : "these \(last - first + 1) words"
+		let hit = hit(by: selected)
+		if let words = spoken(in: hit) {
+			return words.count == 1 ? "this word" : "these \(words.count) words"
 		}
 		let heard = hit.compactMap { $0.soundIndex.map { "[\(sounds[$0].label)]" } }
 		if !heard.isEmpty { return heard.joined(separator: " ") }
 		return "this pause"
+	}
+
+	/// The words a set of pieces stands for.
+	///
+	/// A word stands for itself. A name stands for the whole line it heads,
+	/// which is what makes selecting or clicking one mean "this line" without a
+	/// special case at any of the three places that ask. A pause and a sound
+	/// stand for no words at all, which is the honest answer and is what lets
+	/// the callers say "a pause of 1.2s" instead of naming a sentence beside
+	/// it.
+	private func spoken(in hit: [Piece]) -> Range<Int>? {
+		var indices = hit.compactMap(\.wordIndex)
+		for line in hit.compactMap(\.lineIndex) where laidOutLines.indices.contains(line) {
+			indices.append(laidOutLines[line].lowerBound)
+			indices.append(laidOutLines[line].upperBound - 1)
+		}
+		guard let first = indices.min(), let last = indices.max() else { return nil }
+		return first ..< (last + 1)
+	}
+
+	private func hit(by selected: NSRange) -> [Piece] {
+		pieces.filter { NSIntersectionRange($0.range, selected).length > 0 }
 	}
 
 	/// Where a run of words sits in the text.
@@ -619,8 +1069,14 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			// A click. A non-editable text view answers one with an empty
 			// selection where the caret would have gone, which is the only
 			// thing about it worth knowing.
-			if let at = pieces.firstIndex(where: { NSLocationInRange(selected.location, $0.range) }),
-			   pieces[at].wordIndex == nil {
+			if let line = line(named: selected.location) {
+				// Clicking a name is pointing at the line it heads, not at the
+				// end of the line above it — which is the word that happens to
+				// sit before it in the text.
+				clickWord(at: laidOutLines[line].lowerBound)
+			} else if let at = pieces.firstIndex(where: {
+				NSLocationInRange(selected.location, $0.range)
+			}), pieces[at].wordIndex == nil {
 				onMoveTo?(pieces[at].start)
 			} else if let index = word(containing: selected.location, orBefore: true) {
 				clickWord(at: index)
@@ -639,11 +1095,8 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// it: the words in it, or failing that the sounds in it. `nil` when it is
 	/// nothing but silence, which has no words to be named after.
 	func said(in selected: NSRange) -> String? {
-		let hit = pieces.filter { NSIntersectionRange($0.range, selected).length > 0 }
-		let spoken = hit.compactMap(\.wordIndex)
-		if let first = spoken.min(), let last = spoken.max() {
-			return transcript.phrase(first ..< (last + 1), limit: 4)
-		}
+		let hit = hit(by: selected)
+		if let words = spoken(in: hit) { return transcript.phrase(words, limit: 4) }
 		let heard = hit.compactMap { $0.soundIndex.map { "[\(sounds[$0].label)]" } }
 		return heard.isEmpty ? nil : heard.joined(separator: " ")
 	}
@@ -658,14 +1111,12 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// what the highlight on screen already says it is.
 	///
 	/// One pass over one array. This used to be two — a walk over the words and
-	/// a filter over the pauses, reconciled afterwards — and a third kind of
-	/// thing in the text would have made it three.
+	/// a filter over the pauses, reconciled afterwards — and the third and
+	/// fourth kinds of thing in the text would have made it four.
 	func touched(by selected: NSRange) -> (start: Double, end: Double, words: Range<Int>?)? {
-		let hit = pieces.filter { NSIntersectionRange($0.range, selected).length > 0 }
+		let hit = hit(by: selected)
 		guard let start = hit.map(\.start).min(), let end = hit.map(\.end).max() else { return nil }
-		let spoken = hit.compactMap(\.wordIndex)
-		guard let first = spoken.min(), let last = spoken.max() else { return (start, end, nil) }
-		return (start, end, first ..< (last + 1))
+		return (start, end, spoken(in: hit))
 	}
 
 	/// Which word a character belongs to. A character in the space between two
@@ -711,6 +1162,32 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			eventNumber: 0, clickCount: 1, pressure: 1)!
 		return textView(text, menu: NSMenu(), for: event, at: charIndex)
 	}
+
+	/// For the tests: the names on the chips, the colour a word came out, and
+	/// the caret without a mouse.
+	var chipTitles: [String] {
+		castScroll.isHidden ? [] : castRow.arrangedSubviews.compactMap { ($0 as? NSButton)?.title }
+	}
+
+	func colourOfSound(_ index: Int) -> NSColor? {
+		guard let piece = pieces.first(where: { $0.soundIndex == index }) else { return nil }
+		return text.textStorage?.attribute(.foregroundColor, at: piece.range.location,
+		                                   effectiveRange: nil) as? NSColor
+	}
+
+	var paragraphStyleAtStart: NSParagraphStyle? {
+		guard (text.textStorage?.length ?? 0) > 0 else { return nil }
+		return text.textStorage?.attribute(.paragraphStyle, at: 0,
+		                                   effectiveRange: nil) as? NSParagraphStyle
+	}
+
+	func colourOfWord(_ index: Int) -> NSColor? {
+		guard let piece = wordPieces[safe: index].flatMap({ pieces[safe: $0] }) else { return nil }
+		return text.textStorage?.attribute(.foregroundColor, at: piece.range.location,
+		                                   effectiveRange: nil) as? NSColor
+	}
+
+	func selectForTest(word index: Int) { putCaret(at: index) }
 
 	/// For the tests: what the pane is showing.
 	var wordCount: Int { transcript.count }

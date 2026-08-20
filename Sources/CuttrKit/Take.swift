@@ -46,6 +46,17 @@ public struct Take: Sendable, Equatable {
 	/// take is one recording and one recording has one transcript.
 	public var words: Words?
 
+	/// Who talks in this recording.
+	///
+	/// A slug and a name each — see ``Speaker``. The words themselves carry the
+	/// slug, out in the sidecar, so this is the one place a person's name is
+	/// written and renaming them is one line changed.
+	///
+	/// Empty for every take nobody has labelled, and left out of the file
+	/// entirely when it is: a recording of one person talking to camera has no
+	/// cast and should not carry a block saying so.
+	public var speakers: [Speaker]
+
 	/// What was heard in this recording that nobody said: a laugh, applause, a
 	/// cough. See ``SoundEvent``.
 	///
@@ -82,7 +93,8 @@ public struct Take: Sendable, Equatable {
 
 	public init(
 		video: String? = nil, audio: AudioTrack? = nil, clips: [Clip] = [],
-		anchors: [Anchor] = [], words: Words? = nil, sounds: [SoundEvent] = [],
+		anchors: [Anchor] = [], words: Words? = nil, speakers: [Speaker] = [],
+		sounds: [SoundEvent] = [],
 		measured: Measured = Measured(), look: Look = .none,
 		source: TakeSource? = nil, unknownKeys: [String: Any] = [:]
 	) {
@@ -92,6 +104,7 @@ public struct Take: Sendable, Equatable {
 		self.clips = clips
 		self.anchors = anchors
 		self.words = words
+		self.speakers = speakers
 		self.sounds = sounds
 		self.measured = measured
 		self.look = look
@@ -100,9 +113,37 @@ public struct Take: Sendable, Equatable {
 
 	public static func == (a: Take, b: Take) -> Bool {
 		a.video == b.video && a.audio == b.audio && a.clips == b.clips
-			&& a.anchors == b.anchors && a.words == b.words && a.sounds == b.sounds
+			&& a.anchors == b.anchors && a.words == b.words
+			&& a.speakers == b.speakers && a.sounds == b.sounds
 			&& a.measured == b.measured && a.look == b.look
 			&& a.source == b.source
+	}
+
+	// MARK: - The cast
+
+	public func speaker(_ slug: String) -> Speaker? {
+		speakers.first { $0.slug == slug }
+	}
+
+	/// What to call somebody. The cast's name for them, and otherwise the slug
+	/// itself — a sidecar that names a speaker the take has never heard of is
+	/// still worth colouring, and `mia` reads perfectly well.
+	public func speakerTitle(_ slug: String) -> String {
+		speaker(slug)?.title ?? slug
+	}
+
+	/// Adds a speaker under a slug nothing else in this take has.
+	@discardableResult
+	public mutating func add(_ speaker: Speaker) -> Speaker {
+		var unique = speaker
+		unique.slug = Slug.unique(
+			Slug.make(from: speaker.slug.isEmpty ? speaker.name : speaker.slug),
+			taken: Set(speakers.map(\.slug)))
+		if unique.slug.isEmpty {
+			unique.slug = Slug.numbered("speaker", taken: Set(speakers.map(\.slug)))
+		}
+		speakers.append(unique)
+		return unique
 	}
 
 	/// Adds an anchor, with a name nothing else in this take has.

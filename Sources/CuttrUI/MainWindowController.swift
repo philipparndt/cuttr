@@ -39,6 +39,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	/// a clip somebody has moved on from is an answer nobody wants.
 	private var nameProposalTask: Task<Void, Never>?
 	private var wordsTask: Task<Void, Never>?
+	private var speakerTask: Task<Void, Never>?
 	private var soundsTask: Task<Void, Never>?
 
 	private var playhead: Double = 0
@@ -409,6 +410,46 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 		transcriptPane.onStatus = { [weak self] note in self?.header.setStatus(note) }
 
+		// Who is speaking. One key per turn of an interview, and the pane walks
+		// the caret on by itself — so a take is labelled without the hand ever
+		// leaving the number row.
+		transcriptPane.onAssign = { [weak self] word, slug in
+			guard let self else { return }
+			let changed = self.takeDocument.assignSpeaker(slug, from: word)
+			guard changed > 0 else { return }
+			let who = slug.map { self.takeDocument.take.speakerTitle($0) } ?? "nobody"
+			self.header.setStatus(changed == 1
+				? "this line is \(who)"
+				: "\(who), for \(changed) lines — until somebody else was already named")
+			self.refresh()
+		}
+		transcriptPane.onAddSpeaker = { [weak self] name, word in
+			guard let self, let added = self.takeDocument.addSpeaker(named: name) else { return }
+			self.refresh()
+			// Adding somebody while a line is under the caret is nearly always
+			// the same act as naming that line — the first two speakers of a
+			// take are made exactly this way.
+			if let word { self.transcriptPane.assign(added.slug, from: word) }
+			self.header.setStatus("\(added.title) is \(self.takeDocument.take.speakers.count)"
+				+ " — press that number in the words")
+		}
+		transcriptPane.onRenameSpeaker = { [weak self] slug, name in
+			self?.takeDocument.renameSpeaker(slug, to: name)
+			self?.refresh()
+		}
+		transcriptPane.onRemoveSpeaker = { [weak self] slug in
+			self?.takeDocument.removeSpeaker(slug)
+			self?.refresh()
+		}
+		transcriptPane.onSuggestSpeakers = { [weak self] in self?.guessSpeakers() }
+		transcriptPane.onAcceptSuggestions = { [weak self] in
+			guard let self else { return }
+			let count = self.takeDocument.suggestedSpeakers.count
+			self.takeDocument.acceptSuggestions()
+			self.header.setStatus("\(count) lines written down")
+			self.refresh()
+		}
+
 		anchorTable.onRename = { [weak self] old, new in self?.renameAnchor(old, to: new) }
 		anchorTable.onActivate = { [weak self] name in
 			guard let anchor = self?.takeDocument.take.anchors.first(where: { $0.name == name })
@@ -677,6 +718,59 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 	}
 
+	/// Works out who is speaking, and offers it.
+	///
+	/// **An offer, and drawn as one.** What comes back goes into
+	/// ``TakeDocument/suggestedSpeakers`` and is shown in brackets; nothing is
+	/// written until somebody keeps it. A colour that is wrong a third of the
+	/// time is worse than no colour, and the honest way to hold that line is
+	/// for the guess and the record to be different things all the way down.
+	///
+	/// Which method: whose mouth is moving, when the take has faces it is
+	/// already following, because that is the one that scored above chance on
+	/// real footage. Otherwise timbre, which needs nothing at all. Neither
+	/// touches the network. See `docs/speakers.md`.
+	private func guessSpeakers() {
+		guard speakerTask == nil else { return }
+		guard !takeDocument.transcript.isEmpty else {
+			header.setStatus("no words yet — transcribe this take first")
+			return
+		}
+		guard let audio = takeDocument.audioURL ?? takeDocument.videoURL else { return }
+		let faces = takeDocument.take.anchors.compactMap { anchor -> SpeakerDetector.Candidate? in
+			guard let path = takeDocument.anchorPaths[anchor.name] else { return nil }
+			return SpeakerDetector.Candidate(name: anchor.name, path: path)
+		}
+		let method: SpeakerProposal.Method = faces.isEmpty ? .timbre : .mouth
+		let offset = takeDocument.take.video == nil ? 0 : (takeDocument.take.audio?.offset ?? 0)
+		let transcript = takeDocument.transcript
+		let known = takeDocument.take.speakers.map(\.slug)
+		let locale = takeDocument.take.words?.locale ?? ""
+		let video = takeDocument.videoURL
+
+		header.setStatus("\(method.title.lowercased()): working out who is speaking…")
+		speakerTask = Task { [weak self] in
+			let offer = try? await SpeakerProposal.propose(
+				for: transcript, audio: audio, offset: offset, method: method,
+				names: known, locale: locale, video: video, faces: faces)
+			guard let self, !Task.isCancelled else { return }
+			self.speakerTask = nil
+			guard let offer, !offer.isEmpty else {
+				// Saying nothing is an answer, and it is the right one when the
+				// voices did not separate. See `SpeakerClustering.silhouette`.
+				self.header.setStatus("the voices in this take did not separate —"
+					+ " nothing worth offering")
+				return
+			}
+			self.takeDocument.suggest(offer.byLine)
+			self.header.setStatus(String(
+				format: "%d lines guessed, %d left alone — the bracketed names."
+					+ " Keep them, or answer a line yourself. (separation %.2f)",
+				offer.byLine.count, offer.skipped, offer.separation))
+			self.refresh()
+		}
+	}
+
 	/// Listens for what is not a word: a laugh, applause, a cough.
 	///
 	/// Separate from transcribing as well as part of it, because a take that
@@ -817,7 +911,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		                   selected: selectedAnchor)
 		markers.videoSize = takeDocument.videoInfo?.naturalSize ?? .zero
 		transcriptPane.show(takeDocument.transcript, words: takeDocument.take.words,
-		                    sounds: takeDocument.take.sounds)
+		                    sounds: takeDocument.take.sounds,
+		                    cast: takeDocument.take.speakers,
+		                    suggestions: takeDocument.suggestedSpeakers)
 		transcriptPane.setBusy(wordsTask != nil,
 		                       enabled: takeDocument.videoURL != nil || takeDocument.audioURL != nil)
 		clipTable.reload(takeDocument.take.clips, selected: selectedClip)
@@ -1630,6 +1726,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		namingTask?.cancel()
 		nameProposalTask?.cancel()
 		wordsTask?.cancel()
+		speakerTask?.cancel()
 		soundsTask?.cancel()
 		if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
 		keyMonitor = nil
@@ -1666,6 +1763,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	}
 
 	private func handle(_ event: NSEvent) -> Bool {
+		// The words get first refusal, and only while the caret is in them.
+		// Naming who is speaking is `1`, `2`, `3` — the same keys that pick a
+		// clip lane everywhere else in this window — and a person reading a
+		// transcript is unambiguously doing the first thing and not the
+		// second. Nothing here is claimed under a modifier, so the menu keeps
+		// every ⌘ it had.
+		if transcriptPane.handleKey(event) { return true }
+
 		let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 		let shift = flags.contains(.shift)
 		let option = flags.contains(.option)

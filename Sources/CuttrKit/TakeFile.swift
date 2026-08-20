@@ -170,6 +170,28 @@ public enum TakeReader {
 			}
 		}
 
+		// The cast. Read leniently, because this is a list somebody types: an
+		// entry may be a bare slug, a name, or both, and a duplicate is one
+		// person written twice rather than a file to refuse.
+		var speakers: [Speaker] = []
+		var castSlugs = Set<String>()
+		for entry in (root.removeValue(forKey: "speakers") as? [Any]) ?? [] {
+			var slug = ""
+			var name = ""
+			if let bare = nonEmpty(entry as? String ?? "") {
+				slug = Slug.make(from: bare)
+				name = bare
+			} else if let m = mapping(entry) {
+				slug = Slug.make(from: nonEmpty(m["slug"] as? String ?? "") ?? "")
+				name = nonEmpty(m["name"] as? String ?? "") ?? ""
+				if slug.isEmpty { slug = Slug.make(from: name) }
+			}
+			guard !slug.isEmpty, castSlugs.insert(slug).inserted else { continue }
+			// A name identical to the slug is what deriving one produces, and
+			// carrying it doubles every line of the block for nothing.
+			speakers.append(Speaker(slug: slug, name: name == slug ? "" : name))
+		}
+
 		// The sounds that are not words. Read leniently, and in the order the
 		// file has them: a block missing its `sound:` is skipped rather than
 		// failing a whole take, and an unfamiliar kind is kept exactly as it
@@ -212,7 +234,8 @@ public enum TakeReader {
 		}
 
 		return Take(video: video, audio: audio, clips: clips, anchors: anchors, words: words,
-		            sounds: sounds, measured: measured, look: look, source: source,
+		            speakers: speakers, sounds: sounds,
+		            measured: measured, look: look, source: source,
 		            unknownKeys: root)
 	}
 
@@ -362,7 +385,23 @@ public enum TakeWriter {
 			}
 		}
 
-		// What was heard that nobody said, directly under the words: it is the
+		// The cast, under the words, because it is what the words point at.
+		// Left out when there is none, so a take nobody has labelled writes
+		// exactly the bytes it wrote before there were speakers at all.
+		if !take.speakers.isEmpty {
+			out += "\nspeakers:\n"
+			for (index, speaker) in take.speakers.enumerated() {
+				if index > 0 { out += "\n" }
+				out += "  - slug: \(scalar(speaker.slug))\n"
+				// Only when it says something the slug does not. `- slug: mia`
+				// on its own is a complete speaker and reads as one.
+				if !speaker.name.isEmpty {
+					out += "    name: \(scalar(speaker.name))\n"
+				}
+			}
+		}
+
+		// What was heard that nobody said, under the words and the cast: it is the
 		// same kind of claim about the same recording, and it reads as a
 		// continuation of them.
 		//

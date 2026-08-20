@@ -58,6 +58,41 @@ public enum Theme {
 		base(color).withAlphaComponent(selected ? 0.20 : 0.10)
 	}
 
+	// MARK: - Who is speaking
+
+	/// A speaker's name at the head of their line. The palette's own hue, full
+	/// strength, because it is three or four characters and has to be found at
+	/// a glance down the left edge of a page of text.
+	public static func speakerLabel(_ color: ClipColor) -> NSColor { base(color) }
+
+	/// The words themselves, in the speaker's hue but lifted towards the
+	/// panel's ordinary text colour.
+	///
+	/// A page of full-strength amber on a dark grey is a page nobody reads for
+	/// five minutes. Two thirds of the way to ``text`` keeps the hue plainly
+	/// there while the contrast stays close to what the rest of the pane has —
+	/// and the hue is never carrying the identity on its own anyway, because
+	/// the name is written at the head of every line.
+	public static func speakerText(_ color: ClipColor) -> NSColor {
+		guard let hue = base(color).usingColorSpace(.deviceRGB) else { return text }
+		let lift = 0.62
+		return NSColor(
+			deviceRed: hue.redComponent + (0.88 - hue.redComponent) * lift,
+			green: hue.greenComponent + (0.88 - hue.greenComponent) * lift,
+			blue: hue.blueComponent + (0.88 - hue.blueComponent) * lift,
+			alpha: 1)
+	}
+
+	/// A name a model proposed and nobody has confirmed.
+	///
+	/// Dim, and the words it is about are left in the ordinary text colour. A
+	/// colour that is wrong a third of the time is worse than no colour,
+	/// because somebody stops believing the ones that are right — so a guess
+	/// gets a name in brackets and does not get to paint the page.
+	public static func suggestedLabel(_ color: ClipColor) -> NSColor {
+		base(color).withAlphaComponent(0.55)
+	}
+
 	/// The uncommitted in/out span, before it becomes a clip.
 	public static let pendingFill = NSColor(calibratedRed: 0.90, green: 0.55, blue: 0.30, alpha: 0.22)
 	public static let pendingStroke = NSColor(calibratedRed: 0.95, green: 0.62, blue: 0.35, alpha: 0.9)

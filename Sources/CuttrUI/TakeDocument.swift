@@ -35,8 +35,13 @@ public final class TakeDocument {
 	/// that undoing back to the saved state clears the dot in the close button
 	/// instead of leaving a document that claims to be modified into exactly
 	/// what is on disk.
-	public var isDirty: Bool { take != savedTake }
+	///
+	/// The transcript counts, because naming who is speaking changes the
+	/// sidecar and nothing else. Without it, a session spent labelling an
+	/// interview would close without so much as asking.
+	public var isDirty: Bool { take != savedTake || transcript != savedTranscript }
 	private var savedTake: Take?
+	private var savedTranscript = Transcript()
 
 	/// Media, once probed. `nil` while loading, and after a file that has gone
 	/// missing — a take whose video has moved still opens, still shows its
@@ -73,6 +78,121 @@ public final class TakeDocument {
 		// title said "Untitled — edited" before anybody had touched it, and
 		// closing an untouched window asked whether to save it.
 		self.savedTake = take
+	}
+
+	// MARK: - Who is speaking
+
+	/// A model's proposal, keyed by the first word of each line it is about.
+	///
+	/// **Not in the file, and not in the transcript.** A suggestion is a fact
+	/// about this session — the same distinction ``manualSlugs`` draws — and
+	/// the file records what somebody confirmed. Drawn as visibly a
+	/// suggestion, and it becomes a fact only when ``acceptSuggestions()`` or a
+	/// keystroke says so.
+	public private(set) var suggestedSpeakers: [Int: String] = [:]
+
+	/// What an automatic pass thinks, offered rather than applied.
+	public func suggest(_ proposal: [Int: String]) {
+		suggestedSpeakers = proposal
+		onChange?()
+	}
+
+	public func clearSuggestions() {
+		guard !suggestedSpeakers.isEmpty else { return }
+		suggestedSpeakers = [:]
+		onChange?()
+	}
+
+	/// Writes down what was proposed. The one place a guess becomes a record.
+	public func acceptSuggestions() {
+		guard !suggestedSpeakers.isEmpty else { return }
+		var next = transcript
+		for line in next.lines {
+			guard let slug = suggestedSpeakers[line.lowerBound] else { continue }
+			for index in line { next.words[index].speaker = slug }
+		}
+		// Anybody the proposal invented joins the cast, or the names would have
+		// nowhere to live.
+		var take = take
+		for slug in next.speakers where take.speaker(slug) == nil {
+			take.speakers.append(Speaker(slug: slug))
+		}
+		if take != self.take { apply(take, actionName: "Name the Speakers") }
+		suggestedSpeakers = [:]
+		applyTranscript(next, actionName: "Name the Speakers")
+	}
+
+	/// Says who is speaking from this line on. See
+	/// ``CuttrKit/Transcript/assign(_:from:)`` for what "from" means.
+	@discardableResult
+	public func assignSpeaker(_ slug: String?, from wordIndex: Int) -> Int {
+		var next = transcript
+		let changed = next.assign(slug, from: wordIndex)
+		guard changed > 0 else { return 0 }
+		// Confirming a line by hand retires the guesses it covers, so the pane
+		// does not go on offering an answer to a question already settled.
+		let lines = next.lines
+		if let first = lines.firstIndex(where: { $0.contains(wordIndex) }) {
+			for line in lines[first ..< min(first + changed, lines.count)] {
+				suggestedSpeakers[line.lowerBound] = nil
+			}
+		}
+		applyTranscript(next, actionName: "Name the Speaker")
+		return changed
+	}
+
+	/// Adds somebody to the cast under a slug nothing else has.
+	@discardableResult
+	public func addSpeaker(named name: String) -> Speaker? {
+		let trimmed = name.trimmingCharacters(in: .whitespaces)
+		guard !trimmed.isEmpty else { return nil }
+		var next = take
+		let added = next.add(Speaker(slug: Slug.make(from: trimmed), name: trimmed))
+		apply(next, actionName: "Add a Speaker")
+		return added
+	}
+
+	/// Renames somebody.
+	///
+	/// The prose only. The slug is what the sidecar's four hundred lines point
+	/// at, and leaving it alone is exactly what makes renaming one line's work
+	/// — the same rule the clips follow, for the same reason.
+	public func renameSpeaker(_ slug: String, to name: String) {
+		guard let index = take.speakers.firstIndex(where: { $0.slug == slug }) else { return }
+		var next = take
+		next.speakers[index].name = name.trimmingCharacters(in: .whitespaces)
+		apply(next, actionName: "Rename Speaker")
+	}
+
+	/// Takes somebody out of the cast, and off every word that named them.
+	public func removeSpeaker(_ slug: String) {
+		var next = take
+		next.speakers.removeAll { $0.slug == slug }
+		apply(next, actionName: "Remove Speaker")
+		var said = transcript
+		if said.rename(slug, to: nil) > 0 {
+			applyTranscript(said, actionName: "Remove Speaker")
+		}
+	}
+
+	/// The one way the transcript changes once it exists.
+	///
+	/// Undoable like everything else, because a transcript is a value too — and
+	/// a carry-forward that painted forty lines the wrong colour has to be one
+	/// press of ⌘Z, or nobody will risk the keystroke that makes this fast.
+	///
+	/// The sidecar is not written here. It goes at save, with the take, because
+	/// a key held down for a second is thirty edits and none of them is a
+	/// decision to write a file.
+	public func applyTranscript(_ next: Transcript, actionName: String) {
+		guard next != transcript else { return }
+		let previous = transcript
+		undoManager.registerUndo(withTarget: self) { document in
+			MainActor.assumeIsolated { document.applyTranscript(previous, actionName: actionName) }
+		}
+		undoManager.setActionName(actionName)
+		transcript = next
+		onChange?()
 	}
 
 	// MARK: - Editing
@@ -259,7 +379,9 @@ public final class TakeDocument {
 	/// sidecar is read when the take is opened and the recogniser is run only
 	/// when somebody asks for it. Transcribing on every open would be a minute
 	/// of somebody's machine, every time, for an answer that has not changed.
-	public private(set) var transcript = Transcript()
+	public private(set) var transcript = Transcript() {
+		didSet { if transcript.isEmpty != oldValue.isEmpty { suggestedSpeakers = [:] } }
+	}
 
 	/// Records a transcript and writes it beside the take.
 	///
@@ -271,6 +393,7 @@ public final class TakeDocument {
 		_ transcript: Transcript, recogniser: Words.Recogniser, locale: String
 	) throws {
 		self.transcript = transcript
+		self.savedTranscript = transcript
 		var next = take
 		next.words = Words(
 			path: take.words?.path ?? "words/\(Slug.make(from: displayName)).words",
@@ -301,11 +424,13 @@ public final class TakeDocument {
 	/// Reads the sidecar the take names. Called after opening one.
 	public func loadWords() {
 		transcript = Transcript()
+		savedTranscript = transcript
 		guard let baseURL, let words = take.words,
 		      let text = try? String(
 			      contentsOf: URL(fileURLWithPath: words.path, relativeTo: baseURL), encoding: .utf8)
 		else { return }
 		transcript = Transcript.read(text)
+		savedTranscript = transcript
 	}
 
 	/// Trimming from the table or the context menu.
@@ -509,6 +634,7 @@ public final class TakeDocument {
 		// and nowhere else. This is the first moment there is a folder to put
 		// them beside, so they go now rather than at the next transcription.
 		if !transcript.isEmpty { try? writeWords() }
+		savedTranscript = transcript
 		savedTake = take
 		onChange?()
 		NotificationCenter.default.post(name: .cuttrTakeChanged, object: fileURL.standardizedFileURL)

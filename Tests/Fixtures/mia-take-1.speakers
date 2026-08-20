@@ -1,0 +1,100 @@
+# cuttr speaker labels — mia-take-1
+#
+# Who says each line of a real five-minute take: a German interview with a
+# child, Mia, and at least two adults. Labelled by hand, by reading. An
+# interview alternates question and answer and the text says which is which.
+#
+# THE WORDS ARE NOT HERE, AND MUST NOT BE. This repository is public and the
+# take is a seven-year-old's family interview. A time and a name are the shape
+# of a conversation; the transcript is its content, and the content stays on
+# the machine that recorded it. The words live beside the take, wherever that
+# is, and the tests that need them are gated on CUTTR_FOOTAGE and skip without
+# it — see Tests/CuttrKitTests/GroundTruthTests.swift and docs/speakers.md.
+#
+# Matched to a take by TIME, not by line number, so that a change to how lines
+# are divided does not silently shift every label by one. Each row is the start
+# of a line, on the video's clock, and who said it.
+#
+# Two labels, not three. There are certainly two adults in the room — the
+# exchange from 00:32 to 00:54 is one of them talking to the other about where
+# to cut — but which adult says which of those lines cannot be read off the
+# text, only heard. Reading is the method that was used, so reading is what
+# these claim. Anybody who listens can split `interviewer` in two by editing
+# this file and nothing else.
+#
+# Read but not certain, four lines: 00:10.567, 00:20.947, 00:30.007 and
+# 00:35.167. They are 6% of the take and are labelled as read, so a method that
+# gets them wrong is not being marked down in secret.
+#
+# 68 lines: 26 interviewer, 42 mia. Always answering `mia` scores 61.8%, which
+# is the number any method has to beat before it is worth switching on.
+#
+# at           who
+00:07.867    interviewer
+00:09.187    interviewer
+00:10.027    mia
+00:10.567    interviewer
+00:15.187    interviewer
+00:16.987    interviewer
+00:20.947    interviewer
+00:22.867    interviewer
+00:26.227    mia
+00:30.007    interviewer
+00:35.167    interviewer
+00:35.887    interviewer
+00:41.407    interviewer
+00:42.547    interviewer
+00:50.167    interviewer
+01:01.627    mia
+01:05.887    mia
+01:11.227    mia
+01:12.907    interviewer
+01:16.747    mia
+01:25.207    mia
+01:31.627    mia
+01:33.607    mia
+01:40.507    interviewer
+01:42.787    mia
+01:48.727    mia
+01:54.187    mia
+01:56.047    mia
+01:57.487    mia
+02:01.087    mia
+02:06.907    interviewer
+02:09.907    mia
+02:15.307    mia
+02:21.787    mia
+02:27.907    interviewer
+02:29.827    mia
+02:35.647    interviewer
+02:37.447    mia
+02:41.587    interviewer
+02:46.807    mia
+02:52.567    interviewer
+02:56.107    mia
+03:01.267    mia
+03:01.987    mia
+03:05.407    mia
+03:07.447    interviewer
+03:12.847    mia
+03:16.447    mia
+03:19.867    interviewer
+03:26.407    mia
+03:34.087    interviewer
+03:36.847    mia
+03:45.187    mia
+03:46.747    mia
+03:52.267    interviewer
+03:54.787    mia
+04:04.087    mia
+04:09.007    mia
+04:18.247    mia
+04:28.087    mia
+04:29.767    interviewer
+04:34.327    mia
+04:38.887    mia
+04:47.107    interviewer
+04:55.147    mia
+04:58.027    mia
+05:03.127    mia
+05:04.807    mia
