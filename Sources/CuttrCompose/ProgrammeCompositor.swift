@@ -34,12 +34,18 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 		let people: PersonMask?
 
 		/// Whether anything is being drawn into the frame at this moment.
+		///
+		/// The *drawn* window rather than the span, because a movement placed
+		/// before the first mark puts the overlay on screen early — and a frame
+		/// this says nothing is happening on is handed straight back to the
+		/// encoder untouched. Asking the span here is how film mode would fail
+		/// to grade the frames it was meant to have graded before the clip.
 		func busy(at time: Double) -> Bool {
-			if effects.contains(where: { time >= $0.overlay.start && time <= $0.overlay.end }) {
+			if effects.contains(where: { $0.overlay.timing.drawn(at: time) }) {
 				return true
 			}
 			return overlays.contains { shown in
-				guard time >= shown.start, time <= shown.end else { return false }
+				guard shown.timing.drawn(at: time) else { return false }
 				if shown.overlay.behind == .people { return true }
 				// Film mode, the aberration and the tape change the frame
 				// itself, so a frame any of them is on is a frame that cannot

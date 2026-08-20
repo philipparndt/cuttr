@@ -213,7 +213,7 @@ public enum OverlayLayers {
 
 	// MARK: - The animations
 
-	/// On screen for its span, and not one frame longer.
+	/// On screen for as long as it is drawn, and not one frame longer.
 	///
 	/// The opacity envelope takes an overlay away at the end only when it
 	/// *fades* away; one that leaves by sliding is off the edge of the frame,
@@ -225,19 +225,27 @@ public enum OverlayLayers {
 	/// not, which is why the opacity envelope below now brackets itself with
 	/// zeroes and does the same work a second time. Both are kept: this one is
 	/// the plainer statement, and neither costs anything.
+	///
+	/// **The window is the drawn one, not the span.** Those were the same thing
+	/// until a movement could be placed outside the span; an overlay whose
+	/// arrival is placed before its first mark is on screen before that mark,
+	/// and bracketing it at the mark would hide exactly the frames the placement
+	/// was asked for. ``OverlayTiming`` is where the two are told apart.
 	private static func shown(_ resolved: ResolvedOverlay, host: Host) -> CAKeyframeAnimation {
+		let timing = resolved.timing
 		let animation = CAKeyframeAnimation(keyPath: "hidden")
 		animation.values = [true, false, true]
 		animation.keyTimes = [0, 0, 1]
 		animation.calculationMode = .discrete
-		animation.beginTime = host.beginTime(resolved.start)
-		animation.duration = max(resolved.duration, 0.0001)
+		animation.beginTime = host.beginTime(timing.drawnFrom)
+		animation.duration = timing.drawnSpan
 		animation.fillMode = .both
 		animation.isRemovedOnCompletion = false
 		return animation
 	}
 
-	/// In, hold, out — as one keyframe animation over the overlay's whole span.
+	/// In, hold, out — as one keyframe animation over everything the overlay is
+	/// drawn for.
 	///
 	/// One animation rather than three, because the three would have to be kept
 	/// in step by hand and the interesting case is when they meet: an overlay
@@ -245,21 +253,27 @@ public enum OverlayLayers {
 	/// fades in, with nothing to arrange.
 	private static func opacity(_ resolved: ResolvedOverlay, host: Host) -> CAKeyframeAnimation {
 		let animation = CAKeyframeAnimation(keyPath: "opacity")
-		let span = max(resolved.duration, 0.0001)
-		let arrive = min(resolved.overlay.arrival.duration, span / 2)
-		let depart = min(resolved.overlay.departure.duration, span / 2)
+		let timing = resolved.timing
 		// A slide arrives at full opacity — it is the movement that shows it —
 		// while a fade is the opacity. A cut is neither and simply appears.
-		let arrivesByFading = isFade(resolved.overlay.arrival)
-		let departsByFading = isFade(resolved.overlay.departure)
+		let arrivesByFading = timing.arrivesByFading
+		let departsByFading = timing.departsByFading
 		// Zero at each end, held there by `fillMode: .both`, is what keeps the
-		// overlay off screen outside its span — whatever its transitions are.
+		// overlay off screen outside the window it is drawn for — whatever its
+		// transitions are.
 		//
 		// This used to be left to a discrete animation on `hidden`, which the
 		// preview honours and the export tool quietly does not. An overlay with
 		// `in: cut, out: cut` was on for the whole film: the one spelling with
 		// no fade to hide the mistake, and so the one nobody could see was
 		// wrong until it was measured.
+		//
+		// The keyframes are placed by asking ``OverlayTiming`` where each moment
+		// falls in the drawn window rather than by dividing by the span. That is
+		// the same arithmetic while a movement is taken from inside the span,
+		// and the only arithmetic that survives one that is not: an arrival
+		// placed before the first mark starts the window early, and the ramp has
+		// to start with it.
 		//
 		// A cut is a step rather than a movement, but it cannot be written as
 		// two keyframes at the same instant — Core Animation renders a span of
@@ -278,8 +292,8 @@ public enum OverlayLayers {
 		}
 		at(0, 0)
 		if !arrivesByFading { at(step, 1) }
-		at(max(arrive / span, arrivesByFading ? 0 : step), 1)
-		at(departsByFading ? 1 - depart / span : 1 - step, 1)
+		at(max(timing.fraction(at: timing.arriveTo), arrivesByFading ? 0 : step), 1)
+		at(departsByFading ? timing.fraction(at: timing.departFrom) : 1 - step, 1)
 		at(1, 0)
 		animation.values = values
 		animation.keyTimes = times.map(NSNumber.init(value:))
@@ -290,8 +304,8 @@ public enum OverlayLayers {
 			if departsByFading, index == values.count - 1 { return CAMediaTimingFunction(name: .easeIn) }
 			return CAMediaTimingFunction(name: .linear)
 		}
-		animation.beginTime = host.beginTime(resolved.start)
-		animation.duration = span
+		animation.beginTime = host.beginTime(timing.drawnFrom)
+		animation.duration = timing.drawnSpan
 		animation.fillMode = .both
 		animation.isRemovedOnCompletion = false
 		return animation
@@ -313,9 +327,7 @@ public enum OverlayLayers {
 	private static func slideAnimation(
 		_ resolved: ResolvedOverlay, contentSize: CGSize, frame: CGSize, host: Host
 	) -> CAKeyframeAnimation {
-		let span = max(resolved.duration, 0.0001)
-		let arrive = min(resolved.overlay.arrival.duration, span / 2)
-		let depart = min(resolved.overlay.departure.duration, span / 2)
+		let timing = resolved.timing
 
 		func offscreen(_ transition: Overlay.Transition) -> CGPoint {
 			guard case .slide(let edge, _) = transition else { return .zero }
@@ -339,7 +351,16 @@ public enum OverlayLayers {
 			NSValue(point: .zero),
 			NSValue(point: NSPoint(x: to.x, y: to.y)),
 		]
-		animation.keyTimes = [0, NSNumber(value: arrive / span), NSNumber(value: 1 - depart / span), 1]
+		// Over the drawn window, so a slide placed before the mark travels in the
+		// seconds leading up to it and is home for the clip's first frame —
+		// which is what "finished when the clip starts" means for a movement
+		// that is a movement rather than a fade.
+		animation.keyTimes = [
+			0,
+			NSNumber(value: timing.fraction(at: timing.arriveTo)),
+			NSNumber(value: timing.fraction(at: timing.departFrom)),
+			1,
+		]
 		// Eased at both ends: a caption that arrives at constant speed and stops
 		// dead reads as a bug in the render rather than as a move.
 		animation.timingFunctions = [
@@ -347,8 +368,8 @@ public enum OverlayLayers {
 			CAMediaTimingFunction(name: .linear),
 			CAMediaTimingFunction(name: .easeIn),
 		]
-		animation.beginTime = host.beginTime(resolved.start)
-		animation.duration = span
+		animation.beginTime = host.beginTime(timing.drawnFrom)
+		animation.duration = timing.drawnSpan
 		animation.fillMode = .both
 		animation.isRemovedOnCompletion = false
 		return animation
@@ -358,21 +379,26 @@ public enum OverlayLayers {
 	private static func follow(
 		_ path: AnchorPath, resolved: ResolvedOverlay, offset: CGPoint, size: CGSize, host: Host
 	) -> CAKeyframeAnimation {
-		let span = max(resolved.duration, 0.0001)
-		// Only the samples inside the overlay's span, with the ends pinned so
-		// the first and last keyframe land exactly on the span's edges.
-		var times: [Double] = [resolved.start]
-		times += path.samples.map(\.time).filter { $0 > resolved.start && $0 < resolved.end }
-		times.append(resolved.end)
+		let timing = resolved.timing
+		// Only the samples inside the window the overlay is drawn for, with the
+		// ends pinned so the first and last keyframe land exactly on its edges.
+		// The drawn window rather than the span, because an overlay arriving
+		// before its first mark is following a face over those frames too, and
+		// holding the position it will have at the mark puts it beside where the
+		// head is going to be rather than where it is.
+		var times: [Double] = [timing.drawnFrom]
+		times += path.samples.map(\.time)
+			.filter { $0 > timing.drawnFrom && $0 < timing.drawnUntil }
+		times.append(timing.drawnUntil)
 
 		let animation = CAKeyframeAnimation(keyPath: "position")
 		animation.values = times.map { time in
 			NSValue(point: position(from: path, at: time, offset: offset, size: size))
 		}
-		animation.keyTimes = times.map { NSNumber(value: ($0 - resolved.start) / span) }
+		animation.keyTimes = times.map { NSNumber(value: timing.fraction(at: $0)) }
 		animation.calculationMode = .linear
-		animation.beginTime = host.beginTime(resolved.start)
-		animation.duration = span
+		animation.beginTime = host.beginTime(timing.drawnFrom)
+		animation.duration = timing.drawnSpan
 		animation.fillMode = .both
 		animation.isRemovedOnCompletion = false
 		return animation
@@ -389,11 +415,6 @@ public enum OverlayLayers {
 		let point = path.point(at: time) ?? CGPoint(x: 0.5, y: 0.5)
 		return CGPoint(x: point.x * size.width + offset.x * size.height,
 		               y: point.y * size.height + offset.y * size.height)
-	}
-
-	private static func isFade(_ transition: Overlay.Transition) -> Bool {
-		if case .fade = transition { return true }
-		return false
 	}
 
 	// MARK: - The content
@@ -504,26 +525,30 @@ public enum OverlayLayers {
 		                                                      style: style, size: size),
 		                       frame: size)
 
-		// When the tail is redrawn: at every sample the anchor has inside this
-		// appearance, with the ends pinned — the same list ``follow(_:…)`` uses,
-		// and for the same reason.
+		// When the tail is redrawn: at every sample the anchor has inside the
+		// window this bubble is drawn for, with the ends pinned — the same list
+		// ``follow(_:…)`` uses, and for the same reason. A bubble finished
+		// arriving before the clip starts is a bubble whose words can be read
+		// from the clip's first frame, which is the reason somebody would ask
+		// for it; a tail frozen on the mark's position over those frames would
+		// be pointing at where the face is about to be.
 		let moments = tailMoments(resolved)
 		func target(at time: Double) -> CGPoint? {
 			bubbleTarget(bubble, resolved: resolved, at: time, size: size)
 		}
-		let span = max(resolved.duration, 0.0001)
+		let timing = resolved.timing
 
 		func animate(_ layer: CAShapeLayer, _ path: @escaping (Double) -> CGPath?) {
 			guard moments.count > 1 else {
-				layer.path = path(resolved.start)
+				layer.path = path(timing.drawnFrom)
 				return
 			}
 			let animation = CAKeyframeAnimation(keyPath: "path")
 			animation.values = moments.map { path($0) ?? CGMutablePath() }
-			animation.keyTimes = moments.map { NSNumber(value: ($0 - resolved.start) / span) }
+			animation.keyTimes = moments.map { NSNumber(value: timing.fraction(at: $0)) }
 			animation.calculationMode = .linear
-			animation.beginTime = host.beginTime(resolved.start)
-			animation.duration = span
+			animation.beginTime = host.beginTime(timing.drawnFrom)
+			animation.duration = timing.drawnSpan
 			animation.fillMode = .both
 			animation.isRemovedOnCompletion = false
 			layer.path = animation.values?.first as! CGPath?
@@ -546,7 +571,7 @@ public enum OverlayLayers {
 			// paper rather than over it — the same order the painter draws in.
 			if !Bubbling.tailIsInTheBody(bubble.shape) {
 				let tail = made()
-				let paths = Bubbling.paths(bubble, box: box, pointingAt: target(at: resolved.start),
+				let paths = Bubbling.paths(bubble, box: box, pointingAt: target(at: timing.drawnFrom),
 				                           frame: size, pass: pass)
 				if paths.tailIsPaper, pass == 0 { tail.fillColor = Bubbling.cg(bubble.fill) }
 				animate(tail) { time in
@@ -589,10 +614,12 @@ public enum OverlayLayers {
 	/// the anchor's own samples, which is ten a second — finer than the tail
 	/// moves and coarser than the frame rate, exactly as the anchor was solved.
 	static func tailMoments(_ resolved: ResolvedOverlay) -> [Double] {
-		guard let path = resolved.path, !path.isEmpty else { return [resolved.start] }
-		var times: [Double] = [resolved.start]
-		times += path.samples.map(\.time).filter { $0 > resolved.start && $0 < resolved.end }
-		times.append(resolved.end)
+		let timing = resolved.timing
+		guard let path = resolved.path, !path.isEmpty else { return [timing.drawnFrom] }
+		var times: [Double] = [timing.drawnFrom]
+		times += path.samples.map(\.time)
+			.filter { $0 > timing.drawnFrom && $0 < timing.drawnUntil }
+		times.append(timing.drawnUntil)
 		return times
 	}
 
@@ -623,7 +650,13 @@ public enum OverlayLayers {
 		// covered, because placing it once is a different question from pointing
 		// at it, and a bubble that refuses to appear because the tracking has a
 		// hole at that exact instant is no use to anybody.
-		if let path = resolved.path, let point = path.point(at: resolved.start) {
+		//
+		// "Came on" is the first frame it is *drawn*, not its first mark. For
+		// everything written before placements existed those are the same
+		// instant; for a bubble whose arrival is placed before the mark, the
+		// first frame is the one somebody sees it appear on, and that is the
+		// frame its paper should be beside the face on.
+		if let path = resolved.path, let point = path.point(at: resolved.timing.drawnFrom) {
 			return CGPoint(x: point.x * size.width + offset.x * size.height,
 			               y: point.y * size.height + offset.y * size.height)
 		}
@@ -1051,6 +1084,15 @@ public enum OverlayLayers {
 			                         y: (first.y ?? 0.5) * size.height)
 			layer.opacity = Float(first.opacity ?? 1)
 
+			// The span, not the drawn window — and this is the other half of the
+			// rule the envelope above follows. What is drawn *for* is the drawn
+			// window; what a keyframe's `t` is measured *from* is the span, here
+			// as in ``Frame`` and in a spinner's cycling words below. A scene's
+			// part whose keys moved with the drawing would be re-timed by
+			// somebody adding `at: before` to the overlay's `in:`, which is a
+			// one-word edit quietly rewriting an animation. So the parts hold
+			// their first key over the frames before the mark and start moving
+			// on it, and `fillMode: .both` is what holds them.
 			let span = max(resolved.duration, 0.0001)
 			func animate(_ path: String, _ values: [Any], on target: CALayer = layer) {
 				let animation = CAKeyframeAnimation(keyPath: path)

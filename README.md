@@ -387,6 +387,35 @@ animations are taken from inside the span, so two overlays whose spans meet
 cross at the boundary — the first slides out to the right exactly as the second
 slides in from the left, with nothing to keep in step by hand.
 
+**`at:` says where a movement sits against the mark.** `in:` and `out:` say how
+an overlay arrives and leaves, `over:` says how long that takes, and `at:` says
+where that length goes:
+
+| | |
+|---|---|
+| `at: before` | the movement has finished by the time the mark arrives |
+| `at: across` | the mark falls in the middle of the movement |
+| `at: after` | the movement begins at the mark |
+
+```yaml
+  - film:  sepia
+    from:  demo-install
+    in:    {fade: true, over: 1, at: before}
+```
+
+Read against the mark, so one set of words does both ends — which is why the
+*defaults* are different words at the two: `after` at the first mark and
+`before` at the last, because that is the arrangement in which nothing is on
+screen outside the span. `before` therefore reads as a change at the start of an
+overlay and as the way it already was at the end. Same word, same meaning; the
+mark it is measured from is what moved.
+
+An overlay whose movement is placed outside its span is **drawn** outside it,
+and that is the point — a grade finished when the clip starts has to have
+started before it. The span itself does not move: it is still what the file
+says, still what the timeline draws, and still what a `keys:` entry's `t` counts
+from, so adding `at:` re-times nothing. A cut has no length and takes no `at:`.
+
 **An overlay can also be written inside the entry it is drawn over.** Given no
 range of its own it covers exactly that placement — which is the one thing a
 name cannot say, because `from: intro` finds *every* use of `intro`:

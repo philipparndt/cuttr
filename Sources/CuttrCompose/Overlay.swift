@@ -137,6 +137,19 @@ public struct Overlay: Sendable, Equatable {
 	public var arrival: Transition
 	public var departure: Transition
 
+	/// Where the arrival sits against the overlay's first mark, and where the
+	/// departure sits against its last.
+	///
+	/// Two fields beside the transitions rather than a case inside them, for two
+	/// reasons. A sound has an arrival and a departure of the same type and no
+	/// span to place them against, so a placement on ``Transition`` would be a
+	/// value half its holders could not use. And every `case` of that enum is
+	/// pattern-matched in a dozen places for what it *is*; adding a second
+	/// associated value to all four to carry something none of them reads would
+	/// touch every one of those and say nothing.
+	public var arrivalPlacement: Transition.Placement = .after
+	public var departurePlacement: Transition.Placement = .before
+
 	/// The overlay's parameters, moving.
 	///
 	/// Empty for nearly every overlay, and an empty list is exactly what an
@@ -177,6 +190,8 @@ public struct Overlay: Sendable, Equatable {
 		appearances: [Appearance],
 		arrival: Transition = .slide(.left, over: 0.4),
 		departure: Transition = .slide(.right, over: 0.4),
+		arrivalPlacement: Transition.Placement = .after,
+		departurePlacement: Transition.Placement = .before,
 		behind: Occlusion = .nothing,
 		anchor: String? = nil,
 		offset: CGPoint = .zero,
@@ -187,6 +202,8 @@ public struct Overlay: Sendable, Equatable {
 		self.behind = behind
 		self.arrival = arrival
 		self.departure = departure
+		self.arrivalPlacement = arrivalPlacement
+		self.departurePlacement = departurePlacement
 		self.anchor = anchor
 		self.offset = offset
 		self.keys = keys
@@ -198,14 +215,17 @@ public struct Overlay: Sendable, Equatable {
 		span: Span,
 		arrival: Transition = .slide(.left, over: 0.4),
 		departure: Transition = .slide(.right, over: 0.4),
+		arrivalPlacement: Transition.Placement = .after,
+		departurePlacement: Transition.Placement = .before,
 		behind: Occlusion = .nothing,
 		anchor: String? = nil,
 		offset: CGPoint = .zero,
 		keys: [Key] = []
 	) {
 		self.init(kind: kind, appearances: [Appearance(span)], arrival: arrival,
-		          departure: departure, behind: behind, anchor: anchor, offset: offset,
-		          keys: keys)
+		          departure: departure, arrivalPlacement: arrivalPlacement,
+		          departurePlacement: departurePlacement, behind: behind, anchor: anchor,
+		          offset: offset, keys: keys)
 	}
 
 	/// Several ranges, all saying the same thing.
@@ -214,14 +234,17 @@ public struct Overlay: Sendable, Equatable {
 		spans: [Span],
 		arrival: Transition = .slide(.left, over: 0.4),
 		departure: Transition = .slide(.right, over: 0.4),
+		arrivalPlacement: Transition.Placement = .after,
+		departurePlacement: Transition.Placement = .before,
 		behind: Occlusion = .nothing,
 		anchor: String? = nil,
 		offset: CGPoint = .zero,
 		keys: [Key] = []
 	) {
 		self.init(kind: kind, appearances: spans.map { Appearance($0) }, arrival: arrival,
-		          departure: departure, behind: behind, anchor: anchor, offset: offset,
-		          keys: keys)
+		          departure: departure, arrivalPlacement: arrivalPlacement,
+		          departurePlacement: departurePlacement, behind: behind, anchor: anchor,
+		          offset: offset, keys: keys)
 	}
 
 	/// Where an overlay lives on the programme's clock.
@@ -278,12 +301,22 @@ public struct Overlay: Sendable, Equatable {
 
 	/// How an overlay enters or leaves.
 	///
-	/// `over` is the length of the movement, taken from *inside* the span at
-	/// each end. So two overlays whose spans meet — one ending where the next
-	/// begins — cross at the boundary: the first slides out to the right at the
-	/// same moment the second slides in from the left, with no gap to arrange
-	/// and nothing to keep in step by hand. That is the effect the whole
-	/// clip-bound design exists to make automatic.
+	/// `over` is the length of the movement. Where that length *sits* is a
+	/// separate question, and its answer is ``Overlay/arrivalPlacement`` and
+	/// ``Overlay/departurePlacement``; by default the movement is taken from
+	/// inside the span at each end, which is what it has always been.
+	///
+	/// So two overlays whose spans meet — one ending where the next begins —
+	/// cross at the boundary: the first slides out to the right at the same
+	/// moment the second slides in from the left, with no gap to arrange and
+	/// nothing to keep in step by hand. That is the effect the whole clip-bound
+	/// design exists to make automatic, and a placement moves where the crossing
+	/// happens rather than whether it does. Both movements placed `across` the
+	/// mark is the same crossing centred on it; the second one's arrival placed
+	/// `before` puts the two on top of each other in the seconds *leading up*
+	/// to the mark, which is a dissolve between two overlays rather than a
+	/// hand-off at a line. Neither overlay's span moves, so the file still says
+	/// which one belongs where.
 	public enum Transition: Sendable, Equatable {
 		case cut
 		case fade(over: Double)
@@ -295,6 +328,55 @@ public struct Overlay: Sendable, Equatable {
 
 		public enum Edge: String, Sendable, CaseIterable {
 			case left, right, up, down
+		}
+
+		/// Where a movement sits relative to the mark it is attached to.
+		///
+		/// Read against the **mark**, never against the overlay, which is what
+		/// makes one set of three words do both ends:
+		///
+		/// - `before` — the movement has finished by the time the mark arrives.
+		///   At the first mark that is an overlay already fully on for the
+		///   clip's first frame; at the last it is one already gone.
+		/// - `across` — the mark falls in the middle of the movement: half way
+		///   on at the first frame, half way off at the last.
+		/// - `after` — the movement begins at the mark.
+		///
+		/// **Why the two defaults are different words.** `over` has always been
+		/// taken from *inside* the span: an overlay begins arriving at its first
+		/// mark and has finished leaving by its last, so the whole of both
+		/// movements happens between the marks somebody wrote and nothing at all
+		/// is on screen outside them. Said in these words, that is `after` at
+		/// the start and `before` at the end. It looks lopsided written down,
+		/// and it is the one arrangement in which the span and the picture agree
+		/// about when the overlay exists — which is why it is the default and
+		/// why the asymmetry is worth a paragraph rather than a tidy-up.
+		///
+		/// The word that surprises people is `before`. At the first mark it puts
+		/// the overlay on screen *early*; at the last mark it is what already
+		/// happens and changes nothing. Same word, same meaning — the mark it is
+		/// measured from is the thing that moved.
+		public enum Placement: String, Sendable, CaseIterable {
+			case before, across, after
+
+			/// How much of the movement falls on the near side of the mark.
+			var beforeTheMark: Double {
+				switch self {
+				case .before: return 1
+				case .across: return 0.5
+				case .after: return 0
+				}
+			}
+
+			/// What to call one in the panel, where there is no mark drawn to
+			/// point at.
+			public var title: String {
+				switch self {
+				case .before: return "before the mark"
+				case .across: return "across the mark"
+				case .after: return "after the mark"
+				}
+			}
 		}
 
 		public var duration: Double {

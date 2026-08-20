@@ -44,16 +44,27 @@ enum Frame {
 	) -> CIImage {
 		var image = picture
 
-		for shown in work.overlays where time >= shown.start && time <= shown.end {
-			let intensity = fade(shown, at: time)
+		for shown in work.overlays {
+			// Drawn, which is not the same question as on: a movement placed
+			// before the first mark puts the overlay on screen before its span
+			// begins, and this is the loop that decides whether there is
+			// anything to draw at all. ``OverlayTiming`` owns both answers.
+			let timing = shown.timing
+			guard timing.drawn(at: time) else { continue }
+			let intensity = timing.envelope(at: time)
 			// The overlay's parameters as they stand at this moment. `t` is
-			// measured from the start of *this appearance*, as a scene's keys
-			// are measured from the start of the scene — an overlay that is on
-			// three times runs its keys three times.
+			// measured from the start of *this appearance* — from the span's
+			// first mark, not from the first drawn frame — as a scene's keys are
+			// measured from the start of the scene. An overlay that is on three
+			// times runs its keys three times, and adding `at: before` to an
+			// `in:` moves no key: the file said `t: 0` about the mark, and the
+			// mark has not moved. On the frames before it the tracks hold their
+			// first value, which is what ``Track`` does for any `t`
+			// below its first key.
 			//
-			// It composes with the fade rather than replacing it: `intensity`
-			// still says how far into the thing the programme is, and the
-			// numbers it scales are now the ones the keys have moved to.
+			// It composes with the envelope rather than replacing it:
+			// `intensity` still says how far into the thing the programme is,
+			// and the numbers it scales are the ones the keys have moved to.
 			switch shown.overlay.kind(at: time - shown.start) {
 			case .film(let film):
 				image = Filming.applied(film, to: image, intensity: intensity,
@@ -68,8 +79,9 @@ enum Frame {
 
 			case .effect:
 				guard intensity > 0.001, let renderer = renderer(for: shown, in: work) else { continue }
-				image = thrown(shown, renderer: renderer, over: image, under: picture,
-				               at: time, opacity: intensity, size: size, work: work)
+				image = thrown(shown, timing: timing, renderer: renderer, over: image,
+				               under: picture, at: time, opacity: intensity, size: size,
+				               work: work)
 
 			case .text, .spinner, .scene, .bubble:
 				// Layers, unless they go behind somebody — in which case they
@@ -109,17 +121,23 @@ enum Frame {
 	/// effect written after a film overlay puts the film-graded person back in
 	/// front of the confetti rather than the ungraded one.
 	private static func thrown(
-		_ shown: ResolvedOverlay, renderer: EffectRenderer, over image: CIImage,
-		under picture: CIImage, at time: Double, opacity: Double, size: CGSize,
-		work: ProgrammeCompositor.Work
+		_ shown: ResolvedOverlay, timing: OverlayTiming, renderer: EffectRenderer,
+		over image: CIImage, under picture: CIImage, at time: Double, opacity: Double,
+		size: CGSize, work: ProgrammeCompositor.Work
 	) -> CIImage {
-		var spawningUntil = Double.infinity
-		if case .fall(let over) = shown.overlay.departure {
-			spawningUntil = max(0, shown.duration - over)
-		}
+		let spawningUntil = timing.spawningUntil ?? .infinity
 
 		func plate(_ half: EffectRenderer.Half) -> CIImage? {
-			guard let drawn = renderer.image(at: time - shown.start,
+			// On the *drawn* clock, not the span's, and this is the one place
+			// the two are deliberately different. A cloud of pieces is a
+			// simulation: it has to start empty on the first frame anybody sees
+			// it, or an effect whose arrival is placed before the mark shows a
+			// full shower in its first frame and then starts over at the mark.
+			// A key is a number somebody wrote against the mark and stays
+			// there. The two clocks coincide unless a movement is placed
+			// outside the span, and where they differ each is doing its own
+			// right thing.
+			guard let drawn = renderer.image(at: time - timing.drawnFrom,
 			                                 spawningUntil: spawningUntil, only: half)
 			else { return nil }
 			guard opacity < 0.999 else { return drawn }
@@ -151,22 +169,13 @@ enum Frame {
 	/// How far in or out an overlay is at a moment: one in the middle, nothing
 	/// at either edge if it fades.
 	///
-	/// Only a fade fades. An effect cannot slide — it is the whole frame — so
-	/// anything else simply starts, which for confetti means the first pieces
-	/// arriving over the top edge. For film mode, the aberration and the tape
-	/// this number is not an opacity but how far into the thing the programme
-	/// is: the bars close, the fringes spread, the tracking gives way.
+	/// Kept as a name of its own because it reads at the call site, and thin
+	/// because the arithmetic behind it now belongs to ``OverlayTiming`` — where
+	/// the export's keyframes and the painter get it from too. An effect cannot
+	/// slide, being the whole frame, so anything that is not a fade simply
+	/// starts: for confetti that means the first pieces arriving over the top
+	/// edge.
 	static func fade(_ shown: ResolvedOverlay, at time: Double) -> Double {
-		let span = max(shown.duration, 0.0001)
-		let arrive = min(shown.overlay.arrival.duration, span / 2)
-		let depart = min(shown.overlay.departure.duration, span / 2)
-		var opacity = 1.0
-		if case .fade = shown.overlay.arrival, arrive > 0, time < shown.start + arrive {
-			opacity = min(opacity, (time - shown.start) / arrive)
-		}
-		if case .fade = shown.overlay.departure, depart > 0, time > shown.end - depart {
-			opacity = min(opacity, (shown.end - time) / depart)
-		}
-		return max(0, min(1, opacity))
+		shown.timing.envelope(at: time)
 	}
 }

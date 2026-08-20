@@ -83,4 +83,41 @@ import Testing
 		#expect(try await ink(in: url, at: 1.5) > 100)
 		#expect(try await ink(in: url, at: 2.4) == 0)
 	}
+
+	/// An arrival placed before the first mark, in the encoded file.
+	///
+	/// The claim placements make is that an overlay can be on screen *before*
+	/// its span, and the export is where such a claim has failed before: the
+	/// preview honours the discrete `hidden` animation and
+	/// `AVVideoCompositionCoreAnimationTool` does not, so the opacity envelope
+	/// has to bracket the drawn window rather than the span. Bracketed at the
+	/// span, this caption would be invisible for the whole of its fade and would
+	/// snap on at the mark — which is exactly what it is not allowed to do.
+	@Test func aCaptionPlacedBeforeTheMarkIsUpBeforeItsSpan() async throws {
+		let url = try await rendered("""
+			    in:    {fade: true, over: 0.4, at: before}
+			    out:   cut
+			""")
+		defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+		// The movement runs from 0.6 to the mark at 1.0.
+		#expect(try await ink(in: url, at: 0.4) == 0, "nothing before the movement starts")
+		#expect(try await ink(in: url, at: 0.9) > 0, "three quarters of the way up, early")
+		#expect(try await ink(in: url, at: 1) > 100, "fully on for the mark itself")
+		#expect(try await ink(in: url, at: 1.96) > 100)
+		#expect(try await ink(in: url, at: 2.04) == 0, "and cut away at its last mark")
+	}
+
+	/// A departure placed after the last mark, likewise: still up when the span
+	/// ends, and gone a fraction of a second later.
+	@Test func aCaptionPlacedAfterTheMarkIsStillUpWhenItsSpanEnds() async throws {
+		let url = try await rendered("""
+			    in:    cut
+			    out:   {fade: true, over: 0.4, at: after}
+			""")
+		defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+		#expect(try await ink(in: url, at: 0.96) == 0, "nothing before its first mark")
+		#expect(try await ink(in: url, at: 2) > 100, "still fully on at the last mark")
+		#expect(try await ink(in: url, at: 2.1) > 0, "on its way out, past the span")
+		#expect(try await ink(in: url, at: 2.44) == 0, "and gone")
+	}
 }

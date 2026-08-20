@@ -1,0 +1,181 @@
+# cuttr project — where a transition sits relative to the mark.
+#
+# `in:` and `out:` say *how* an overlay arrives and leaves. `over:` says how
+# long that takes. `at:` says where that length sits against the mark it is
+# attached to, and there are three answers:
+#
+#   at: before    the movement has finished by the time the mark arrives
+#   at: across    the mark falls in the middle of the movement
+#   at: after     the movement begins at the mark
+#
+# Read against the mark, so one set of words does both ends. The defaults are
+# therefore *different words* at the two ends — `after` at the first mark and
+# `before` at the last — because that is the one arrangement in which nothing
+# is on screen outside the span, which is what `over` has always meant.
+#
+# Six passes. Each is a slate card, a cream card and a slate card, and film
+# mode is on over the cream one: 2.39 bars close in, a sepia stock mixes up.
+# The cream card is the clip, so where the bars are as it starts — and where
+# they still are as it ends — is the whole of what there is to see.
+cuttr-project: 1
+
+output:
+  size: 1280x720
+  fps:  25
+  file: at-the-mark.mov
+
+timeline:
+  # --- The first mark: three ways of arriving --------------------------------
+  - card:  00:01.200
+    fill:  "#7d8798"
+  - card:  00:01.600
+    fill:  "#e2d7b4"
+    as:    in-before
+    overlays:
+      - text:  "in — at before"
+        style: title
+        in:    cut
+        out:   cut
+  - card:  00:00.600
+    fill:  "#7d8798"
+
+  - card:  00:01.200
+    fill:  "#7d8798"
+  - card:  00:01.600
+    fill:  "#e2d7b4"
+    as:    in-across
+    overlays:
+      - text:  "in — at across"
+        style: title
+        in:    cut
+        out:   cut
+  - card:  00:00.600
+    fill:  "#7d8798"
+
+  - card:  00:01.200
+    fill:  "#7d8798"
+  - card:  00:01.600
+    fill:  "#e2d7b4"
+    as:    in-after
+    overlays:
+      - text:  "in — at after (the default)"
+        style: title
+        in:    cut
+        out:   cut
+  - card:  00:00.600
+    fill:  "#7d8798"
+
+  # --- The last mark: three ways of leaving ----------------------------------
+  - card:  00:00.600
+    fill:  "#7d8798"
+  - card:  00:01.600
+    fill:  "#e2d7b4"
+    as:    out-before
+    overlays:
+      - text:  "out — at before (the default)"
+        style: title
+        in:    cut
+        out:   cut
+  - card:  00:01.200
+    fill:  "#7d8798"
+
+  - card:  00:00.600
+    fill:  "#7d8798"
+  - card:  00:01.600
+    fill:  "#e2d7b4"
+    as:    out-across
+    overlays:
+      - text:  "out — at across"
+        style: title
+        in:    cut
+        out:   cut
+  - card:  00:01.200
+    fill:  "#7d8798"
+
+  - card:  00:00.600
+    fill:  "#7d8798"
+  - card:  00:01.600
+    fill:  "#e2d7b4"
+    as:    out-after
+    overlays:
+      - text:  "out — at after"
+        style: title
+        in:    cut
+        out:   cut
+  - card:  00:01.200
+    fill:  "#7d8798"
+
+overlays:
+  # Finished when the clip starts. The bars are already closed and the stock is
+  # already mixed on the cream card's first frame, so the change happened over
+  # the slate card in front of it.
+  - film:   sepia
+    ratio:  2.39:1
+    strength: 1
+    grain:  0.12
+    vignette: 0.25
+    from:   "@in-before"
+    in:     {fade: true, over: 1, at: before}
+    out:    cut
+
+  # Half through when the clip starts: half the bar, half the stock.
+  - film:   sepia
+    ratio:  2.39:1
+    strength: 1
+    grain:  0.12
+    vignette: 0.25
+    from:   "@in-across"
+    in:     {fade: true, over: 1, at: across}
+    out:    cut
+
+  # Starts with the clip, which is what a file that says nothing gets.
+  - film:   sepia
+    ratio:  2.39:1
+    strength: 1
+    grain:  0.12
+    vignette: 0.25
+    from:   "@in-after"
+    in:     {fade: true, over: 1}
+    out:    cut
+
+  # Finished leaving by the last frame of the clip — again the default, and the
+  # same word as the first pass above. `before` is early at the first mark and
+  # punctual at the last; the word did not change, the mark did.
+  - film:   sepia
+    ratio:  2.39:1
+    strength: 1
+    grain:  0.12
+    vignette: 0.25
+    from:   "@out-before"
+    in:     cut
+    out:    {fade: true, over: 1}
+
+  # Half out when the clip ends.
+  - film:   sepia
+    ratio:  2.39:1
+    strength: 1
+    grain:  0.12
+    vignette: 0.25
+    from:   "@out-across"
+    in:     cut
+    out:    {fade: true, over: 1, at: across}
+
+  # Still all the way in when the clip ends, and leaving over the slate card
+  # after it — which is film mode carried across a cut on purpose.
+  - film:   sepia
+    ratio:  2.39:1
+    strength: 1
+    grain:  0.12
+    vignette: 0.25
+    from:   "@out-after"
+    in:     cut
+    out:    {fade: true, over: 1, at: after}
+
+  # A cut has no length, so there is nothing to place: `at:` on one is read and
+  # dropped, and the file writes `cut` back. This caption is here to say so.
+  - text:  "`at:` needs a length — a cut is an instant"
+    style: caption
+    from:  00:00.000
+    to:    00:03.000
+    in:    {fade: true, over: 0.3}
+    out:   {fade: true, over: 0.3}
