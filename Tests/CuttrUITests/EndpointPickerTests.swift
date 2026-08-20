@@ -203,8 +203,15 @@ import Testing
 		#expect(timeline.acceptsFirstResponder)
 		var pressed: [String] = []
 		timeline.onKey = { pressed.append($0); return $0 != "x" }
-		for key in [" ", "i", "o", "x"] { timeline.keyDown(with: press(key)) }
-		#expect(pressed == [" ", "i", "o", "x"])
+		// Only the keys it claims are sent in. An unclaimed key falls through
+		// to `NSResponder`, which has nowhere to send it and **beeps** — from a
+		// test run that is a noise on somebody's machine while they are working,
+		// once per run, for no reason anybody watching could explain.
+		for key in [" ", "i", "o"] { timeline.keyDown(with: press(key)) }
+		#expect(pressed == [" ", "i", "o"])
+		// What happens to a key it does not claim is asked of the hook rather
+		// than of the responder chain.
+		#expect(timeline.onKey?("x") == false)
 	}
 
 	/// And the dialog does something with each of them.
