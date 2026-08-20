@@ -406,31 +406,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// different questions — which of these am I already in, and which did I
 	/// work on last week — and a list that mixes them makes somebody read every
 	/// row to find out which kind each one is.
-	func switcherGroups() -> [DocumentSwitcher.Group] {
+	func switcherGroups(current: NSWindow? = nil) -> [DocumentSwitcher.Group] {
 		var groups: [DocumentSwitcher.Group] = []
 
+		let here = current ?? NSApp.keyWindow
 		let open = openDocuments().map { document in
 			DocumentSwitcher.Entry(
 				name: document.name,
-				path: document.project.map { "in \($0)" } ?? shortPath(document.url),
+				// Always the folder, never "in dingsda". The indent already says
+				// which project a take belongs to; the folder is the thing that
+				// tells two takes called `take-1` apart, and it was the column
+				// this list was missing.
+				path: shortPath(document.url),
 				kind: document.kind,
-				open: { [weak self] in
+				indented: document.project != nil,
+				isCurrent: document.window === here,
+				open: {
 					guard let window = document.window else { return }
-					_ = self
 					NSApp.activate(ignoringOtherApps: true)
 					window.makeKeyAndOrderFront(nil)
 				})
 		}
-		if !open.isEmpty { groups.append(.init("Open", open)) }
+		if !open.isEmpty { groups.append(.init("Open Documents", open)) }
 
 		// What was open before. `remember(_:)` already files these with the
 		// document controller, so the list is there for the taking — but a
 		// remembered file can have moved since, and a row offering a path that
 		// opens nothing is worse than a row that says so.
+		//
+		// Takes as well as projects, and eight of them. A take is a document
+		// somebody opens directly — double-clicking a `.cuttr` is the ordinary
+		// way into one — so leaving them out would make the list answer a
+		// narrower question than it is asked. Eight because the list is
+		// most-recent-first and this is a switcher rather than an archive: past
+		// the first handful, somebody is looking for a file rather than for the
+		// thing they had open on Tuesday, and `⌘O` is the better door.
 		let alreadyOpen = Set(openDocuments().compactMap { $0.url?.standardizedFileURL.path })
 		let recent = NSDocumentController.shared.recentDocumentURLs
 			.filter { !alreadyOpen.contains($0.standardizedFileURL.path) }
-			.prefix(12)
+			.prefix(8)
 			.map { url -> DocumentSwitcher.Entry in
 				let there = FileManager.default.fileExists(atPath: url.path)
 				return DocumentSwitcher.Entry(
@@ -440,7 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 					missing: !there,
 					open: there ? { [weak self] in self?.open(url) } : nil)
 			}
-		if !recent.isEmpty { groups.append(.init("Recent", Array(recent))) }
+		if !recent.isEmpty { groups.append(.init("Recent Documents", Array(recent))) }
 		return groups
 	}
 
@@ -454,7 +468,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 	/// Shows it under a part of a view — a half of the capsule.
 	func showDocumentSwitcher(from view: NSView, rect: NSRect, onClose: @escaping () -> Void) {
-		let groups = switcherGroups()
+		let groups = switcherGroups(current: view.window)
 		guard !groups.isEmpty else { onClose(); return }
 		DocumentSwitcher.show(groups, from: view, rect: rect, onClose: onClose)
 	}
