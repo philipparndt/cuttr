@@ -197,6 +197,17 @@ public final class PropertiesPanel: NSView {
 	/// nothing.
 	private var mine = false
 
+	/// For the tests: every word of explanation this form carries, and which
+	/// heading it is filed under.
+	var explanationsForTesting: [(section: String, key: String, note: String)] {
+		helps.flatMap { help in help.lines.map { (help.section, $0.key, $0.note) } }
+	}
+
+	/// For the tests: the headings that offer a `?`.
+	var askableSectionsForTesting: [String] {
+		helps.filter { $0.button?.isHidden == false }.map(\.section)
+	}
+
 	/// For the tests: the head, without going through the view tree looking for
 	/// a font.
 	var subjectForTesting: SubjectLine { subject }
@@ -216,6 +227,8 @@ public final class PropertiesPanel: NSView {
 		if built != selection { selectedSpan = 0; stripHadFocus = false; selectedKey = 0 }
 		mine = false
 		sinks.removeAll()
+		helps.removeAll()
+		help = nil
 		generation += 1
 		for row in form.arrangedSubviews {
 			form.removeArrangedSubview(row)
@@ -1652,7 +1665,7 @@ public final class PropertiesPanel: NSView {
 		case .text, .spinner, .scene:
 			return
 		}
-		field("", [label("")], note: message)
+		remark(message)
 	}
 
 	/// How long this overlay is on, for the range a new key is placed in.
@@ -2030,25 +2043,110 @@ public final class PropertiesPanel: NSView {
 		row.widthAnchor.constraint(equalTo: form.widthAnchor, constant: -28).isActive = true
 	}
 
-	/// A heading with a hairline running to the far edge.
+	/// A heading, a `?`, and a hairline running to the far edge.
+	///
+	/// The `?` is where the explanations went. Every field in this panel carried
+	/// three lines of grey prose under it, permanently — good writing, printed
+	/// for ever, and most of the reason the column felt space-demanding. Not one
+	/// word of it is gone: it is the field's tooltip, and it is all here behind
+	/// this button, keyed by the field it explains. Printed once when somebody
+	/// asks, rather than always because somebody might.
 	private func section(_ name: String) {
 		let label = NSTextField(labelWithString: name.uppercased())
 		label.font = Theme.heading
 		label.textColor = Theme.faintText
 		label.setContentHuggingPriority(.required, for: .horizontal)
 
+		let help = Help(section: name)
+		self.help = help
+		helps.append(help)
+
+		let ask = NSButton()
+		ask.isBordered = false
+		ask.bezelStyle = .inline
+		ask.image = NSImage(systemSymbolName: "questionmark.circle",
+		                    accessibilityDescription: "what these mean")?
+			.withSymbolConfiguration(.init(pointSize: 10, weight: .medium)
+				.applying(.init(paletteColors: [Theme.faintText])))
+		ask.imagePosition = .imageOnly
+		ask.toolTip = "What the keys in \(name) mean"
+		ask.translatesAutoresizingMaskIntoConstraints = false
+		ask.widthAnchor.constraint(equalToConstant: 16).isActive = true
+		// Hidden until something is said under this heading. A `?` that opens an
+		// empty popover is worse than no `?`.
+		ask.isHidden = true
+		let sink = Sink { [weak self, weak ask] _ in
+			guard let ask else { return }
+			self?.explain(help, from: ask)
+		}
+		sinks.append(sink)
+		ask.target = sink
+		ask.action = #selector(Sink.fire(_:))
+		help.button = ask
+
 		let rule = NSBox()
 		rule.boxType = .separator
 		rule.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
 		rule.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
 
-		let header = NSStackView(views: [label, rule])
+		let header = NSStackView(views: [label, ask, rule])
 		header.orientation = .horizontal
-		header.spacing = 8
+		header.spacing = 6
 		header.alignment = .centerY
 		header.edgeInsets = NSEdgeInsets(
 			top: form.arrangedSubviews.isEmpty ? 0 : 8, left: 0, bottom: 0, right: 0)
 		add(header)
+	}
+
+	/// Everything said about the fields under one heading.
+	private final class Help {
+		let section: String
+		var lines: [(key: String, note: String)] = []
+		weak var button: NSButton?
+		init(section: String) { self.section = section }
+	}
+
+	/// The heading being filled now, and all of them, kept because a `Sink`
+	/// holds only a closure.
+	private var help: Help?
+	private var helps: [Help] = []
+	private var explaining: NSPopover?
+
+	private func explain(_ help: Help, from button: NSButton) {
+		if let explaining, explaining.isShown { explaining.close(); return }
+		let text = NSTextView()
+		text.isEditable = false
+		text.drawsBackground = false
+		text.textContainerInset = NSSize(width: 14, height: 12)
+		let body = NSMutableAttributedString()
+		for (key, note) in help.lines {
+			if !body.string.isEmpty { body.append(NSAttributedString(string: "\n\n")) }
+			if !key.isEmpty {
+				body.append(NSAttributedString(
+					string: key + "\n",
+					attributes: [.font: Theme.mono, .foregroundColor: Theme.text]))
+			}
+			body.append(NSAttributedString(
+				string: note,
+				attributes: [.font: Theme.body, .foregroundColor: Theme.dimText]))
+		}
+		text.textStorage?.setAttributedString(body)
+		text.textContainer?.containerSize = NSSize(width: 340, height: CGFloat.greatestFiniteMagnitude)
+		text.textContainer?.widthTracksTextView = true
+		text.frame = NSRect(x: 0, y: 0, width: 368, height: 100)
+		text.layoutManager?.ensureLayout(for: text.textContainer!)
+		let used = text.layoutManager?.usedRect(for: text.textContainer!).height ?? 100
+		text.frame = NSRect(x: 0, y: 0, width: 368, height: min(520, used + 24))
+
+		let holder = NSViewController()
+		holder.view = text
+		holder.preferredContentSize = text.frame.size
+		let popover = NSPopover()
+		popover.contentViewController = holder
+		popover.behavior = .transient
+		popover.appearance = NSAppearance(named: .darkAqua)
+		explaining = popover
+		popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
 	}
 
 	/// Something that takes the whole width — the picture, the range strip.
@@ -2082,8 +2180,23 @@ public final class PropertiesPanel: NSView {
 		row.alignment = .centerY
 		add(row)
 
-		if let note { add(caption(note)) }
+		// The explanation, said twice and printed neither time: on the row, so
+		// resting on it says it, and under the heading's `?`, so all of them can
+		// be read at once.
+		guard let note else { return }
+		row.toolTip = note
+		name.toolTip = note
+		for control in controls where control.toolTip == nil { control.toolTip = note }
+		help?.lines.append((key, note))
+		help?.button?.isHidden = false
 	}
+
+	/// A remark that is not about one key.
+	///
+	/// The few places that say "the thing you are looking for is not here, and
+	/// this is why". That is not an explanation of a field somebody can rest on
+	/// — there is no field — so it stays printed.
+	private func remark(_ message: String) { add(caption(message)) }
 
 	/// A line of explanation, indented under the controls it explains.
 	private func caption(_ message: String) -> NSView {

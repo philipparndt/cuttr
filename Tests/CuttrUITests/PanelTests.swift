@@ -939,3 +939,75 @@ import Testing
 		#expect(tops.count == 1, "the form starts at \(tops.sorted())")
 	}
 }
+
+/// The explanations are kept and put away.
+///
+/// Every field in the properties panel carried three lines of grey prose under
+/// it, permanently. It is good writing and it was most of the reason the column
+/// felt space-demanding. Not one word has gone: it is the field's tooltip, and
+/// it is all behind a `?` in the heading, keyed by the field it explains.
+@Suite @MainActor struct FieldHelpTests {
+
+	private func panel(_ selection: ProjectSelection) -> PropertiesPanel {
+		_ = NSApplication.shared
+		let panel = PropertiesPanel()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 900),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = panel
+		panel.reload(
+			Project(
+				timeline: [TimelineEntry(clip: ClipReference("intro"))],
+				overlays: [Overlay(kind: .spinner(Spinner(words: [SpinnerWord("one")])),
+				                   spans: [.times(from: 0, to: 4)], anchor: "mia-eye")]),
+			vocabulary: ComposeDocument.Vocabulary(), selection: selection)
+		panel.layoutSubtreeIfNeeded()
+		return panel
+	}
+
+	/// Every word is still there, and every heading that has words offers them.
+	@Test func theWordsAreKeptBehindTheHeading() {
+		for selection: ProjectSelection in [.output, .entry([0]), .overlay(.project(0))] {
+			let panel = self.panel(selection)
+			let said = panel.explanationsForTesting
+			#expect(!said.isEmpty, "nothing is explained for \(selection)")
+			#expect(said.allSatisfy { !$0.note.isEmpty })
+			// A `?` on every heading that has something under it, and on none
+			// that has not: a button opening an empty popover is worse than no
+			// button.
+			let withWords = Set(said.map(\.section))
+			#expect(Set(panel.askableSectionsForTesting) == withWords,
+			        "for \(selection): \(panel.askableSectionsForTesting) against \(withWords.sorted())")
+		}
+	}
+
+	/// And none of it is printed under the fields any more.
+	///
+	/// `output` is the case with no standing remarks in it — the few places that
+	/// say "the thing you are looking for is not here, and this is why" are not
+	/// explanations of a field and stay printed.
+	@Test func noneOfItIsPrintedUnderTheFields() {
+		let panel = self.panel(.output)
+		let notes = Set(panel.explanationsForTesting.map(\.note))
+		func labels(in view: NSView) -> [NSTextField] {
+			view.subviews.flatMap { sub -> [NSTextField] in
+				((sub as? NSTextField).map { [$0] } ?? []) + labels(in: sub)
+			}
+		}
+		let printed = labels(in: panel).map(\.stringValue).filter { notes.contains($0) }
+		#expect(printed.isEmpty, "still printed: \(printed)")
+	}
+
+	/// Resting on a row says the same thing.
+	@Test func everyExplainedRowSaysItOnHover() {
+		let panel = self.panel(.output)
+		let notes = Set(panel.explanationsForTesting.map(\.note))
+		func tips(in view: NSView) -> [String] {
+			view.subviews.flatMap { sub -> [String] in
+				(sub.toolTip.map { [$0] } ?? []) + tips(in: sub)
+			}
+		}
+		let shown = Set(tips(in: panel))
+		#expect(notes.isSubset(of: shown),
+		        "not offered on hover: \(notes.subtracting(shown))")
+	}
+}
