@@ -31,6 +31,9 @@ final class EffectRenderer: @unchecked Sendable {
 		let spinX: Float, spinY: Float, spinZ: Float
 		let lift: Float
 		let size: Float
+		/// Where this piece comes in the seeded sequence, as a fraction. What
+		/// an animated density thins the cloud by — see ``EffectMotion``.
+		let rank: Double
 	}
 
 	private let renderer: SCNRenderer
@@ -38,6 +41,10 @@ final class EffectRenderer: @unchecked Sendable {
 	private let camera = SCNNode()
 	private let pieces: [Piece]
 	private let effect: Effect
+	/// How the keys reach the cloud: the clock, the drift, the size and the
+	/// fraction of the cloud that is allowed to fall. Everything animated about
+	/// an effect goes through here.
+	private let motion: EffectMotion
 	private let size: CGSize
 	private let device: MTLDevice
 	private let queue: MTLCommandQueue
@@ -60,13 +67,14 @@ final class EffectRenderer: @unchecked Sendable {
 	/// frame's shape — so `size` and speeds mean the same thing at any output.
 	private static let worldHeight: Float = 10
 
-	init?(_ effect: Effect, size: CGSize) {
+	init?(_ effect: Effect, keys: [Overlay.Key] = [], size: CGSize) {
 		guard size.width >= 16, size.height >= 16,
 		      let device = MTLCreateSystemDefaultDevice(),
 		      let queue = device.makeCommandQueue() else { return nil }
 		self.device = device
 		self.queue = queue
 		self.effect = effect
+		self.motion = EffectMotion(effect, keys: keys)
 		self.size = size
 
 		let depthDescriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -123,7 +131,13 @@ final class EffectRenderer: @unchecked Sendable {
 		var random = Seeded(effect.seed)
 		let colours = effect.colours
 		var pieces: [Piece] = []
-		for index in 0..<effect.count {
+		// Built for the most the effect is ever asked for rather than for what
+		// it starts at, because a piece cannot be made half way through a
+		// render — see ``EffectMotion``. With nothing animating the density this
+		// is exactly `effect.count`, off the same seeded sequence, so a project
+		// that does not animate gets the cloud it always got.
+		let count = effect.count(for: motion.peakDensity)
+		for index in 0..<count {
 			let colour = colours[index % colours.count]
 			// Where in the cloud this piece is. Drawn before anything that uses
 			// it so the same seed gives the same arrangement.
@@ -144,7 +158,11 @@ final class EffectRenderer: @unchecked Sendable {
 				spinY: Float(random.value(-3...3)),
 				spinZ: Float(random.value(-1.5...1.5)),
 				lift: Float(random.value(Self.lift(effect))),
-				size: Float(random.value(0.75...1.35)) * (1 - depth * 0.45))
+				size: Float(random.value(0.75...1.35)) * (1 - depth * 0.45),
+				// Position in the sequence, which is uncorrelated with anything
+				// a piece is — every other field came off the same generator —
+				// so thinning by it thins the cloud evenly.
+				rank: (Double(index) + 0.5) / Double(count))
 			scene.rootNode.addChildNode(piece.node)
 			pieces.append(piece)
 		}
@@ -265,6 +283,10 @@ final class EffectRenderer: @unchecked Sendable {
 	/// the frame.
 	var showing: Int { pieces.filter { !$0.node.isHidden }.count }
 
+	/// Which pieces are not being let go, in the order they were made. For the
+	/// test that says a thinned cloud never puts a piece out in shot.
+	var hiddenFlags: [Bool] { pieces.map(\.node.isHidden) }
+
 	/// How far back each piece is, how big, and how fast — for the test that
 	/// says the back of the cloud is smaller and slower.
 	var depths: [(depth: Double, size: Double, fall: Double)] {
@@ -356,13 +378,26 @@ final class EffectRenderer: @unchecked Sendable {
 		SCNTransaction.disableActions = true
 		defer { SCNTransaction.commit() }
 
-		let speed = max(0.05, effect.speed)
-		let t = Float(max(0, time)) * Float(speed)
+		let now = max(0, time)
+		// The effect's own clock: the *area* under the speed, not the speed at
+		// this instant multiplied by the time so far. With a speed that never
+		// changes the two are the same number, worked out the way they always
+		// were; with one that does, only the area is continuous. Multiplying
+		// moves every piece in the cloud the instant the speed changes, which
+		// is a cut rather than an acceleration.
+		let t = motion.clock(at: now)
 		let world = Self.worldHeight
 		let floor = -world / 2 - 1.5
-		// How far sideways a piece goes for every unit it falls, and how wide
-		// the cloud is spread — which is what it wraps around.
-		let lean = Float(max(-4, min(4, effect.wind))) * 0.25
+		// How far the wind has carried a piece that falls at one unit of the
+		// clock a second — again an area, and this one under the wind *times*
+		// the speed, because a piece going twice as fast covers twice the ground
+		// sideways while it does it. Only worked out when the wind itself
+		// moves: a lean that never changes comes out of the integral, and the
+		// lean times the clock is the same distance.
+		let drift = motion.windMoves ? motion.drift(at: now) : 0
+		// The slant of the path right now, which is what a rain streak turns to.
+		let lean = Float(motion.lean(at: now))
+		let scale = Float(max(0.05, motion.size(at: now)))
 		let span = world * Float(size.width / size.height) * 1.1
 
 		for piece in pieces {
@@ -412,8 +447,19 @@ final class EffectRenderer: @unchecked Sendable {
 					// stopped letting pieces go a quarter of the way in: rain
 					// asked for from 7.1 to 33.1 seconds stopped at fifteen, and
 					// the faster it was told to fall the sooner it dried up.
-					let released = Double(laps * lap + entry) / Double(piece.fall) / speed
+					// The clock reading at which it was let go, taken back to a
+					// moment in the programme by the same integral run
+					// backwards. With a fixed speed this is the division it
+					// always was.
+					let released = motion.time(atClock: Double(laps * lap + entry) / Double(piece.fall))
+					// Two reasons a piece may not be let go this lap: the
+					// shower has been switched off, or the density has been
+					// turned down and this piece is in the part of the cloud
+					// that is not falling at the moment. Both are decided at
+					// the moment it would have come over the top of the frame,
+					// so nothing ever appears or vanishes in shot.
 					piece.node.isHidden = released > spawningUntil
+						|| piece.rank >= motion.showing(at: released)
 				} else {
 					piece.node.isHidden = false
 				}
@@ -422,14 +468,20 @@ final class EffectRenderer: @unchecked Sendable {
 			// Carried sideways by the wind, at the speed it is falling: a drop
 			// that is going twice as fast covers twice the ground while it does
 			// it, which is what keeps every streak on the same slant.
-			var x: Float = piece.x + sway + piece.fall * lean * t
-			if lean != 0, span > 0 {
+			var x: Float = piece.x + sway
+				+ (motion.windMoves ? piece.fall * drift : piece.fall * lean * t)
+			if motion.windBlows, span > 0 {
 				// Wrapped, or a minute of wind empties the frame from one side.
 				x = (x + span / 2).truncatingRemainder(dividingBy: span)
 				if x < 0 { x += span }
 				x -= span / 2
 			}
-			if effect.style == .sparkle { piece.node.isHidden = false }
+			// A burst is let go once, at the start, so the density it is thinned
+			// by is the one at the start. Nothing about a shard already in the
+			// air can be un-thrown.
+			if effect.style == .sparkle {
+				piece.node.isHidden = piece.rank >= motion.showing(at: 0)
+			}
 			piece.node.position = SCNVector3(x, y, piece.z)
 			if effect.style == .rain {
 				// A streak does not tumble. It leans, all of them the same way,
@@ -441,8 +493,11 @@ final class EffectRenderer: @unchecked Sendable {
 				let roll: Float = piece.spinZ * t
 				piece.node.eulerAngles = SCNVector3(pitch, yaw, roll)
 			}
-			let scale = piece.size * Float(max(0.05, effect.size))
-			piece.node.scale = SCNVector3(scale, scale, scale)
+			// Set every frame from the effect's size, which is why size is one
+			// of the four that can move: it is a scale on the node, not a
+			// dimension baked into the geometry.
+			let grown = piece.size * scale
+			piece.node.scale = SCNVector3(grown, grown, grown)
 		}
 	}
 

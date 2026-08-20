@@ -7,6 +7,10 @@ public enum ProjectError: LocalizedError {
 	case notAMapping
 	case unsupportedVersion(Int)
 	case badValue(key: String, value: String)
+	/// A key asks for something to move that cannot move, or cannot move
+	/// honestly. Named rather than dropped: an animation that silently does
+	/// nothing is worse than one that will not open.
+	case cannotAnimate(parameter: String, reason: String)
 	case yaml(String)
 
 	public var errorDescription: String? {
@@ -17,6 +21,8 @@ public enum ProjectError: LocalizedError {
 			return "This project says `cuttr-project: \(v)`, which this version cannot read."
 		case .badValue(let key, let value):
 			return "`\(key): \(value)` is not something cuttr understands."
+		case .cannotAnimate(let parameter, let reason):
+			return "`\(parameter)` cannot be animated: \(reason)"
 		case .yaml(let message):
 			return "This file is not valid YAML: \(message)"
 		}
@@ -355,7 +361,8 @@ public enum ProjectReader {
 			departure: try transition(m["out"], key: "out") ?? .slide(.right, over: 0.4),
 			behind: (m["behind"] as? String).flatMap { Overlay.Occlusion(rawValue: $0) } ?? .nothing,
 			anchor: (m["anchor"] as? String).flatMap(nonEmpty),
-			offset: try point(m["offset"], key: "offset") ?? .zero
+			offset: try point(m["offset"], key: "offset") ?? .zero,
+			keys: try overlayKeys(m["keys"], of: kind)
 		)
 	}
 
@@ -464,6 +471,94 @@ public enum ProjectReader {
 	/// has no keys to appear at, is an error with the offending line in it.
 	/// That is the rule everywhere else in this format and there is no reason a
 	/// scene should be the exception.
+	/// The keys an overlay's parameters move on — and a refusal, by name, for
+	/// anything they ask for that cannot be honoured.
+	///
+	/// The precedent is ``readPart(_:)``: a scene part the reader cannot
+	/// understand is an error with the offending line in it rather than a line
+	/// quietly dropped. An animation is the worse of the two to drop, because a
+	/// part that vanishes leaves a hole somebody can see and a key that vanishes
+	/// leaves an effect that simply sits still — which looks exactly like an
+	/// effect nobody animated.
+	///
+	/// What is refused and why is written out in ``Overlay/Kind/animatable``.
+	/// This function only says it out loud.
+	private static func overlayKeys(_ value: Any?, of kind: Overlay.Kind) throws -> [Overlay.Key] {
+		guard let value else { return [] }
+		guard let entries = value as? [Any] else {
+			throw ProjectError.badValue(key: "keys", value: describe(value))
+		}
+		let allowed = kind.animatable
+		guard !allowed.isEmpty else {
+			throw ProjectError.cannotAnimate(
+				parameter: "keys",
+				reason: "\(kind.named) has nothing that moves. A caption and a spinner "
+					+ "arrive and leave by `in:` and `out:`, and a scene's parts carry "
+					+ "keys of their own.")
+		}
+		var keys: [Overlay.Key] = []
+		for entry in entries {
+			guard let fields = mapping(entry) else {
+				throw ProjectError.badValue(key: "keys", value: describe(entry))
+			}
+			var key = Overlay.Key(t: number(fields["t"]) ?? 0)
+			if let named = fields["ease"] {
+				guard let ease = (named as? String).flatMap(Scene.Ease.init(rawValue:)) else {
+					throw ProjectError.badValue(key: "ease", value: describe(named))
+				}
+				key.ease = ease
+			}
+			for (name, written) in fields where name != "t" && name != "ease" {
+				guard let parameter = Overlay.Parameter(rawValue: name),
+				      allowed.contains(parameter) else {
+					throw ProjectError.cannotAnimate(
+						parameter: name, reason: cannotAnimate(name, of: kind, allowed: allowed))
+				}
+				guard let amount = animated(written, parameter) else {
+					throw ProjectError.badValue(key: name, value: describe(written))
+				}
+				key[parameter] = amount
+			}
+			keys.append(key)
+		}
+		// Left in the order they were written. They are sorted wherever they are
+		// used, and a reader that reorders somebody's file is a reader that makes
+		// a diff out of opening it.
+		return keys
+	}
+
+	/// Why a key cannot have what it asked for, in a sentence.
+	private static func cannotAnimate(
+		_ name: String, of kind: Overlay.Kind, allowed: [Overlay.Parameter]
+	) -> String {
+		let list = allowed.map(\.rawValue).joined(separator: ", ")
+		switch name {
+		case "seed":
+			return "the same number gives the same cloud, every render, on every "
+				+ "machine, and that is the whole of what a seed is for. One that "
+				+ "changed half way through would not be a cloud moving but two "
+				+ "clouds cut together. What can move here is \(list)."
+		case "film", "tint", "stock", "finish", "style", "palette", "condition",
+		     "tape", "aberration", "effect", "kind", "color", "colour":
+			return "it is a name rather than a number, and there is nothing half way "
+				+ "between two of them. Cross-fade a second overlay over this one "
+				+ "instead. What can move here is \(list)."
+		default:
+			return "\(kind.named) has no such parameter. What can move here is \(list)."
+		}
+	}
+
+	/// A key's value for one parameter. Numbers, everywhere except the shape a
+	/// film overlay closes to — which a key states as the single quantity that
+	/// can move, though `w:h` is still read because that is how the overlay
+	/// above it writes the same thing.
+	private static func animated(_ value: Any, _ parameter: Overlay.Parameter) -> Double? {
+		if parameter == .ratio, let text = (value as? String).flatMap(nonEmpty) {
+			return Film.Ratio(text)?.value
+		}
+		return number(value)
+	}
+
 	private static func readPart(_ value: Any) throws -> Scene.Part {
 		guard let fields = mapping(value) else {
 			throw ProjectError.badValue(key: "parts", value: describe(value))

@@ -312,7 +312,8 @@ public enum Renderer {
 		let effects: [(overlay: ResolvedOverlay, effect: Effect, renderer: EffectRenderer)] =
 			resolved.overlays.compactMap { shown in
 				guard case .effect(let effect) = shown.overlay.kind,
-				      let renderer = EffectRenderer(effect, size: size) else { return nil }
+				      let renderer = EffectRenderer(effect, keys: shown.overlay.keys, size: size)
+				else { return nil }
 				return (shown, effect, renderer)
 			}
 		// Asked for only when something wants to go behind somebody.

@@ -69,6 +69,11 @@ public final class PropertiesPanel: NSView {
 	/// what that looks like from the outside.
 	private var selectedSpan = 0
 	private var stripHadFocus = false
+	/// Which key of the selected overlay is being worked on. Held for the same
+	/// reason `selectedSpan` is: the form is rebuilt after every edit, and a
+	/// rebuilt key list would otherwise go back to the first one every time
+	/// somebody typed a number into the third.
+	private var selectedKey = 0
 
 	final class Sink: NSObject {
 		let run: (NSControl) -> Void
@@ -170,7 +175,7 @@ public final class PropertiesPanel: NSView {
 
 	private func rebuild() {
 		// A different thing selected is a different set of ranges.
-		if built != selection { selectedSpan = 0; stripHadFocus = false }
+		if built != selection { selectedSpan = 0; stripHadFocus = false; selectedKey = 0 }
 		mine = false
 		sinks.removeAll()
 		generation += 1
@@ -981,6 +986,8 @@ public final class PropertiesPanel: NSView {
 				: "they cycle for as long as the overlay is on screen")
 		}
 
+		keyframes(origin, overlay)
+
 		section("when it is on")
 		full(strip(origin, overlay))
 
@@ -1230,6 +1237,209 @@ public final class PropertiesPanel: NSView {
 				{ if case .fall = transition { return "seconds to empty" } else { return "seconds" } }()))
 		}
 		field(name, controls)
+	}
+
+	// MARK: - what moves
+
+	/// The keys the overlay's parameters move on.
+	///
+	/// The scene inspector's idiom, deliberately: a list of keys with the time
+	/// and the easing on each, what that key *states* summarised beside it, and
+	/// the selected one opened up into a row per parameter. A value that came
+	/// from the key before is shown dim and in brackets — still there to read
+	/// and still typeable, because typing it is exactly how somebody claims it —
+	/// rather than as a number they wrote.
+	///
+	/// Only for the kinds that have anything to move. What each of them can and
+	/// cannot move, and why, is `Overlay.Kind.animatable`; the note at the
+	/// bottom of this section says the awkward half of it out loud, because the
+	/// panel is where somebody will look for `seed` and not find it.
+	private func keyframes(_ origin: Origin, _ overlay: Overlay) {
+		let parameters = overlay.kind.animatable
+		guard !parameters.isEmpty else { return }
+		section("what moves")
+
+		guard !overlay.keys.isEmpty else {
+			field("keys", [small("Make it move") { [weak self] in
+				guard let self else { return }
+				let length = self.span(of: origin)
+				// Chosen before the edit, not after: committing rebuilds the
+				// form, and a selection set afterwards would not be seen until
+				// the next thing somebody did.
+				self.selectedKey = 1
+				self.editKeys(origin) { keys in
+					// Two, because one key is a value and two are a movement.
+					// The first states nothing, so it is whatever the overlay
+					// above already says; the second states the one knob
+					// somebody most likely came here to change, at what it
+					// currently is, so there is a number to type over.
+					keys = [Overlay.Key(t: 0), Overlay.Key(t: length)]
+					if let principal = overlay.kind.principal {
+						keys[1][principal] = overlay.kind.declared(principal)
+					}
+				}
+			}], note: "the numbers above are what it is for the whole of its span. "
+				+ "Keys make them move: `t` in seconds from the start of each "
+				+ "appearance, and a key states only what changes.")
+			cannotMove(overlay)
+			return
+		}
+
+		let chosen = min(max(0, selectedKey), overlay.keys.count - 1)
+		for (position, key) in overlay.keys.enumerated() {
+			let pick = small(position == chosen ? "●" : "○") { [weak self] in
+				self?.selectedKey = position
+				self?.rebuild()
+			}
+			pick.toolTip = "Work on this key"
+			let time = number(key.t, width: 56) { [weak self] value in
+				self?.editKeys(origin) { keys in
+					guard position < keys.count else { return }
+					keys[position].t = max(0, value)
+				}
+			}
+			let ease = pop(Scene.Ease.allCases.map(\.rawValue),
+			               selected: Scene.Ease.allCases.firstIndex(of: key.ease) ?? 3) {
+				[weak self] picked in
+				self?.editKeys(origin) { keys in
+					guard position < keys.count else { return }
+					keys[position].ease = Scene.Ease.allCases[picked]
+				}
+			}
+			let said = parameters.filter { key[$0] != nil }.map(\.rawValue).joined(separator: " ")
+			let drop = small("−") { [weak self] in
+				self?.editKeys(origin) { keys in
+					guard position < keys.count else { return }
+					keys.remove(at: position)
+				}
+			}
+			drop.toolTip = "Take this key out"
+
+			let row = NSStackView(views: [
+				pick, time, ease, label(said.isEmpty ? "inherits everything" : said),
+				NSView(), drop,
+			])
+			row.orientation = .horizontal
+			row.spacing = 5
+			row.alignment = .centerY
+			add(row)
+
+			guard position == chosen else { continue }
+			let filled = overlay.inherited(_:)
+			for parameter in parameters {
+				add(keyRow(parameter, of: key, at: position, in: origin,
+				           inherited: filled(parameter)[position]))
+			}
+		}
+
+		field("", [small("+ key") { [weak self] in
+			guard let self else { return }
+			let length = self.span(of: origin)
+			self.selectedKey = overlay.keys.count
+			self.editKeys(origin) { keys in
+				let last = keys.map(\.t).max() ?? 0
+				// Half way to the end of the span if there is any left, and a
+				// second past the last one if there is not.
+				keys.append(Overlay.Key(t: last < length ? (last + length) / 2 : last + 1))
+			}
+		}], note: "a key states only what changes. Everything else is what it was "
+			+ "at the key before, which is why an effect that only speeds up says "
+			+ "its speed twice and nothing else at all.")
+		cannotMove(overlay)
+	}
+
+	/// One parameter of one key: the number, and whether it is this key's or
+	/// the one before it's.
+	private func keyRow(_ parameter: Overlay.Parameter, of key: Overlay.Key,
+	                    at position: Int, in origin: Origin, inherited: Double) -> NSView {
+		let stated = key[parameter]
+		let name = NSTextField(labelWithString: parameter.rawValue)
+		name.font = Theme.mono
+		name.textColor = stated == nil ? Theme.faintText : Theme.text
+		name.translatesAutoresizingMaskIntoConstraints = false
+		let wide = name.widthAnchor.constraint(equalToConstant: 78)
+		wide.priority = NSLayoutConstraint.Priority(900)
+		wide.isActive = true
+		_ = squeezable(name)
+
+		let shown = stated ?? inherited
+		let box = text(TakeWriter.number(shown, places: 3), width: 66, placeholder: "—") {
+			[weak self] value in
+			let cleaned = value.trimmingCharacters(in: .whitespaces)
+				.replacingOccurrences(of: ",", with: ".")
+			self?.setKey(origin, position, parameter, cleaned.isEmpty ? nil : Double(cleaned))
+		}
+		if stated == nil {
+			box.textColor = Theme.faintText
+			box.stringValue = "(\(TakeWriter.number(shown, places: 3)))"
+		}
+
+		let button = small(stated == nil ? "set" : "inherit") { [weak self] in
+			self?.setKey(origin, position, parameter, stated == nil ? shown : nil)
+		}
+		button.toolTip = stated == nil
+			? "State this here, at what it already is"
+			: "Take it back to whatever the key before says"
+
+		let row = NSStackView(views: [name, box, button, NSView()])
+		row.orientation = .horizontal
+		row.spacing = 5
+		row.alignment = .centerY
+		row.edgeInsets = NSEdgeInsets(top: 0, left: 22, bottom: 0, right: 0)
+		return row
+	}
+
+	/// What is not in the list above, said where somebody will look for it.
+	private func cannotMove(_ overlay: Overlay) {
+		let message: String
+		switch overlay.kind {
+		case .effect:
+			message = "`seed` is not here and cannot be: the same number gives the "
+				+ "same cloud on every render, which is the whole of what it is for. "
+				+ "Nor is the style, the finish or the palette — there is nothing "
+				+ "half way between two names."
+		case .tape:
+			message = "`seed` is not here and cannot be: the same number gives the "
+				+ "same wobble on every render. Nor is the condition, which is a "
+				+ "name rather than a number — it sets the five knobs, and those move."
+		case .film:
+			message = "The stock is not here: there is nothing half way between "
+				+ "`warm` and `noir`. Cross-fade a second film overlay over this one."
+		case .aberration:
+			message = "Which kind it is is not here: `radial` and `linear` are two "
+				+ "different things rather than two ends of one."
+		case .text, .spinner, .scene:
+			return
+		}
+		field("", [label("")], note: message)
+	}
+
+	/// How long this overlay is on, for the range a new key is placed in.
+	/// Two seconds when the programme has not resolved and there is nothing to
+	/// ask — a number to type over rather than a refusal.
+	private func span(of origin: Origin) -> Double {
+		let found = resolved?.overlays.first {
+			$0.origin == origin && $0.appearance == selectedSpan
+		}?.duration
+		return max(0.5, found ?? 2)
+	}
+
+	private func editKeys(_ origin: Origin, _ change: (inout [Overlay.Key]) -> Void) {
+		editOverlay(origin) { overlay in
+			change(&overlay.keys)
+			// Kept in time order here rather than at read time: the file keeps
+			// whatever order somebody wrote, and this is the one place that
+			// makes a new order.
+			overlay.keys.sort { $0.t < $1.t }
+		}
+	}
+
+	private func setKey(_ origin: Origin, _ position: Int,
+	                    _ parameter: Overlay.Parameter, _ value: Double?) {
+		editKeys(origin) { keys in
+			guard position < keys.count else { return }
+			keys[position][parameter] = value
+		}
 	}
 
 	private func editOverlay(_ origin: Origin, _ change: (inout Overlay) -> Void) {

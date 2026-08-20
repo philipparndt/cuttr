@@ -125,6 +125,14 @@ public struct Overlay: Sendable, Equatable {
 	public var arrival: Transition
 	public var departure: Transition
 
+	/// The overlay's parameters, moving.
+	///
+	/// Empty for nearly every overlay, and an empty list is exactly what an
+	/// overlay was before there were any: nothing is computed, nothing is
+	/// rounded, and the file writes what it always wrote. See ``Overlay/Key``
+	/// for what a key may state and ``Kind/animatable`` for what it may not.
+	public var keys: [Key] = []
+
 	/// What it goes behind.
 	///
 	/// `people` asks Vision, on this machine, for the shape of whoever is in the
@@ -154,7 +162,8 @@ public struct Overlay: Sendable, Equatable {
 		departure: Transition = .slide(.right, over: 0.4),
 		behind: Occlusion = .nothing,
 		anchor: String? = nil,
-		offset: CGPoint = .zero
+		offset: CGPoint = .zero,
+		keys: [Key] = []
 	) {
 		self.kind = kind
 		self.appearances = appearances
@@ -163,6 +172,7 @@ public struct Overlay: Sendable, Equatable {
 		self.departure = departure
 		self.anchor = anchor
 		self.offset = offset
+		self.keys = keys
 	}
 
 	/// The overlay most projects write: on over one range, saying one thing.
@@ -173,10 +183,12 @@ public struct Overlay: Sendable, Equatable {
 		departure: Transition = .slide(.right, over: 0.4),
 		behind: Occlusion = .nothing,
 		anchor: String? = nil,
-		offset: CGPoint = .zero
+		offset: CGPoint = .zero,
+		keys: [Key] = []
 	) {
 		self.init(kind: kind, appearances: [Appearance(span)], arrival: arrival,
-		          departure: departure, behind: behind, anchor: anchor, offset: offset)
+		          departure: departure, behind: behind, anchor: anchor, offset: offset,
+		          keys: keys)
 	}
 
 	/// Several ranges, all saying the same thing.
@@ -187,10 +199,12 @@ public struct Overlay: Sendable, Equatable {
 		departure: Transition = .slide(.right, over: 0.4),
 		behind: Occlusion = .nothing,
 		anchor: String? = nil,
-		offset: CGPoint = .zero
+		offset: CGPoint = .zero,
+		keys: [Key] = []
 	) {
 		self.init(kind: kind, appearances: spans.map { Appearance($0) }, arrival: arrival,
-		          departure: departure, behind: behind, anchor: anchor, offset: offset)
+		          departure: departure, behind: behind, anchor: anchor, offset: offset,
+		          keys: keys)
 	}
 
 	/// Where an overlay lives on the programme's clock.
