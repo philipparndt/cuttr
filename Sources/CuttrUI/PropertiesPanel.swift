@@ -1199,17 +1199,22 @@ public final class PropertiesPanel: NSView {
 				[weak self] value in
 				self?.editBubble(origin) { $0.text = value }
 			}], note: "it wraps to `width` and the bubble grows to fit — no measuring by hand")
-			field("shape", [pop(Bubble.Shape.allCases.map(\.rawValue),
-			                    selected: Bubble.Shape.allCases.firstIndex(of: bubble.shape) ?? 0) {
-				[weak self] pick in
-				self?.editBubble(origin) { $0.shape = Bubble.Shape.allCases[pick] }
-			}], note: "speech has a tail, thought has a trail of puffs, box has an arrow")
+			// The style before the shape, because the shape is drawn round the
+			// words: the type decides how big the paper has to be and therefore
+			// what a rounded bubble, a cloud or a box will look like. Choosing
+			// the outline first and the type it has to hold second is picking
+			// the frame before the picture.
 			field("style", [pop(styleNames,
 			                    selected: styleNames.firstIndex(of: bubble.style ?? "bubble") ?? 0) {
 				[weak self] pick in
 				guard let self else { return }
 				self.editBubble(origin) { $0.style = self.styleNames[pick] }
 			}], note: "`bubble` is dark ink on nothing — a caption's white would be invisible")
+			field("shape", [pop(Bubble.Shape.allCases.map(\.rawValue),
+			                    selected: Bubble.Shape.allCases.firstIndex(of: bubble.shape) ?? 0) {
+				[weak self] pick in
+				self?.editBubble(origin) { $0.shape = Bubble.Shape.allCases[pick] }
+			}], note: "speech has a tail, thought has a trail of puffs, box has an arrow")
 			field("fill", [colour(bubble.fill) { [weak self] rgba in
 				self?.editBubble(origin) { $0.fill = rgba }
 			}, label("the paper")])
@@ -1988,6 +1993,11 @@ public final class PropertiesPanel: NSView {
 	/// times a second.
 	private func scrub(to time: Double) {
 		onScrub?(time)
+		// The handles go where the picture goes. An anchored bubble's paper and
+		// tip are both measured from the face *at this moment*, so a preview
+		// showing one frame with the handles worked out for another would write
+		// a number that put the bubble somewhere else again.
+		currentPreview?.moment = time
 		let now = CACurrentMediaTime()
 		guard now - lastScrub > 0.12 else { return }
 		lastScrub = now
@@ -2071,6 +2081,9 @@ public final class PropertiesPanel: NSView {
 		let anchor = found?.path?.point(at: found?.start ?? 0)
 		preview.anchorPoint = anchor
 		preview.anchorName = overlay.anchor
+		// The frame the picture is of, which for an anchored overlay is also the
+		// frame its handles are placed against: the face travels.
+		preview.moment = found?.start ?? 0
 
 		switch overlay.kind {
 		case .effect, .scene, .film, .aberration, .tape:
@@ -2079,10 +2092,26 @@ public final class PropertiesPanel: NSView {
 		case .text(let content, let style):
 			preview.content = .caption(content, project.style(named: style))
 		case .bubble(let bubble):
-			// The words, in the bubble's own style. The paper is not drawn here:
-			// what the picture is for is where the thing sits, and a bubble sits
-			// where its words do.
-			preview.content = .caption(bubble.text, project.style(named: bubble.style ?? "bubble"))
+			if let found {
+				// The bubble itself, drawn by the code that renders it — paper,
+				// wobble, tail and all — with a handle on the paper and a handle
+				// on the tip. `offset: [-0.08, 0.3]` is a number nobody can
+				// picture, and this is the answer to that.
+				preview.content = .bubble(found, of: project)
+				preview.onOffset = { [weak self] offset in
+					self?.editOverlay(origin) { $0.offset = offset }
+				}
+				preview.onTail = { [weak self] tail in
+					self?.editBubble(origin) { $0.tail = tail }
+				}
+			} else {
+				// Nothing resolved — an unsaved project, or a file that is
+				// half-typed. The words alone, so the picture is still worth
+				// having, and nothing draggable, because there is no anchor path
+				// to be draggable against.
+				preview.content = .caption(bubble.text,
+				                           project.style(named: bubble.style ?? "bubble"))
+			}
 		case .spinner(let spinner):
 			// The words beside a spinner have a style of their own, and it is
 			// not the caption style: `caption` has no plate behind it, because
@@ -2133,6 +2162,12 @@ public final class PropertiesPanel: NSView {
 
 	private func explanation(for overlay: Overlay, anchored: Bool) -> String {
 		if anchored { return "drag: offset from the anchor" }
+		// A bubble that got its picture says its own — see
+		// ``FramePreview/drawBubble(_:of:)``. This is the line for the one that
+		// did not, which is a bubble in a project that has not resolved.
+		if case .bubble(let bubble) = overlay.kind, bubble.at != nil {
+			return "drag: offset from the spot it points at"
+		}
 		if case .text(_, let style) = overlay.kind {
 			return "drag: position of style `\(style ?? "lower-third")` — every caption drawn in it"
 		}

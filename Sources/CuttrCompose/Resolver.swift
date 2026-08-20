@@ -139,7 +139,14 @@ public struct ResolvedSound: Sendable {
 
 /// An overlay with its times worked out.
 public struct ResolvedOverlay: Sendable {
-	public let overlay: Overlay
+	/// The overlay itself.
+	///
+	/// Settable, and for one reason: a panel dragging an overlay across a
+	/// picture has a value that is not in the file yet and has to draw it. The
+	/// alternative was for the preview to work out where a bubble would go with
+	/// arithmetic of its own, which is exactly the second implementation this
+	/// program keeps refusing to have. See ``showing(_:)``.
+	public var overlay: Overlay
 	/// Where in the file this one is written.
 	///
 	/// The overlay itself is not the answer: what is resolved is the overlay
@@ -162,6 +169,19 @@ public struct ResolvedOverlay: Sendable {
 	public let path: AnchorPath?
 
 	public var duration: Double { end - start }
+
+	/// The same appearance, at the same times, on the same anchor path, with a
+	/// different overlay in it.
+	///
+	/// What a drag is: everything about *when* and *what it follows* is settled
+	/// and only the numbers being dragged have changed, so re-resolving the
+	/// project sixty times a second to see them would be the wrong tool by
+	/// several orders of magnitude.
+	public func showing(_ overlay: Overlay) -> ResolvedOverlay {
+		var out = self
+		out.overlay = overlay
+		return out
+	}
 }
 
 /// A named section of the programme, once its contents are laid out.

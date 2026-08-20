@@ -73,41 +73,21 @@ public enum OverlayPainter {
 
 	/// A bubble at one moment, over the whole frame.
 	///
-	/// Every number in here comes from ``OverlayLayers`` and ``Bubbling`` — where
-	/// the paper sits, what the tail points at, the paths themselves — so a
-	/// bubble that goes behind somebody is the same bubble as one that does not,
-	/// drawn a second way because the mask needs it in the frame pass.
-	static func bubbleImage(
+	/// Every number in it comes from ``BubblePlacing`` — where the paper sits,
+	/// what the tail points at, which drawing this is — so a bubble that goes
+	/// behind somebody is the same bubble as one that does not, and the same
+	/// bubble again as the one somebody drags around in the panel's little
+	/// picture. One arithmetic, three places it is asked from.
+	///
+	/// Public because the panel draws a bubble with it. A preview that
+	/// approximated this would be a preview somebody could place a bubble
+	/// wrongly with.
+	public static func bubbleImage(
 		_ bubble: Bubble, resolved: ResolvedOverlay, project: Project,
 		size: CGSize, at time: Double
 	) -> CGImage? {
-		guard size.width >= 1, size.height >= 1, let context = CGContext(
-			data: nil, width: Int(size.width), height: Int(size.height),
-			bitsPerComponent: 8, bytesPerRow: 0,
-			space: CGColorSpace(name: CGColorSpace.sRGB)!,
-			bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-		else { return nil }
-		let style = project.style(named: bubble.style ?? "bubble")
-		let words = Bubbling.words(bubble.text, style: style, frame: size, width: bubble.width)
-		// The moment this frame's drawing was made, which for a breathing bubble
-		// is the beat it began on. Every question below is asked at that moment
-		// and not at this frame's own: a tail that tracked the face smoothly
-		// through a drawing that is standing still would be the frame path and
-		// the layer path drawing two different bubbles.
-		let moment = Bubbling.drawn(at: time, from: resolved.timing.drawnFrom,
-		                            breath: bubble.breath)
-		let box = Bubbling.box(
-			words: words?.size ?? .zero, shape: bubble.shape, style: style,
-			home: OverlayLayers.bubbleHome(bubble, resolved: resolved, style: style,
-			                               size: size, at: moment),
-			frame: size,
-			give: bubble.follow && resolved.path != nil ? Bubbling.give * size.height : 0)
-		Bubbling.draw(
-			bubble, box: box, words: words?.image, wordSize: words?.size ?? .zero,
-			pointingAt: OverlayLayers.bubbleTarget(bubble, resolved: resolved,
-			                                       at: moment, size: size),
-			frame: size, at: moment, into: context)
-		return context.makeImage()
+		BubblePlacing.drawing(bubble, resolved: resolved, project: project,
+		                      size: size, at: time).image
 	}
 
 	/// Where the overlay's anchor point sits, in the frame.

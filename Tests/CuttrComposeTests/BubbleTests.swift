@@ -79,6 +79,35 @@ struct BubbleCanvas {
 		return best
 	}
 
+	/// Where the words are on the frame: the middle of the ink, weighted by how
+	/// much ink there is.
+	///
+	/// Weighted rather than counted, and that is not a detail. A count of the
+	/// pixels over a threshold moves in whole pixels — it jumps as each edge
+	/// pixel crosses the line — so measuring a sentence that has slid half a
+	/// pixel with one would report several pixels of judder that is not in the
+	/// picture. Weighting by the ink makes the answer continuous, and a
+	/// sub-pixel movement measures as a sub-pixel movement.
+	///
+	/// `nil` where there is not enough ink to have a middle.
+	var ink: CGPoint? {
+		var x = 0.0, y = 0.0, total = 0.0
+		for row in 0 ..< height {
+			// Fully covered pixels only. The paper's own edge is antialiased
+			// against nothing, and a half-covered pale pixel reads as half-dark
+			// — so the rim of the bubble would be counted as ink, and it is the
+			// one part of the drawing that wobbles on purpose.
+			for column in 0 ..< width where alpha(x: column, y: row) > 0.99 {
+				// The paper is not quite white, so the floor keeps a bubble's
+				// worth of pale from outvoting a sentence's worth of black.
+				let weight = max(0, darkness(x: column, y: row) - 0.25)
+				x += Double(column) * weight; y += Double(row) * weight; total += weight
+			}
+		}
+		guard total > 20 else { return nil }
+		return CGPoint(x: x / total, y: y / total)
+	}
+
 	/// The box every drawn pixel fits in.
 	var extent: CGRect {
 		let pixels = drawn
@@ -791,32 +820,8 @@ struct BubbleCanvas {
 			size: size, at: time)))
 	}
 
-	/// Where the words are on the frame: the middle of the ink, weighted by how
-	/// much ink there is.
-	///
-	/// Weighted rather than counted, and that is not a detail. A count of the
-	/// pixels over a threshold moves in whole pixels — it jumps as each edge
-	/// pixel crosses the line — so measuring a sentence that has slid half a
-	/// pixel with one would report several pixels of judder that is not in the
-	/// picture. Weighting by the ink makes the answer continuous, and a
-	/// sub-pixel movement measures as a sub-pixel movement.
-	private func lettering(_ canvas: BubbleCanvas) -> CGPoint? {
-		var x = 0.0, y = 0.0, total = 0.0
-		for row in 0 ..< canvas.height {
-			// Fully covered pixels only. The paper's own edge is antialiased
-			// against nothing, and a half-covered pale pixel reads as half-dark
-			// — so the rim of the bubble would be counted as ink, and it is the
-			// one part of the drawing that wobbles on purpose.
-			for column in 0 ..< canvas.width where canvas.alpha(x: column, y: row) > 0.99 {
-				// The paper is not quite white, so the floor keeps a bubble's
-				// worth of pale from outvoting a sentence's worth of black.
-				let ink = max(0, canvas.darkness(x: column, y: row) - 0.25)
-				x += Double(column) * ink; y += Double(row) * ink; total += ink
-			}
-		}
-		guard total > 20 else { return nil }
-		return CGPoint(x: x / total, y: y / total)
-	}
+	/// Where the words are on the frame. See ``BubbleCanvas/ink``.
+	private func lettering(_ canvas: BubbleCanvas) -> CGPoint? { canvas.ink }
 
 	/// **It follows.** Over three seconds of walking, the words travel as far as
 	/// the face does, and in the same direction.
