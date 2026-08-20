@@ -53,7 +53,12 @@ public final class ProjectInspector: NSView, NSSplitViewDelegate {
 	}
 	/// Somebody right-clicked a placement and asked to see where it came from.
 	public var onOpenInTake: (([Int]) -> Void)? {
-		didSet { programme.onOpenInTake = onOpenInTake }
+		didSet {
+			programme.onOpenInTake = onOpenInTake
+			// The properties panel offers the same journey from its head: `from
+			// mia-take-1` is where a clip was cut, and that is a place.
+			properties.onOpenInTake = onOpenInTake
+		}
 	}
 	/// One section, played on its own.
 	public var onPreviewSection: ((String) -> Void)? {
@@ -90,6 +95,10 @@ public final class ProjectInspector: NSView, NSSplitViewDelegate {
 			self.showWhatItWrites()
 		}
 		properties.onChange = { [weak self] project in self?.onChange?(project) }
+		// The head of the properties panel says what the selection depends on,
+		// and every one of those is somewhere to go. The tree owns the
+		// selection, so the panel asks it rather than selecting anything itself.
+		properties.onGoTo = { [weak self] wanted in self?.programme.select(wanted) }
 
 		// The properties fill the column and the file fragment sits under them at
 		// a fixed height.

@@ -41,6 +41,17 @@ public final class PropertiesPanel: NSView {
 	/// Somebody is placing a range at this moment on the programme. The window
 	/// takes the preview there, so the picture and the panel agree.
 	public var onScrub: ((Double) -> Void)?
+	/// Somebody clicked one of the things in the subject line: select it.
+	///
+	/// The head of this panel says what the selection depends on, and every one
+	/// of those is a place — so it is a link. The panel cannot select anything
+	/// itself: the tree owns the selection, and two objects deciding what is
+	/// selected is how a panel comes to show one thing while a tree highlights
+	/// another.
+	public var onGoTo: ((ProjectSelection) -> Void)?
+	/// And the one relationship that leads out of this window altogether: the
+	/// take a clip was cut from.
+	public var onOpenInTake: (([Int]) -> Void)?
 
 	private var project = Project()
 	private var vocabulary = ComposeDocument.Vocabulary()
@@ -51,7 +62,19 @@ public final class PropertiesPanel: NSView {
 	/// in either that can push back on the pane it is in.
 	private let form = NSStackView()
 	private static let keyWidth: CGFloat = 112
-	private let title = NSTextField(labelWithString: "")
+	/// The thing, and what it depends on. Where `TIMELINE ENTRY` used to be.
+	private let subject = SubjectLine()
+	/// A frame of it, in the space above the fields that was empty.
+	private let thumbnail = NSImageView()
+	/// How tall the head is, decided here and nowhere else.
+	///
+	/// A fixed number rather than something the subject line and the picture
+	/// negotiate. Two views that each size themselves from their contents is
+	/// the arrangement this panel has already been burnt by twice: the form
+	/// grew, the pane re-laid out, the form shrank, and the window flickered
+	/// while it was dragged.
+	private static let headHeight: CGFloat = 80
+	private static let thumbnailWidth: CGFloat = 120
 	/// The closures the controls call. Held because a target is unowned.
 	private var sinks: [Sink] = []
 	/// Bumped on every rebuild, so a frame that arrives late is dropped rather
@@ -89,8 +112,11 @@ public final class PropertiesPanel: NSView {
 		// a different kind of thing is most of how anybody knows that.
 		layer?.backgroundColor = Theme.card.cgColor
 
-		title.font = Theme.heading
-		title.textColor = Theme.faintText
+		thumbnail.imageScaling = .scaleProportionallyUpOrDown
+		thumbnail.wantsLayer = true
+		thumbnail.layer?.backgroundColor = Theme.background.cgColor
+		thumbnail.layer?.cornerRadius = 4
+		thumbnail.layer?.masksToBounds = true
 
 		form.orientation = .vertical
 		form.alignment = .leading
@@ -120,14 +146,22 @@ public final class PropertiesPanel: NSView {
 		scroll.translatesAutoresizingMaskIntoConstraints = false
 		addSubview(scroll)
 
-		title.translatesAutoresizingMaskIntoConstraints = false
-		addSubview(title)
+		for view in [thumbnail, subject] as [NSView] {
+			view.translatesAutoresizingMaskIntoConstraints = false
+			addSubview(view)
+		}
 		NSLayoutConstraint.activate([
-			title.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-			title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-			title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -14),
+			thumbnail.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+			thumbnail.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+			thumbnail.widthAnchor.constraint(equalToConstant: Self.thumbnailWidth),
+			thumbnail.heightAnchor.constraint(equalToConstant: Self.thumbnailWidth * 9 / 16),
 
-			scroll.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 6),
+			subject.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+			subject.leadingAnchor.constraint(equalTo: thumbnail.trailingAnchor, constant: 10),
+			subject.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+			subject.heightAnchor.constraint(equalToConstant: Self.headHeight - 12),
+
+			scroll.topAnchor.constraint(equalTo: topAnchor, constant: Self.headHeight),
 			scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
 			scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
 			scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -163,6 +197,10 @@ public final class PropertiesPanel: NSView {
 	/// nothing.
 	private var mine = false
 
+	/// For the tests: the head, without going through the view tree looking for
+	/// a font.
+	var subjectForTesting: SubjectLine { subject }
+
 	private var isEditing: Bool {
 		guard let responder = window?.firstResponder as? NSView else { return false }
 		var view: NSView? = responder
@@ -185,30 +223,18 @@ public final class PropertiesPanel: NSView {
 		}
 
 		built = selection
+		showSubject()
 		switch selection {
 		case .output:
-			title.stringValue = "OUTPUT"
 			outputForm()
 		case .entry(let path):
-			guard let entry = project.entry(at: path) else {
-				title.stringValue = "PROJECT"
-				return
-			}
-			title.stringValue = "TIMELINE ENTRY"
+			guard let entry = project.entry(at: path) else { return }
 			entryForm(path, entry)
 		case .sound(let origin):
-			guard let sound = project.sound(at: origin) else {
-				title.stringValue = "PROJECT"
-				return
-			}
-			title.stringValue = "SOUND"
+			guard let sound = project.sound(at: origin) else { return }
 			soundForm(origin, sound)
 		case .overlay(let origin):
-			guard let overlay = project.overlay(at: origin) else {
-				title.stringValue = "PROJECT"
-				return
-			}
-			title.stringValue = "OVERLAY"
+			guard let overlay = project.overlay(at: origin) else { return }
 			overlayForm(origin, overlay)
 			// Whoever was placing ranges keeps the keyboard, or the delete key
 			// stops working after the first thing it deletes.
@@ -216,6 +242,221 @@ public final class PropertiesPanel: NSView {
 				window?.makeFirstResponder(strip)
 			}
 		}
+	}
+
+	// MARK: - The thing, and what it depends on
+
+	/// Heads the panel with the selection and its relationships.
+	///
+	/// Everything here comes out of the resolver, which is the only thing that
+	/// knows: which take a slug came from, where a placement lands on the
+	/// programme's clock, which overlays are on while it plays. The panel used
+	/// to print the name of a Swift type instead.
+	private func showSubject() {
+		let (name, kind, relations) = describe()
+		subject.show(name, kind: kind, relations: relations)
+		showThumbnail(at: momentOfSelection)
+	}
+
+	/// Where on the programme the selection is, for the picture and for the
+	/// `at` link. `nil` when the thing does not occupy time.
+	private var momentOfSelection: Double? {
+		switch selection {
+		case .output:
+			return 0
+		case .entry(let path):
+			if let clip = resolved?.clips.first(where: { $0.entry == path }) { return clip.start }
+			if let card = resolved?.cards.first(where: { $0.entry == path }) { return card.start }
+			if let group = resolved?.groups.first(where: { $0.entry == path }) { return group.start }
+			// A section or a query whose own path is not on the list still has
+			// contents, and the first of them is where it begins.
+			return resolved?.clips.first(where: { $0.entry.starts(with: path) })?.start
+		case .overlay(let origin):
+			return resolved?.overlays.first(where: { $0.origin == origin })?.start
+		case .sound(let origin):
+			return resolved?.sounds.first(where: { $0.origin == origin })?.start
+		}
+	}
+
+	private func showThumbnail(at time: Double?) {
+		thumbnail.image = nil
+		guard let poster, let time else { return }
+		let asked = generation
+		poster(time) { [weak self] image in
+			guard let self, self.generation == asked else { return }
+			self.thumbnail.image = image
+		}
+	}
+
+	private func describe() -> (String, Theme.Kind?, [SubjectLine.Relation]) {
+		switch selection {
+		case .output:
+			return ("output", nil, [
+				SubjectLine.Relation("frame",
+				                     "\(project.output.width)×\(project.output.height)"),
+				SubjectLine.Relation("rate", String(format: "%g fps",
+				                                    project.output.framesPerSecond)),
+				SubjectLine.Relation("holds", "\(resolved?.clips.count ?? project.timeline.count) clips"),
+			])
+		case .entry(let path):
+			guard let entry = project.entry(at: path) else { return ("project", nil, []) }
+			return (entryName(entry), entryKind(entry), entryRelations(path, entry))
+		case .overlay(let origin):
+			guard let overlay = project.overlay(at: origin) else { return ("project", nil, []) }
+			return (ProgrammePanel.OverlayRow.name(overlay), overlayKind(overlay),
+			        carriedRelations(origin, anchor: overlay.anchor,
+			                         appearances: overlay.appearances.count))
+		case .sound(let origin):
+			guard let sound = project.sound(at: origin) else { return ("project", nil, []) }
+			return (sound.file, .sound, carriedRelations(origin, anchor: nil, appearances: 1))
+		}
+	}
+
+	private func entryName(_ entry: TimelineEntry) -> String {
+		switch entry.source {
+		case .group(let name, _): return "@" + name
+		case .card: return "card"
+		default: return entry.source.description
+		}
+	}
+
+	private func entryKind(_ entry: TimelineEntry) -> Theme.Kind {
+		switch entry.source {
+		case .clip: return .clip
+		case .list: return .list
+		case .query: return .query
+		case .card: return .card
+		case .group: return .section
+		}
+	}
+
+	private func overlayKind(_ overlay: Overlay) -> Theme.Kind {
+		switch overlay.kind {
+		case .text: return .text
+		case .spinner: return .spinner
+		case .effect: return .effect
+		case .scene: return .scene
+		case .film: return .film
+		case .aberration: return .aberration
+		case .tape: return .tape
+		}
+	}
+
+	private func entryRelations(_ path: [Int], _ entry: TimelineEntry) -> [SubjectLine.Relation] {
+		var out: [SubjectLine.Relation] = []
+
+		// Which take it came out of, and a way to go and look at the footage.
+		if let placed = resolved?.clips.first(where: { $0.entry == path }) {
+			out.append(SubjectLine.Relation("from", placed.takeName, kind: .take) {
+				[weak self] in self?.onOpenInTake?(path)
+			})
+		}
+
+		// Which section it is inside. Structural, so it is the one relationship
+		// that says where this row *is* rather than what it points at.
+		if path.count > 1, let parent = project.entry(at: Array(path.dropLast())),
+		   case .group(let name, _) = parent.source {
+			let up = Array(path.dropLast())
+			out.append(SubjectLine.Relation("in", "@" + name, kind: .section) {
+				[weak self] in self?.onGoTo?(.entry(up))
+			})
+		}
+
+		// What is drawn over it, and a way to the first of them. Anything hung
+		// on this entry's own name counts, wherever it is written.
+		let carried = overlaysOn(path, entry)
+		if let first = carried.first {
+			let what = carried.count == 1
+				? project.overlay(at: first).map { ProgrammePanel.OverlayRow.name($0) } ?? "1 overlay"
+				: "\(carried.count) overlays"
+			out.append(SubjectLine.Relation("carries", what, kind: .text) {
+				[weak self] in self?.onGoTo?(.overlay(first))
+			})
+		}
+
+		if let moment = momentOfSelection {
+			out.append(SubjectLine.Relation("at", Timecode.string(moment)) {
+				[weak self] in self?.onScrub?(moment)
+			})
+		}
+		return out
+	}
+
+	/// Every overlay hung on an entry: the ones written inside it, and the ones
+	/// in the top-level list that name it.
+	private func overlaysOn(_ path: [Int], _ entry: TimelineEntry) -> [Origin] {
+		var out: [Origin] = entry.overlays.indices.map { .entry(path: path, index: $0) }
+		let names = ProgrammePanel.names(of: entry)
+		out += project.overlays.indices
+			.filter { index in
+				ProgrammePanel.endpoints(of: project.overlays[index]).contains { names.contains($0) }
+			}
+			.map { Origin.project($0) }
+		return out
+	}
+
+	/// The relationships an overlay or a sound has: what it is written inside,
+	/// what it follows, when it is on.
+	private func carriedRelations(_ origin: Origin, anchor: String?,
+	                              appearances: Int) -> [SubjectLine.Relation] {
+		var out: [SubjectLine.Relation] = []
+		if case .entry(let path, _) = origin, let entry = project.entry(at: path) {
+			out.append(SubjectLine.Relation("in", entryName(entry), kind: entryKind(entry)) {
+				[weak self] in self?.onGoTo?(.entry(path))
+			})
+		} else {
+			// Written in the top-level list, so what it is about is whatever its
+			// span names — and that name is a row in the tree.
+			let named = ProgrammePanel.endpoints(of: currentSpan).sorted().first { !$0.isEmpty }
+			if let named, let path = pathNamed(named) {
+				out.append(SubjectLine.Relation("over", named, kind: .section) {
+					[weak self] in self?.onGoTo?(.entry(path))
+				})
+			} else if let named {
+				out.append(SubjectLine.Relation("over", named))
+			} else {
+				out.append(SubjectLine.Relation("over", "the programme's own clock"))
+			}
+		}
+		if let anchor {
+			out.append(SubjectLine.Relation("follows", anchor, kind: .anchor))
+		}
+		if appearances > 1 {
+			out.append(SubjectLine.Relation("on", "\(appearances) times"))
+		}
+		if let moment = momentOfSelection {
+			out.append(SubjectLine.Relation("at", Timecode.string(moment)) {
+				[weak self] in self?.onScrub?(moment)
+			})
+		}
+		return out
+	}
+
+	/// The span of whatever is selected, for working out what it is over.
+	private var currentSpan: Overlay.Span {
+		switch selection {
+		case .overlay(let origin):
+			return project.overlay(at: origin)?.span ?? .times(from: 0, to: 0)
+		case .sound(let origin):
+			return project.sound(at: origin)?.span ?? .times(from: 0, to: 0)
+		default:
+			return .times(from: 0, to: 0)
+		}
+	}
+
+	/// Which timeline entry answers to a name, so that `over @question1` can be
+	/// somewhere to go rather than a word.
+	private func pathNamed(_ name: String) -> [Int]? {
+		var found: [Int]?
+		func walk(_ entries: [TimelineEntry], _ prefix: [Int]) {
+			for (index, entry) in entries.enumerated() {
+				let path = prefix + [index]
+				if found == nil, ProgrammePanel.names(of: entry).contains(name) { found = path }
+				if case .group(_, let inner) = entry.source { walk(inner, path) }
+			}
+		}
+		walk(project.timeline, [])
+		return found
 	}
 
 	// MARK: - output

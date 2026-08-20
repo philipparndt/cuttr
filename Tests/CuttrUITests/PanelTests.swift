@@ -850,3 +850,92 @@ import Testing
 		#expect(panel.treeRowsForTesting.contains("entry intro → overlay 1.0#0"))
 	}
 }
+
+/// The head of the properties panel says what depends on what.
+///
+/// It used to say `TIMELINE ENTRY` — the name of a Swift type, which is the one
+/// fact about a selection nobody needs. What is asserted here is that it names
+/// the thing instead, that each of its relationships is a place, and that
+/// clicking one asks the tree for it rather than selecting anything itself.
+@Suite @MainActor struct SubjectLineTests {
+
+	private func project() -> Project {
+		Project(
+			timeline: [
+				TimelineEntry(group: "question1", entries: [
+					TimelineEntry(clip: ClipReference("clip-4"), label: "shot"),
+				]),
+			],
+			overlays: [
+				Overlay(kind: .text("why though", style: nil),
+				        span: .marks(from: .group("shot"), to: .group("shot"))),
+			])
+	}
+
+	private func panel(_ selection: ProjectSelection) -> PropertiesPanel {
+		_ = NSApplication.shared
+		let panel = PropertiesPanel()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 900),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = panel
+		panel.reload(project(), vocabulary: ComposeDocument.Vocabulary(), selection: selection)
+		panel.layoutSubtreeIfNeeded()
+		return panel
+	}
+
+	@Test func itNamesTheThingAndWhatItIsInside() {
+		let panel = self.panel(.entry([0, 0]))
+		let lines = panel.subjectForTesting.linesForTesting
+		#expect(lines.first == "clip-4", "the head says \(lines)")
+		#expect(lines.contains { $0.contains("in @question1") }, "no section in \(lines)")
+		#expect(lines.contains { $0.contains("carries") }, "nothing carried in \(lines)")
+		#expect(lines.allSatisfy { !$0.contains("TIMELINE ENTRY") })
+	}
+
+	@Test func aSectionSaysWhatItIs() {
+		let lines = panel(.entry([0])).subjectForTesting.linesForTesting
+		#expect(lines.first == "@question1", "the head says \(lines)")
+	}
+
+	/// An overlay says what it is over, which is the other direction of the same
+	/// relationship.
+	@Test func anOverlaySaysWhatItIsOver() {
+		let lines = panel(.overlay(.project(0))).subjectForTesting.linesForTesting
+		#expect(lines.first == "\u{201C}why though\u{201D}", "the head says \(lines)")
+		#expect(lines.contains { $0.contains("over @shot") }, "not over anything in \(lines)")
+	}
+
+	/// Clicking a relationship asks for that selection. The panel does not make
+	/// one itself: the tree owns the selection, and two owners is how a panel
+	/// comes to show one thing while a tree highlights another.
+	@Test func clickingARelationshipAsksForIt() {
+		let panel = self.panel(.entry([0, 0]))
+		var asked: [ProjectSelection] = []
+		panel.onGoTo = { asked.append($0) }
+		let buttons = panel.subjectForTesting.relationButtonsForTesting
+		#expect(!buttons.isEmpty)
+		for button in buttons where button.isEnabled { button.performClick(nil) }
+		#expect(asked.contains(.entry([0])), "the section was not offered: \(asked)")
+		#expect(asked.contains(.overlay(.project(0))), "the caption was not offered: \(asked)")
+	}
+
+	/// And the head is the same height whatever is selected, because the panel
+	/// states it and nothing in the head argues.
+	@Test func theHeadDoesNotMoveTheForm() {
+		var tops: Set<CGFloat> = []
+		for selection: ProjectSelection in [.output, .entry([0]), .entry([0, 0]), .overlay(.project(0))] {
+			let panel = self.panel(selection)
+			func scrolls(in view: NSView) -> [NSScrollView] {
+				view.subviews.flatMap { sub -> [NSScrollView] in
+					((sub as? NSScrollView).map { [$0] } ?? []) + scrolls(in: sub)
+				}
+			}
+			guard let form = scrolls(in: panel).first else {
+				Issue.record("no form for \(selection)")
+				continue
+			}
+			tops.insert(form.convert(form.bounds, to: panel).minY)
+		}
+		#expect(tops.count == 1, "the form starts at \(tops.sorted())")
+	}
+}

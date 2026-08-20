@@ -1408,6 +1408,26 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		}
 	}
 
+	/// Selects whatever this names, and scrolls to it.
+	///
+	/// The tree owns the selection, so this is how anything else asks for one —
+	/// the links in the head of the properties panel, which say what the
+	/// selection depends on and are therefore places to go. Two objects each
+	/// deciding what is selected is how a panel comes to show one thing while
+	/// the tree highlights another.
+	public func select(_ wanted: ProjectSelection) {
+		let row: Int?
+		switch wanted {
+		case .output: selectOutput(); return
+		case .entry(let path): row = self.row(for: path)
+		case .overlay(let origin): row = self.row(for: .overlay(origin))
+		case .sound(let origin): row = self.row(for: .sound(origin))
+		}
+		guard let row else { return }
+		outline.selectRowIndexes([row], byExtendingSelection: false)
+		outline.scrollRowToVisible(row)
+	}
+
 	/// Clears the selection back to the project itself, which is what the
 	/// output properties are about.
 	public func selectOutput() {
@@ -1626,7 +1646,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	/// One overlay, drawn: what it says, when it is on, what it follows, and
 	/// what it is drawn on top of.
-	fileprivate final class OverlayRow: NSTableCellView {
+	final class OverlayRow: NSTableCellView {
 		var overlay = Overlay(kind: .text("", style: nil), span: .times(from: 0, to: 0))
 		/// Where this one comes in the stack, in words. Worked out by the panel,
 		/// which is the only thing that can see the rest of the list.
