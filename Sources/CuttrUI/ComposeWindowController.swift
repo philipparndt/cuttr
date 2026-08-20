@@ -12,7 +12,8 @@ import UniformTypeIdentifiers
 /// the other is written. That is the point of ``OverlayLayers/Host``: a preview
 /// that agrees with the export by construction rather than by care.
 @MainActor
-public final class ComposeWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
+public final class ComposeWindowController: NSWindowController, NSWindowDelegate,
+	NSMenuItemValidation, NSSplitViewDelegate {
 
 	public let composeDocument: ComposeDocument
 	/// The same transport the cutting window uses. One playback path in the
@@ -33,6 +34,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private var mode: Mode = .edit
 	/// Whether the window is showing the picture and nothing else.
 	private var presenting = false
+	/// The panes whose size somebody can drag, and the constraint that says how
+	/// big each one wants to be — updated as the divider moves, or the next
+	/// layout pass puts it straight back.
+	private var dragged: [(view: NSView, size: NSLayoutConstraint, horizontal: Bool)] = []
 	/// The bar that comes back when the mouse moves in full screen.
 	private let controls = PlaybackControls()
 	private var pointerWatch: Any?
@@ -261,11 +266,18 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		])
 
 		let preferred = NSLayoutConstraint.Priority(250)
-		let wishes = [
-			material.widthAnchor.constraint(equalToConstant: 260),
-			takesTable.heightAnchor.constraint(equalToConstant: 180),
-			strip.heightAnchor.constraint(equalToConstant: 200),
-		]
+		// The same as in the inspector: these say how big a pane wants to be,
+		// and since nothing else does, they are also what pulls a dragged
+		// divider back. Held on to and followed along as the dividers move.
+		let materialWidth = material.widthAnchor.constraint(equalToConstant: 260)
+		let takesHeight = takesTable.heightAnchor.constraint(equalToConstant: 180)
+		let stripHeight = strip.heightAnchor.constraint(equalToConstant: 200)
+		dragged = [(material, materialWidth, true), (takesTable, takesHeight, false),
+		           (strip, stripHeight, false)]
+		editing.delegate = self
+		material.delegate = self
+		split.delegate = self
+		let wishes = [materialWidth, takesHeight, stripHeight]
 		for wish in wishes { wish.priority = preferred; wish.isActive = true }
 		NSLayoutConstraint.activate([
 			material.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
@@ -642,6 +654,31 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// programme strip at the size of a wall. Watching is a different job from
 	/// editing: the furniture goes, the picture takes the screen, and escape or
 	/// the same key brings it back.
+	/// A pane is the size its divider was dragged to.
+	///
+	/// Taken during the drag: these panes are laid out by constraints, so the
+	/// frames a split view sets are put back on the next pass and reading them
+	/// afterwards reads the old size. The position under the pointer is what
+	/// somebody is asking for, and it goes straight into the constraint that
+	/// decides.
+	public func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat,
+	                      ofSubviewAt dividerIndex: Int) -> CGFloat {
+		let panes = splitView.arrangedSubviews
+		guard dividerIndex + 1 < panes.count else { return proposedPosition }
+		let before = panes[dividerIndex], after = panes[dividerIndex + 1]
+		let total = splitView.isVertical ? splitView.frame.width : splitView.frame.height
+		for (view, size, _) in dragged {
+			if view === before {
+				size.constant = proposedPosition
+			} else if view === after {
+				// The pane on the far side of the divider: what is left of the
+				// split once the first one and the divider have had their share.
+				size.constant = max(0, total - proposedPosition - splitView.dividerThickness)
+			}
+		}
+		return proposedPosition
+	}
+
 	@objc public func toggleFullScreenPreview(_ sender: Any?) {
 		guard let window else { return }
 		presenting.toggle()

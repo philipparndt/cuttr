@@ -19,7 +19,7 @@ import CuttrKit
 /// it writes as it writes it, somebody who does open the file already knows
 /// what they are looking at.
 @MainActor
-public final class ProjectInspector: NSView {
+public final class ProjectInspector: NSView, NSSplitViewDelegate {
 
 	/// A whole project, edited. The window applies and saves it.
 	public var onChange: ((Project) -> Void)?
@@ -61,6 +61,8 @@ public final class ProjectInspector: NSView {
 	}
 
 	private let programme = ProgrammePanel()
+	/// How wide the tree is, followed along as the divider moves.
+	private var treeWidth: NSLayoutConstraint?
 	private let properties = PropertiesPanel()
 	private let yaml = NSTextView()
 	private let writesTitle = NSButton()
@@ -117,6 +119,7 @@ public final class ProjectInspector: NSView {
 		let split = NSSplitView()
 		split.isVertical = true
 		split.dividerStyle = .thin
+		split.delegate = self
 		split.addArrangedSubview(programme)
 		split.addArrangedSubview(column)
 		split.translatesAutoresizingMaskIntoConstraints = false
@@ -130,8 +133,21 @@ public final class ProjectInspector: NSView {
 		// is rows of a key and its controls, which is what actually runs out of
 		// width: a `when:` row is a mode, two addresses and their labels, and at
 		// 320 points it wrapped or truncated every one of them.
+		// The width somebody dragged it to, or 440 until they do.
+		//
+		// A split view moves the frames when a divider is dragged and autolayout
+		// then puts them back: this constraint is the only thing that says how
+		// wide the tree is, so however low its priority, it wins the next pass
+		// and the pane springs back. Keeping hold of it and following the drag
+		// is what makes the divider work at all — and the default is unchanged,
+		// because 440 is where it has always opened.
 		let wide = programme.widthAnchor.constraint(equalToConstant: 440)
-		wide.priority = NSLayoutConstraint.Priority(250)
+		// Above the pull of the properties form beside it, which hugs its
+		// content harder than 250 and squeezed the tree to 288 — the opposite
+		// of the 440 this line asks for. It is still below `required`, so the
+		// two floors either side of it win when the window is narrow.
+		wide.priority = NSLayoutConstraint.Priority(700)
+		treeWidth = wide
 		wide.isActive = true
 		NSLayoutConstraint.activate([
 			split.topAnchor.constraint(equalTo: topAnchor),
@@ -144,6 +160,19 @@ public final class ProjectInspector: NSView {
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
+
+	/// The tree is as wide as the divider is dragged to.
+	///
+	/// Followed *during* the drag rather than after it: a split view whose
+	/// panes are laid out by constraints has its frames put straight back on
+	/// the next pass, so watching where they ended up reads the width that was
+	/// just restored. This hook is called with the position under the pointer,
+	/// which is the thing somebody is actually asking for.
+	public func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat,
+	                      ofSubviewAt dividerIndex: Int) -> CGFloat {
+		treeWidth?.constant = proposedPosition
+		return proposedPosition
+	}
 
 	private var vocabulary = ComposeDocument.Vocabulary()
 

@@ -61,3 +61,52 @@ import Testing
 		#expect(fits(library, NSSize(width: 500, height: 700)))
 	}
 }
+
+/// Dragging a divider, and the pane staying where it was put.
+///
+/// A split view moves the frames when a divider is dragged, and autolayout puts
+/// them back on the next pass: the preferred-width constraint is the only thing
+/// that says how wide the tree is, so however low its priority it wins and the
+/// pane springs back. Following the drag is what makes the divider work at all.
+@Suite @MainActor struct SplitResizeTests {
+
+	@Test func theTreeKeepsTheWidthItIsDraggedTo() {
+		_ = NSApplication.shared
+		let inspector = ProjectInspector()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 800),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = inspector
+		inspector.reload(Project(timeline: [TimelineEntry(clip: ClipReference("intro"))]),
+		                 vocabulary: ComposeDocument.Vocabulary())
+		inspector.layoutSubtreeIfNeeded()
+
+		func split(in view: NSView) -> NSSplitView? {
+			for subview in view.subviews {
+				if let found = subview as? NSSplitView { return found }
+				if let found = split(in: subview) { return found }
+			}
+			return nil
+		}
+		guard let split = split(in: inspector), split.arrangedSubviews.count == 2 else {
+			Issue.record("no split view")
+			return
+		}
+		// It opens where it always has.
+		#expect(abs(split.arrangedSubviews[0].frame.width - 440) < 2,
+		        "opens at \(split.arrangedSubviews[0].frame.width)")
+
+		// A drag, as AppKit reports one: the position under the pointer.
+		_ = (split.delegate)?.splitView?(split, constrainSplitPosition: 600, ofSubviewAt: 0)
+		split.setPosition(600, ofDividerAt: 0)
+		inspector.layoutSubtreeIfNeeded()
+		#expect(abs(split.arrangedSubviews[0].frame.width - 600) < 2,
+		        "the tree sprang back to \(split.arrangedSubviews[0].frame.width)")
+
+		// And it stays there through the next layout, which is where it used to
+		// go back.
+		inspector.frame = NSRect(x: 0, y: 0, width: 1380, height: 800)
+		inspector.layoutSubtreeIfNeeded()
+		#expect(abs(split.arrangedSubviews[0].frame.width - 600) < 4,
+		        "and again after a relayout: \(split.arrangedSubviews[0].frame.width)")
+	}
+}
