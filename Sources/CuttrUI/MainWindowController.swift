@@ -34,10 +34,26 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	private let markers = AnchorMarkerView()
 	private var solveTask: Task<Void, Never>?
 	private var namingTask: Task<Void, Never>?
+	/// Asking the model what a clip should be called. Its own task, because it
+	/// is cancelled by the *next* proposal and by nothing else — an answer for
+	/// a clip somebody has moved on from is an answer nobody wants.
+	private var nameProposalTask: Task<Void, Never>?
 	private var wordsTask: Task<Void, Never>?
+	private var soundsTask: Task<Void, Never>?
 
 	private var playhead: Double = 0
 	private var pending: (start: Double, end: Double)?
+	/// Whether the pending span came from reading the transcript rather than
+	/// from marking.
+	///
+	/// The two look identical on the timeline and mean different things
+	/// afterwards. A clip made from a sentence somebody has just read is a clip
+	/// they have already decided about, so proposing a name for it is the next
+	/// thing they were going to do anyway. A clip made by marking is the middle
+	/// of a loop — play, mark, play, mark — and a text field in front of the
+	/// next `S` stops that loop dead, which is a lesson this program has
+	/// already learned once.
+	private var pendingFromWords = false
 	private var selectedClip: Clip.ID?
 	/// The colour the next clip gets.
 	///
@@ -307,6 +323,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			guard let self else { return }
 			let grid = self.takeDocument.grid
 			self.pending = (grid.snap(start), grid.snap(end))
+			self.pendingFromWords = true
 			self.timeline.pending = self.pending
 			self.timeline.reveal(from: start - 0.5, to: end + 0.5)
 		}
@@ -324,6 +341,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			guard let self else { return }
 			let grid = self.takeDocument.grid
 			self.pending = (grid.snap(start), grid.snap(end))
+			self.pendingFromWords = true
 			self.timeline.pending = self.pending
 			self.commitPending()
 		}
@@ -592,11 +610,26 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 				guard !Task.isCancelled, let self else { return }
 				try self.takeDocument.setTranscript(
 					made.transcript, recogniser: made.recogniser, locale: made.locale)
-				self.wordsTask = nil
-				self.header.setProgress(nil)
 				self.header.setStatus(
 					"\(made.transcript.count) words · \(made.recogniser.rawValue) · \(made.locale)"
-						+ " — select a sentence and press ⏎")
+						+ " — listening for what is not a word…")
+				self.refresh()
+
+				// The same audio, listened to a second time for what nobody
+				// said. Not a button of its own here, because asking what was
+				// said and asking what was heard are one question — and this
+				// pass is seconds where the one above was minutes.
+				let heard = try? await SoundSpotter.listen(source)
+				guard !Task.isCancelled else { return }
+				self.wordsTask = nil
+				self.header.setProgress(nil)
+				if let heard, !heard.isEmpty {
+					self.report(heard)
+				} else {
+					self.header.setStatus(
+						"\(made.transcript.count) words · \(made.recogniser.rawValue) · \(made.locale)"
+							+ " — select a sentence and press ⏎")
+				}
 				self.refresh()
 			} catch {
 				guard let self else { return }
@@ -608,31 +641,127 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 	}
 
-	/// Names the selected clip after the first words spoken in it.
+	/// Listens for what is not a word: a laugh, applause, a cough.
 	///
-	/// The keystroke that turns `clip-7` into `so-the-driver-installs`. The
-	/// name is the sentence as it was said and the slug falls out of it, which
-	/// is the same route a name typed by hand takes — including the rule that a
-	/// slug somebody has written themselves is theirs and stays.
-	private func nameFromWords() {
-		guard let id = selectedClip,
-		      let clip = takeDocument.take.clips.first(where: { $0.id == id })
+	/// Separate from transcribing as well as part of it, because a take that
+	/// was transcribed before this existed should not have to sit through the
+	/// recogniser again to get its laughs — and this pass is seconds where that
+	/// one is minutes.
+	private func findSounds() {
+		guard soundsTask == nil, wordsTask == nil else { return }
+		guard let source = Transcriber.Source.forTake(
+			takeDocument.take, videoURL: takeDocument.videoURL,
+			audioURL: takeDocument.audioURL, duration: takeDocument.duration)
 		else {
-			header.setStatus("select a clip first — W names it after its first words")
+			header.setStatus("nothing to listen to — give this take a video or an audio file first")
 			return
 		}
-		guard !takeDocument.transcript.isEmpty else {
+		header.setStatus("listening to \(source.url.lastPathComponent) for what is not a word")
+		soundsTask = Task { [weak self] in
+			let heard = try? await SoundSpotter.listen(source)
+			guard !Task.isCancelled, let self else { return }
+			self.soundsTask = nil
+			self.report(heard)
+			self.refresh()
+		}
+	}
+
+	/// What the classifier found, said out loud. Nothing found is worth saying
+	/// too: an empty pane after a pass that looked like it did something reads
+	/// as a failure.
+	private func report(_ heard: [SoundEvent]?) {
+		guard let heard else {
+			header.setStatus("this Mac's sound classifier would not run")
+			return
+		}
+		guard !heard.isEmpty else {
+			header.setStatus("nothing but words in this one")
+			return
+		}
+		takeDocument.setSounds(heard)
+		var counted: [String: Int] = [:]
+		for sound in heard { counted[sound.label, default: 0] += 1 }
+		header.setStatus(counted.sorted { $0.value > $1.value }
+			.map { "\($0.value) × \($0.key)" }.joined(separator: ", "))
+	}
+
+	/// Names the selected clip after what is said in it.
+	///
+	/// The keystroke that turns `clip-7` into `arbeitsanzug`.
+	private func nameFromWords() {
+		guard let id = selectedClip else {
+			header.setStatus("select a clip first — W names it after what is said in it")
+			return
+		}
+		guard !takeDocument.transcript.isEmpty || !takeDocument.take.sounds.isEmpty else {
 			header.setStatus("no words yet — transcribe this take first")
 			return
 		}
-		let phrase = takeDocument.transcript.phrase(covering: clip.start ... clip.end)
-		guard !phrase.isEmpty else {
+		propose(for: id)
+	}
+
+	/// Puts a name for a clip in front of somebody, editable and ready to be
+	/// typed over.
+	///
+	/// **The keystroke is never blocked.** The field opens straight away with
+	/// the first words in it, which is a usable name and is what this program
+	/// did before there was a model to ask. The model's answer arrives about
+	/// seven tenths of a second later and replaces what is in the field *only
+	/// if nobody has started typing* — see ``TimelineView/repropose(_:for:replacing:)``.
+	/// Seven tenths of a second is nothing to wait for a better name and far
+	/// too long to hold a key down for.
+	///
+	/// **Nothing is written until somebody presses Return.** A name reaching a
+	/// take goes through `setName`, which re-derives the slug unless somebody
+	/// has typed one — the same route a name typed by hand takes, including the
+	/// rule that a slug somebody wrote is theirs and stays.
+	private func propose(for id: Clip.ID) {
+		guard let clip = takeDocument.take.clips.first(where: { $0.id == id }) else { return }
+		let span = clip.start ... clip.end
+		let firstWords = firstWordsOrSound(covering: span)
+		guard !firstWords.isEmpty else {
 			header.setStatus("nothing is said in \(clip.slug)")
 			return
 		}
-		takeDocument.setName(phrase, for: id, actionName: "Name from Words")
-		let named = takeDocument.take.clips.first(where: { $0.id == id })?.slug ?? ""
-		header.setStatus("\(named) — “\(phrase)”")
+		timeline.reveal(from: clip.start, to: clip.end)
+		timeline.beginRenaming(clip, proposing: firstWords)
+		header.setStatus("\(firstWords) — ⏎ to keep it, or type over it")
+
+		let said = takeDocument.transcript.text(covering: span)
+		guard !said.isEmpty, ClipNamer.availability.isAvailable else { return }
+		nameProposalTask?.cancel()
+		nameProposalTask = Task { [weak self] in
+			let naming = await ClipNamer.propose(for: said, orFirstWords: firstWords)
+			guard !Task.isCancelled, let self else { return }
+			self.nameProposalTask = nil
+			guard self.timeline.repropose(naming.name, for: id, replacing: firstWords) else { return }
+			// Which of the two answered, always. A name somebody cannot account
+			// for is a name they cannot trust, and both of these are honest
+			// answers to the same question.
+			switch naming.source {
+			case .model:
+				self.header.setStatus("\(naming.name) — suggested here on this Mac."
+					+ " ⏎ to keep it, or type over it")
+			case .invented(let made):
+				self.header.setStatus("kept “\(naming.name)”: nobody said “\(made)”")
+			case .firstWords(let why):
+				self.header.setStatus("\(naming.name) — its first words, because \(why)")
+			}
+		}
+	}
+
+	/// What goes in the field: the clip's first words, or the sound in it when
+	/// nothing is said.
+	///
+	/// A clip made from a laugh is called `Lachen`, and needs no model to work
+	/// that out.
+	private func firstWordsOrSound(covering span: ClosedRange<Double>) -> String {
+		let phrase = takeDocument.transcript.phrase(covering: span)
+		guard phrase.isEmpty else { return phrase }
+		return takeDocument.take.sounds
+			.filter { $0.start < span.upperBound && $0.end > span.lowerBound }
+			.map(\.label)
+			.joined(separator: " ")
 	}
 
 	private func refresh() {
@@ -651,7 +780,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		                   paths: takeDocument.anchorPaths,
 		                   selected: selectedAnchor)
 		markers.videoSize = takeDocument.videoInfo?.naturalSize ?? .zero
-		transcriptPane.show(takeDocument.transcript, words: takeDocument.take.words)
+		transcriptPane.show(takeDocument.transcript, words: takeDocument.take.words,
+		                    sounds: takeDocument.take.sounds)
 		transcriptPane.setBusy(wordsTask != nil,
 		                       enabled: takeDocument.videoURL != nil || takeDocument.audioURL != nil)
 		clipTable.reload(takeDocument.take.clips, selected: selectedClip)
@@ -837,20 +967,27 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		                color: currentColor)
 		next.clips.append(clip)
 		takeDocument.apply(next, actionName: "New Clip")
+		let fromWords = pendingFromWords
 		self.pending = nil
+		pendingFromWords = false
 		timeline.pending = nil
 		select(clip.id)
+		// See ``pendingFromWords``: a clip cut out of a sentence somebody just
+		// read is one they are ready to name, and a clip cut by marking is not.
+		if fromWords { propose(for: clip.id) }
 	}
 
 	private func setIn() {
 		let t = takeDocument.grid.snap(playhead)
 		pending = (t, max(pending?.end ?? t, t))
+		pendingFromWords = false
 		timeline.pending = pending
 	}
 
 	private func setOut() {
 		let t = takeDocument.grid.snap(playhead)
 		pending = (min(pending?.start ?? t, t), t)
+		pendingFromWords = false
 		timeline.pending = pending
 	}
 
@@ -1123,6 +1260,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		UserDefaults.standard.set(language, forKey: languageKey)
 	}
 	@objc public func nameFromWordsAction(_ sender: Any? = nil) { nameFromWords() }
+	@objc public func findSoundsAction(_ sender: Any? = nil) { findSounds() }
 	@objc public func zoomIn(_ sender: Any? = nil) { timeline.zoomAroundPlayhead(by: 1 / 1.6) }
 	@objc public func zoomOut(_ sender: Any? = nil) { timeline.zoomAroundPlayhead(by: 1.6) }
 	@objc public func zoomFit(_ sender: Any? = nil) { timeline.zoomToFit() }
@@ -1426,7 +1564,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			return wordsTask == nil
 				&& (takeDocument.videoURL != nil || takeDocument.audioURL != nil)
 		case #selector(nameFromWordsAction(_:)):
-			return selectedClip != nil && !takeDocument.transcript.isEmpty
+			return selectedClip != nil
+				&& !(takeDocument.transcript.isEmpty && takeDocument.take.sounds.isEmpty)
+		case #selector(findSoundsAction(_:)):
+			return soundsTask == nil && wordsTask == nil
+				&& (takeDocument.videoURL != nil || takeDocument.audioURL != nil)
 		default:
 			return true
 		}
@@ -1450,7 +1592,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	public func windowWillClose(_ notification: Notification) {
 		solveTask?.cancel()
 		namingTask?.cancel()
+		nameProposalTask?.cancel()
 		wordsTask?.cancel()
+		soundsTask?.cancel()
 		if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
 		keyMonitor = nil
 		transport.pause()

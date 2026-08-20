@@ -279,6 +279,14 @@ public final class TakeDocument {
 		try writeWords()
 	}
 
+	/// The sounds that are not words. Straight into the take, because that is
+	/// where they live — there is no sidecar to keep in step.
+	public func setSounds(_ sounds: [SoundEvent]) {
+		var next = take
+		next.sounds = sounds
+		apply(next, actionName: "Find Sounds")
+	}
+
 	private func writeWords() throws {
 		guard let baseURL, let words = take.words else { onChange?(); return }
 		let url = URL(fileURLWithPath: words.path, relativeTo: baseURL)

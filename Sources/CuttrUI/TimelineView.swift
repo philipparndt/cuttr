@@ -870,10 +870,15 @@ public final class TimelineView: NSView {
 	/// moment the name is committed, so typing "Intro" here leaves `intro` in
 	/// the file without anybody having to know that. A slug somebody wants to
 	/// choose by hand is edited in the table, where it is a column of its own.
-	public func beginRenaming(_ clip: Clip) {
+	/// `proposing` puts a suggested name in the field instead of the clip's own,
+	/// selected, so that it is one keystroke to keep and one to type over.
+	/// Nothing is written until somebody presses Return: a proposal that
+	/// committed itself would be a rename nobody asked for, and this is the
+	/// only place a name from a model ever reaches a take.
+	public func beginRenaming(_ clip: Clip, proposing: String? = nil) {
 		endRenaming(commit: true)
 		let field = NSTextField(frame: barRect(for: clip).insetBy(dx: -1, dy: -2))
-		field.stringValue = clip.name
+		field.stringValue = proposing ?? clip.name
 		field.placeholderString = clip.slug
 		field.font = NSFont.systemFont(ofSize: 11)
 		field.textColor = Theme.text
@@ -890,6 +895,21 @@ public final class TimelineView: NSView {
 		onSelectClip?(clip.id)
 		window?.makeFirstResponder(field)
 		field.currentEditor()?.selectAll(nil)
+	}
+
+	/// Puts a better proposal in the open rename editor — **only** if it is open
+	/// on this clip and still says exactly what was put there.
+	///
+	/// The guard is the whole method. Something worked out half a second after
+	/// the field opened may improve what is in it, and may not put itself in
+	/// front of what somebody has begun to type. Returns whether it did.
+	@discardableResult
+	public func repropose(_ proposal: String, for clip: Clip.ID, replacing untouched: String) -> Bool {
+		guard editingClip == clip, let editor, editor.stringValue == untouched,
+		      proposal != untouched else { return false }
+		editor.stringValue = proposal
+		editor.currentEditor()?.selectAll(nil)
+		return true
 	}
 
 	/// Closes the editor. `commit` false is escape, which leaves the name alone.
