@@ -66,11 +66,20 @@ public enum Timecode {
 	/// column of clip times readable — most takes are minutes long, and
 	/// `00:00:12.300` spends four characters saying so. A parser that accepts
 	/// both forms is what buys this, and it does.
+	/// The milliseconds this time is written as.
+	///
+	/// Rounded once, so that 12.9996 shows as 13.000 rather than as 12.1000
+	/// from a floor of the seconds and a round of the rest — and available on
+	/// its own, because anything derived from two written times has to be
+	/// derived from the numbers that were *written* rather than from the ones
+	/// they came from.
+	public static func milliseconds(_ seconds: Double) -> Int {
+		Int((abs(seconds) * 1000).rounded()) * (seconds < 0 ? -1 : 1)
+	}
+
 	public static func string(_ seconds: Double) -> String {
 		let negative = seconds < 0
-		// Round once, in milliseconds, so that 12.9996 shows as 13.000 rather
-		// than as 12.1000 from a floor of the seconds and a round of the rest.
-		let ms = Int((abs(seconds) * 1000).rounded())
+		let ms = abs(milliseconds(seconds))
 		let (whole, milli) = (ms / 1000, ms % 1000)
 		let (h, m, s) = (whole / 3600, (whole / 60) % 60, whole % 60)
 		let sign = negative ? "-" : ""
