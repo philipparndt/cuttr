@@ -53,6 +53,26 @@ rm -rf "$APP"
 mkdir -p build
 cp -R "$BUILT" "$APP"
 
+# Which build this actually is.
+#
+# A crash report names the app's version, and the version in the project file
+# is whatever was last released — so a report from a build made an hour ago
+# says 0.4.1 (5) and points the reader at the released binary. That happened,
+# and it cost half an hour of looking at the wrong tree. The commit goes in
+# before signing, because changing the plist afterwards breaks the signature.
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+git diff --quiet 2>/dev/null || COMMIT="$COMMIT+"
+/usr/libexec/PlistBuddy -c "Add :CuttrCommit string $COMMIT" "$APP/Contents/Info.plist" 2>/dev/null \
+	|| /usr/libexec/PlistBuddy -c "Set :CuttrCommit $COMMIT" "$APP/Contents/Info.plist"
+# A crash report prints `CFBundleVersion` and nothing of our own, so for a
+# build nobody released the commit goes there as well. A release keeps its
+# plain number: that one *is* the thing it says it is.
+if [ "$XCODE_CONFIG" = "Debug" ]; then
+	BUILD="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Contents/Info.plist")"
+	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD-$COMMIT" "$APP/Contents/Info.plist"
+fi
+echo "==> Built from $COMMIT"
+
 # Signed with a Developer ID rather than ad-hoc, and not for distribution —
 # this app is never shipped anywhere. TCC remembers "cuttr may read your Movies
 # folder" against the app's identity, and an ad-hoc signature has none: it is
