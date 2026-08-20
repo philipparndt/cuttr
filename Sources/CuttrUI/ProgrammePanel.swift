@@ -1543,8 +1543,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			play.representedObject = name
 			menu.addItem(play)
 		}
-		if case .clip(let reference) = node.entry.source, node.overlay == nil, !node.isOverlayRoot {
-			let open = NSMenuItem(title: "Open “\(reference.slug)” in its take",
+		if case .clip = node.entry.source, node.overlay == nil, !node.isOverlayRoot {
+			// Not "Open “clip-4” in its take": the row it was opened from says
+			// which clip this is, and a menu that repeats what was clicked is a
+			// menu asking somebody to check its work.
+			let open = NSMenuItem(title: "Open in Take",
 			                      action: #selector(openInTake(_:)), keyEquivalent: "")
 			open.target = self
 			open.representedObject = node.path
