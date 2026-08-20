@@ -43,4 +43,28 @@ import Testing
 		#expect(second?.start == 4)
 		#expect(second?.end == 10)
 	}
+
+	/// The case that was missed: a bubble written at the top level, on for three
+	/// seconds of a four-second clip, was offered the whole programme to aim at
+	/// — because the range was taken from where the overlay is *written* rather
+	/// than from what its span is tied to.
+	@Test func anOverlayInsideAClipIsAboutThatClip() throws {
+		let project = Project(timeline: [
+			TimelineEntry(source: .card(Card(duration: 4)), label: "first"),
+			TimelineEntry(source: .card(Card(duration: 6)), label: "second"),
+		])
+		let resolved = try Resolver.resolve(
+			project, baseURL: URL(fileURLWithPath: NSTemporaryDirectory()))
+		let panel = PropertiesPanel(frame: NSRect(x: 0, y: 0, width: 380, height: 800))
+		panel.resolved = resolved
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .output)
+
+		// `within: second, from: 1, to: 3` — written at the top level.
+		let overlay = Overlay(
+			kind: .text("inside", style: nil),
+			span: .within(.group("second"), from: 1, to: 3))
+		let bounds = panel.boundsForTesting(.project(0), overlay)
+		#expect(bounds?.start == 4)
+		#expect(bounds?.end == 10)
+	}
 }

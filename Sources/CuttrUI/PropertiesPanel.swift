@@ -1946,16 +1946,7 @@ public final class PropertiesPanel: NSView {
 		let strip = SpanStrip()
 		currentStrip = strip
 		strip.duration = resolved?.duration ?? 0
-		// An overlay written inside a timeline entry is on while that entry
-		// plays and at no other time, so the strip is about that entry. Showing
-		// the whole programme offered times that cannot mean anything, and
-		// squeezed the ones that can into a thumbnail at one end.
-		if case .entry(let path, _) = origin, let resolved,
-		   let extent = Project.extent(of: path, in: resolved) {
-			strip.showing = (extent.0, extent.1)
-		} else {
-			strip.showing = nil
-		}
+		strip.showing = bounds(origin, overlay)
 		strip.blocks = (resolved?.clips ?? []).map {
 			SpanStrip.Block(start: $0.start, end: $0.end, name: $0.clip.slug)
 		}
@@ -2006,6 +1997,40 @@ public final class PropertiesPanel: NSView {
 			guard let self, self.generation == generation, let image else { return }
 			self.currentPreview?.poster = image
 		}
+	}
+
+	/// For the tests: the stretch the strip would be about.
+	func boundsForTesting(_ origin: Origin, _ overlay: Overlay) -> (start: Double, end: Double)? {
+		bounds(origin, overlay)
+	}
+
+	/// The stretch of the programme this overlay's ranges can be in.
+	///
+	/// Two ways an overlay is tied to one thing rather than to the programme,
+	/// and both of them make most of the strip meaningless:
+	///
+	/// - it is **written inside** a timeline entry, and covers that placement;
+	/// - it says `within:` a clip or a section, wherever it is written — which
+	///   is what the panel calls *inside a clip*, and what a bubble pointing at
+	///   somebody in one shot always says.
+	///
+	/// The second is the common one and was the one this missed: a bubble
+	/// written at the top level, on for three seconds of a four-second clip,
+	/// was offered a hundred and five seconds to aim at.
+	///
+	/// `nil` for an overlay that really is about the whole programme.
+	private func bounds(_ origin: Origin, _ overlay: Overlay) -> (start: Double, end: Double)? {
+		let position = min(max(0, selectedSpan), max(0, overlay.spans.count - 1))
+		if position < overlay.appearances.count,
+		   case .within(let mark, _, _) = overlay.appearances[position].span,
+		   let inside = extent(of: .marks(from: mark, to: mark)) {
+			return (inside.0, inside.1)
+		}
+		if case .entry(let path, _) = origin, let resolved,
+		   let extent = Project.extent(of: path, in: resolved) {
+			return (extent.start, extent.end)
+		}
+		return nil
 	}
 
 	/// Where a range lands on the programme's clock.
