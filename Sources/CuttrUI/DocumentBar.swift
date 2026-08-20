@@ -364,8 +364,14 @@ public final class DocumentBar: NSView {
 	}
 
 	/// Where a list should hang from, for the half that was clicked.
+	///
+	/// Never an empty rectangle. `NSPopover.show(relativeTo:)` given one
+	/// declines silently — no panel, no error, and no closing to report — and a
+	/// squeezed capsule is exactly where that used to happen.
 	public func anchor(for half: DocumentCapsule.Half) -> (NSView, NSRect) {
-		(capsule, half == .project ? capsule.projectRect : capsule.branchRect)
+		let wanted = half == .project ? capsule.projectRect : capsule.branchRect
+		guard wanted.width >= 8, wanted.height >= 8 else { return (capsule, capsule.bounds) }
+		return (capsule, wanted)
 	}
 
 	/// Where the playhead is. Always, in every mode — that is the point.

@@ -22,8 +22,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// otherwise share one scene window between them.
 	private var sceneOwners: [ObjectIdentifier: ObjectIdentifier] = [:]
 
+	/// Installed here rather than at launch.
+	///
+	/// These watch the windows, and the windows are the thing being tested.
+	/// `applicationDidFinishLaunching(_:)` is never called in a test — it
+	/// builds the menu bar and puts an untitled project on screen — so an
+	/// observer registered there is an observer no test can see the effect of.
+	/// A delegate that has been made is a delegate that is watching.
+	override init() {
+		super.init()
+		watchWindows()
+	}
+
 	func applicationDidFinishLaunching(_ notification: Notification) {
 		NSApp.mainMenu = MainMenu.build()
+		// A window with nothing in it, and a prompt in the timeline saying what
+		// to drop on it. Opening straight into a file panel is the other choice
+		// and it is worse: the first thing this program should show is what it
+		// is, not a list of the user's folders.
+		//
+		// On the next turn of the run loop, because `application(_:open:)` has
+		// not been called yet: launching by double-clicking a project used to
+		// give an empty take tab as well, sitting in front of the thing that was
+		// actually asked for.
+		DispatchQueue.main.async { [weak self] in
+			guard let self, self.controllers.isEmpty, self.composers.isEmpty else { return }
+			// A project, not a take. The project is the thing somebody works
+			// from — it lists the takes, opens them, and makes new ones — so
+			// starting in a take is starting one level down.
+			//
+			// Untitled, and it says so: demanding a save location before the
+			// window has appeared is a file panel as a splash screen. Adding a
+			// take is what asks, because that is the first moment a path has to
+			// be relative to something.
+			self.showComposer(ComposeDocument())
+		}
+	}
+
+	private func watchWindows() {
 		// A tab group restored from a launch before tabbing was turned off
 		// comes back with its tab bar, and that bar draws over a title bar the
 		// program draws itself. Turning the mechanism off does not undo an
@@ -63,6 +99,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		) { [weak self] note in
 			MainActor.assumeIsolated {
 				guard let window = note.object as? NSWindow else { return }
+				// The place outlives the document that was in it.
+				if self?.documentWindows.contains(window) == true { self?.place = window.frame }
 				self?.controllers.removeAll { $0.window === window }
 				self?.composers.removeAll { $0.window === window }
 				for scene in self?.scenes.filter({ $0.window === window }) ?? [] {
@@ -73,28 +111,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 					self?.sceneOwners.removeValue(forKey: ObjectIdentifier(scene))
 				}
 				self?.scenes.removeAll { $0.window === window }
+				self?.fillThePlace(without: window)
 			}
-		}
-		// A window with nothing in it, and a prompt in the timeline saying what
-		// to drop on it. Opening straight into a file panel is the other choice
-		// and it is worse: the first thing this program should show is what it
-		// is, not a list of the user's folders.
-		//
-		// On the next turn of the run loop, because `application(_:open:)` has
-		// not been called yet: launching by double-clicking a project used to
-		// give an empty take tab as well, sitting in front of the thing that was
-		// actually asked for.
-		DispatchQueue.main.async { [weak self] in
-			guard let self, self.controllers.isEmpty, self.composers.isEmpty else { return }
-			// A project, not a take. The project is the thing somebody works
-			// from — it lists the takes, opens them, and makes new ones — so
-			// starting in a take is starting one level down.
-			//
-			// Untitled, and it says so: demanding a save location before the
-			// window has appeared is a file panel as a splash screen. Adding a
-			// take is what asks, because that is the first moment a path has to
-			// be relative to something.
-			self.showComposer(ComposeDocument())
 		}
 	}
 
@@ -163,8 +181,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	}
 
 	private func openProject(_ url: URL) {
-		if let existing = composers.first(where: { $0.composeDocument.url == url }) {
-			existing.window?.makeKeyAndOrderFront(nil)
+		if let existing = composers.first(where: {
+			$0.composeDocument.url?.standardizedFileURL == url.standardizedFileURL
+		}) {
+			reveal(existing.window)
 			return
 		}
 		// An untitled project window that nobody has touched is a placeholder,
@@ -176,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				return
 			}
 			AppDelegate.remember(url)
-			blank.window?.makeKeyAndOrderFront(nil)
+			reveal(blank.window)
 			return
 		}
 		let document = ComposeDocument()
@@ -202,7 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 			sceneOwners[ObjectIdentifier($0)] == ObjectIdentifier(document)
 		}) {
 			if let chosen { existing.sceneDocument.show(chosen) }
-			existing.window?.makeKeyAndOrderFront(nil)
+			reveal(existing.window)
 			return
 		}
 		// A project with no scenes yet opens on one this program made, under a
@@ -391,9 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	}
 
 	@objc func goToDocument(_ sender: NSMenuItem) {
-		guard let window = sender.representedObject as? NSWindow else { return }
-		NSApp.activate(ignoringOtherApps: true)
-		window.makeKeyAndOrderFront(nil)
+		reveal(sender.representedObject as? NSWindow)
 	}
 
 	/// The keyboard path, which must not regress now that the tabs are gone:
@@ -421,11 +439,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				kind: document.kind,
 				indented: document.project != nil,
 				isCurrent: document.window === here,
-				open: {
-					guard let window = document.window else { return }
-					NSApp.activate(ignoringOtherApps: true)
-					window.makeKeyAndOrderFront(nil)
-				})
+				open: { [weak self] in self?.reveal(document.window) })
 		}
 		if !open.isEmpty { groups.append(.init("Open Documents", open)) }
 
@@ -467,20 +481,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	}
 
 	/// Shows it under a part of a view — a half of the capsule.
-	func showDocumentSwitcher(from view: NSView, rect: NSRect, onClose: @escaping () -> Void) {
+	@discardableResult
+	func showDocumentSwitcher(from view: NSView, rect: NSRect,
+	                          onClose: @escaping () -> Void) -> Bool {
 		let groups = switcherGroups(current: view.window)
-		guard !groups.isEmpty else { onClose(); return }
-		DocumentSwitcher.show(groups, from: view, rect: rect, onClose: onClose)
+		guard !groups.isEmpty else { onClose(); return false }
+		return DocumentSwitcher.show(groups, from: view, rect: rect, onClose: onClose)
 	}
 
 	/// `⇧⌘P`: the same list, for a hand on the keyboard.
 	///
 	/// The same list, and that is the point — the capsule prints this key, so
 	/// pressing it has to arrive at what clicking the capsule arrives at. It
-	/// hangs from the capsule of whichever window is key, so the popover appears
+	/// hangs from the capsule of the document on screen, so the popover appears
 	/// where the eye already is rather than in the middle of the screen.
 	@objc func showDocumentPalette(_ sender: Any?) {
-		guard let window = NSApp.keyWindow ?? openDocuments().compactMap(\.window).first,
+		// The document on screen first, and only then whichever window is key.
+		// Reached from the Window menu there is no key window — the menu is
+		// tracking — and this used to give up and do nothing at all, having
+		// first lit the capsule's chevron and left it lit.
+		guard let window = showing ?? NSApp.keyWindow ?? documentWindows.first,
 		      let bar = documentBar(in: window)
 		else { return }
 		bar.setOpenHalf(.project)
@@ -516,10 +536,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	private func step(by offset: Int) {
 		let open = openDocuments().compactMap(\.window)
 		guard open.count > 1 else { return }
-		let here = open.firstIndex { $0.isKeyWindow } ?? 0
+		// From the document on screen rather than from whichever window is
+		// key: with a menu tracking or a popover up there may be no key window
+		// at all, and stepping from index 0 then goes somewhere arbitrary.
+		let here = open.firstIndex { $0 === showing } ?? open.firstIndex { $0.isKeyWindow } ?? 0
 		let landing = (here + offset + open.count) % open.count
-		NSApp.activate(ignoringOtherApps: true)
-		open[landing].makeKeyAndOrderFront(nil)
+		reveal(open[landing])
 	}
 
 	static func remember(_ url: URL) {
@@ -561,15 +583,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	private func open(_ url: URL, at time: Double?) {
 		open(url)
 		guard let time,
-		      let controller = controllers.first(where: { $0.takeDocument.url == url })
+		      let controller = controllers.first(where: {
+		      	$0.takeDocument.url?.standardizedFileURL == url.standardizedFileURL
+		      })
 		else { return }
 		controller.reveal(at: time)
 	}
 
-	private func open(_ url: URL) {
+	func open(_ url: URL) {
 		if url.pathExtension != "cuttr" { openMedia([url]); return }
-		if let existing = controllers.first(where: { $0.takeDocument.url == url }) {
-			existing.window?.makeKeyAndOrderFront(nil)
+		// Compared standardised. `/tmp/x` and `/private/tmp/x` are one file
+		// under two names, and a project naming its takes relative to itself
+		// hands over the other one from the panel — so plain `==` opened a
+		// second window on a take that was already open, which is the one
+		// thing this model must never do.
+		if let existing = controllers.first(where: {
+			$0.takeDocument.url?.standardizedFileURL == url.standardizedFileURL
+		}) {
+			reveal(existing.window)
 			return
 		}
 		let document = TakeDocument()
@@ -609,31 +640,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		present(controller.window)
 	}
 
-	/// Puts a window up as a tab of whichever one is already there.
+	// MARK: - One place to work
+
+	/// The frame the documents take turns in.
 	///
-	/// `addTabbedWindow` rather than `makeKeyAndOrderFront` alone: without it a
-	/// second window opens on top of the first at the same size and position,
-	/// and the one underneath is invisible and unreachable except through the
-	/// Window menu. With it, a take and a project are two tabs of one window,
-	/// which is what somebody working on both actually has.
-	private func present(_ window: NSWindow?) {
+	/// **A window is a place to work, and the document in it changes.** That is
+	/// the model, and it is the one the user asked for twice: opening a take
+	/// from a project puts the take where the project was, and the switcher
+	/// behind the document's name puts anything else back there. Exactly one
+	/// document window is on screen at a time. The others stay *open* — still
+	/// in memory, still holding unsaved cuts, still listed in the capsule — and
+	/// are simply not on screen.
+	///
+	/// What this replaces was two mechanisms pulling opposite ways.
+	/// ``present(_:)`` put each new window into a tab group with the project by
+	/// calling `addTabbedWindow`, which works whatever `tabbingMode` says —
+	/// `.disallowed` declines *automatic* tabbing and does not refuse an
+	/// explicit request. So a group was formed, a system tab bar appeared over
+	/// the title bar this program draws itself, and the observer installed in
+	/// ``applicationDidFinishLaunching(_:)`` then saw a window become key
+	/// inside a group of two and called `moveTabToNewWindow` on it — during the
+	/// very notification the tabbing had just caused. The take ended up in a
+	/// window of its own, cascaded away from the project, sometimes behind it
+	/// and off screen: "it only opens sometimes and then in a different
+	/// window". Measured on a real project, three documents open, every take
+	/// hidden and the project window walked 58 points down and right each time.
+	///
+	/// Two windows can never show one document here, because no document has
+	/// two controllers and no more than one controller is on screen at all.
+	var place: NSRect?
+
+	/// Every window that holds a document, in the order the capsule lists them.
+	var documentWindows: [NSWindow] {
+		composers.compactMap(\.window) + controllers.compactMap(\.window)
+			+ scenes.compactMap(\.window)
+	}
+
+	/// Whichever document is on screen.
+	var showing: NSWindow? { documentWindows.first { $0.isVisible } }
+
+	/// Puts a document in the place, and takes whatever was there out of sight.
+	///
+	/// The same gesture lands the same way every time: there is no host window
+	/// to look for, no tab group to form, and nothing that depends on which
+	/// window happened to be key.
+	func reveal(_ window: NSWindow?) {
 		guard let window else { return }
-		// Hosted by the project window when there is one, so the project keeps
-		// its place as the first tab and takes accumulate after it rather than
-		// in front of it.
-		let host = composers.compactMap(\.window).first { $0.isVisible && $0 !== window }
-			?? NSApp.keyWindow
-			?? allWindows.first { $0 !== window }
-		if let host, host !== window {
-			host.addTabbedWindow(window, ordered: .above)
+		let leaving = documentWindows.filter { $0 !== window && $0.isVisible }
+		if let frame = leaving.first?.frame { place = frame }
+		// A window somebody has taken full screen keeps its own arrangement:
+		// putting a frame on it would drop it out, which is not what opening a
+		// take asked for.
+		if let frame = place, !window.styleMask.contains(.fullScreen) {
+			window.setFrame(fitted(frame, to: window), display: false)
 		}
 		window.makeKeyAndOrderFront(nil)
 		NSApp.activate(ignoringOtherApps: true)
+		// Afterwards, never before. Ordering the outgoing window out first
+		// leaves the screen blank for a frame — and ordering it out at all is
+		// what stops AppKit handing key status back to it.
+		for window in leaving { window.orderOut(nil) }
 	}
 
-	private var allWindows: [NSWindow] {
-		(controllers.compactMap(\.window) + composers.compactMap(\.window)).filter { $0.isVisible }
+	/// A frame this window can actually take. Windows differ in what they will
+	/// go down to, and a project asked to fit into a take's frame must not end
+	/// up smaller than it can draw itself in.
+	private func fitted(_ frame: NSRect, to window: NSWindow) -> NSRect {
+		var frame = frame
+		frame.size.width = max(frame.width, window.minSize.width)
+		frame.size.height = max(frame.height, window.minSize.height)
+		return frame
 	}
+
+	/// When the document on screen closes, the next one takes its place rather
+	/// than leaving an empty screen with documents still open.
+	///
+	/// The window that is closing is named rather than waited for. `willClose`
+	/// arrives while it is still on screen, so asking `showing` at that moment
+	/// gets the answer "the one that is going" — and deferring the question to
+	/// the next turn of the run loop makes the whole thing depend on a hop
+	/// that a test cannot see the far side of.
+	private func fillThePlace(without closing: NSWindow?) {
+		let open = documentWindows.filter { $0 !== closing }
+		guard !open.contains(where: \.isVisible), let next = open.first else { return }
+		reveal(next)
+	}
+
+	private func present(_ window: NSWindow?) { reveal(window) }
 
 	// MARK: - Menu targets
 
