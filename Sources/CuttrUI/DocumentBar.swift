@@ -29,37 +29,33 @@ public final class DocumentBar: NSView {
 	/// title has always sat.
 	public static let height: CGFloat = 52
 
-	/// Puts the close, minimise and zoom buttons in the middle of the bar.
+	/// Makes the window's title band as tall as this bar, with the close,
+	/// minimise and zoom buttons in the middle of it.
 	///
-	/// AppKit centres them in the *titlebar*, which is 28 points whatever the
-	/// window does — so under a 52-point bar they sat ten points high, while the
-	/// name and the clock were centred below them. Three dots that line up with
-	/// nothing are the first thing the eye finds in a window.
+	/// An empty `NSToolbar` in the `.unified` style, and nothing else. macOS
+	/// gives a unified toolbar a 52-point band and centres the traffic lights in
+	/// it — which is exactly this bar's height, and exactly the arrangement
+	/// wanted. Nothing goes *in* the toolbar: the bar is a view in the content
+	/// view, which runs up behind the titlebar because the window is
+	/// `.fullSizeContentView`.
 	///
-	/// Moved rather than asked, because asking does not work. An empty titlebar
-	/// accessory makes the band taller — that is the mechanism a unified toolbar
-	/// uses — and it was tried first: measured afterwards the buttons had not
-	/// moved at all, still sixteen points from the top of a fifty-two point
-	/// band. So this sets the frames, and does it again whenever the window
-	/// changes size, because AppKit puts them back.
+	/// This replaced setting the buttons' frames by hand and setting them again
+	/// on every resize, because AppKit put them back. Measured, both put the
+	/// buttons in the same place — but only this one makes the *band* 52 points:
+	/// by hand the buttons were centred while `contentLayoutRect` still reported
+	/// a 32-point titlebar, so anything asking the window how much room the
+	/// titlebar wanted got the wrong answer.
 	///
-	/// Not in full screen, where there is no titlebar to be in the middle of.
-	public static func centreTrafficLights(in window: NSWindow) {
-		guard !window.styleMask.contains(.fullScreen), let content = window.contentView else {
-			return
-		}
-		// Worked out in the content view, which is the thing the bar is pinned
-		// to, and converted back — rather than in whatever coordinate space the
-		// titlebar happens to hand out.
-		let middle = content.bounds.maxY - height / 2
-		for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-			guard let button = window.standardWindowButton(kind),
-			      let holder = button.superview
-			else { continue }
-			let wanted = holder.convert(NSPoint(x: 0, y: middle), from: content)
-			button.setFrameOrigin(NSPoint(x: button.frame.origin.x,
-			                              y: wanted.y - button.frame.height / 2))
-		}
+	/// The empty row does not take the clicks. Hit-testing a point in the middle
+	/// of the band lands on the bar's own clock, not on the toolbar: with no
+	/// items in it there is nothing there to hit.
+	public static func growTitleBand(of window: NSWindow) {
+		let toolbar = NSToolbar(identifier: "cuttr.band")
+		toolbar.displayMode = .iconOnly
+		toolbar.allowsUserCustomization = false
+		toolbar.showsBaselineSeparator = false
+		window.toolbar = toolbar
+		window.toolbarStyle = .unified
 	}
 
 	/// How far in the first thing starts, so it clears the traffic lights.
@@ -100,7 +96,11 @@ public final class DocumentBar: NSView {
 	/// this document made of", and putting the second behind the first is what
 	/// made it wrong. The rule the bar follows now — the leading group is the
 	/// document you are in, the trailing group is what this window does with it.
-	public var documents: (() -> NSMenu?)?
+	public var onProject: (() -> Void)?
+	/// Asked to show what can be done about the repository this document sits
+	/// in, and which branch it is on. `nil` when the folder is not a work tree,
+	/// which is the ordinary case for footage.
+	public var onBranch: (() -> Void)?
 
 	/// Rolling the tape, from the bar that says where the tape is.
 	///
@@ -112,7 +112,8 @@ public final class DocumentBar: NSView {
 	public var onPlayPause: (() -> Void)?
 
 	private var documentName = ""
-	private let name = NSButton()
+	/// Which project on the left, which branch on the right, and `⇧⌘P`.
+	private let capsule = DocumentCapsule()
 	/// The way into the setting-up controls: an ellipsis, which is what a menu
 	/// of more things about the thing beside it looks like everywhere else on
 	/// this machine.
@@ -171,13 +172,14 @@ public final class DocumentBar: NSView {
 			edge.heightAnchor.constraint(equalToConstant: 1),
 		])
 
-		name.isBordered = false
-		name.isEnabled = true
-		name.bezelStyle = .inline
-		name.imagePosition = .noImage
-		name.target = self
-		name.action = #selector(showDocuments)
-		name.setContentCompressionResistancePriority(
+		capsule.onHalf = { [weak self] half in
+			guard let self else { return }
+			switch half {
+			case .project: self.onProject?()
+			case .branch: self.onBranch?()
+			}
+		}
+		capsule.setContentCompressionResistancePriority(
 			NSLayoutConstraint.Priority(1), for: .horizontal)
 
 		// Tabular figures, and a width that never changes.
@@ -245,7 +247,7 @@ public final class DocumentBar: NSView {
 			divider.heightAnchor.constraint(equalToConstant: 16),
 		])
 
-		for view in [name, divider, group, play, clock, statusLabel, progress, trailing] as [NSView] {
+		for view in [capsule, divider, group, play, clock, statusLabel, progress, trailing] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			addSubview(view)
 		}
@@ -262,13 +264,14 @@ public final class DocumentBar: NSView {
 		// and then every message that arrives with one arrives in a different
 		// place.
 		NSLayoutConstraint.activate([
-			name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.trafficLights),
-			name.centerYAnchor.constraint(equalTo: centerYAnchor),
+			capsule.leadingAnchor.constraint(equalTo: leadingAnchor,
+			                                 constant: Self.trafficLights),
+			capsule.centerYAnchor.constraint(equalTo: centerYAnchor),
 
 			// The rule, then the group: a clear gap either side of it, so the
 			// cluster is plainly separate from the name at one end and from the
 			// clock at the other.
-			divider.leadingAnchor.constraint(equalTo: name.trailingAnchor, constant: 14),
+			divider.leadingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: 14),
 			divider.centerYAnchor.constraint(equalTo: centerYAnchor),
 
 			group.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 14),
@@ -308,12 +311,30 @@ public final class DocumentBar: NSView {
 	/// Which document this window is about.
 	public func setName(_ text: String) {
 		documentName = text
-		name.attributedTitle = NSAttributedString(
-			string: text,
-			attributes: [.font: Theme.bodyStrong, .foregroundColor: Theme.text])
-		name.toolTip = "Which document this is \u{2014} and every other one that is open"
+		capsule.show(project: text, branch: branchName)
+		capsule.toolTip = "Which document this is \u{2014} and every other one that is open"
 		more.toolTip = setUp == nil
 			? nil : "What this take is made of, and how the two line up"
+	}
+
+	private var branchName: String?
+
+	/// Which branch the folder this document sits in is on. `nil` takes the
+	/// right half away altogether, which is what a folder outside a work tree
+	/// should look like: not an empty box, no box.
+	public func setBranch(_ branch: String?) {
+		branchName = branch
+		capsule.show(project: documentName, branch: branch)
+	}
+
+	/// Lights the half whose list is up, and puts it out again after.
+	public func setOpenHalf(_ half: DocumentCapsule.Half?) {
+		capsule.openHalf = half
+	}
+
+	/// Where a list should hang from, for the half that was clicked.
+	public func anchor(for half: DocumentCapsule.Half) -> (NSView, NSRect) {
+		(capsule, half == .project ? capsule.projectRect : capsule.branchRect)
 	}
 
 	/// Where the playhead is. Always, in every mode — that is the point.
@@ -360,16 +381,10 @@ public final class DocumentBar: NSView {
 
 	@objc private func playTapped() { onPlayPause?() }
 
-	@objc private func showDocuments() {
-		guard let menu = documents?(), !menu.items.isEmpty else { return }
-		let below = NSPoint(x: 0, y: name.bounds.maxY + 4)
-		menu.popUp(positioning: nil, at: below, in: name)
-	}
-
 	@objc private func showSetUp() {
 		guard let content = setUp else { return }
 		if let popover, popover.isShown { popover.close(); return }
-		let from: NSView = more.isHidden ? name : more
+		let from: NSView = more.isHidden ? capsule : more
 		let holder = NSViewController()
 		holder.view = content
 		let showing = NSPopover()
@@ -384,7 +399,7 @@ public final class DocumentBar: NSView {
 	/// without going through the view tree looking for a font.
 	var clockForTesting: NSTextField { clock }
 	var playForTesting: NSButton { play }
-	var nameForTesting: NSButton { name }
+	var capsuleForTesting: DocumentCapsule { capsule }
 	var moreForTesting: NSButton { more }
 	var groupForTesting: NSStackView { group }
 	var dividerForTesting: NSView { divider }

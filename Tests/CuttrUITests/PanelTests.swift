@@ -1581,16 +1581,40 @@ import Testing
 		bar.setName("mia-take-1")
 		bar.setUp = TakeSetup()
 
-		// The name is a way in whether or not the window has a set-up popover:
-		// every window has documents, only a take has files.
-		#expect(bar.nameForTesting.isEnabled)
-		#expect(bar.nameForTesting.action != bar.moreForTesting.action,
-		        "the name and the ellipsis do the same thing")
+		var asked: [DocumentCapsule.Half] = []
+		bar.onProject = { asked.append(.project) }
+		bar.onBranch = { asked.append(.branch) }
+
+		// Two halves, two lists, two hit targets — and the ellipsis beside them
+		// is a third door, to this take's own files.
+		#expect(bar.moreForTesting.isHidden == false)
+		#expect(bar.capsuleForTesting.projectForTesting == "mia-take-1")
 
 		let plain = DocumentBar()
 		plain.setName("dingsda")
-		#expect(plain.nameForTesting.isEnabled, "a window with no set-up still has documents")
-		#expect(plain.moreForTesting.isHidden)
+		#expect(plain.moreForTesting.isHidden, "an ellipsis with nothing behind it")
+	}
+
+	/// With no branch there is nothing on the right to point at, so the whole
+	/// capsule belongs to the project — which is the ordinary case for footage
+	/// on a volume that is not a work tree.
+	@Test func withNoBranchTheWholeCapsuleIsTheProject() {
+		_ = NSApplication.shared
+		let capsule = DocumentCapsule(frame: NSRect(x: 0, y: 0, width: 400, height: 30))
+		capsule.show(project: "dingsda", branch: nil)
+		capsule.layoutSubtreeIfNeeded()
+		#expect(!capsule.hasBranch)
+		// Anywhere inside it is the project half.
+		#expect(capsule.halfForTesting(at: NSPoint(x: 20, y: 15)) == .project)
+		#expect(capsule.halfForTesting(at: NSPoint(x: 380, y: 15)) == .project)
+
+		capsule.show(project: "dingsda", branch: "ui")
+		capsule.layoutSubtreeIfNeeded()
+		#expect(capsule.hasBranch)
+		#expect(capsule.halfForTesting(at: NSPoint(x: 20, y: 15)) == .project)
+		#expect(capsule.halfForTesting(at: NSPoint(x: 380, y: 15)) == .branch)
+		// And outside it is neither.
+		#expect(capsule.halfForTesting(at: NSPoint(x: 20, y: 200)) == nil)
 	}
 
 	/// One document open is still a list, and the tick still says which.
@@ -1634,54 +1658,68 @@ import Testing
 	}
 }
 
-/// The palette on ⇧⌘P: type three letters, press return.
-@Suite @MainActor struct DocumentPaletteTests {
+/// The switcher behind the capsule and behind ⇧⌘P: type three letters, press
+/// return.
+///
+/// One list with two ways in, which is why the capsule prints the key rather
+/// than a chevron nobody can press. This replaces a separate palette that
+/// answered the same question in a second place — two lists of the same thing
+/// come apart.
+@Suite @MainActor struct DocumentSwitcherTests2 {
 
-	private func entries() -> [DocumentPalette.Entry] {
+	private func groups() -> [DocumentSwitcher.Group] {
 		[
-			.init(name: "dingsda", detail: "project", kind: .scene, window: nil),
-			.init(name: "mia-take-1", detail: "in dingsda", kind: .take, window: nil),
-			.init(name: "walter-take-2", detail: "in dingsda", kind: .take, window: nil),
-			.init(name: "intro", detail: "scene", kind: .section, window: nil),
+			.init("Open", [
+				.init(name: "dingsda", path: "~/dev", kind: .scene, open: {}),
+				.init(name: "mia-take-1", path: "in dingsda", kind: .take, open: {}),
+				.init(name: "walter-take-2", path: "in dingsda", kind: .take, open: {}),
+			]),
+			.init("Recent", [
+				.init(name: "old-project", path: "~/archive", kind: .scene, open: {}),
+				.init(name: "gone", path: "/Volumes/gone", kind: .take, missing: true, open: nil),
+			]),
 		]
 	}
 
-	/// The letters in order, not necessarily together — which is the whole
-	/// point of typing at a list instead of reading it.
+	/// The letters in order, not necessarily together — the point of typing at
+	/// a list instead of reading it.
 	@Test func itMatchesTheLettersInOrder() {
-		#expect(DocumentPalette.matches("mt1", in: "mia-take-1"))
-		#expect(DocumentPalette.matches("wt2", in: "walter-take-2"))
-		#expect(DocumentPalette.matches("ding", in: "dingsda"))
-		#expect(!DocumentPalette.matches("1tm", in: "mia-take-1"),
+		#expect(DocumentSwitcher.matches("mt1", in: "mia-take-1"))
+		#expect(DocumentSwitcher.matches("wt2", in: "walter-take-2"))
+		#expect(DocumentSwitcher.matches("ding", in: "dingsda"))
+		#expect(!DocumentSwitcher.matches("1tm", in: "mia-take-1"),
 		        "the order does not matter, and it should")
-		#expect(!DocumentPalette.matches("zz", in: "mia-take-1"))
+		#expect(!DocumentSwitcher.matches("zz", in: "mia-take-1"))
 	}
 
-	@Test func typingNarrowsItAndEmptyShowsEverything() {
+	/// Headings appear only over rows that survived the filter: a heading with
+	/// nothing under it is a heading about nothing.
+	@Test func aHeadingWithNothingUnderItGoesAway() {
 		_ = NSApplication.shared
-		let palette = DocumentPalette(entries()) { _ in }
-		#expect(palette.shownForTesting.count == 4)
+		let switcher = DocumentSwitcher.Switcher(groups())
+		switcher.loadView()
+		#expect(switcher.shownForTesting == ["# Open", "dingsda", "mia-take-1",
+		                                     "walter-take-2", "# Recent", "old-project", "gone"])
 
-		palette.filter("mt1")
-		#expect(palette.shownForTesting.map(\.name) == ["mia-take-1"])
+		switcher.setFilter("mt1")
+		#expect(switcher.shownForTesting == ["# Open", "mia-take-1"],
+		        "\(switcher.shownForTesting)")
 
-		// The detail is matched too, so "dingsda" finds the project and
-		// everything filed under it.
-		palette.filter("dingsda")
-		#expect(palette.shownForTesting.count == 3)
+		switcher.setFilter("old")
+		#expect(switcher.shownForTesting == ["# Recent", "old-project"])
 
-		palette.filter("")
-		#expect(palette.shownForTesting.count == 4)
+		switcher.setFilter("qqq")
+		#expect(switcher.shownForTesting.isEmpty)
 
-		palette.filter("qqq")
-		#expect(palette.shownForTesting.isEmpty)
+		switcher.setFilter("")
+		#expect(switcher.shownForTesting.count == 7)
 	}
 
-	/// A take says which project it is in; anything else says what it is, rather
-	/// than showing an empty parenthesis.
-	@Test func everyRowSaysWhatItIs() {
-		for entry in entries() {
-			#expect(!entry.detail.isEmpty, "\(entry.name) says nothing about itself")
-		}
+	/// A remembered document that has moved says so rather than offering a path
+	/// that opens nothing.
+	@Test func aDocumentThatHasMovedSaysSo() {
+		let gone = groups()[1].entries[1]
+		#expect(gone.missing)
+		#expect(gone.open == nil, "a missing file is still offered as something to open")
 	}
 }

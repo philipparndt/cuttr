@@ -115,7 +115,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		window.tabbingMode = .disallowed
 		// One band at the top, and the bar is it. See `DocumentBar.height`.
 		window.titleVisibility = .hidden
-		DocumentBar.centreTrafficLights(in: window)
+		DocumentBar.growTitleBand(of: window)
 		super.init(window: window)
 		window.delegate = self
 		build()
@@ -483,9 +483,29 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		}
 
 		bar.setUp = setup
-		bar.documents = { [weak self] in
-			AppDelegate.shared?.documentsMenu(for: self?.window)
+		// The two halves of the capsule: the documents on the left, and what can
+		// be done about the repository this one sits in on the right.
+		bar.onProject = { [weak self] in
+			guard let self else { return }
+			self.bar.setOpenHalf(.project)
+			let (view, rect) = self.bar.anchor(for: .project)
+			AppDelegate.shared?.showDocumentSwitcher(from: view, rect: rect) {
+				self.bar.setOpenHalf(nil)
+			}
 		}
+		bar.onBranch = { [weak self] in
+			guard let self, let root = self.repositoryRoot else { return }
+			self.bar.setOpenHalf(.branch)
+			guard let menu = BranchMenu.menu(for: root,
+			                                 branch: GitRepository.branch(in: root)) else {
+				self.bar.setOpenHalf(nil)
+				return
+			}
+			let (view, rect) = self.bar.anchor(for: .branch)
+			menu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY + 4), in: view)
+			self.bar.setOpenHalf(nil)
+		}
+
 		bar.onPlayPause = { [weak self] in self?.playSelectionOrToggle() }
 		// The button shows what pressing it will do, so it has to hear about
 		// the tape starting and stopping from anywhere — `space`, a menu item,
@@ -949,8 +969,22 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	///
 	/// One method, called from everywhere that used to call four setters, so the
 	/// clock and the file names can never disagree about which take this is.
+	/// The work tree this take's file sits in, if it sits in one. Looked up when
+	/// the file changes rather than on every draw: `git rev-parse` is cheap but
+	/// it is still a subprocess.
+	private var repositoryRoot: URL?
+	private var repositoryFor: URL?
+
+	private func findRepository() {
+		guard takeDocument.url != repositoryFor else { return }
+		repositoryFor = takeDocument.url
+		repositoryRoot = takeDocument.url.flatMap { GitRepository.root(for: $0) }
+	}
+
 	private func showDocument(at time: Double) {
+		findRepository()
 		bar.setName(takeDocument.displayName)
+		bar.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
 		bar.setClock(time)
 		setup.update(document: takeDocument)
 		let hasAudio = takeDocument.take.audio != nil
@@ -1831,12 +1865,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		default:
 			return true
 		}
-	}
-
-	/// AppKit puts the traffic lights back where it likes them on every
-	/// resize, so they are placed again here. See `centreTrafficLights`.
-	public func windowDidResize(_ notification: Notification) {
-		if let window { DocumentBar.centreTrafficLights(in: window) }
 	}
 
 	public func windowShouldClose(_ sender: NSWindow) -> Bool {
