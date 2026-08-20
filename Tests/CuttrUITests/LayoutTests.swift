@@ -544,8 +544,16 @@ import Testing
 				window.layoutIfNeeded()
 			}
 			let after = panes.map(\.frame.height)
-			#expect(before == after,
-			        "at \(height) the column shrank: \(before) became \(after)")
+			// Within a few points, not to the point. Which pane gets the last
+			// of the slack is a tie — a split view remembers a dragged divider
+			// at priority 250 and the panes ask for their preferred heights at
+			// the same 250 — so a fold can move a point or two between
+			// neighbours. What this is looking for is a pane that lost its
+			// room: the bug shrank one by 52 points, and left another at its
+			// heading.
+			let moved = zip(before, after).map { abs($0 - $1) }.max() ?? 0
+			#expect(moved <= 4,
+			        "at \(height) the column shifted by \(moved): \(before) became \(after)")
 		}
 		window.close()
 	}

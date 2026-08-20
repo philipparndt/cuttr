@@ -27,7 +27,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private let library = LibraryView()
 	private let inspector = ProjectInspector()
 	private let source = ProjectTextEditor()
-	private let modes = NSTabView()
+	/// A real frame, for the reason in `roomToLayOutIn`: a tab view sizes the
+	/// item views inside it, so a tab view at 0×0 hands every pane of this
+	/// window a required `width == 0` before anything has been laid out.
+	private let modes = NSTabView(frame: .roomToLayOutIn)
 
 	/// Which of the three is showing.
 	public enum Mode: Int { case edit, text, preview }
@@ -196,7 +199,16 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			controls.heightAnchor.constraint(equalToConstant: 76),
 		])
 
-		let split = NSSplitView()
+		// A real frame, not zero.
+		//
+		// A split view created at 0x0 has its size turned into a pair of
+		// *required* constraints by its autoresizing mask — `width == 0`,
+		// `height == 0` — and every content minimum inside it is then one half
+		// of a system with no solution. That is the same lesson `TableScroll`
+		// already records for scroll views, and it is what filled the log with
+		// `layout constraints are not satisfiable` before this window had ever
+		// been shown.
+		let split = NSSplitView(frame: .roomToLayOutIn)
 		split.isVertical = false
 		split.dividerStyle = .thin
 		split.addArrangedSubview(picture)
@@ -213,13 +225,13 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// tracked faces. A project is assembled by dragging from that list onto
 		// the programme, which is why the two live in one column — the material
 		// on the left, the programme in the middle, its properties on the right.
-		let material = NSSplitView()
+		let material = NSSplitView(frame: .roomToLayOutIn)
 		material.isVertical = false
 		material.dividerStyle = .thin
 		material.addArrangedSubview(takesTable)
 		material.addArrangedSubview(library)
 
-		let editing = NSSplitView()
+		let editing = NSSplitView(frame: .roomToLayOutIn)
 		editing.isVertical = true
 		editing.dividerStyle = .thin
 		editing.addArrangedSubview(material)
@@ -236,7 +248,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			modes.addTabViewItem(item)
 		}
 
-		let content = DropView()
+		let content = DropView(frame: .roomToLayOutIn)
 		content.onDrop = { [weak self] urls in
 			guard let url = urls.first(where: { $0.pathExtension == "cuttrproj" }) else { return }
 			try? self?.composeDocument.read(from: url)
@@ -280,11 +292,13 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		let wishes = [materialWidth, takesHeight, stripHeight]
 		for wish in wishes { wish.priority = preferred; wish.isActive = true }
 		NSLayoutConstraint.activate([
-			material.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
-			takesTable.heightAnchor.constraint(greaterThanOrEqualToConstant: 90),
-			library.heightAnchor.constraint(greaterThanOrEqualToConstant: 120),
-			strip.heightAnchor.constraint(greaterThanOrEqualToConstant: 90),
-			playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
+			// Floors, not laws — see `asFloor`. All five are inside split views
+			// inside a tab view, and the item that is not showing has no size.
+			material.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).asFloor,
+			takesTable.heightAnchor.constraint(greaterThanOrEqualToConstant: 90).asFloor,
+			library.heightAnchor.constraint(greaterThanOrEqualToConstant: 120).asFloor,
+			strip.heightAnchor.constraint(greaterThanOrEqualToConstant: 90).asFloor,
+			playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180).asFloor,
 		])
 
 		window.contentView = content

@@ -113,10 +113,21 @@ public final class ProjectInspector: NSView, NSSplitViewDelegate {
 			writes.leadingAnchor.constraint(equalTo: column.leadingAnchor),
 			writes.trailingAnchor.constraint(equalTo: column.trailingAnchor),
 			writes.bottomAnchor.constraint(equalTo: column.bottomAnchor),
-			writes.heightAnchor.constraint(greaterThanOrEqualToConstant: 30),
+			// A floor, not a law — see `asFloor`. The panel above it is pinned
+			// to this view's top, so at zero height the pair has no solution.
+			writes.heightAnchor.constraint(greaterThanOrEqualToConstant: 30).asFloor,
 		])
 
-		let split = NSSplitView()
+		// A real frame, not zero.
+		//
+		// A split view created at 0x0 has its size turned into a pair of
+		// *required* constraints by its autoresizing mask — `width == 0`,
+		// `height == 0` — and every content minimum inside it is then one half
+		// of a system with no solution. That is the same lesson `TableScroll`
+		// already records for scroll views, and it is what filled the log with
+		// `layout constraints are not satisfiable` before this window had ever
+		// been shown.
+		let split = NSSplitView(frame: .roomToLayOutIn)
 		split.isVertical = true
 		split.dividerStyle = .thin
 		split.delegate = self
@@ -154,8 +165,10 @@ public final class ProjectInspector: NSView, NSSplitViewDelegate {
 			split.bottomAnchor.constraint(equalTo: bottomAnchor),
 			split.leadingAnchor.constraint(equalTo: leadingAnchor),
 			split.trailingAnchor.constraint(equalTo: trailingAnchor),
-			programme.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
-			column.widthAnchor.constraint(greaterThanOrEqualToConstant: 380),
+			// Floors, not laws — see `asFloor`. Both are panes of a split view
+			// that a tab view leaves at zero width until its item is showing.
+			programme.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).asFloor,
+			column.widthAnchor.constraint(greaterThanOrEqualToConstant: 380).asFloor,
 		])
 	}
 
