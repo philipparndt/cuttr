@@ -14,8 +14,9 @@ effects, no footage — so every one of them renders on any machine:
 | `effects/celebrate.cuttrproj` | metallic confetti over a title card, then snow |
 | `effects/weather.cuttrproj` | rain, snow and sparks — the same machinery with different numbers |
 | `effects/looks.cuttrproj` | film mode, the tape and chromatic aberration, working on confetti and rain |
+| `effects/coming-on.cuttrproj` | `keys:` — a drizzle becoming a downpour, bars closing in, a lens giving up and recovering |
 
-Two things these are meant to teach, both of which cost a render to learn:
+Three things these are meant to teach, all of which cost a render to learn:
 
 **The ground belongs to the card, not to the scene.** Effects are drawn *into*
 the picture; a scene is drawn *over* it, as a Core Animation layer, in a second
@@ -27,3 +28,14 @@ it — the confetti is there and cannot be seen. Put the colour on the card's
 dissolve or a push: during an overlap both scenes are on at once and the later
 one simply covers the earlier. Between two shots a push reads beautifully;
 between two cards with scenes on them it reads as the second arriving early.
+
+**`in:` and `out:` are not `keys:`.** The envelope scales the whole of an effect
+on its way in and out — everything at once, from nothing to everything, which is
+one shape and the shape of *arriving*. Keys move the parameters themselves, so
+the rain can start as a drizzle and turn into a downpour while it is fully on.
+Not everything can move: a seed cannot, because the same number giving the same
+cloud on every render is the whole of what a seed is for, and a stock or a
+condition or a finish cannot, because there is nothing half way between two
+names. Ask for one of those on a key and the file will not open, with a sentence
+saying which and why — an animation that silently does nothing looks exactly
+like an animation nobody wrote.

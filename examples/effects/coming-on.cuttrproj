@@ -1,0 +1,104 @@
+# An effect that comes on: the numbers themselves moving, not just the fade.
+#
+# `in:` and `out:` scale the whole of an effect on its way in and out. That is
+# an effect arriving, and it is all one shape — everything at once, from nothing
+# to everything. What is here instead is `keys:`, which move the *parameters*:
+# rain that starts as a drizzle and turns into a downpour, bars that close in
+# over six seconds, a lens that gives up for a moment and recovers, a tape that
+# gets worse for two seconds and settles.
+#
+#   cuttr-render examples/effects/coming-on.cuttrproj
+#
+# A key is the same thing here as it is in a scene: `t` in seconds from the
+# start of the overlay's own appearance, and a key states only what changes —
+# everything it leaves out is what it was at the key before, and before the
+# first key everything is what the overlay itself says above. So the first key
+# of each of these is `{t: 0}` and says nothing at all: it is the moment the
+# numbers written above are true.
+#
+# Not everything can move, and the ones that cannot are refused by name rather
+# than ignored. `seed` is the whole of what makes a render repeatable, so a seed
+# that changed half way through would be two clouds cut together rather than one
+# cloud moving. A stock, a condition and a finish are names — there is nothing
+# half way between `warm` and `noir` — so change those by cross-fading a second
+# overlay over the first.
+cuttr-project: 1
+
+output:
+  size: 1280x720
+  fps:  25
+  file: coming-on.mov
+
+timeline:
+  - card:  00:10.000
+    as:    storm
+    fill:  ["#1b2733", "#05080c"]
+
+overlays:
+  # A drizzle that becomes a downpour, and a wind that gets up with it.
+  #
+  # `speed` and `wind` are *integrated* rather than multiplied — a drop's
+  # position is the area under its speed, not the speed at this instant times
+  # the time so far — so the rain accelerates instead of jumping forward the
+  # moment the number changes. `density` cannot make new drops half way through
+  # a render, so it is read as the fraction of the cloud allowed to fall: the
+  # shower is built for the heaviest it ever gets, and a drop that is not
+  # falling this time round is held back above the top of the frame rather than
+  # vanishing where you can see it.
+  - effect:  rain
+    density: 0.15
+    speed:   0.6
+    seed:    7
+    keys:
+      - {t: 0}
+      - {t: 4, density: 1.4, speed: 2.2, wind: 1.2, ease: in}
+      - {t: 8, density: 2, speed: 3, wind: 2.2}
+      - {t: 10, speed: 2.4, wind: 1.2, ease: out}
+    from:    "@storm"
+    in:      cut
+    out:     {fade: true, over: 0.6}
+
+  # The lens giving up for a moment and recovering. Under the film overlay, so
+  # the bars that close over it stay clean.
+  - aberration: radial
+    amount:     0.05
+    keys:
+      - {t: 0}
+      - {t: 3.5, amount: 1.6, ease: out}
+      - {t: 5, amount: 0.2, ease: in}
+      - {t: 10, amount: 0.7}
+    from:       "@storm"
+    in:         cut
+    out:        cut
+
+  # The bars closing in, and the stock arriving with them. `ratio` on a key is
+  # the one number the shape is — 2.39 rather than `2.39:1` — because a key
+  # states the quantity that moves.
+  - film:     cool
+    ratio:    "16:9"
+    strength: 0
+    grain:    0
+    vignette: 0
+    keys:
+      - {t: 0}
+      - {t: 6, ratio: 2.39, strength: 0.9, grain: 0.45, vignette: 0.5, ease: out}
+    from:     "@storm"
+    in:       cut
+    out:      cut
+
+  # Two seconds of the machine eating the tape, and then it settles. Written
+  # after the film overlay, so it disturbs the bars as well.
+  - tape:      clean
+    jitter:    0
+    band:      0
+    chroma:    0
+    scanlines: 0.15
+    dropouts:  0
+    seed:      2
+    keys:
+      - {t: 0}
+      - {t: 2.2, jitter: 0.9, band: 0.8, chroma: 0.8, scanlines: 0.4, dropouts: 0.7, ease: in}
+      - {t: 4.5, jitter: 0.08, band: 0.1, chroma: 0.25, scanlines: 0.2, dropouts: 0, ease: out}
+    from:      "@storm"
+    in:        cut
+    out:       cut
