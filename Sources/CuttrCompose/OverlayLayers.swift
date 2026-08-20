@@ -201,6 +201,11 @@ public enum OverlayLayers {
 	/// and one that leaves by cutting is at full opacity with nowhere to be —
 	/// so it stayed. A discrete animation on `isHidden` says the plain thing
 	/// the other one only implies, whatever the transitions are.
+	///
+	/// The preview honours this; `AVVideoCompositionCoreAnimationTool` does
+	/// not, which is why the opacity envelope below now brackets itself with
+	/// zeroes and does the same work a second time. Both are kept: this one is
+	/// the plainer statement, and neither costs anything.
 	private static func shown(_ resolved: ResolvedOverlay, host: Host) -> CAKeyframeAnimation {
 		let animation = CAKeyframeAnimation(keyPath: "hidden")
 		animation.values = [true, false, true]
@@ -228,17 +233,44 @@ public enum OverlayLayers {
 		// while a fade is the opacity. A cut is neither and simply appears.
 		let arrivesByFading = isFade(resolved.overlay.arrival)
 		let departsByFading = isFade(resolved.overlay.departure)
-		animation.values = [
-			arrivesByFading ? 0 : 1,
-			1, 1,
-			departsByFading ? 0 : 1,
-		]
-		animation.keyTimes = [0, NSNumber(value: arrive / span), NSNumber(value: 1 - depart / span), 1]
-		animation.timingFunctions = [
-			CAMediaTimingFunction(name: .easeOut),
-			CAMediaTimingFunction(name: .linear),
-			CAMediaTimingFunction(name: .easeIn),
-		]
+		// Zero at each end, held there by `fillMode: .both`, is what keeps the
+		// overlay off screen outside its span — whatever its transitions are.
+		//
+		// This used to be left to a discrete animation on `hidden`, which the
+		// preview honours and the export tool quietly does not. An overlay with
+		// `in: cut, out: cut` was on for the whole film: the one spelling with
+		// no fade to hide the mistake, and so the one nobody could see was
+		// wrong until it was measured.
+		//
+		// A cut is a step rather than a movement, but it cannot be written as
+		// two keyframes at the same instant — Core Animation renders a span of
+		// zero length as no span at all, which is how the bug survived a first
+		// attempt at this. So a cut takes `step`: a thousandth of the overlay's
+		// time on screen, under a millisecond for anything short enough to
+		// notice and well inside one frame. The same goes for the last pair:
+		// a step written as two keyframes at the end is no step at all, and the
+		// overlay stayed up.
+		let step = 0.001
+		var times: [Double] = []
+		var values: [Double] = []
+		func at(_ time: Double, _ value: Double) {
+			times.append(min(1, max(times.last ?? 0, time)))
+			values.append(value)
+		}
+		at(0, 0)
+		if !arrivesByFading { at(step, 1) }
+		at(max(arrive / span, arrivesByFading ? 0 : step), 1)
+		at(departsByFading ? 1 - depart / span : 1 - step, 1)
+		at(1, 0)
+		animation.values = values
+		animation.keyTimes = times.map(NSNumber.init(value:))
+		animation.timingFunctions = (1..<values.count).map { index in
+			// Ease only where something is actually moving: the arrival is the
+			// second segment of a fade, the departure the second to last.
+			if arrivesByFading, index == 1 { return CAMediaTimingFunction(name: .easeOut) }
+			if departsByFading, index == values.count - 1 { return CAMediaTimingFunction(name: .easeIn) }
+			return CAMediaTimingFunction(name: .linear)
+		}
 		animation.beginTime = host.beginTime(resolved.start)
 		animation.duration = span
 		animation.fillMode = .both

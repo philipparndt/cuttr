@@ -483,6 +483,39 @@ import Testing
 		"""
 		#expect(throws: (any Error).self) { try ProjectReader.read(text) }
 	}
+
+	/// `fade: false` is somebody turning the fade off, and it used to read as a
+	/// fade of the default length: the word was seen, the answer never was.
+	@Test func aFadeTurnedOffIsACut() throws {
+		let project = try ProjectReader.read("""
+			timeline: [{card: 00:02.000, fill: "#000000"}]
+			overlays:
+			  - text: one
+			    from: 00:00.000
+			    to:   00:01.000
+			    in:   {fade: false}
+			    out:  {fade: 0}
+			  - text: two
+			    from: 00:00.000
+			    to:   00:01.000
+			    in:   {fade: true}
+			    out:  {fade: true, over: 0.25}
+			sounds:
+			  - file: one.wav
+			    from: 00:00.000
+			    to:   00:01.000
+			    in:   {fade: false}
+			""")
+		#expect(project.overlays[0].arrival == .cut)
+		#expect(project.overlays[0].departure == .cut)
+		#expect(project.overlays[1].arrival == .fade(over: 0.4))
+		#expect(project.overlays[1].departure == .fade(over: 0.25))
+		#expect(project.sounds.first?.arrival == .cut)
+		// And a cut written down comes back a cut.
+		let back = try ProjectReader.read(ProjectWriter.write(project))
+		#expect(back.overlays[0].arrival == .cut)
+		#expect(back.overlays[1].departure == .fade(over: 0.25))
+	}
 }
 
 /// Film mode, in the file.

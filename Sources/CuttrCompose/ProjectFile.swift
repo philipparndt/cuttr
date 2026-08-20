@@ -598,7 +598,14 @@ public enum ProjectReader {
 		if let edge = (m["slide"] as? String).flatMap(Overlay.Transition.Edge.init(rawValue:)) {
 			return .slide(edge, over: over)
 		}
-		if m["fade"] != nil { return .fade(over: over) }
+		// `{fade: false}` is somebody saying *no* fade, and it used to read as a
+		// fade of the default length — the value was noticed and never looked
+		// at. `{fade: 0}` says the same thing with a number.
+		if let asked = m["fade"] {
+			if let wanted = asked as? Bool { return wanted ? .fade(over: number(m["over"]) ?? 0.4) : .cut }
+			if let seconds = number(asked) { return seconds > 0 ? .fade(over: seconds) : .cut }
+			return .fade(over: over)
+		}
 		// A shower that runs out rather than one somebody switched off.
 		if m["fall"] != nil { return .fall(over: number(m["over"]) ?? 1.5) }
 		return .cut
@@ -656,6 +663,8 @@ public enum ProjectReader {
 		// The mapping first, because a mapping is not a time and asking for one
 		// throws rather than falling through.
 		if let m = mapping(value) {
+			// `{fade: false}` means no fade, the same as it does for an overlay.
+			if let wanted = m["fade"] as? Bool, !wanted { return .cut }
 			guard m["fade"] != nil || m["over"] != nil else { return .cut }
 			return .fade(over: number(m["over"]) ?? number(m["fade"]) ?? 0.5)
 		}
