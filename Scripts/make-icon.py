@@ -27,12 +27,30 @@ ICON_DIR = os.path.join(ROOT, "Resources", "Icon")
 # The geometry, in the 0–100 square the concept was drawn in, scaled up here.
 # Kept in those numbers so it can be checked against the design page directly.
 BACKGROUND = (0x19, 0x1B, 0x1F)
+# Written as they were drawn, then centred: the three of them together span
+# x 12–76 and y 30–76, which leaves twice as much room on the right as on the
+# left and a little more above than below. Somebody noticed, and at the size an
+# icon is actually seen — sixteen points in a menu bar, a thumbnail in a dock —
+# six units of a hundred is the difference between "off" and "drawn".
 SHAPES = [
     # x,  y,   w,   h,    r,    colour                  what
     (12, 30, 64, 15, 7.5, (0x6B, 0x9E, 0xD9)),  # the camera lane's blue
     (12, 56, 38, 15, 7.5, (0xF2, 0xB8, 0x52)),  # the recorder lane's amber
     (57, 51, 19, 25, 2.0, (0xF2, 0x4C, 0x59)),  # the playhead red, as a cursor
 ]
+
+def centred(shapes):
+    """The same shapes, with equal air on all four sides."""
+    left = min(x for x, _, _, _, _, _ in shapes)
+    right = max(x + w for x, _, w, _, _, _ in shapes)
+    top = min(y for _, y, _, _, _, _ in shapes)
+    bottom = max(y + h for _, y, _, h, _, _ in shapes)
+    dx = (100 - (left + right)) / 2
+    dy = (100 - (top + bottom)) / 2
+    return [(x + dx, y + dy, w, h, r, colour) for x, y, w, h, r, colour in shapes]
+
+
+SHAPES = centred(SHAPES)
 CORNER = 22.5
 
 # Four sub-rows a pixel, and exact horizontal extents within each. Enough
