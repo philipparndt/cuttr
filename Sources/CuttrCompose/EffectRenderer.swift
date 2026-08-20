@@ -283,6 +283,10 @@ final class EffectRenderer: @unchecked Sendable {
 	/// the frame.
 	var showing: Int { pieces.filter { !$0.node.isHidden }.count }
 
+	/// Which pieces are not being let go, in the order they were made. For the
+	/// test that says a thinned cloud never puts a piece out in shot.
+	var hiddenFlags: [Bool] { pieces.map(\.node.isHidden) }
+
 	/// How far back each piece is, how big, and how fast — for the test that
 	/// says the back of the cloud is smaller and slower.
 	var depths: [(depth: Double, size: Double, fall: Double)] {
