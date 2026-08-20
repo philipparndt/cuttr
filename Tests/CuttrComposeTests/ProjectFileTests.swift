@@ -34,6 +34,37 @@ import Testing
 		#expect(ProjectWriter.write(sample()) == ProjectWriter.write(sample()))
 	}
 
+	/// Words with a comma in them, in the three places the emitter writes a
+	/// value inside `{…}`.
+	///
+	/// A comma ends an entry in a flow collection, so `clips are named, never
+	/// timed` written bare came back as two entries and the second half of the
+	/// sentence became a key with no value. Found by writing the examples out,
+	/// reading them back and writing them again: the two passes disagreed.
+	@Test func aCommaSurvivesTheFlowForms() throws {
+		let project = Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"))],
+			overlays: [
+				Overlay(kind: .scene("card", with: ["under": "clips are named, never timed"]),
+				        span: .times(from: 0, to: 2)),
+				Overlay(
+					kind: .spinner(Spinner(words: [SpinnerWord("thinking, still", duration: 2)])),
+					span: .times(from: 0, to: 4)),
+				Overlay(
+					kind: .text("plain", style: nil),
+					appearances: [
+						Overlay.Appearance(.times(from: 0, to: 1), text: "one, two"),
+						Overlay.Appearance(.times(from: 2, to: 3), text: "three"),
+					]),
+			])
+		let written = ProjectWriter.write(project)
+		let back = try ProjectReader.read(written)
+		#expect(back == project)
+		// And again, because the fault only showed on the second pass: the
+		// first wrote something the second read as two things.
+		#expect(ProjectWriter.write(back) == written)
+	}
+
 	@Test func readsWhatSomebodyWouldTypeByHand() throws {
 		let project = try ProjectReader.read("""
 		cuttr-project: 1

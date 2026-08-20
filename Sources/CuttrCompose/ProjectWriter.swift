@@ -319,8 +319,8 @@ public enum ProjectWriter {
 	/// uses.
 	private static func words(_ words: [SpinnerWord]) -> String {
 		"[" + words.map { word in
-			word.duration.map { "{text: \(scalar(word.text)), for: \(trim($0))}" }
-				?? scalar(word.text)
+			word.duration.map { "{text: \(flow(word.text)), for: \(trim($0))}" }
+				?? flow(word.text)
 		}.joined(separator: ", ") + "]"
 	}
 
@@ -388,7 +388,7 @@ public enum ProjectWriter {
 				case .scene(let name, let parameters):
 					out += "\(indent)- scene:   \(scalar(name))\n"
 					if !parameters.isEmpty {
-						let pairs = parameters.keys.sorted().map { "\($0): \(scalar(parameters[$0] ?? ""))" }
+						let pairs = parameters.keys.sorted().map { "\(flow($0)): \(flow(parameters[$0] ?? ""))" }
 						out += "\(indent)  with:    {" + pairs.joined(separator: ", ") + "}\n"
 					}
 				case .effect(let effect):
@@ -450,7 +450,7 @@ public enum ProjectWriter {
 						out += "\(indent)  words:\n"
 						for word in spinner.words {
 							if let duration = word.duration {
-								out += "\(indent)    - {text: \(scalar(word.text)), for: \(trim(duration))}\n"
+								out += "\(indent)    - {text: \(flow(word.text)), for: \(trim(duration))}\n"
 							} else {
 								out += "\(indent)    - \(scalar(word.text))\n"
 							}
@@ -480,7 +480,7 @@ public enum ProjectWriter {
 								return parts[0].trimmingCharacters(in: .whitespaces) + ": "
 									+ parts[1].trimmingCharacters(in: .whitespaces)
 							}
-						if let text = appearance.text { fields.append("text: \(scalar(text))") }
+						if let text = appearance.text { fields.append("text: \(flow(text))") }
 						if let said = appearance.words { fields.append("words: \(words(said))") }
 						out += "\(indent)    - {" + fields.joined(separator: ", ") + "}\n"
 					}
@@ -517,4 +517,22 @@ public enum ProjectWriter {
 	private static func trim(_ value: CGFloat) -> String { trim(Double(value)) }
 
 	private static func scalar(_ value: String) -> String { TakeWriter.scalar(value) }
+
+	/// The same, for a value going inside `{…}` or `[…]`.
+	///
+	/// A comma ends an entry in a flow collection and a brace ends the
+	/// collection, so a caption reading `clips are named, never timed` written
+	/// bare into one comes back as two entries and the second half of the
+	/// sentence becomes a key with no value. Found by writing the examples out
+	/// twice and comparing: the first pass produced it, the second read it as
+	/// two things. The block form has no such characters to worry about, which
+	/// is why this is a second function and not a change to the first.
+	private static func flow(_ value: String) -> String {
+		let quoted = scalar(value)
+		guard quoted == value else { return quoted }
+		return value.contains(where: { ",{}[]".contains($0) })
+			? "\"" + value.replacingOccurrences(of: "\\", with: "\\\\")
+				.replacingOccurrences(of: "\"", with: "\\\"") + "\""
+			: value
+	}
 }
