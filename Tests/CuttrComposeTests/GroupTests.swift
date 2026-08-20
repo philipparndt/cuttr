@@ -131,8 +131,13 @@ import Testing
 	/// This used to throw, and the reasoning was that a zero-length section is
 	/// not a section. It is, though — it is a section somebody has just made and
 	/// has not filled yet, and refusing the whole programme for it leaves an
-	/// empty preview and a greyed render button while they work. Skipped, and
-	/// said out loud.
+	/// empty preview and a greyed render button while they work.
+	///
+	/// It used to warn, too, and that was the same mistake one step quieter: a
+	/// programme built question by question is a dozen empty sections for most
+	/// of an afternoon, and a dozen lines of warning is a program complaining
+	/// that somebody has not finished yet. The tree says it where it belongs —
+	/// the section is there with nothing under it.
 	@Test func anEmptySectionIsSkippedRatherThanRefused() throws {
 		let directory = try fixture()
 		defer { try? FileManager.default.removeItem(at: directory) }
@@ -141,7 +146,7 @@ import Testing
 		let resolved = try Resolver.resolve(project, baseURL: directory)
 		#expect(resolved.clips.count == 1)
 		#expect(resolved.groups.contains { $0.name == "nothing" } == false)
-		#expect(resolved.warnings.contains { $0.contains("@nothing") })
+		#expect(resolved.warnings.isEmpty)
 	}
 
 	/// The same for an overlay pointing at a section that is not there: it comes
@@ -203,14 +208,13 @@ import Testing
 		return project
 	}
 
-    @Test func anEmptySectionIsSkippedAndSaidSo() throws {
+	@Test func anEmptySectionIsSkippedWithoutComment() throws {
 		let resolved = try resolve(programme())
 		#expect(resolved.duration == 2)
 		#expect(resolved.cards.count == 1)
 		// Not registered as a section, because there is nothing there to hang on.
 		#expect(resolved.groups.contains { $0.name == "nothing" } == false)
-		#expect(resolved.warnings.count == 1)
-		#expect(resolved.warnings[0].contains("@nothing"))
+		#expect(resolved.warnings.isEmpty)
 	}
 
 	/// And an overlay hung on one comes off the programme rather than taking
@@ -226,7 +230,9 @@ import Testing
 		let resolved = try resolve(project)
 		#expect(resolved.overlays.count == 1)
 		#expect(resolved.overlays.first?.overlay.described.contains("on something") == true)
-		#expect(resolved.warnings.count == 2)
+		// One warning, not two: the empty section is not worth mentioning, but
+		// something hung on a name that does not exist is.
+		#expect(resolved.warnings.count == 1)
 		#expect(resolved.warnings.contains { $0.contains("on nothing") })
 	}
 

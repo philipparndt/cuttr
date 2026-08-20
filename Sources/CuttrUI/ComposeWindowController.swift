@@ -186,6 +186,15 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		problemLabel.font = Theme.monoSmall
 		problemLabel.textColor = NSColor(calibratedRed: 0.95, green: 0.5, blue: 0.5, alpha: 1)
 		problemLabel.lineBreakMode = .byTruncatingTail
+		problemLabel.usesSingleLineMode = true
+		// A message may not decide how wide the window is. A label's intrinsic
+		// width is the width of its whole string whatever its truncation says,
+		// so thirteen warnings joined into one line asked for five thousand
+		// points and got them: the window opened five screens wide. Truncation
+		// is what to do when there is not room; being *given* the room is the
+		// bug.
+		problemLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+		problemLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 		// The picture takes the slack, the error line takes its own height.
 		//
 		// Without saying so the layout is ambiguous: the bar and the strip are
@@ -722,7 +731,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			problemLabel.stringValue = problem
 			problemLabel.textColor = NSColor(calibratedRed: 0.95, green: 0.5, blue: 0.5, alpha: 1)
 		} else if !warnings.isEmpty {
-			problemLabel.stringValue = warnings.joined(separator: "   ")
+			problemLabel.stringValue = Self.line(from: warnings)
 			problemLabel.textColor = Theme.dimText
 		} else {
 			problemLabel.stringValue = ""
@@ -1308,4 +1317,26 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		buildTask?.cancel()
 		transport.pause()
 	}
+
+	/// One line, whatever happened.
+	///
+	/// A status line is a line: it says the first thing and how many others
+	/// there are, and whoever wants the list opens the text or reads stderr.
+	/// Joining them all was how a project with a dozen unfinished sections
+	/// opened a window five screens wide — a label's intrinsic width is the
+	/// width of its whole string however it is truncated, so the message was
+	/// deciding the size of the window that was supposed to contain it.
+	static func line(from warnings: [String], limit: Int = 120) -> String {
+		guard let first = warnings.first else { return "" }
+		let rest = warnings.count - 1
+		let head = first.count <= limit ? first : String(first.prefix(limit - 1)) + "…"
+		return rest > 0 ? "\(head)  · and \(rest) more" : head
+	}
+
+	/// For the tests: say something in the problem line without having to
+	/// arrange a project that goes wrong in the right way.
+	func setProblemForTesting(_ text: String) {
+		problemLabel.stringValue = text
+	}
+
 }

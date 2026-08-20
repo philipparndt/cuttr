@@ -269,7 +269,9 @@ import Testing
 		""")
 		let resolved = try Resolver.resolve(project, baseURL: directory)
 		#expect(resolved.overlays.isEmpty)
-		#expect(resolved.warnings.count == 2)
+		// One, not two: an unfilled section is not worth a word, but an overlay
+		// hung on a name that does not exist is.
+		#expect(resolved.warnings.count == 1)
 	}
 
 	@Test func editingReachesAnOverlayWhereverItIsWritten() throws {
