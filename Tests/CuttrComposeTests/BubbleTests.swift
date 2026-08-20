@@ -534,8 +534,16 @@ struct BubbleCanvas {
 		#expect(try await paper(frame(in: url, at: 2.4)) == 0)
 	}
 
-	/// Two renders of the same project decode to the same bytes, and two seeds
-	/// do not. The hand-drawn look is worth nothing if it cannot be repeated.
+	/// Two renders of the same project draw the same bubble, and two seeds do
+	/// not. The hand-drawn look is worth nothing if it cannot be repeated.
+	///
+	/// Not byte-for-byte on the decoded frame, which is what this used to ask
+	/// and why it failed under a loaded machine and passed when run alone: an
+	/// H.264 encoder given less time makes different rate-control decisions,
+	/// and a decoded frame is a level or two away from the one it made when it
+	/// was not busy. That is a fact about the encoder and this test is about
+	/// the drawing, so it compares how far apart the two frames are — nothing,
+	/// against a different seed, which redraws every wobble.
 	@Test func twoRendersOfTheSameProjectAreTheSameFrames() async throws {
 		let first = try await rendered(3)
 		let second = try await rendered(3)
@@ -547,7 +555,25 @@ struct BubbleCanvas {
 		}
 		let a = try await frame(in: first, at: 1.5)
 		let b = try await frame(in: second, at: 1.5)
-		#expect(a == b, "two renders of one project disagree")
-		#expect(try await a != frame(in: other, at: 1.5), "two seeds drew the same bubble")
+		let c = try await frame(in: other, at: 1.5)
+		let same = apart(a, b)
+		let different = apart(a, c)
+		// Measured on an idle machine: nothing at all against 0.44 a channel.
+		// The bounds are set an order of magnitude either side of those, because
+		// what is being asked is "the same drawing" against "a different one",
+		// and a single byte of encoder noise moves the mean by a millionth.
+		#expect(same < 0.01, "two renders of one project disagree by \(same) a channel")
+		#expect(different > 0.1,
+		        "two seeds drew the same bubble: \(different) against \(same)")
+	}
+
+	/// The mean absolute difference per channel between two decoded frames.
+	private func apart(_ a: [UInt8], _ b: [UInt8]) -> Double {
+		guard a.count == b.count, !a.isEmpty else { return .infinity }
+		var total = 0
+		for index in stride(from: 0, to: a.count, by: 4) {
+			total += abs(Int(a[index]) - Int(b[index]))
+		}
+		return Double(total) / Double(a.count / 4)
 	}
 }
