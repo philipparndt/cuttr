@@ -84,6 +84,24 @@ public struct Transcript: Sendable, Equatable {
 		return .none
 	}
 
+	/// Every moment the talking starts or stops, in order.
+	///
+	/// What somebody is aiming at when they trim a clip against speech: the
+	/// head of the first word after a silence, and the tail of the last word
+	/// before one. Not every word boundary — inside a sentence the words run
+	/// together and a mark between two of them is a mark in the middle of a
+	/// breath.
+	public var edges: [Double] {
+		guard !words.isEmpty else { return [] }
+		var found = [words[0].start]
+		for index in words.indices where silence(after: index) != .none {
+			found.append(words[index].end)
+			found.append(words[index + 1].start)
+		}
+		found.append(words[words.count - 1].end)
+		return found
+	}
+
 	/// The run of words around `index` with no break in it — the line somebody
 	/// sees, which is the unit they mean when they point at one and say "play
 	/// that".

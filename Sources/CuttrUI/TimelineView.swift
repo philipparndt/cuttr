@@ -295,6 +295,7 @@ public final class TimelineView: NSView {
 		drawLanes()
 		drawRuler()
 		drawClipBand()
+		drawSpeechEdges()
 		drawPending()
 		drawPlayhead()
 		drawOverview()
@@ -494,6 +495,25 @@ public final class TimelineView: NSView {
 		}
 	}
 
+	/// The marks ⌥ is aiming at, while it is being held.
+	///
+	/// Drawn only during a drag: a timeline permanently ruled with the speech
+	/// would be a timeline nobody can read, and these are an answer to a
+	/// question somebody is in the middle of asking.
+	private func drawSpeechEdges() {
+		guard drag != nil, NSEvent.modifierFlags.contains(.option) else { return }
+		let edges = document?.transcript.edges ?? []
+		guard !edges.isEmpty else { return }
+		let band = lanesRect
+		for edge in edges {
+			let x = x(for: edge)
+			guard x >= band.minX - 1, x <= band.maxX + 1 else { continue }
+			let hit = snapped.map { abs($0 - edge) < 0.0005 } ?? false
+			(hit ? Theme.accent : Theme.dimText.withAlphaComponent(0.35)).setFill()
+			NSRect(x: x.rounded(), y: band.minY, width: hit ? 2 : 1, height: band.height).fill()
+		}
+	}
+
 	private func drawPending() {
 		guard let pending else { return }
 		let a = x(for: min(pending.start, pending.end))
@@ -620,6 +640,8 @@ public final class TimelineView: NSView {
 		enum Edge { case start, end }
 	}
 	private var drag: Drag?
+	/// The speech edge the mark is sitting on, while it is.
+	private var snapped: Double?
 
 	public override func mouseDown(with event: NSEvent) {
 		let point = convert(event.locationInWindow, from: nil)
@@ -690,10 +712,18 @@ public final class TimelineView: NSView {
 		onScrub?(t)
 	}
 
+	/// ⌥ pressed or let go in the middle of a drag changes what the mark is
+	/// aiming at, so it has to change what is drawn as well.
+	public override func flagsChanged(with event: NSEvent) {
+		if drag != nil { needsDisplay = true }
+		super.flagsChanged(with: event)
+	}
+
 	public override func mouseDragged(with event: NSEvent) {
 		let point = convert(event.locationInWindow, from: nil)
 		let t = snap(time(forX: point.x))
 		autoscroll(toward: point.x)
+		if NSEvent.modifierFlags.contains(.option) { needsDisplay = true }
 
 		switch drag {
 		case .scrub:
@@ -737,6 +767,17 @@ public final class TimelineView: NSView {
 		drag = nil
 	}
 
+	/// The nearest moment the talking starts or stops, if one is close enough
+	/// to be what was meant.
+	func speechEdge(near t: Double) -> Double? {
+		let edges = document?.transcript.edges ?? []
+		guard !edges.isEmpty else { return nil }
+		let tolerance = secondsPerPoint * 12
+		let nearest = edges.min { abs($0 - t) < abs($1 - t) }
+		guard let nearest, abs(nearest - t) <= tolerance else { return nil }
+		return max(0, nearest)
+	}
+
 	/// Never zero-length: a clip nobody can see is a clip nobody can grab back.
 	private var minimumClip: Double { max(secondsPerPoint * 4, 0.02) }
 
@@ -753,7 +794,20 @@ public final class TimelineView: NSView {
 		needsDisplay = true
 	}
 
+	/// Where the pointer's time actually lands.
+	///
+	/// Holding ⌥ aims at the speech instead of at the grid: the mark goes to
+	/// where the talking starts or stops, which is what somebody trimming
+	/// against a waveform is looking for and what they would otherwise find by
+	/// zooming in and squinting. Only when there are words to aim at, and only
+	/// within a dozen points of the pointer — further away than that and it
+	/// would be moving the mark somewhere nobody pointed.
 	private func snap(_ t: Double) -> Double {
+		if NSEvent.modifierFlags.contains(.option), let edge = speechEdge(near: t) {
+			snapped = edge
+			return edge
+		}
+		snapped = nil
 		let grid = document?.grid ?? .none
 		// Only snap when a frame is wider than a couple of points. Zoomed in
 		// past that, the operator is placing a mark against the audio and the
