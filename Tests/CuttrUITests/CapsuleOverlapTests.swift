@@ -39,7 +39,7 @@ import Testing
 	@Test func theHalvesOfTheCapsuleNeverDrawOverEachOther() throws {
 		_ = NSApplication.shared
 		let project = ComposeWindowController(document: ComposeDocument())
-		let window = try #require(project.window)
+		let window = project.windowForTesting
 		let bar = try #require(self.bar(in: window))
 		let capsule = bar.capsuleForTesting
 
@@ -98,7 +98,7 @@ import Testing
 	@Test func theSwitcherAlwaysHasSomethingToHangFrom() throws {
 		_ = NSApplication.shared
 		let project = ComposeWindowController(document: ComposeDocument())
-		let window = try #require(project.window)
+		let window = project.windowForTesting
 		let bar = try #require(self.bar(in: window))
 		bar.setName("Lilly, Annelie, Chris 1")
 		bar.setBranch("main")

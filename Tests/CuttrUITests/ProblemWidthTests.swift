@@ -14,12 +14,12 @@ import Testing
 		let document = ComposeDocument(project: Project(
 			takes: [], timeline: [TimelineEntry(source: .card(Card(duration: 2)))]))
 		let controller = ComposeWindowController(document: document)
-		_ = controller.window
+		let window = controller.windowForTesting
 		let many = (1...20).map {
 			"The section `@a-question-somebody-has-not-answered-yet-\($0)` has nothing in it."
 		}
 		controller.setProblemForTesting(ComposeWindowController.line(from: many))
-		guard let content = controller.window?.contentView else {
+		guard let content = window.contentView else {
 			Issue.record("no window")
 			return
 		}

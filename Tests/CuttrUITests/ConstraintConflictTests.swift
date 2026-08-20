@@ -143,7 +143,8 @@ enum ConstraintConflicts {
 	@Test func switchingRailPanesNeverLeavesAnUnsolvableLayout() {
 		_ = NSApplication.shared
 		let controller = MainWindowController(document: TakeDocument(take: take()))
-		guard let window = controller.window, let content = window.contentView else {
+		let window = controller.windowForTesting
+		guard let content = window.contentView else {
 			Issue.record("no window"); return
 		}
 		window.setContentSize(NSSize(width: 1500, height: 1000))
@@ -193,7 +194,8 @@ enum ConstraintConflicts {
 		_ = NSApplication.shared
 		let document = ComposeDocument(project: project())
 		let controller = ComposeWindowController(document: document)
-		guard let window = controller.window, let content = window.contentView else {
+		let window = controller.windowForTesting
+		guard let content = window.contentView else {
 			Issue.record("no window"); return
 		}
 		ConstraintConflicts.watch(window)

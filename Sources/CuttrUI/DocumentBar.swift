@@ -414,6 +414,38 @@ public final class DocumentBar: NSView {
 	/// does not say so itself.
 	public func groupChanged() { showGroup() }
 
+	/// Empties the bar, for the next document to furnish.
+	///
+	/// One bar per window means the bar outlives the document in it, and every
+	/// piece of it is about a document: the name, the branch, the `…` behind
+	/// which a take's files sit, the monitor a take adds and the `Render…` a
+	/// project adds, what just happened and how far along it is. All of it goes,
+	/// and ``DocumentEditor/furnish(_:)`` puts the next document's back.
+	///
+	/// The controls are *removed*, not hidden. A stack view handed a view that
+	/// is already in another stack takes it out of that one — so leaving the
+	/// last take's monitor in place would have it silently stolen the moment
+	/// another take furnished the bar, and the take that comes back would find
+	/// its own control gone.
+	public func reset() {
+		for view in group.arrangedSubviews where view !== more {
+			group.removeView(view)
+		}
+		for view in trailing.arrangedSubviews { trailing.removeView(view) }
+		setUp = nil
+		onProject = nil
+		onBranch = nil
+		onPlayPause = nil
+		setOpenHalf(nil)
+		setStatus("")
+		setProgress(nil)
+		setClock(0)
+		setPlaying(false)
+		setBranch(nil)
+		setName("")
+		isHidden = false
+	}
+
 	// MARK: - The popover behind the name
 
 	@objc private func playTapped() { onPlayPause?() }

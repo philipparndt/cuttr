@@ -24,8 +24,8 @@ import Testing
 	@Test func noWindowJoinsATabGroup() throws {
 		let cutting = MainWindowController(document: TakeDocument())
 		let composing = ComposeWindowController(document: ComposeDocument())
-		#expect(cutting.window?.tabbingMode == .disallowed)
-		#expect(composing.window?.tabbingMode == .disallowed)
+		#expect(cutting.windowForTesting.tabbingMode == .disallowed)
+		#expect(composing.windowForTesting.tabbingMode == .disallowed)
 		// Including the scene window, which used to ask to be a tab of the
 		// project it belongs to.
 		var project = Project()
@@ -33,7 +33,7 @@ import Testing
 		let scene = SceneWindowController(
 			document: SceneDocument(project: project, baseURL: nil, name: "card"),
 			projectURL: nil)
-		#expect(scene.window?.tabbingMode == .disallowed)
+		#expect(scene.windowForTesting.tabbingMode == .disallowed)
 	}
 
 	/// And a window that finds itself in one leaves. Two windows are put in a

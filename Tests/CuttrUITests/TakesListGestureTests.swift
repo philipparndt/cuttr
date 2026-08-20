@@ -87,8 +87,12 @@ import Testing
 	@Test func theGestureOpensTheTakeItLandedOn() throws {
 		let (list, table, take) = try list()
 		var opened: [URL] = []
+		var aside: [Bool] = []
 		var scenes: [String?] = []
-		list.onOpen = { opened.append($0) }
+		list.onOpen = { url, sideways in
+			opened.append(url)
+			aside.append(sideways)
+		}
 		list.onScene = { scenes.append($0) }
 
 		// The row is chosen and the table's own double-click handler run, which
@@ -103,5 +107,11 @@ import Testing
 		list.chooseRowForTesting(1)
 		#expect(scenes == ["intro"], "the scene chosen was \(scenes)")
 		#expect(opened.count == 1)
+
+		// The ordinary gesture swaps the document in place; ⌥ asks for a window
+		// of its own, and the list says which was meant rather than deciding.
+		#expect(aside == [false], "the plain double-click asked for a new window")
+		list.chooseRowForTesting(0, aside: true)
+		#expect(aside == [false, true], "⌥ on the row did not ask for a new window")
 	}
 }

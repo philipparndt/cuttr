@@ -48,7 +48,7 @@ import Testing
 	@Test func theComposeWindowResizes() {
 		_ = NSApplication.shared
 		let controller = ComposeWindowController(document: ComposeDocument())
-		guard let window = controller.window else { return }
+		let window = controller.windowForTesting
 		window.setContentSize(NSSize(width: 1500, height: 950))
 		window.layoutIfNeeded()
 		#expect(window.contentView?.frame.width ?? 0 >= 1400)
@@ -65,7 +65,7 @@ import Testing
 	@Test func theCuttingWindowFitsItsPanesAtTheSmallestSizeItAllows() {
 		_ = NSApplication.shared
 		let controller = MainWindowController(document: TakeDocument())
-		guard let window = controller.window else { return }
+		let window = controller.windowForTesting
 		window.setContentSize(window.minSize)
 		window.layoutIfNeeded()
 		#expect(window.contentView?.frame.height ?? 0 > 0)

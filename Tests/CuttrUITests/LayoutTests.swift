@@ -157,8 +157,8 @@ import Testing
 			cutting.window?.close()
 			composing.window?.close()
 		}
-		for controller in [cutting as NSWindowController, composing as NSWindowController] {
-			guard let window = controller.window else { continue }
+		for controller in [cutting as DocumentEditor, composing as DocumentEditor] {
+			let window = controller.windowForTesting
 			window.setContentSize(NSSize(width: 1400, height: 900))
 			window.makeKeyAndOrderFront(nil)
 			window.layoutIfNeeded()
@@ -177,7 +177,8 @@ import Testing
 		_ = NSApplication.shared
 		let controller = MainWindowController(document: TakeDocument())
 		defer { controller.window?.close() }
-		guard let window = controller.window, let content = window.contentView else { return }
+		let window = controller.windowForTesting
+		guard let content = window.contentView else { return }
 		window.setContentSize(NSSize(width: 1400, height: 900))
 		window.makeKeyAndOrderFront(nil)
 		window.layoutIfNeeded()
@@ -192,7 +193,7 @@ import Testing
 		_ = NSApplication.shared
 		let controller = MainWindowController(document: TakeDocument())
 		defer { controller.window?.close() }
-		guard let window = controller.window else { return }
+		let window = controller.windowForTesting
 		window.makeKeyAndOrderFront(nil)
 		for size in [NSSize(width: 1400, height: 900), NSSize(width: 1000, height: 700),
 		             NSSize(width: 1600, height: 1000)] {
@@ -672,7 +673,7 @@ import Testing
 			                    markedAt: Double(i), point: CGPoint(x: 0.5, y: 0.5)))
 		}
 		let controller = MainWindowController(document: TakeDocument(take: take))
-		let window = controller.window!
+		let window = controller.windowForTesting
 		window.setContentSize(NSSize(width: 1500, height: 1100))
 		window.layoutIfNeeded()
 		return (controller, window)
@@ -767,9 +768,10 @@ import Testing
 		let cutting = MainWindowController(document: TakeDocument())
 		let composing = ComposeWindowController(document: ComposeDocument())
 		var frames: [NSRect] = []
-		for (controller, rail) in [(cutting as NSWindowController, cutting.railForTesting),
-		                           (composing as NSWindowController, composing.railForTesting)] {
-			guard let window = controller.window, let content = window.contentView else { continue }
+		for (controller, rail) in [(cutting as DocumentEditor, cutting.railForTesting),
+		                           (composing as DocumentEditor, composing.railForTesting)] {
+			let window = controller.windowForTesting
+			guard let content = window.contentView else { continue }
 			window.setContentSize(NSSize(width: 1400, height: 900))
 			window.layoutIfNeeded()
 			frames.append(rail.convert(rail.bounds, to: content))

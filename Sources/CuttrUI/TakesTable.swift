@@ -12,7 +12,11 @@ import CuttrKit
 @MainActor
 public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
-	public var onOpen: ((URL) -> Void)?
+	/// Open this take. The flag is "in a window of its own" — ⌥ held on the
+	/// double-click, or the context menu's second item. Comparing two takes is a
+	/// real thing to want, and the ordinary gesture puts the take where the
+	/// project was.
+	public var onOpen: ((URL, Bool) -> Void)?
 	public var onRemove: ((String) -> Void)?
 	public var onAdd: (() -> Void)?
 	/// The name typed into the Take column: the file is renamed to match.
@@ -22,6 +26,12 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 	/// Somebody wants to work on a scene: the one named, or a new one when the
 	/// name is `nil`.
 	public var onScene: ((String?) -> Void)?
+	/// Whether ⌥ is down as a row is chosen. Read from the event rather than
+	/// from `NSEvent.modifierFlags` where there is an event to read: a
+	/// `doubleAction` arrives with the click still current.
+	private var asideWanted: Bool {
+		NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.option)
+	}
 	/// Bring a scene in from another project.
 	public var onAddScene: (() -> Void)?
 	public var onRemoveScene: ((String) -> Void)?
@@ -213,13 +223,13 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 	/// walks up the responder chain and beeps on somebody's machine — so the
 	/// row is named instead of clicked, and what a real click *reaches* is
 	/// checked by hit-testing in `TakesListGestureTests`.
-	func chooseRowForTesting(_ row: Int) {
-		if let entry = take(row) { onOpen?(entry.url) }
+	func chooseRowForTesting(_ row: Int, aside: Bool = false) {
+		if let entry = take(row) { onOpen?(entry.url, aside) }
 		else if let name = sceneName(row) { onScene?(name) }
 	}
 
 	@objc private func doubleClicked() {
-		if let entry = take(table.clickedRow) { onOpen?(entry.url) }
+		if let entry = take(table.clickedRow) { onOpen?(entry.url, asideWanted) }
 		else if let name = sceneName(table.clickedRow) { onScene?(name) }
 	}
 
@@ -243,7 +253,8 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		}
 
 		let menu = NSMenu()
-		for (title, action) in [("Open in a Tab", #selector(openSelected)),
+		for (title, action) in [("Open", #selector(openSelected)),
+		                        ("Open in a New Window", #selector(openSelectedAside)),
 		                        ("Rename…", #selector(renameSelected)),
 		                        ("Reveal in Finder", #selector(revealSelected)),
 		                        ("Remove from Project", #selector(removeSelected))] {
@@ -256,8 +267,15 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 	}
 
 	@objc private func openSelected() {
-		if let entry = take(table.selectedRow) { onOpen?(entry.url) }
+		if let entry = take(table.selectedRow) { onOpen?(entry.url, false) }
 		else if let name = sceneName(table.selectedRow) { onScene?(name) }
+	}
+
+	/// The same take, in a window of its own — the explicit way to end up with
+	/// two takes on screen at once.
+	@objc private func openSelectedAside() {
+		guard let entry = take(table.selectedRow) else { return }
+		onOpen?(entry.url, true)
 	}
 
 	@objc private func renameSelected() {

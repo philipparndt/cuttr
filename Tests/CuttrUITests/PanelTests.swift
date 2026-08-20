@@ -1359,7 +1359,7 @@ import Testing
 		let document = ComposeDocument(project: Project(
 			timeline: [TimelineEntry(clip: ClipReference("intro"))]))
 		let controller = ComposeWindowController(document: document)
-		let window = controller.window!
+		let window = controller.windowForTesting
 		window.setContentSize(NSSize(width: 1400, height: 900))
 		window.layoutIfNeeded()
 		return (controller, window)
@@ -1531,7 +1531,7 @@ import Testing
 	@Test func theProjectPageShowsTheFileThatWasOpened() throws {
 		_ = NSApplication.shared
 		let controller = ComposeWindowController(document: ComposeDocument())
-		let window = try #require(controller.window)
+		let window = controller.windowForTesting
 		window.setContentSize(NSSize(width: 1400, height: 900))
 		// Key, because that is when AppKit picks a first responder — and this
 		// never reproduced until the window was.
@@ -1634,16 +1634,15 @@ import Testing
 		_ = NSApplication.shared
 		let delegate = AppDelegate()
 		let controller = ComposeWindowController(document: ComposeDocument())
-		defer { controller.window?.close() }
 		delegate.adoptForTesting(composers: [controller])
 
-		let menu = delegate.documentsMenu(for: controller.window)
+		let menu = delegate.documentsMenu(for: controller)
 		#expect(menu.items.count == 1)
 		#expect(menu.items.first?.state == .on, "the one document open is not ticked")
 		#expect(menu.items.first?.image != nil, "no kind symbol on the row")
 
 		// And from somewhere that is not it, nothing is ticked.
-		let elsewhere = delegate.documentsMenu(for: nil)
+		let elsewhere = delegate.documentsMenu(for: nil as DocumentEditor?)
 		#expect(elsewhere.items.allSatisfy { $0.state == .off })
 	}
 
@@ -1653,12 +1652,10 @@ import Testing
 		_ = NSApplication.shared
 		let delegate = AppDelegate()
 		let take = MainWindowController(document: TakeDocument())
-		defer { take.window?.close() }
 		let project = ComposeWindowController(document: ComposeDocument())
-		defer { project.window?.close() }
 		delegate.adoptForTesting(composers: [project], controllers: [take])
 
-		let menu = delegate.documentsMenu(for: take.window)
+		let menu = delegate.documentsMenu(for: take)
 		// The take is not in the project, so it is listed on its own — after a
 		// separator, at no indent, and with no claim about a project.
 		let rows = menu.items.filter { !$0.isSeparatorItem }
