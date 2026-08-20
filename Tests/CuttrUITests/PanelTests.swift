@@ -67,9 +67,9 @@ import Testing
 		let project = self.project()
 		let selections: [ProjectSelection] = [
 			.output, .entry([0]), .entry([1]), .entry([1, 0]), .entry([1, 1]), .entry([2]),
-			.entry([3]), .overlay(0), .overlay(1), .sound(0), .sound(1), .output,
+			.entry([3]), .overlay(.project(0)), .overlay(.project(1)), .sound(0), .sound(1), .output,
 			// Gone: a selection that outlived the thing it named.
-			.entry([9]), .overlay(9), .sound(9),
+			.entry([9]), .overlay(.project(9)), .sound(9),
 		]
 		for selection in selections {
 			panel.reload(project, vocabulary: vocabulary(), selection: selection)
@@ -636,5 +636,26 @@ import Testing
 	@Test func theLooseHeadingStartsClosed() {
 		let panel = self.panel()
 		#expect(panel.looseHeadingIsOpenForTesting == false)
+	}
+
+	/// One written inside an entry is shown under that entry, whatever it is
+	/// called — which is the whole reason for writing it there.
+	@Test func anOverlayWrittenInsideAnEntryIsShownUnderIt() {
+		_ = NSApplication.shared
+		let project = Project(timeline: [
+			TimelineEntry(clip: ClipReference("intro"),
+			              overlays: [Overlay(kind: .text("first", style: nil), appearances: [])]),
+			TimelineEntry(group: "middle", entries: [
+				TimelineEntry(clip: ClipReference("intro"),
+				              overlays: [Overlay(kind: .text("second", style: nil), appearances: [])]),
+			]),
+		])
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 600))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		// The same clip twice, and each caption under the use it was written
+		// in — the case a name could not tell apart.
+		#expect(panel.treeRowsForTesting.contains("entry intro → overlay 0#0"))
+		#expect(panel.treeRowsForTesting.contains("entry intro → overlay 1.0#0"))
 	}
 }

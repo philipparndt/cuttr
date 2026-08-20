@@ -332,14 +332,25 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// Dragged on the big timeline, written back the way the file says it:
 		// snapped to a clip, kept relative to one, or in programme times —
 		// whichever that range was already using.
-		strip.onMoveOverlay = { [weak self] source, appearance, start, end in
+		strip.onMoveOverlay = { [weak self] origin, appearance, start, end in
 			guard let self, let resolved = self.composeDocument.resolved else { return }
 			var next = self.composeDocument.project
-			guard source < next.overlays.count,
-			      appearance < next.overlays[source].appearances.count else { return }
-			let span = next.overlays[source].appearances[appearance].span
-			next.overlays[source].appearances[appearance].span =
-				span.moved(start: start, end: end, in: resolved)
+			next.editOverlay(at: origin) { overlay in
+				// An overlay written inside an entry and given no range covers
+				// that entry. Dragging its bar is somebody saying it should
+				// cover something else, so it stops being that and starts
+				// saying when it is on — written the way anything dragged here
+				// is, snapped to whatever the programme has at those moments.
+				guard appearance < overlay.appearances.count else {
+					guard overlay.appearances.isEmpty else { return }
+					overlay.appearances = [Overlay.Appearance(
+						Overlay.Span.times(from: start, to: end)
+							.moved(start: start, end: end, in: resolved))]
+					return
+				}
+				overlay.appearances[appearance].span = overlay.appearances[appearance].span
+					.moved(start: start, end: end, in: resolved)
+			}
 			self.composeDocument.apply(next)
 			try? self.composeDocument.write()
 		}

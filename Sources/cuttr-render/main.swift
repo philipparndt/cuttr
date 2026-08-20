@@ -357,6 +357,18 @@ if describe {
 					: " words \(spinner.words.map(\.text).joined(separator: " · "))")
 		}
 		print(String(format: "  %7.3f → %7.3f  %@", shown.start, shown.end, what as NSString))
+		// Where it is written, when that is not the top-level list. Two
+		// captions with the same words over two uses of one clip are told apart
+		// by nothing else, and "why is this one on here" is exactly the
+		// question `--describe` is asked.
+		if case .entry(let path, let index) = shown.origin {
+			let entry = project.entry(at: path)
+			print("           written in `\(entry?.source.description ?? "?")`"
+				+ " at timeline \(path.map(String.init).joined(separator: "."))"
+				+ ", overlay \(index + 1) of \(entry?.overlays.count ?? 0)"
+				+ (entry?.overlays[index].appearances.isEmpty == true
+					? " — covering that placement" : ""))
+		}
 		print("           anchor \(shown.overlay.anchor ?? "none")"
 			+ (shown.overlay.anchor != nil && shown.path == nil
 				? "  — NOT FOUND: it will sit where its style says" : "")

@@ -27,7 +27,7 @@ import Testing
 		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 800),
 		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
 		window.contentView = panel
-		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(0))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(.project(0)))
 		panel.layoutSubtreeIfNeeded()
 		return (panel, window)
 	}
@@ -60,7 +60,7 @@ import Testing
 		#expect(project.overlays[0].offset.x == 0.25)
 		#expect(project.overlays[0].offset.y == -0.25)
 
-		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(0))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(.project(0)))
 		panel.layoutSubtreeIfNeeded()
 		#expect(numbers(panel).contains("0.25"), "the offset shown is \(numbers(panel))")
 	}
@@ -79,7 +79,7 @@ import Testing
 
 		#expect(project.overlays[0].spans == [.times(from: 6, to: 9)])
 
-		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(0))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(.project(0)))
 		panel.layoutSubtreeIfNeeded()
 		#expect(numbers(panel).contains(Timecode.string(6)), "the times shown are \(numbers(panel))")
 	}
@@ -104,7 +104,7 @@ import Testing
 			overlays: [Overlay(kind: .spinner(Spinner(words: [SpinnerWord("one")])),
 			                   spans: [.times(from: 0, to: 4), .times(from: 5, to: 9)])])
 		panel.onChange = { project = $0 }
-		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(0))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(.project(0)))
 		panel.layoutSubtreeIfNeeded()
 
 		// Every minus in the form, twice, with no reload in between.
@@ -136,15 +136,15 @@ import Testing
 			timeline: [TimelineEntry(clip: ClipReference("intro"))],
 			overlays: [Overlay(kind: .spinner(Spinner()),
 			                   spans: [.times(from: 0, to: 4), .times(from: 5, to: 9)])])
-		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(0))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(.project(0)))
 
 		find(SpanStrip.self, in: panel).first?.onSelect?(1)
-		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(0))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(.project(0)))
 		#expect(find(SpanStrip.self, in: panel).first?.selected == 1)
 
 		// A different overlay starts again at its own first range.
 		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .output)
-		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(0))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(.project(0)))
 		#expect(find(SpanStrip.self, in: panel).first?.selected == 0)
 	}
 }

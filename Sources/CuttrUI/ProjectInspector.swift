@@ -216,8 +216,8 @@ public final class ProjectInspector: NSView {
 	private func showWhatItWrites() {
 		guard showingWrites else { return }
 		switch selection {
-		case .overlay(let index) where index < project.overlays.count:
-			yaml.string = ProjectWriter.fragment(for: project.overlays[index])
+		case .overlay(let origin) where project.overlay(at: origin) != nil:
+			yaml.string = project.overlay(at: origin).map { ProjectWriter.fragment(for: $0) } ?? ""
 		case .sound(let index) where index < project.sounds.count:
 			yaml.string = ProjectWriter.fragment(for: project.sounds[index])
 		case .entry(let path):

@@ -6,7 +6,10 @@ import CuttrKit
 public enum ProjectSelection: Equatable {
 	case output
 	case entry([Int])
-	case overlay(Int)
+	/// An overlay, wherever it is written: the top-level list, or inside one
+	/// timeline entry. The panel edits both through the same form, so it
+	/// carries the address rather than an index into one particular list.
+	case overlay(OverlayOrigin)
 	case sound(Int)
 }
 
@@ -87,13 +90,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		/// entry — the tree shows both, because an overlay hung on a clip is
 		/// part of the structure of the programme and looking for it in a
 		/// second list is how somebody loses it.
-		let overlay: Int?
+		let overlay: OverlayOrigin?
 		/// The heading the overlays that hang on nothing in particular live
 		/// under. Closed to begin with: they are the exception.
 		let isOverlayRoot: Bool
 
 		init(path: [Int], entry: TimelineEntry, children: [Node],
-		     overlay: Int? = nil, isOverlayRoot: Bool = false) {
+		     overlay: OverlayOrigin? = nil, isOverlayRoot: Bool = false) {
 			self.path = path
 			self.entry = entry
 			self.children = children
@@ -408,7 +411,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		var found: Set<Int> = []
 		for shown in resolved.overlays
 		where shown.start < span.end - 1e-6 && shown.end > span.start + 1e-6 {
-			found.insert(shown.source)
+			// Only the ones in the top-level list: this answers the overlay
+			// table, which lists that and nothing else. The nested ones are
+			// already shown under the entry they belong to.
+			if let index = shown.origin.projectIndex { found.insert(index) }
 		}
 		return found
 	}
@@ -433,6 +439,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// For the tests: what the tree holds, as text.
 	var treeRowsForTesting: [String] {
 		var out: [String] = []
+		func named(_ origin: OverlayOrigin) -> String {
+			switch origin {
+			case .project(let index): return "\(index)"
+			case .entry(let path, let index):
+				return path.map(String.init).joined(separator: ".") + "#\(index)"
+			}
+		}
 		func name(_ node: Node) -> String {
 			if node.isOverlayRoot { return "loose" }
 			if let label = node.entry.label { return "entry \(label)" }
@@ -441,8 +454,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		}
 		func walk(_ nodes: [Node], under parent: String?) {
 			for node in nodes {
-				if let index = node.overlay {
-					out.append("\(parent ?? "?") → overlay \(index)")
+				if let origin = node.overlay {
+					out.append("\(parent ?? "?") → overlay \(named(origin))")
 				} else {
 					walk(node.children, under: name(node))
 				}
@@ -470,7 +483,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	}
 
 	/// The overlay selected in the tree, if that is what is selected.
-	private var selectedTreeOverlay: Int? {
+	private var selectedTreeOverlay: OverlayOrigin? {
 		(outline.item(atRow: outline.selectedRow) as? Node)?.overlay
 	}
 
@@ -675,7 +688,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		guard landing >= 0, landing < project.overlays.count else { return }
 		var next = project
 		next.overlays.swapAt(index, landing)
-		pending = .overlay(landing)
+		pending = .overlay(.project(landing))
 		onChange?(next)
 	}
 
@@ -732,14 +745,14 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		var next = project
 		next.overlays.append(Overlay(kind: kind, span: spanForNewOverlay,
 		                             arrival: arrival, departure: departure))
-		pending = .overlay(next.overlays.count - 1)
+		pending = .overlay(.project(next.overlays.count - 1))
 		onChange?(next)
 	}
 
 	@objc private func addText() {
 		var next = project
 		next.overlays.append(Overlay(kind: .text("Caption", style: nil), span: spanForNewOverlay))
-		pending = .overlay(next.overlays.count - 1)
+		pending = .overlay(.project(next.overlays.count - 1))
 		onChange?(next)
 	}
 
@@ -748,7 +761,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		next.overlays.append(Overlay(
 			kind: .spinner(Spinner(words: [SpinnerWord("Working")])), span: spanForNewOverlay,
 			arrival: .fade(over: 0.3), departure: .fade(over: 0.3)))
-		pending = .overlay(next.overlays.count - 1)
+		pending = .overlay(.project(next.overlays.count - 1))
 		onChange?(next)
 	}
 
@@ -757,7 +770,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		next.overlays.append(Overlay(
 			kind: .effect(Effect()), span: spanForNewOverlay,
 			arrival: .cut, departure: .fall(over: 1.5)))
-		pending = .overlay(next.overlays.count - 1)
+		pending = .overlay(.project(next.overlays.count - 1))
 		onChange?(next)
 	}
 
@@ -765,7 +778,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		guard let index = overlay(at: overlayTable.selectedRow) else { return }
 		var next = project
 		next.overlays.insert(project.overlays[index], at: index + 1)
-		pending = .overlay(index + 1)
+		pending = .overlay(.project(index + 1))
 		onChange?(next)
 	}
 
@@ -799,7 +812,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				path: [], entry: TimelineEntry(clip: ClipReference("")),
 				children: loose.map {
 					Node(path: [], entry: TimelineEntry(clip: ClipReference("")),
-					     children: [], overlay: $0)
+					     children: [], overlay: .project($0))
 				},
 				isOverlayRoot: true))
 		}
@@ -823,9 +836,19 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			}
 			overlayTable.deselectAll(nil)
 			soundTable.deselectAll(nil)
-		case .overlay(let index) where index < project.overlays.count:
+		case .overlay(.project(let index)) where index < project.overlays.count:
 			overlayTable.selectRowIndexes([index], byExtendingSelection: false)
 			outline.deselectAll(nil)
+			soundTable.deselectAll(nil)
+		case .overlay(let origin) where project.overlay(at: origin) != nil:
+			// Written inside an entry, so the tree is the only place it is
+			// shown. Kept selected across a reload the same way an entry is.
+			if let row = row(for: origin) {
+				outline.selectRowIndexes([row], byExtendingSelection: false)
+			} else {
+				outline.deselectAll(nil)
+			}
+			overlayTable.deselectAll(nil)
 			soundTable.deselectAll(nil)
 		case .sound(let index) where index < project.sounds.count:
 			soundTable.selectRowIndexes([index], byExtendingSelection: false)
@@ -849,12 +872,18 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			if case .group(_, let inner) = entry.source {
 				children = tree(inner, at: path)
 			}
-			// The overlays hung on this entry, under it. Structural rather than
-			// by the clock: an overlay that names this clip or this section
-			// *belongs* to it, while one that merely happens to be on while it
-			// plays belongs to whatever it does name.
+			// The overlays this entry carries, under it — the ones written
+			// inside it first, because those *are* part of the entry.
+			children += entry.overlays.indices.map {
+				Node(path: path, entry: entry, children: [],
+				     overlay: .entry(path: path, index: $0))
+			}
+			// And the ones from the top-level list that name it. Structural
+			// rather than by the clock: an overlay that names this clip or this
+			// section *belongs* to it, while one that merely happens to be on
+			// while it plays belongs to whatever it does name.
 			children += overlaysNaming(entry).map {
-				Node(path: path, entry: entry, children: [], overlay: $0)
+				Node(path: path, entry: entry, children: [], overlay: .project($0))
 			}
 			return Node(path: path, entry: entry, children: children)
 		}
@@ -907,7 +936,16 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	}
 
 	private func row(for path: [Int]) -> Int? {
-		for row in 0..<outline.numberOfRows where (outline.item(atRow: row) as? Node)?.path == path {
+		for row in 0..<outline.numberOfRows
+		where (outline.item(atRow: row) as? Node).map({ $0.overlay == nil && $0.path == path }) == true {
+			return row
+		}
+		return nil
+	}
+
+	private func row(for origin: OverlayOrigin) -> Int? {
+		for row in 0..<outline.numberOfRows
+		where (outline.item(atRow: row) as? Node)?.overlay == origin {
 			return row
 		}
 		return nil
@@ -954,11 +992,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		guard let node = item as? Node else { return nil }
 		// An overlay under the entry it hangs on, drawn as the overlay list
 		// draws it, so the two agree about what a caption looks like.
-		if let index = node.overlay, index < project.overlays.count {
+		if let origin = node.overlay, let overlay = project.overlay(at: origin) {
 			let row = (outlineView.makeView(withIdentifier: .init("treeOverlay"), owner: self)
 				as? OverlayRow)
 				?? { let made = OverlayRow(); made.identifier = .init("treeOverlay"); return made }()
-			row.overlay = project.overlays[index]
+			row.overlay = overlay
 			row.stack = ""
 			row.plays = false
 			row.needsDisplay = true
@@ -1168,10 +1206,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	// MARK: - Selection
 
 	public func outlineViewSelectionDidChange(_ notification: Notification) {
-		if let index = selectedTreeOverlay, index < project.overlays.count {
+		if let origin = selectedTreeOverlay, project.overlay(at: origin) != nil {
 			if overlayTable.selectedRow >= 0 { overlayTable.deselectAll(nil) }
 			if soundTable.selectedRow >= 0 { soundTable.deselectAll(nil) }
-			selection = .overlay(index)
+			selection = .overlay(origin)
 			onSelect?(selection)
 			return
 		}
@@ -1197,7 +1235,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			guard let index = overlay(at: row) else { return }
 			if outline.selectedRow >= 0 { outline.deselectAll(nil) }
 			if soundTable.selectedRow >= 0 { soundTable.deselectAll(nil) }
-			selection = .overlay(index)
+			selection = .overlay(.project(index))
 		}
 		onSelect?(selection)
 	}
