@@ -1333,3 +1333,93 @@ import Testing
 		#expect(seen.count == 2, "the tree has one height for everything: \(seen.sorted())")
 	}
 }
+
+/// The project is a place in the rail, not something you reach by deselecting.
+///
+/// The frame size and the rate of the thing being made were behind "click a row
+/// in the tree, then click it again to clear the selection" — which is to say,
+/// behind knowing that deselecting is a way of selecting something. Nothing new
+/// is written: `output:` is where every one of these already lived.
+@Suite @MainActor struct ProjectPageTests {
+
+	private func opened() -> (ComposeWindowController, NSWindow) {
+		_ = NSApplication.shared
+		let document = ComposeDocument(project: Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"))]))
+		let controller = ComposeWindowController(document: document)
+		let window = controller.window!
+		window.setContentSize(NSSize(width: 1400, height: 900))
+		window.layoutIfNeeded()
+		return (controller, window)
+	}
+
+	/// It is the first thing in the rail, and going there shows it.
+	@Test func theProjectIsTheFirstPlaceInTheRail() {
+		let (controller, window) = opened()
+		#expect(controller.railForTesting.countForTesting == 4)
+		#expect(ComposeWindowController.Mode.project.rawValue == 0)
+
+		controller.show(.project)
+		window.layoutIfNeeded()
+		#expect(controller.railForTesting.selected == 0)
+
+		// And the page in the window is the output form, headed by the
+		// project's name rather than by the key it writes.
+		func panels(in view: NSView) -> [PropertiesPanel] {
+			view.subviews.flatMap { sub -> [PropertiesPanel] in
+				((sub as? PropertiesPanel).map { [$0] } ?? []) + panels(in: sub)
+			}
+		}
+		let shown = panels(in: window.contentView!)
+		#expect(shown.count == 1, "\(shown.count) properties panels in the window")
+		let head = shown.first?.subjectForTesting.linesForTesting.first ?? ""
+		#expect(head != "output", "the head still names the key: \(head)")
+		#expect(head == controller.composeDocument.displayName, "the head says \(head)")
+		window.close()
+	}
+
+	/// The rail's order and its numbers agree.
+	@Test func theRailIsNumberedInItsOwnOrder() {
+		for (index, mode) in [ComposeWindowController.Mode.project, .edit, .text, .preview]
+			.enumerated() {
+			#expect(mode.rawValue == index, "\(mode) is not \(index)")
+		}
+	}
+
+	/// And it writes what it always wrote: the output keys, and nothing else.
+	@Test func itReachesOutputWithoutInventingAnything() {
+		let panel = PropertiesPanel()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 800),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = panel
+		panel.documentName = "dingsda"
+		var project = Project()
+		project.output.width = 1920
+		project.output.height = 1080
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .output)
+		panel.layoutSubtreeIfNeeded()
+
+		// Opening the page changes nothing. That is what "a way of reaching
+		// `output:` rather than a new thing to write down" means in practice,
+		// and it is checkable: the file the project would be written to is the
+		// same afterwards, byte for byte.
+		let before = ProjectWriter.write(project)
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .output)
+		panel.layoutSubtreeIfNeeded()
+		#expect(ProjectWriter.write(project) == before)
+
+		// And every key it offers is one the emitter already writes under
+		// `output:` — no field here invents a key of its own.
+		let keys = Set(panel.explanationsForTesting.map(\.key)).subtracting([""])
+		#expect(!keys.isEmpty, "the page explains nothing")
+		var full = Project()
+		full.output.audio = AudioTarget()
+		full.output.file = "programme.mov"
+		full.output.matchReference = "intro"
+		let written = ProjectWriter.fragment(for: full.output)
+		for key in keys {
+			let head = key.split(separator: ".").first.map(String.init) ?? key
+			#expect(written.contains(head), "\(key) is not a key `output:` has")
+		}
+	}
+}

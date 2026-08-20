@@ -155,10 +155,13 @@ enum MainMenu {
 
 		let viewItem = NSMenuItem()
 		let view = NSMenu(title: "View")
-		// The project window's three views, before the zooms.
-		view.addItem(command("Editor", #selector(ComposeWindowController.showEditor(_:)), "1"))
-		view.addItem(command("Project File", #selector(ComposeWindowController.showText(_:)), "2"))
-		view.addItem(command("Preview", #selector(ComposeWindowController.showPreview(_:)), "3"))
+		// The project window's four views, before the zooms — in the rail's own
+		// order, numbered to match it. A rail whose first item is ⌘2 is a rail
+		// somebody has to remember an exception about.
+		view.addItem(command("Project", #selector(ComposeWindowController.showProject(_:)), "1"))
+		view.addItem(command("Editor", #selector(ComposeWindowController.showEditor(_:)), "2"))
+		view.addItem(command("Project File", #selector(ComposeWindowController.showText(_:)), "3"))
+		view.addItem(command("Preview", #selector(ComposeWindowController.showPreview(_:)), "4"))
 		view.addItem(command("Full-Screen Preview",
 		                     #selector(ComposeWindowController.toggleFullScreenPreview(_:)),
 		                     "f", [.command, .control]))

@@ -33,7 +33,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private let modes = NSTabView(frame: .roomToLayOutIn)
 
 	/// Which of the three is showing.
-	public enum Mode: Int { case edit, text, preview }
+	public enum Mode: Int { case project, edit, text, preview }
 	private var mode: Mode = .edit
 	/// Whether the window is showing the picture and nothing else.
 	private var presenting = false
@@ -63,10 +63,21 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// Which of the three has the window, down the left edge — the same shape
 	/// and the same place as the cutting window's.
 	private let rail = Rail([
-		Rail.Item("Edit", "list.bullet.indent", "The programme, and everything about it (\u{2318}1)"),
-		Rail.Item("Text", "curlybraces", "The project file as it stands (\u{2318}2)"),
-		Rail.Item("Play", "play.rectangle", "What it comes to, played (\u{2318}3)"),
+		Rail.Item("Project", "info.circle",
+		          "What this project is, and what it renders to (\u{2318}1)"),
+		Rail.Item("Edit", "list.bullet.indent",
+		          "The programme, and everything about it (\u{2318}2)"),
+		Rail.Item("Text", "curlybraces", "The project file as it stands (\u{2318}3)"),
+		Rail.Item("Play", "play.rectangle", "What it comes to, played (\u{2318}4)"),
 	])
+	/// The project itself: what it renders to, and what it is called.
+	///
+	/// The same panel that edits everything else, held to `output`. It was
+	/// reachable only by deselecting every row in the tree — which is to say, by
+	/// knowing that deselecting was a way of selecting something — and the frame
+	/// size and rate of the thing being made are not an afterthought of the
+	/// timeline.
+	private let projectPanel = PropertiesPanel()
 	private let renderButton = NSButton()
 	/// The two controls that belong to the picture, over the picture: the anchor
 	/// markers, and the way to give the picture the screen. Neither is true of
@@ -259,7 +270,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// do rather than starting a second row of furniture.
 		modes.tabViewType = .noTabsNoBorder
 		modes.drawsBackground = false
-		for (identifier, view) in [("edit", editing), ("text", source), ("preview", split)] as [(String, NSView)] {
+		for (identifier, view) in [("project", projectPage()), ("edit", editing),
+		                          ("text", source), ("preview", split)] as [(String, NSView)] {
 			let item = NSTabViewItem(identifier: identifier)
 			item.view = view
 			modes.addTabViewItem(item)
@@ -502,6 +514,14 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			try? self.composeDocument.write()
 		}
 
+		// The project page writes through the same door as everything else: it
+		// is the same panel, so an edit here is an edit there.
+		projectPanel.onChange = { [weak self] project in
+			guard let self else { return }
+			self.composeDocument.apply(project)
+			try? self.composeDocument.write()
+		}
+
 		inspector.onChange = { [weak self] project in
 			guard let self else { return }
 			// Straight to the file. The panel is a way of writing the project,
@@ -639,6 +659,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// So the file can say which of its names point at nothing.
 		source.vocabulary = vocabulary
 		inspector.reload(composeDocument.project, vocabulary: vocabulary)
+		if mode == .project { reloadProjectPage() }
 		if mode == .text { source.show(sourceText) }
 		strip.resolved = composeDocument.resolved
 		markers.markers = (composeDocument.resolved?.anchors ?? []).compactMap { entry in
@@ -779,7 +800,57 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		CATransaction.commit()
 	}
 
-	/// Switches which of the three has the window.
+	/// What the project page shows: the output, headed by the project's name.
+	///
+	/// Nothing new is written. `output:` is where every one of these already
+	/// lived; this is a way of reaching it that does not require knowing that
+	/// deselecting the tree is how you select the project.
+	private func reloadProjectPage() {
+		projectPanel.documentName = composeDocument.displayName
+		projectPanel.resolved = composeDocument.resolved
+		projectPanel.poster = { [weak self] time, done in
+			guard let self, let composition = self.builtComposition else { return done(nil) }
+			let generator = AVAssetImageGenerator(asset: composition)
+			generator.videoComposition = self.builtVideoComposition
+			generator.requestedTimeToleranceBefore = CMTime(seconds: 0.25, preferredTimescale: 600)
+			generator.requestedTimeToleranceAfter = CMTime(seconds: 0.25, preferredTimescale: 600)
+			generator.generateCGImageAsynchronously(
+				for: CMTime(seconds: max(0, time), preferredTimescale: 600)
+			) { image, _, _ in
+				let picture = image.map { NSImage(cgImage: Self.asShown($0), size: .zero) }
+				Task { @MainActor in done(picture) }
+			}
+		}
+		projectPanel.reload(composeDocument.project,
+		                    vocabulary: composeDocument.vocabulary, selection: .output)
+	}
+
+	/// The project's own page: the output form, in a column rather than smeared
+	/// across a window that may be eighteen hundred points wide.
+	///
+	/// A form is read down its left edge, and a key column with two feet of
+	/// empty space after it is a form nobody can follow from one row to the
+	/// next. The width is a preference and the ceiling is the page, so it gives
+	/// way on a narrow window instead of demanding room that is not there.
+	private func projectPage() -> NSView {
+		let page = NSView(frame: .roomToLayOutIn)
+		page.wantsLayer = true
+		page.layer?.backgroundColor = Theme.panel.cgColor
+		projectPanel.translatesAutoresizingMaskIntoConstraints = false
+		page.addSubview(projectPanel)
+		let wide = projectPanel.widthAnchor.constraint(equalToConstant: 560)
+		wide.priority = NSLayoutConstraint.Priority(250)
+		wide.isActive = true
+		NSLayoutConstraint.activate([
+			projectPanel.topAnchor.constraint(equalTo: page.topAnchor),
+			projectPanel.bottomAnchor.constraint(equalTo: page.bottomAnchor),
+			projectPanel.centerXAnchor.constraint(equalTo: page.centerXAnchor),
+			projectPanel.widthAnchor.constraint(lessThanOrEqualTo: page.widthAnchor),
+		])
+		return page
+	}
+
+	/// Switches which of the four has the window.
 	public func show(_ mode: Mode) {
 		self.mode = mode
 		modes.selectTabViewItem(at: mode.rawValue)
@@ -790,11 +861,13 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			Task { @MainActor [weak self] in self?.attachOverlays() }
 		}
 		if mode == .text { source.show(sourceText) }
+		if mode == .project { reloadProjectPage() }
 		// Nothing plays behind a view that is not the picture: a project window
 		// left on the editor should not keep decoding.
 		if mode != .preview { transport.pause() }
 	}
 
+	@objc public func showProject(_ sender: Any?) { show(.project) }
 	@objc public func showEditor(_ sender: Any?) { show(.edit) }
 	@objc public func showText(_ sender: Any?) { show(.text) }
 	@objc public func showPreview(_ sender: Any?) { show(.preview) }

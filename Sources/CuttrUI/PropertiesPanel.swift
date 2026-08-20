@@ -52,6 +52,11 @@ public final class PropertiesPanel: NSView {
 	/// And the one relationship that leads out of this window altogether: the
 	/// take a clip was cut from.
 	public var onOpenInTake: (([Int]) -> Void)?
+	/// What the document is called, for the head of the panel when the thing
+	/// selected *is* the document. `output` is the key it writes; it is not what
+	/// anybody calls the project.
+	public var documentName = ""
+
 
 	private var project = Project()
 	private var vocabulary = ComposeDocument.Vocabulary()
@@ -288,7 +293,7 @@ public final class PropertiesPanel: NSView {
 	private func describe() -> (String, Theme.Kind?, [SubjectLine.Relation]) {
 		switch selection {
 		case .output:
-			return ("output", nil, [
+			return (documentName.isEmpty ? "output" : documentName, nil, [
 				SubjectLine.Relation("frame",
 				                     "\(project.output.width)×\(project.output.height)"),
 				SubjectLine.Relation("rate", String(format: "%g fps",
