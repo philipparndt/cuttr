@@ -46,6 +46,12 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 	/// twice. A permanently editable name column swallows the double-click —
 	/// which here means "open this take" — and the field starts editing
 	/// instead, so the gesture appears to do nothing.
+	///
+	/// Making the field non-editable was not enough, and that is worth knowing:
+	/// a text field is an `NSControl` and answers the mouse whether it is
+	/// editable or not. What actually hands the click to the row is the
+	/// `hitTest` on ``NamedRow`` and ``PlainCell``, and this flag is what those
+	/// two ask.
 	private var renaming: String?
 
 	public override init(frame: NSRect) {
@@ -199,6 +205,19 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		table.editColumn(0, row: row, with: nil, select: true)
 	}
 
+	/// For the tests: the list itself, to ask what a click at a point lands on.
+	var tableForTesting: NSTableView { table }
+
+	/// For the tests: the row the gesture landed on, taken as `doubleAction`
+	/// takes it. A synthesised `NSEvent` is not used — one that nothing handles
+	/// walks up the responder chain and beeps on somebody's machine — so the
+	/// row is named instead of clicked, and what a real click *reaches* is
+	/// checked by hit-testing in `TakesListGestureTests`.
+	func chooseRowForTesting(_ row: Int) {
+		if let entry = take(row) { onOpen?(entry.url) }
+		else if let name = sceneName(row) { onScene?(name) }
+	}
+
 	@objc private func doubleClicked() {
 		if let entry = take(table.clickedRow) { onOpen?(entry.url) }
 		else if let name = sceneName(table.clickedRow) { onScene?(name) }
@@ -289,6 +308,23 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		let field = NSTextField()
 		var symbol: NSImage?
 
+		/// The row takes the click, not the name in it.
+		///
+		/// This is what "double-clicking a take only opens it sometimes" was.
+		/// The name column is a text field spanning the row, and a text field
+		/// is an `NSControl`: it answers the mouse itself and the table never
+		/// sees the click, so `clickedRow` stays at −1 and `doubleAction` does
+		/// not fire. Double-clicking a take's *name* — the obvious place to
+		/// aim — did nothing, while the same gesture on the clip count beside
+		/// it opened the take. Measured on a real project: the name dead, the
+		/// Clips column live.
+		///
+		/// Passed through while the name is being edited, because then the
+		/// field is the point and the caret has to be placeable in it.
+		override func hitTest(_ point: NSPoint) -> NSView? {
+			field.isEditable ? super.hitTest(point) : nil
+		}
+
 		override init(frame: NSRect) {
 			super.init(frame: frame)
 			field.isBordered = false
@@ -311,6 +347,17 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		}
 	}
 
+	/// A column that is text and nothing else, and hands the mouse to the row.
+	///
+	/// The same rule as ``NamedRow``, so that a double-click anywhere along a
+	/// row means the same thing. One row, one gesture: a list where the answer
+	/// depends on which column you happened to hit is a list nobody can learn.
+	final class PlainCell: NSTextField {
+		override func hitTest(_ point: NSPoint) -> NSView? {
+			isEditable ? super.hitTest(point) : nil
+		}
+	}
+
 	// MARK: - Data source
 
 	public func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -323,9 +370,9 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 
 	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
 		guard let tableColumn, row < rows.count else { return nil }
-		let field = (tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? NSTextField)
+		let field = (tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? PlainCell)
 			?? {
-				let field = NSTextField()
+				let field = PlainCell()
 				field.identifier = tableColumn.identifier
 				field.isBordered = false
 				field.drawsBackground = false

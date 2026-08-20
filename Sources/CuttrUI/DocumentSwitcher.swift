@@ -69,26 +69,62 @@ public enum DocumentSwitcher {
 	private static var showing: NSPopover?
 	private static var controller: Switcher?
 
+	/// Whether one is up right now.
+	public static var isShowing: Bool { showing?.isShown == true }
+
 	/// Puts it under a part of a view — a half of the capsule — with the beak
-	/// pointing up at it.
+	/// pointing up at it. Says whether it managed to.
+	///
+	/// **Asking for the list gets the list.** This is not a toggle, and that is
+	/// the fix rather than an omission.
+	///
+	/// It was one, and a toggle has to remember whether it is on. This one's
+	/// memory was two static variables — and a `.transient` popover dismissed
+	/// by a click outside it is closed by AppKit without ever coming through
+	/// `close()`, so the memory went stale on its own. Every way of getting it
+	/// wrong looks the same from the outside: the panel appears on every *other*
+	/// press. Measured on a real project, `⇧⌘P` opened it, closed it, and then
+	/// did nothing at all. There is nothing to remember now: anything already up
+	/// is closed and a fresh one takes its place. Escape and a click anywhere
+	/// outside put it away, which is what a popover does anyway.
+	///
+	/// The answer still matters, because the caller lights the half it is
+	/// opening under *before* asking, and a light nobody puts out stays on.
+	/// Every path out of here either shows a popover that will report its own
+	/// closing, or runs `onClose` on the way out.
+	@discardableResult
 	public static func show(_ groups: [Group], from view: NSView, rect: NSRect,
-	                        onClose: (() -> Void)? = nil) {
-		if let showing, showing.isShown {
-			showing.close()
-			DocumentSwitcher.showing = nil
-			return
-		}
+	                        onClose: (() -> Void)? = nil) -> Bool {
+		// Whatever is up goes, including one AppKit has already taken down and
+		// not told anybody about.
+		close()
+		showing = nil
+		controller = nil
+
 		let switcher = Switcher(groups)
 		let popover = NSPopover()
 		popover.contentViewController = switcher
 		popover.behavior = .transient
 		popover.appearance = NSAppearance(named: .darkAqua)
 		popover.delegate = switcher
+		// Not animated, so `close()` is over by the time it returns and the
+		// document chosen can be brought forward immediately afterwards.
+		popover.animates = false
 		switcher.onClose = onClose
 		showing = popover
 		controller = switcher
 		popover.show(relativeTo: inside(rect, of: view), of: view, preferredEdge: .maxY)
+		// `show(relativeTo:)` declines silently — an empty anchor rectangle is
+		// enough to do it — and a popover that never appeared never reports a
+		// closing either.
+		guard popover.isShown else {
+			showing = nil
+			controller = nil
+			onClose?()
+			return false
+		}
 		switcher.focus()
+		return true
 	}
 
 	/// Keeps the panel inside the window it belongs to.
@@ -111,8 +147,19 @@ public enum DocumentSwitcher {
 	}
 
 	public static func close() {
-		showing?.close()
+		guard let popover = showing else { return }
+		// Forgotten first, so the `popoverDidClose` this provokes does not come
+		// back round through here.
 		showing = nil
+		controller = nil
+		popover.close()
+	}
+
+	/// Called by a switcher that has closed, however it was closed.
+	static func forget(_ switcher: Switcher) {
+		guard controller === switcher else { return }
+		showing = nil
+		controller = nil
 	}
 
 	/// For the tests: type into the open one and say what is listed.
@@ -176,8 +223,24 @@ public enum DocumentSwitcher {
 			field.font = NSFont.systemFont(ofSize: 12)
 			field.delegate = self
 			field.focusRingType = .none
-			field.drawsBackground = false
-			field.isBezeled = false
+			// The bezel stays, and it is not decoration.
+			//
+			// It was turned off to make the field sit flat on the panel, and
+			// that took the magnifier's room away with it. A search field
+			// reserves the room by *insetting its bezel*: with the bezel on,
+			// `searchTextRect` is (22, 5, 336, 16) and the field editor is put
+			// exactly there. With it off, the cell still reports 22 — but the
+			// editor is installed over the whole bounds, at x = 0, and the
+			// placeholder is drawn from x = 2 straight through a glyph that
+			// occupies 6 to 18. Twelve points of the magnifier had text over
+			// it, and always: this field is given the cursor the moment the
+			// popover opens, so the unfocused case that looked right was never
+			// on screen.
+			//
+			// It also fixes the height. Unbezelled the field laid out 15 points
+			// tall for a 12-point font, with no room above or below the text.
+			field.isBezeled = true
+			field.bezelStyle = .roundedBezel
 			field.translatesAutoresizingMaskIntoConstraints = false
 
 			table.dataSource = self
@@ -302,13 +365,38 @@ public enum DocumentSwitcher {
 			table.scrollRowToVisible(here)
 		}
 
+		/// What choosing the selected row will do, once the panel is out of the
+		/// way. See ``take()``.
+		private var pending: (() -> Void)?
+
 		@objc private func take() {
 			let row = table.selectedRow
 			guard row >= 0, row < rows.count, case .entry(let entry) = rows[row],
 			      let open = entry.open
 			else { return }
+			// The panel goes first and the document comes forward after it,
+			// never the other way round.
+			//
+			// A transient popover with a text field in it *is* the key window
+			// while it is up, and AppKit hands key status back to the window
+			// the popover hung from as it closes. That happens after this
+			// method returns — so a switcher that ordered another document's
+			// window front from here had it taken away again a moment later,
+			// and the window somebody had just left came back to the front.
+			// That is the whole of "choosing a document from the dropdown does
+			// nothing": the handler ran, every time, and its effect was undone.
+			pending = open
 			DocumentSwitcher.close()
-			open()
+			// If there was no popover to close — a switcher driven directly,
+			// which is how the tests drive it — nothing ran it, so run it here.
+			// Whichever arrives first clears it, so it happens exactly once.
+			runPending()
+		}
+
+		private func runPending() {
+			let open = pending
+			pending = nil
+			open?()
 		}
 
 		// MARK: - Typing
@@ -328,7 +416,15 @@ public enum DocumentSwitcher {
 			}
 		}
 
-		func popoverDidClose(_ notification: Notification) { onClose?() }
+		/// Closed, by `close()` or by AppKit because somebody clicked away.
+		///
+		/// Both go through here, which is what makes the light on the capsule
+		/// and the panel on screen say the same thing.
+		func popoverDidClose(_ notification: Notification) {
+			DocumentSwitcher.forget(self)
+			onClose?()
+			runPending()
+		}
 
 		// MARK: - The list
 
