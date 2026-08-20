@@ -39,12 +39,16 @@ public final class ProjectInspector: NSView, NSSplitViewDelegate {
 		didSet { properties.poster = poster }
 	}
 	/// The programme as the preview plays it, for the dialogs that set a moment
-	/// against it.
+	/// against it — and for a look taken from the tree, which plays the same
+	/// assembly rather than building a second one.
 	public var playable: (() -> (composition: AVComposition,
 	                             videoComposition: AVVideoComposition?,
 	                             audioMix: AVAudioMix?,
 	                             duration: Double)?)? {
-		didSet { properties.programme = playable }
+		didSet {
+			properties.programme = playable
+			programme.playable = playable
+		}
 	}
 	/// Somebody is placing a range at this moment. The window takes the preview
 	/// there, so what plays and what is being edited are the same moment.

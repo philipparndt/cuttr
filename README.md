@@ -301,6 +301,18 @@ belongs to the section; drag it to the heading at the end and it becomes one of
 the global ones, still on at exactly the moments it was on before. Sounds move
 the same way, and are shown in the same tree.
 
+**`space` in the tree is a look at what is selected.** A panel appears beside
+the row and plays exactly that — a clip is its span, a section is everything
+inside it, an overlay or a sound is the stretch it is on for, several rows are
+the run from the first to the last — and it plays the assembly the window has
+already built, so it arrives in a few milliseconds rather than being rendered.
+`space` again, `escape`, or a click anywhere but the tree puts it away; arrowing
+down the tree with it open moves it on to the next thing. It is a look, not a
+place: the playhead the window is showing does not move, and nothing about the
+file changes. A whole section watched properly is still `Preview “name” on its
+own` from the row's own menu, which takes the window to the picture — and both
+play the same stretch of programme.
+
 Takes edited in another tab update the programme at once — re-cut a clip, track
 a face, and the project window has it before you have switched back.
 
