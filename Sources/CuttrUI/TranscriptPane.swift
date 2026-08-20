@@ -144,6 +144,12 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 
 		provenance.font = Theme.monoSmall
 		provenance.textColor = Theme.dimText
+		// The first thing to give way when the pane is narrow: the language is
+		// named by the pop-up beside it and the word count is a nicety, while
+		// the two controls are the point of the row.
+		provenance.lineBreakMode = .byTruncatingTail
+		provenance.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+		provenance.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 		button.title = "Transcribe"
 		button.bezelStyle = .rounded
 		button.controlSize = .small
@@ -297,8 +303,9 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		if let words, !words.locale.isEmpty { select(words.locale) }
 
 		if let words, !transcript.isEmpty {
+			// Not the language: the pop-up beside this says that, and saying it
+			// twice is what made the row too wide for its own heading.
 			provenance.stringValue = "\(transcript.count) words · \(words.recogniser.rawValue)"
-				+ (words.locale.isEmpty ? "" : " · \(words.locale)")
 		} else {
 			provenance.stringValue = ""
 		}

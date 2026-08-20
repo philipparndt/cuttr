@@ -42,23 +42,3 @@ import Testing
 		#expect((0..<19).allSatisfy { solid.silence(after: $0) == .none })
 	}
 }
-
-/// The moments a trim can be aimed at.
-@MainActor @Suite struct TranscriptEdgeTests {
-
-	@Test func theEdgesAreWhereTheTalkingStartsAndStops() {
-		let said = Transcript(words: [
-			Word(start: 1.0, end: 1.4, text: "eins"),
-			Word(start: 1.4, end: 1.8, text: "zwei"),
-			Word(start: 4.0, end: 4.4, text: "drei"),
-		])
-		// The head of the take, both sides of the silence, and the tail —
-		// and *not* the boundary between "eins" and "zwei", which is in the
-		// middle of a breath.
-		#expect(said.edges == [1.0, 1.8, 4.0, 4.4])
-	}
-
-	@Test func nothingSaidHasNoEdges() {
-		#expect(Transcript().edges.isEmpty)
-	}
-}

@@ -56,6 +56,13 @@ public final class FoldingPane: NSView {
 			NSLayoutConstraint.activate([
 				accessory.trailingAnchor.constraint(equalTo: head.trailingAnchor, constant: -8),
 				accessory.centerYAnchor.constraint(equalTo: head.centerYAnchor),
+				// It may not cross the title. Pinned only by its trailing edge,
+				// an accessory that says more than it used to grows leftwards
+				// and prints itself over the heading — which is what the words
+				// pane did the moment it had a language to name as well as a
+				// word count.
+				accessory.leadingAnchor.constraint(
+					greaterThanOrEqualTo: label.trailingAnchor, constant: 8),
 			])
 		}
 

@@ -502,7 +502,7 @@ public final class TimelineView: NSView {
 	/// question somebody is in the middle of asking.
 	private func drawSpeechEdges() {
 		guard drag != nil, NSEvent.modifierFlags.contains(.option) else { return }
-		let edges = document?.transcript.edges ?? []
+		let edges = speechEdges
 		guard !edges.isEmpty else { return }
 		let band = lanesRect
 		for edge in edges {
@@ -642,6 +642,8 @@ public final class TimelineView: NSView {
 	private var drag: Drag?
 	/// The speech edge the mark is sitting on, while it is.
 	private var snapped: Double?
+	/// The edges, and what they were worked out from.
+	private var edgeCache: (signature: Signature, edges: [Double])?
 
 	public override func mouseDown(with event: NSEvent) {
 		let point = convert(event.locationInWindow, from: nil)
@@ -767,15 +769,48 @@ public final class TimelineView: NSView {
 		drag = nil
 	}
 
-	/// The nearest moment the talking starts or stops, if one is close enough
-	/// to be what was meant.
-	func speechEdge(near t: Double) -> Double? {
-		let edges = document?.transcript.edges ?? []
+	/// The nearest moment the sound starts or stops, if one is close enough to
+	/// be what was meant.
+	func speechEdge(near t: Double) -> Double? { speechEdge(near: t, in: speechEdges) }
+
+	/// The arithmetic on its own, so it can be asked about without a recording.
+	func speechEdge(near t: Double, in edges: [Double]) -> Double? {
 		guard !edges.isEmpty else { return nil }
-		let tolerance = secondsPerPoint * 12
+		// Sixteen points, in points rather than in seconds, so "near where I
+		// pointed" means the same thing at every zoom. Twelve was not quite
+		// enough: the mark for the end of a sentence is the end of its *decay*,
+		// which is a hair later than where the drawn peak appears to stop, and
+		// at a close zoom that hair was wider than the tolerance.
+		let tolerance = secondsPerPoint * 16
 		let nearest = edges.min { abs($0 - t) < abs($1 - t) }
 		guard let nearest, abs(nearest - t) <= tolerance else { return nil }
 		return max(0, nearest)
+	}
+
+	/// Worked out from the envelope this view is drawing, and kept until the
+	/// drawing changes.
+	///
+	/// The separate recorder when there is one: it is the microphone nearest
+	/// whoever is talking, and it is the track the transcript was made from.
+	/// Its edges are shifted onto the programme's clock by the same offset the
+	/// lane is drawn with, so a mark lands where the shape is rather than where
+	/// the file thinks it is.
+	var speechEdges: [Double] {
+		let offset = document?.take.audio?.offset ?? 0
+		let wave = document?.audioWaveform ?? document?.videoWaveform
+		let shift = document?.audioWaveform != nil ? offset : 0
+		guard let wave else { return [] }
+		let signature = Signature(buckets: wave.bucketCount, duration: wave.duration, shift: shift)
+		if let cached = edgeCache, cached.signature == signature { return cached.edges }
+		let found = SpeechEdges.edges(in: wave, shift: shift)
+		edgeCache = (signature, found)
+		return found
+	}
+
+	private struct Signature: Equatable {
+		let buckets: Int
+		let duration: Double
+		let shift: Double
 	}
 
 	/// Never zero-length: a clip nobody can see is a clip nobody can grab back.
