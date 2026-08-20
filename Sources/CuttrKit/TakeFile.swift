@@ -381,6 +381,20 @@ public enum TakeWriter {
 		if ["true", "false", "yes", "no", "on", "off", "null", "~"].contains(lower) { return quoted(value) }
 		// A name that is only digits would come back as a number.
 		if Double(value) != nil { return quoted(value) }
+		// So would a shape. YAML 1.1 reads digits separated by colons as a
+		// base-60 number — `16:9` is sixteen minutes and nine seconds, which is
+		// 969 — so a film overlay's `ratio: 4:3` was written plainly and read
+		// back as `243:1`. Three of the six shapes this program offers went
+		// through the file and came out as something else.
+		//
+		// A timecode is safe and stays unquoted: this program writes them with
+		// the milliseconds on, `01:23.500`, and a component with a full stop in
+		// it is not a run of digits.
+		if value.contains(":"),
+		   value.split(separator: ":", omittingEmptySubsequences: false)
+		   	.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isWholeNumber) }) {
+			return quoted(value)
+		}
 		return value
 	}
 
