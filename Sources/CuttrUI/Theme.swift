@@ -9,6 +9,21 @@ import CuttrKit
 /// need a second set of contrasts tuned against a white ground, and nobody
 /// grades audio on white.
 public enum Theme {
+	/// Three grounds, and the rule is **the further in, the lighter**.
+	///
+	/// `background` is the chrome: the bar across the top and the rail down the
+	/// side, which together are one L of furniture saying where you are and what
+	/// you are doing. `panel` is everything that L frames. `card` is a surface
+	/// somebody reads or types into inside that — the properties form, the
+	/// project file — and it is lighter again.
+	///
+	/// Stated because it was arrived at twice by being wrong. The bar was
+	/// `panel`, which is what the content it sits above is, so there was no edge
+	/// between them at all; moving the bar to `background` then put it at the
+	/// same value as the code editor, which was also `background`, and moved the
+	/// missing edge one page over. Three regions cannot be told apart by two
+	/// colours, and which of them is which is not a matter of taste — it is how
+	/// far in they are.
 	public static let background = NSColor(calibratedWhite: 0.10, alpha: 1)
 	public static let panel = NSColor(calibratedWhite: 0.14, alpha: 1)
 	public static let rule = NSColor(calibratedWhite: 0.24, alpha: 1)
@@ -147,8 +162,8 @@ public enum Theme {
 
 	public static let playhead = NSColor(calibratedRed: 0.95, green: 0.30, blue: 0.35, alpha: 1)
 
-	/// The editor's own furniture: a card ground that lifts off the panel, and a
-	/// rule that separates without drawing a line anybody notices.
+	/// A surface somebody reads or types into: the paper, one step in from the
+	/// panel — and a rule that separates without drawing a line anybody notices.
 	public static let card = NSColor(calibratedWhite: 0.17, alpha: 1)
 	public static let cardHigh = NSColor(calibratedWhite: 0.21, alpha: 1)
 	public static let faintText = NSColor(calibratedWhite: 0.40, alpha: 1)

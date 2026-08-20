@@ -72,8 +72,30 @@ public final class DocumentBar: NSView {
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
+		// The window's chrome is one colour and the content is another.
+		//
+		// This was `panel`, and so is the ground the content stands on — so the
+		// bar and the thing under it were the same grey and the only edge in the
+		// window was the rail's. The bar and the rail are the same kind of thing
+		// — furniture that says where you are and what you are doing — so they
+		// share a ground and make one L down and across the window, and
+		// everything they frame is `panel`.
 		wantsLayer = true
-		layer?.backgroundColor = Theme.panel.cgColor
+		layer?.backgroundColor = Theme.background.cgColor
+
+		// A hairline along the bottom, so the edge between chrome and content is
+		// a line somebody can see rather than a two-percent step in grey.
+		let edge = NSView()
+		edge.wantsLayer = true
+		edge.layer?.backgroundColor = Theme.rule.withAlphaComponent(0.8).cgColor
+		edge.translatesAutoresizingMaskIntoConstraints = false
+		addSubview(edge)
+		NSLayoutConstraint.activate([
+			edge.leadingAnchor.constraint(equalTo: leadingAnchor),
+			edge.trailingAnchor.constraint(equalTo: trailingAnchor),
+			edge.bottomAnchor.constraint(equalTo: bottomAnchor),
+			edge.heightAnchor.constraint(equalToConstant: 1),
+		])
 
 		name.isBordered = false
 		name.isEnabled = false

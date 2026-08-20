@@ -91,8 +91,16 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	/// What to do when there is nothing there yet. An empty list that says
 	/// nothing looks like a list that is broken.
-	private let programmeHint = ProgrammePanel.hint(
-		"Drag a clip or a #tag from the library, or press + Clip")
+	/// What the tree says when the programme is empty.
+	///
+	/// A block in the middle of the room rather than a caption near the top —
+	/// see `EmptyState`. No button on it: both ways a thing gets onto the
+	/// programme are already on screen, the `＋` directly above this list and the
+	/// library beside it, and a button that repeats a control two inches away
+	/// teaches somebody that the program says everything twice.
+	private let programmeHint = EmptyState(
+		.clip, "Nothing in the programme yet",
+		"Drag a clip or a #tag in from the library, or add one with ＋.")
 
 	/// Dragging an entry means dragging its position, so the position is what
 	/// travels: `0.2.1` is the second entry of the third entry of the first.
@@ -234,20 +242,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		return holder
 	}
 
-	private static func hint(_ text: String) -> NSTextField {
-		let label = NSTextField(labelWithString: text)
-		label.font = Theme.monoSmall
-		label.textColor = Theme.faintText
-		label.alignment = .center
-		return label
-	}
-
-	private func over(_ scroll: NSScrollView, _ label: NSTextField) {
+	private func over(_ scroll: NSScrollView, _ label: NSView) {
 		label.translatesAutoresizingMaskIntoConstraints = false
 		scroll.addSubview(label)
 		NSLayoutConstraint.activate([
 			label.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
-			label.topAnchor.constraint(equalTo: scroll.topAnchor, constant: 24),
+			label.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
+			label.widthAnchor.constraint(equalTo: scroll.widthAnchor),
 		])
 	}
 

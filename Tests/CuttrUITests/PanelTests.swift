@@ -1423,3 +1423,81 @@ import Testing
 		}
 	}
 }
+
+/// An empty pane is a state, not a caption about a list.
+///
+/// It was one line of `faintText` twenty-four points below the top — the same
+/// grey and roughly the same size as everything else, which is why a program
+/// with nothing in it looked broken rather than new. The block is a tinted
+/// mark, the subject in near-full text, and one sentence in grey, in the middle
+/// of the room.
+@Suite @MainActor struct EmptyStateTests {
+
+	private func hosted(_ state: EmptyState, _ size: NSSize) -> NSView {
+		_ = NSApplication.shared
+		let host = NSView(frame: NSRect(origin: .zero, size: size))
+		host.addSubview(state)
+		NSLayoutConstraint.activate([
+			state.topAnchor.constraint(equalTo: host.topAnchor),
+			state.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+			state.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+			state.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+		])
+		host.layoutSubtreeIfNeeded()
+		return host
+	}
+
+	private func labels(in view: NSView) -> [NSTextField] {
+		view.subviews.flatMap { sub -> [NSTextField] in
+			((sub as? NSTextField).map { [$0] } ?? []) + labels(in: sub)
+		}
+	}
+
+	@Test func itIsThreeSizesInTheMiddleOfTheRoom() {
+		let state = EmptyState(.clip, "Nothing in the programme yet",
+		                       "Drag a clip or a #tag in from the library, or add one with +.")
+		let host = hosted(state, NSSize(width: 440, height: 500))
+
+		let found = labels(in: state).filter { !$0.stringValue.isEmpty }
+		#expect(found.count == 2, "expected a subject and a sentence, got \(found.count)")
+
+		// Three sizes: a mark, a subject, a sentence — and the subject is the
+		// bigger and stronger of the two texts.
+		let sizes = found.map { $0.font?.pointSize ?? 0 }
+		#expect(Set(sizes).count == 2, "the subject and the sentence are one size: \(sizes)")
+		#expect(state.markForTesting.image != nil, "no mark")
+
+		// And it is in the middle of the room rather than near the top.
+		let block = found.map { $0.convert($0.bounds, to: host) }
+			.reduce(NSRect.null) { $0.union($1) }
+		#expect(abs(block.midY - host.bounds.midY) < 30,
+		        "the block is not centred: \(block.midY) against \(host.bounds.midY)")
+		#expect(abs(block.midX - host.bounds.midX) < 2, "the block is not centred sideways")
+	}
+
+	/// The sentence wraps to a measure the eye can come back from, well before
+	/// the pane's own width.
+	@Test func theSentenceWrapsToItsOwnMeasure() {
+		let state = EmptyState(.clip, "Subject",
+		                       String(repeating: "a long sentence about nothing ", count: 6))
+		_ = hosted(state, NSSize(width: 900, height: 400))
+		let sentence = labels(in: state).max { $0.stringValue.count < $1.stringValue.count }
+		let width = sentence?.frame.width ?? 0
+		#expect(width > 0)
+		#expect(width <= 320, "the sentence ran to \(width) in a 900-wide pane")
+	}
+
+	/// No buttons unless they earn their place.
+	@Test func itHasNoButtonsByDefault() {
+		_ = NSApplication.shared
+		let state = EmptyState(.clip, "Subject", "Sentence.")
+		#expect(state.buttonsForTesting.isEmpty)
+
+		var pressed = 0
+		let acting = EmptyState(.clip, "Subject", "Sentence.",
+		                        actions: [.init("Do it", "plus") { pressed += 1 }])
+		#expect(acting.buttonsForTesting.count == 1)
+		acting.buttonsForTesting.first?.performClick(nil)
+		#expect(pressed == 1)
+	}
+}

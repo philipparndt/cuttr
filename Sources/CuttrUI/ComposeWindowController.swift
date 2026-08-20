@@ -135,6 +135,18 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		wire()
 		document.onChange?()
 		rebuild()
+		// A project with nothing in it opens on itself.
+		//
+		// The editor is three empty lists and a form, and that is the first
+		// thing anybody sees when they start this program — a screen whose whole
+		// content is four captions explaining what is not there yet. The project
+		// page has something to say about a new project on the day it is made:
+		// what it is called, what size it is, what rate, where it renders to.
+		// Once there is a programme, the programme is the point and the editor
+		// opens as before.
+		if composeDocument.project.timeline.isEmpty && composeDocument.takes.isEmpty {
+			show(.project)
+		}
 		window.center()
 	}
 
@@ -394,7 +406,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		renderButton.widthAnchor.constraint(equalToConstant: 24).isActive = true
 		bar.addTrailing(renderButton)
 
-		bar.onPlayPause = { [weak self] in self?.togglePlay(nil) }
+		bar.onPlayPause = { [weak self] in self?.playPressed() }
 	}
 
 	/// The controls that belong to the picture, in the corner of the picture.
@@ -865,6 +877,17 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// Nothing plays behind a view that is not the picture: a project window
 		// left on the editor should not keep decoding.
 		if mode != .preview { transport.pause() }
+	}
+
+	/// Play, from wherever somebody happens to be.
+	///
+	/// The picture is only in the window on the preview page — a tab view keeps
+	/// just the selected item's view — so pressing play on the editor started
+	/// the transport with nowhere to draw, and what came out was the sound of a
+	/// programme nobody could see. Play means "show me this", so it shows it.
+	private func playPressed() {
+		if mode != .preview { show(.preview) }
+		togglePlay(nil)
 	}
 
 	@objc public func showProject(_ sender: Any?) { show(.project) }
