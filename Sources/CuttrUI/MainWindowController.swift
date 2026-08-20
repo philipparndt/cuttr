@@ -180,21 +180,36 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		// takes the slack, and dragging the divider overrides both. The minimums
 		// are required, so no pane can be collapsed to nothing by a small
 		// window.
+		//
+		// How short a *folding* pane may be squeezed is the pane's own business,
+		// though, and stating it from here was the bug: folded, a pane is
+		// exactly its heading and says so with a required constraint, so a
+		// required floor from out here is a second required opinion about the
+		// same height. `height >= 96` and `height == 24` cannot both hold.
+		// Autolayout answers that by breaking one and going round the display
+		// cycle again — and through four nested split views and their scroll
+		// views that is a great many passes for one click on a chevron.
+		anchorPane!.minimumHeight = 84
+		wordsPane!.minimumHeight = 96
+		lookPane!.minimumHeight = 144
+
 		let preferred = NSLayoutConstraint.Priority(250)
 		let sizes: [(NSLayoutConstraint, NSLayoutConstraint)] = [
 			(lists.widthAnchor.constraint(equalToConstant: 430),
 			 lists.widthAnchor.constraint(greaterThanOrEqualToConstant: 260)),
-			(anchorPane!.heightAnchor.constraint(equalToConstant: 170),
-			 anchorPane!.heightAnchor.constraint(greaterThanOrEqualToConstant: 84)),
-			(wordsPane!.heightAnchor.constraint(equalToConstant: 200),
-			 wordsPane!.heightAnchor.constraint(greaterThanOrEqualToConstant: 96)),
-			(lookPane!.heightAnchor.constraint(equalToConstant: 230),
-			 lookPane!.heightAnchor.constraint(greaterThanOrEqualToConstant: 144)),
 			(timeline.heightAnchor.constraint(equalToConstant: 280),
 			 timeline.heightAnchor.constraint(greaterThanOrEqualToConstant: 140)),
 			(picture.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
 			 picture.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)),
 		]
+		// What each folding pane would like to be. A dragged divider, a window
+		// too short for all of them, or a folded neighbour all override it, and
+		// being below required is what lets them.
+		for (pane, wish) in [(anchorPane!, 170.0), (wordsPane!, 200.0), (lookPane!, 230.0)] {
+			let height = pane.heightAnchor.constraint(equalToConstant: wish)
+			height.priority = preferred
+			height.isActive = true
+		}
 		for (wish, floor) in sizes {
 			wish.priority = wish.relation == .equal ? preferred : .required
 			floor.priority = .required

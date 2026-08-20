@@ -24,7 +24,26 @@ public final class FoldingPane: NSView {
 	private let label = NSTextField(labelWithString: "")
 	private let head = NSView()
 	public static let headHeight: CGFloat = 24
-	private var contentHeight: NSLayoutConstraint?
+
+	/// How short this pane may be squeezed while it is open.
+	///
+	/// Stated here rather than by whoever puts the pane in a split view,
+	/// because it is the same measurement as the folded height and only one of
+	/// the two can hold at a time. Two owners meant two *required* constraints
+	/// on one height — `>= 96` from the window and `== 24` from the fold — and
+	/// autolayout cannot satisfy both. What it does instead is break one and go
+	/// round the display cycle again looking for an arrangement that works;
+	/// with several nested split views to re-tile each time round, the window
+	/// exceeded the number of passes AppKit allows and AppKit raised out of the
+	/// layout pass. It also left the panes shorter every time one was folded
+	/// and opened again, because a constraint it broke stays broken.
+	public var minimumHeight: CGFloat = 0 {
+		didSet { guard minimumHeight != oldValue else { return }; stateHeight() }
+	}
+
+	/// The one required thing said about this pane's height: how short it may
+	/// go while open, or exactly how tall it is while folded.
+	private var height: NSLayoutConstraint?
 
 	public init(_ title: String, content: NSView, accessory: NSView? = nil) {
 		self.content = content
@@ -92,17 +111,26 @@ public final class FoldingPane: NSView {
 		guard folded != self.folded else { return }
 		self.folded = folded
 		content.isHidden = folded
-		if folded {
-			let height = heightAnchor.constraint(equalToConstant: Self.headHeight)
-			height.priority = .required
-			height.isActive = true
-			contentHeight = height
-		} else {
-			contentHeight?.isActive = false
-			contentHeight = nil
-		}
+		stateHeight()
 		setChevron()
 		if tell { onFold?(folded) }
+	}
+
+	/// Replaces the height rule rather than adding to it.
+	///
+	/// One constraint, swapped, so that at no moment are there two required
+	/// opinions about how tall this pane is. Deactivating the old one before
+	/// activating the new one matters for the same reason: both active at once,
+	/// even for the length of one statement, is a system autolayout cannot
+	/// solve, and it does not wait until the end of the method to notice.
+	private func stateHeight() {
+		height?.isActive = false
+		let next = folded
+			? heightAnchor.constraint(equalToConstant: Self.headHeight)
+			: heightAnchor.constraint(greaterThanOrEqualToConstant: minimumHeight)
+		next.priority = .required
+		next.isActive = true
+		height = next
 	}
 
 	public func toggle() { fold(!folded) }
