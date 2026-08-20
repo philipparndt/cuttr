@@ -284,6 +284,21 @@ if solve {
 	}
 }
 
+/// Where in the file something laid over the programme is written, when that is
+/// not the top-level list.
+///
+/// Two captions with the same words over two uses of one clip are told apart by
+/// nothing else, and "why is this one on here" is exactly the question
+/// `--describe` is asked.
+func writtenIn(_ origin: Origin, of project: Project, covering: Bool) -> String? {
+	guard case .entry(let path, let index) = origin else { return nil }
+	let entry = project.entry(at: path)
+	return "           written in `\(entry?.source.description ?? "?")`"
+		+ " at timeline \(path.map(String.init).joined(separator: "."))"
+		+ ", number \(index + 1)"
+		+ (covering ? " — covering that placement" : "")
+}
+
 let resolved: ResolvedProject
 do {
 	resolved = try Resolver.resolve(project, baseURL: baseURL)
@@ -323,6 +338,10 @@ if describe {
 			if sound.sound.ducks != 0 { says += String(format: ", ducks %.1f dB", sound.sound.ducks) }
 			print(String(format: "  %7.3f → %7.3f  %@  (%@)", sound.start, sound.end,
 			             sound.sound.file as NSString, says as NSString))
+			if let where_ = writtenIn(sound.origin, of: project,
+			                          covering: sound.sound.span == nil) {
+				print(where_)
+			}
 		}
 	}
 	print("anchors")
@@ -357,17 +376,9 @@ if describe {
 					: " words \(spinner.words.map(\.text).joined(separator: " · "))")
 		}
 		print(String(format: "  %7.3f → %7.3f  %@", shown.start, shown.end, what as NSString))
-		// Where it is written, when that is not the top-level list. Two
-		// captions with the same words over two uses of one clip are told apart
-		// by nothing else, and "why is this one on here" is exactly the
-		// question `--describe` is asked.
-		if case .entry(let path, let index) = shown.origin {
-			let entry = project.entry(at: path)
-			print("           written in `\(entry?.source.description ?? "?")`"
-				+ " at timeline \(path.map(String.init).joined(separator: "."))"
-				+ ", overlay \(index + 1) of \(entry?.overlays.count ?? 0)"
-				+ (entry?.overlays[index].appearances.isEmpty == true
-					? " — covering that placement" : ""))
+		if let where_ = writtenIn(shown.origin, of: project,
+		                          covering: shown.overlay.appearances.isEmpty) {
+			print(where_)
 		}
 		print("           anchor \(shown.overlay.anchor ?? "none")"
 			+ (shown.overlay.anchor != nil && shown.path == nil

@@ -229,6 +229,10 @@ public enum ProjectWriter {
 				out += "\(indent)  overlays:\n"
 				out += overlays(entry.overlays, indent: indent + "    ")
 			}
+			if !entry.sounds.isEmpty {
+				out += "\(indent)  sounds:\n"
+				out += sounds(entry.sounds, indent: indent + "    ")
+			}
 		}
 		return out
 	}
@@ -350,21 +354,24 @@ public enum ProjectWriter {
 	/// the first line, when it is on under that, and how it arrives and leaves
 	/// at the bottom. Anything that is what a sound is without it — no gain, no
 	/// fades, no ducking — is left out.
-	private static func sounds(_ list: [Sound]) -> String {
+	private static func sounds(_ list: [Sound], indent: String = "  ") -> String {
 		var out = ""
 		for (index, sound) in list.enumerated() {
 			if index > 0 { out += "\n" }
-			out += "  - file:  \(scalar(sound.file))\n"
-			out += range(sound.span, indent: "    ", column: 7)
-			if sound.gain != 0 { out += "    gain:  \(trim(sound.gain))\n" }
+			out += "\(indent)- file:  \(scalar(sound.file))\n"
+			// No range at all is a sound written inside an entry to play for as
+			// long as that entry is on, and the point of that spelling is that
+			// there is nothing to write.
+			if let span = sound.span { out += range(span, indent: indent + "  ", column: 7) }
+			if sound.gain != 0 { out += "\(indent)  gain:  \(trim(sound.gain))\n" }
 			if case .fade(let over) = sound.arrival {
-				out += "    in:    {fade: true, over: \(trim(over))}\n"
+				out += "\(indent)  in:    {fade: true, over: \(trim(over))}\n"
 			}
 			if case .fade(let over) = sound.departure {
-				out += "    out:   {fade: true, over: \(trim(over))}\n"
+				out += "\(indent)  out:   {fade: true, over: \(trim(over))}\n"
 			}
 			if sound.ducks != 0 {
-				out += "    ducks: \(trim(sound.ducks))   # dB off the programme's own sound\n"
+				out += "\(indent)  ducks: \(trim(sound.ducks))   # dB off the programme's own sound\n"
 			}
 		}
 		return out

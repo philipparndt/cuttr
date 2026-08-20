@@ -28,16 +28,16 @@ public final class ProgrammeStrip: NSView {
 	/// An overlay's bar was dragged: which overlay it came from, and where its
 	/// ends are now, on the programme's clock. The window writes it back the
 	/// way the file says it — snapped to a clip, or relative to one.
-	public var onMoveOverlay: ((OverlayOrigin, Int, Double, Double) -> Void)?
+	public var onMoveOverlay: ((Origin, Int, Double, Double) -> Void)?
 	/// Whether the anchor markers are drawn over the picture. Kept here because
 	/// the strip is where the switch lives.
 	public var showAnchors = true { didSet { needsDisplay = true } }
 
 	/// Where each overlay's bar is, so a drag can find it again.
-	private var bars: [(origin: OverlayOrigin, appearance: Int, rect: NSRect,
+	private var bars: [(origin: Origin, appearance: Int, rect: NSRect,
 	                    start: Double, end: Double)] = []
 	private enum Grip { case body(Double), start, end }
-	private var dragging: (origin: OverlayOrigin, appearance: Int, grip: Grip,
+	private var dragging: (origin: Origin, appearance: Int, grip: Grip,
 	                       start: Double, end: Double)?
 
 	private let clipRowHeight: CGFloat = 34

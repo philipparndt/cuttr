@@ -1,13 +1,12 @@
 import Foundation
 
-/// Moving an overlay from one place in the file to another.
+/// Moving an overlay or a sound from one place in the file to another.
 ///
-/// The tree shows overlays under the entries they are drawn over, so dragging
-/// one from a clip to a section — or out to the top-level list — is a thing
-/// somebody can do with a mouse. What that has to *write* is not obvious, and
-/// getting it wrong is the worst kind of wrong: a caption that quietly moves to
-/// a different part of the programme while the row it was dragged to says it
-/// did what was asked.
+/// The tree shows both under the entries they belong to, so dragging one from a
+/// clip to a section — or out to the top-level list — is a thing somebody can do
+/// with a mouse. What that has to *write* is not obvious, and getting it wrong
+/// is the worst kind of wrong: a caption that quietly moves to a different part
+/// of the programme while the row it was dragged to says it did what was asked.
 ///
 /// Here rather than in the panel because it is arithmetic with a right answer,
 /// and a window cannot be tested.
@@ -16,12 +15,12 @@ extension Project {
 	/// Where an overlay lives: the top-level list, or one timeline entry.
 	///
 	/// `nil` is the top-level list. Not a type of its own, because a home is
-	/// exactly an ``OverlayOrigin`` with the index taken off, and a second name
+	/// exactly an ``Origin`` with the index taken off, and a second name
 	/// for that would be a second thing to keep in step.
-	public typealias OverlayHome = [Int]?
+	public typealias Home = [Int]?
 
 	/// The home an origin is in.
-	public static func home(of origin: OverlayOrigin) -> OverlayHome {
+	public static func home(of origin: Origin) -> Home {
 		switch origin {
 		case .project: return nil
 		case .entry(let path, _): return path
@@ -30,7 +29,7 @@ extension Project {
 
 	/// Adds one where it will live, and says where it landed.
 	@discardableResult
-	public mutating func addOverlay(_ overlay: Overlay, into home: OverlayHome) -> OverlayOrigin? {
+	public mutating func addOverlay(_ overlay: Overlay, into home: Home) -> Origin? {
 		guard let path = home else {
 			overlays.append(overlay)
 			return .project(overlays.count - 1)
@@ -61,8 +60,8 @@ extension Project {
 	/// it, so it is given one that means the same thing.
 	@discardableResult
 	public mutating func moveOverlay(
-		at origin: OverlayOrigin, into home: OverlayHome, in resolved: ResolvedProject?
-	) -> OverlayOrigin? {
+		at origin: Origin, into home: Home, in resolved: ResolvedProject?
+	) -> Origin? {
 		guard var overlay = overlay(at: origin) else { return nil }
 		if Self.home(of: origin) == home { return origin }
 
@@ -97,7 +96,7 @@ extension Project {
 	/// said, and it is exactly what somebody writing the line by hand would
 	/// have written. With neither a name nor a layout there is nothing true to
 	/// write, and the move is refused rather than guessed at.
-	private func spanCovering(_ home: OverlayHome, in resolved: ResolvedProject?)
+	private func spanCovering(_ home: Home, in resolved: ResolvedProject?)
 		-> Overlay.Span?
 	{
 		guard let path = home, let entry = entry(at: path) else { return nil }
@@ -122,6 +121,45 @@ extension Project {
 		}
 		guard let extent else { return nil }
 		return .times(from: extent.start, to: extent.end)
+	}
+
+	// MARK: - Sounds, on the same terms
+
+	/// Adds one where it will live, and says where it landed.
+	@discardableResult
+	public mutating func addSound(_ sound: Sound, into home: Home) -> Origin? {
+		guard let path = home else {
+			sounds.append(sound)
+			return .project(sounds.count - 1)
+		}
+		guard entry(at: path) != nil else { return nil }
+		var landed: Int?
+		modify(at: path) { list, at in
+			list[at].sounds.append(sound)
+			landed = list[at].sounds.count - 1
+		}
+		return landed.map { .entry(path: path, index: $0) }
+	}
+
+	/// The same two rules an overlay gets, for the same reasons: into an entry
+	/// it plays for exactly that placement, and out to the top level it goes on
+	/// playing at the moments it already does.
+	@discardableResult
+	public mutating func moveSound(
+		at origin: Origin, into home: Home, in resolved: ResolvedProject?
+	) -> Origin? {
+		guard var sound = sound(at: origin) else { return nil }
+		if Self.home(of: origin) == home { return origin }
+
+		if home == nil, sound.span == nil {
+			guard let span = spanCovering(Self.home(of: origin), in: resolved) else { return nil }
+			sound.span = span
+		} else if home != nil {
+			sound.span = nil
+		}
+
+		removeSound(at: origin)
+		return addSound(sound, into: home)
 	}
 
 	/// Where a timeline entry sits on the programme's clock, once it is laid

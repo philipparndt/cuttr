@@ -240,7 +240,7 @@ extension Project {
 	// MARK: - Overlays, wherever they are written
 
 	/// The overlay an origin names, from the top-level list or from an entry.
-	public func overlay(at origin: OverlayOrigin) -> Overlay? {
+	public func overlay(at origin: Origin) -> Overlay? {
 		switch origin {
 		case .project(let index):
 			return index < overlays.count ? overlays[index] : nil
@@ -252,7 +252,7 @@ extension Project {
 
 	/// Changes it where it is written. One function, so that every panel that
 	/// edits an overlay stops caring which of the two places it came from.
-	public mutating func editOverlay(at origin: OverlayOrigin, _ change: (inout Overlay) -> Void) {
+	public mutating func editOverlay(at origin: Origin, _ change: (inout Overlay) -> Void) {
 		switch origin {
 		case .project(let index):
 			guard index < overlays.count else { return }
@@ -266,7 +266,7 @@ extension Project {
 	}
 
 	/// Takes it off, wherever it is written.
-	public mutating func removeOverlay(at origin: OverlayOrigin) {
+	public mutating func removeOverlay(at origin: Origin) {
 		switch origin {
 		case .project(let index):
 			guard index < overlays.count else { return }
@@ -275,6 +275,43 @@ extension Project {
 			modify(at: path) { list, at in
 				guard index < list[at].overlays.count else { return }
 				list[at].overlays.remove(at: index)
+			}
+		}
+	}
+
+	/// The sound an origin names, from the top-level list or from an entry.
+	public func sound(at origin: Origin) -> Sound? {
+		switch origin {
+		case .project(let index):
+			return index < sounds.count ? sounds[index] : nil
+		case .entry(let path, let index):
+			guard let entry = entry(at: path), index < entry.sounds.count else { return nil }
+			return entry.sounds[index]
+		}
+	}
+
+	public mutating func editSound(at origin: Origin, _ change: (inout Sound) -> Void) {
+		switch origin {
+		case .project(let index):
+			guard index < sounds.count else { return }
+			change(&sounds[index])
+		case .entry(let path, let index):
+			modify(at: path) { list, at in
+				guard index < list[at].sounds.count else { return }
+				change(&list[at].sounds[index])
+			}
+		}
+	}
+
+	public mutating func removeSound(at origin: Origin) {
+		switch origin {
+		case .project(let index):
+			guard index < sounds.count else { return }
+			sounds.remove(at: index)
+		case .entry(let path, let index):
+			modify(at: path) { list, at in
+				guard index < list[at].sounds.count else { return }
+				list[at].sounds.remove(at: index)
 			}
 		}
 	}

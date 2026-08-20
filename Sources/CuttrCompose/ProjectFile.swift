@@ -144,35 +144,36 @@ public enum ProjectReader {
 					// says nothing about when it is on — here, that means "all
 					// of this entry", which is the point of writing it here.
 					let over = try list(m["overlays"]).compactMap(mapping).compactMap(readOverlay)
+					let under = try list(m["sounds"]).compactMap(mapping).compactMap(readSound)
 					if let group = (m["group"] as? String).flatMap(nonEmpty) {
 						out.append(TimelineEntry(
 							group: Slug.make(from: group),
 							entries: try readEntries(m["clips"]),
-							transition: transition, overlays: over))
+							transition: transition, overlays: over, sounds: under))
 					} else if let query = (m["query"] as? String).flatMap(nonEmpty) {
 						out.append(try TimelineEntry(query: query, transition: transition,
-						                             overlays: over))
+						                             overlays: over, sounds: under))
 					} else if let tag = (m["tag"] as? String).flatMap(nonEmpty) {
 						// `tag:` is sugar for a one-term query, and the
 						// commonest one — worth its own key so the simple case
 						// reads simply.
 						out.append(try TimelineEntry(query: "#\(tag)", transition: transition,
-						                             overlays: over))
+						                             overlays: over, sounds: under))
 					} else if let seconds = try time(m["card"], key: "card") {
 						// A length where a slug goes, because a card has no
 						// slug: there is no take behind it to name.
 						var card = Card(duration: max(0, seconds))
 						if let said = fill(m["fill"]) { card.fill = said }
 						out.append(TimelineEntry(card: card, transition: transition,
-						                         label: label, overlays: over))
+						                         label: label, overlays: over, sounds: under))
 					} else if let clips = m["clips"] as? [Any] {
 						out.append(TimelineEntry(
 							list: clips.compactMap { ($0 as? String).map(ClipReference.init) },
-							transition: transition, overlays: over))
+							transition: transition, overlays: over, sounds: under))
 					} else if let clip = (m["clip"] as? String).flatMap(nonEmpty) {
 						out.append(TimelineEntry(
 							clip: ClipReference(clip), transition: transition,
-							label: label, trim: trim, overlays: over))
+							label: label, trim: trim, overlays: over, sounds: under))
 					}
 				}
 			}
@@ -197,21 +198,11 @@ public enum ProjectReader {
 		// is the same question.
 		var sounds: [Sound] = []
 		for entry in list(root.removeValue(forKey: "sounds")) {
-			guard let m = mapping(entry),
-			      let file = (m["file"] as? String).flatMap(nonEmpty) else { continue }
-			// A `when:` list is read as its first range. A second stretch of the
-			// same music is a second entry under `sounds:` — a lane is a lane,
-			// and repeating four lines is cheaper than a grammar that hides how
-			// many of them there are.
-			let where_ = span(m) ?? (m["when"] as? [Any])?.compactMap(mapping).compactMap(span).first
-			guard let where_ else { continue }
-			sounds.append(Sound(
-				file: file,
-				span: where_,
-				gain: number(m["gain"]) ?? 0,
-				arrival: try fade(m["in"], key: "in"),
-				departure: try fade(m["out"], key: "out"),
-				ducks: number(m["ducks"]) ?? 0))
+			guard let m = mapping(entry), let sound = try readSound(m) else { continue }
+			// A sound in the top-level list has no placement to take its length
+			// from, so one that does not say when it plays is not read.
+			guard sound.span != nil else { continue }
+			sounds.append(sound)
 		}
 
 		return Project(takes: takes, output: output, timeline: timeline,
@@ -366,6 +357,26 @@ public enum ProjectReader {
 			anchor: (m["anchor"] as? String).flatMap(nonEmpty),
 			offset: try point(m["offset"], key: "offset") ?? .zero
 		)
+	}
+
+	/// One sound, read from the mapping that says it.
+	///
+	/// The same reason ``readOverlay(_:)`` is a function: there are two places
+	/// a sound can be written and both have to understand the same keys.
+	static func readSound(_ m: [String: Any]) throws -> Sound? {
+		guard let file = (m["file"] as? String).flatMap(nonEmpty) else { return nil }
+		// A `when:` list is read as its first range. A second stretch of the
+		// same music is a second entry under `sounds:` — a lane is a lane,
+		// and repeating four lines is cheaper than a grammar that hides how
+		// many of them there are.
+		let where_ = span(m) ?? (m["when"] as? [Any])?.compactMap(mapping).compactMap(span).first
+		return Sound(
+			file: file,
+			span: where_,
+			gain: number(m["gain"]) ?? 0,
+			arrival: try fade(m["in"], key: "in"),
+			departure: try fade(m["out"], key: "out"),
+			ducks: number(m["ducks"]) ?? 0)
 	}
 
 	private static func cutTransition(_ value: Any?) throws -> Transition {

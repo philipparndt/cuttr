@@ -67,9 +67,9 @@ import Testing
 		let project = self.project()
 		let selections: [ProjectSelection] = [
 			.output, .entry([0]), .entry([1]), .entry([1, 0]), .entry([1, 1]), .entry([2]),
-			.entry([3]), .overlay(.project(0)), .overlay(.project(1)), .sound(0), .sound(1), .output,
+			.entry([3]), .overlay(.project(0)), .overlay(.project(1)), .sound(.project(0)), .sound(.project(1)), .output,
 			// Gone: a selection that outlived the thing it named.
-			.entry([9]), .overlay(.project(9)), .sound(9),
+			.entry([9]), .overlay(.project(9)), .sound(.project(9)),
 		]
 		for selection in selections {
 			panel.reload(project, vocabulary: vocabulary(), selection: selection)
@@ -618,7 +618,7 @@ import Testing
 		var written: Project?
 		panel.onChange = { written = $0 }
 
-		#expect(panel.rehome(.entry(path: [0], index: 0), onto: [1]))
+		#expect(panel.rehome(.overlay(.entry(path: [0], index: 0)), onto: [1]))
 		#expect(written?.timeline[0].overlays.isEmpty == true)
 		#expect(written?.timeline[1].overlays.count == 1)
 	}
@@ -639,11 +639,64 @@ import Testing
 		// No resolved programme here, so there is nothing to work the times out
 		// from — but the placement has a name, and a name is what it would have
 		// been written as anyway.
-		#expect(panel.rehome(.entry(path: [0], index: 0), onto: nil))
+		#expect(panel.rehome(.overlay(.entry(path: [0], index: 0)), onto: nil))
 		#expect(written?.overlays.count == 1)
 		#expect(written?.overlays[0].span
 			== .marks(from: .group("opening"), to: .group("opening")))
 		#expect(written?.timeline[0].overlays.isEmpty == true)
+	}
+
+	/// Sounds are in the tree on the same terms: filed under the entry they
+	/// are written in, and moved between homes the same way.
+	@Test func aSoundWrittenInsideAnEntryIsShownUnderItAndMoves() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+		panel.reload(Project(timeline: [
+			TimelineEntry(clip: ClipReference("one"),
+			              sounds: [Sound(file: "sting.wav", span: nil)]),
+			TimelineEntry(clip: ClipReference("two")),
+		]), vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		#expect(panel.treeRowsForTesting.contains("entry one → sound 0#0"))
+
+		var written: Project?
+		panel.onChange = { written = $0 }
+		#expect(panel.rehome(.sound(.entry(path: [0], index: 0)), onto: [1]))
+		#expect(written?.timeline[0].sounds.isEmpty == true)
+		#expect(written?.timeline[1].sounds.count == 1)
+
+		// And out to the heading, where it takes the clip's own name — the one
+		// use of it on this timeline, so the name means the same times.
+		panel.reload(written ?? Project(), vocabulary: ComposeDocument.Vocabulary())
+		#expect(panel.rehome(.sound(.entry(path: [1], index: 0)), onto: nil))
+		#expect(written?.sounds.count == 1)
+		#expect(written?.sounds[0].span
+			== .marks(from: .clip(ClipReference("two")), to: .clip(ClipReference("two"))))
+	}
+
+	/// Added while a shot is selected, a sound is written inside that shot too.
+	@Test func aSoundAddedOnASelectedEntryIsWrittenInsideIt() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+		panel.reload(Project(timeline: [
+			TimelineEntry(clip: ClipReference("one")),
+			TimelineEntry(clip: ClipReference("two")),
+		]), vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		var written: Project?
+		panel.onChange = { written = $0 }
+
+		panel.selectRow(1)
+		guard let menu = panel.addEntryMenu(),
+		      let sound = menu.items.firstIndex(where: { $0.title == "Sound" })
+		else {
+			Issue.record("no Sound on the menu")
+			return
+		}
+		menu.performActionForItem(at: sound)
+		#expect(written?.sounds.isEmpty == true)
+		#expect(written?.timeline[1].sounds.count == 1)
+		#expect(written?.timeline[1].sounds[0].span == nil)
 	}
 }
 

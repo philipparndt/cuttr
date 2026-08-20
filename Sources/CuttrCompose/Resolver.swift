@@ -128,8 +128,8 @@ public struct ResolvedCard: Sendable, Equatable {
 /// A sound, placed on the programme's clock with its file found.
 public struct ResolvedSound: Sendable {
 	public let sound: Sound
-	/// Which of the project's sounds this came from, for the panel.
-	public let source: Int
+	/// Where in the file this one is written, for the panel.
+	public let origin: Origin
 	/// The file, already resolved against the project's own folder.
 	public let url: URL
 	public let start: Double
@@ -147,7 +147,7 @@ public struct ResolvedOverlay: Sendable {
 	/// second time is not equal to the one in the file. Matching by value found
 	/// nothing, and the panel lost the picture and the anchor as soon as
 	/// anybody typed a word into a range.
-	public let origin: OverlayOrigin
+	public let origin: Origin
 	/// Which of that overlay's appearances — a caption on twice is two of
 	/// these, and a drag on the second bar moves the second one.
 	public let appearance: Int
@@ -658,7 +658,7 @@ public enum Resolver {
 		/// thing at the top level, which is why an overlay there without a
 		/// range is dropped by the reader instead.
 		func place(
-			_ overlay: Overlay, from origin: OverlayOrigin,
+			_ overlay: Overlay, from origin: Origin,
 			covering: (start: Double, end: Double)?
 		) throws {
 			if let name = overlay.anchor, anchorsByName[name] == nil {
@@ -738,7 +738,16 @@ public enum Resolver {
 		// else the project names. A sound that is on twice is two of these, the
 		// same way an overlay is.
 		var sounds: [ResolvedSound] = []
-		for (index, sound) in project.sounds.enumerated() {
+
+		/// One sound, wherever it is written, on to the programme's clock.
+		///
+		/// `covering` is what it plays for when it says nothing — the placement
+		/// it was written inside, exactly as an overlay written there is drawn
+		/// for. There is no such thing at the top level, which is why a sound
+		/// there without a range is dropped by the reader instead.
+		func lay(
+			_ sound: Sound, from origin: Origin, covering: (start: Double, end: Double)?
+		) throws {
 			let url = URL(fileURLWithPath: sound.file, relativeTo: baseURL).standardizedFileURL
 			// Said now rather than discovered as a silent track. A missing
 			// recording is named when a take is resolved, and a missing piece of
@@ -747,11 +756,36 @@ public enum Resolver {
 			guard FileManager.default.fileExists(atPath: url.path) else {
 				throw ResolveError.missingSound(sound.file)
 			}
-			for span in try when(sound.span) where span.end > span.start {
+			guard let span = sound.span else {
+				guard let covering, covering.end > covering.start else {
+					warnings.append("The sound `\(sound.file)` is written on a timeline entry "
+						+ "that lays nothing down, so it does not play.")
+					return
+				}
 				sounds.append(ResolvedSound(
-					sound: sound, source: index, url: url,
-					start: span.start, end: span.end))
+					sound: sound, origin: origin, url: url,
+					start: covering.start, end: covering.end))
+				return
 			}
+			for where_ in try when(span) where where_.end > where_.start {
+				sounds.append(ResolvedSound(
+					sound: sound, origin: origin, url: url,
+					start: where_.start, end: where_.end))
+			}
+		}
+
+		func nestedSounds(_ entries: [TimelineEntry], at prefix: [Int]) throws {
+			for (position, entry) in entries.enumerated() {
+				let path = prefix + [position]
+				for (index, sound) in entry.sounds.enumerated() {
+					try lay(sound, from: .entry(path: path, index: index), covering: extents[path])
+				}
+				if case .group(_, let inner) = entry.source { try nestedSounds(inner, at: path) }
+			}
+		}
+		try nestedSounds(project.timeline, at: [])
+		for (index, sound) in project.sounds.enumerated() {
+			try lay(sound, from: .project(index), covering: nil)
 		}
 		sounds.sort { $0.start < $1.start }
 

@@ -212,57 +212,64 @@ public struct TimelineEntry: Sendable, Equatable {
 	/// where it is filed.
 	public var overlays: [Overlay]
 
+	/// Sound laid under *this placement*, on the same terms as the overlays
+	/// above: written here and given no range, it plays for exactly as long as
+	/// this entry is on. A sting on one shot rather than on every use of it.
+	public var sounds: [Sound]
+
 	public static func == (a: TimelineEntry, b: TimelineEntry) -> Bool {
 		a.source == b.source && a.transition == b.transition && a.label == b.label
-			&& a.trim == b.trim && a.overlays == b.overlays
+			&& a.trim == b.trim && a.overlays == b.overlays && a.sounds == b.sounds
 	}
 
 	public init(
 		source: Source, transition: Transition = .cut,
 		label: String? = nil, trim: (head: Double, tail: Double) = (0, 0),
-		overlays: [Overlay] = []
+		overlays: [Overlay] = [], sounds: [Sound] = []
 	) {
 		self.source = source
 		self.transition = transition
 		self.label = label
 		self.trim = trim
 		self.overlays = overlays
+		self.sounds = sounds
 	}
 
 	public init(
 		clip: ClipReference, transition: Transition = .cut,
 		label: String? = nil, trim: (head: Double, tail: Double) = (0, 0),
-		overlays: [Overlay] = []
+		overlays: [Overlay] = [], sounds: [Sound] = []
 	) {
 		self.init(source: .clip(clip), transition: transition, label: label, trim: trim,
-		          overlays: overlays)
+		          overlays: overlays, sounds: sounds)
 	}
 
 	public init(list: [ClipReference], transition: Transition = .cut,
-	            overlays: [Overlay] = []) {
-		self.init(source: .list(list), transition: transition, overlays: overlays)
+	            overlays: [Overlay] = [], sounds: [Sound] = []) {
+		self.init(source: .list(list), transition: transition, overlays: overlays, sounds: sounds)
 	}
 
 	/// A query written as text, which is how it arrives from the file and how
 	/// it is written back — keeping the source means a hand-written query comes
 	/// out the way it went in rather than re-printed from the parse tree.
 	public init(query: String, transition: Transition = .cut,
-	            overlays: [Overlay] = []) throws {
+	            overlays: [Overlay] = [], sounds: [Sound] = []) throws {
 		self.init(source: .query(try QueryParser.parse(query), source: query),
-		          transition: transition, overlays: overlays)
+		          transition: transition, overlays: overlays, sounds: sounds)
 	}
 
 	/// A card, which takes a name for its placement like any other entry — and
 	/// wants one more than most, because `@intro` is how the title finds it.
 	public init(card: Card, transition: Transition = .cut, label: String? = nil,
-	            overlays: [Overlay] = []) {
+	            overlays: [Overlay] = [], sounds: [Sound] = []) {
 		self.init(source: .card(card), transition: transition, label: label,
-		          overlays: overlays)
+		          overlays: overlays, sounds: sounds)
 	}
 
 	public init(group: String, entries: [TimelineEntry], transition: Transition = .cut,
-	            overlays: [Overlay] = []) {
-		self.init(source: .group(group, entries), transition: transition, overlays: overlays)
+	            overlays: [Overlay] = [], sounds: [Sound] = []) {
+		self.init(source: .group(group, entries), transition: transition,
+		          overlays: overlays, sounds: sounds)
 	}
 
 	/// An entry written the way it is written in the file.
@@ -289,20 +296,25 @@ public struct TimelineEntry: Sendable, Equatable {
 	}
 }
 
-/// Where an overlay is written down.
+/// Where something laid over the programme is written down.
 ///
-/// An index into `overlays:` was enough while that was the only place one could
-/// be. Now that an entry carries its own, the panel, the strip and the effect
-/// renderers all need to say *which* overlay they mean, and "the third one"
-/// no longer picks out a single thing. A path and an index does.
-public enum OverlayOrigin: Sendable, Equatable, Hashable {
-	/// The nth of the project's top-level `overlays:`.
+/// An index into `overlays:` was enough while that was the only place an
+/// overlay could be. Now that a timeline entry carries its own — and its own
+/// sounds — the panel, the strip and the effect renderers all need to say
+/// *which* one they mean, and "the third one" no longer picks out a single
+/// thing. A path and an index does.
+///
+/// One type for overlays and for sounds, because it is one idea: which of two
+/// lists is being addressed is never in doubt at the place that asks, and two
+/// enums of the same shape are two things to keep in step.
+public enum Origin: Sendable, Equatable, Hashable {
+	/// The nth of the project's own top-level list.
 	case project(Int)
-	/// The nth overlay written inside the timeline entry at this path.
+	/// The nth one written inside the timeline entry at this path.
 	case entry(path: [Int], index: Int)
 
 	/// The top-level index, for the places that are only ever about that list —
-	/// the overlay table, which lists it and nothing else.
+	/// the overlay and sound tables, which list it and nothing else.
 	public var projectIndex: Int? {
 		if case .project(let index) = self { return index }
 		return nil

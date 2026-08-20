@@ -231,7 +231,8 @@ is selected: inside a selected section, after anything else, and an overlay
 added on a clip is *written inside that clip*, where it covers that placement
 and needs no name to be found by. Drag one from a shot to a section and it
 belongs to the section; drag it to the heading at the end and it becomes one of
-the global ones, still on at exactly the moments it was on before.
+the global ones, still on at exactly the moments it was on before. Sounds move
+the same way, and are shown in the same tree.
 
 Takes edited in another tab update the programme at once — re-cut a clip, track
 a face, and the project window has it before you have switched back.
@@ -301,8 +302,8 @@ leaves every project still correct. That is what the slug is for.
 | `- group: name` + `clips:` | a named section; they nest |
 | `- card: 00:04.000` | time with no take behind it |
 
-Any of them may carry `overlays:`, which is the list below written two levels
-in.
+Any of them may carry `overlays:` and `sounds:`, which are the lists below
+written two levels in.
 
 
 Queries are over the tags you put on clips in the cutting window: `#tag`,
@@ -344,6 +345,9 @@ to tell them apart. A nested overlay that *does* write a range — `within:`,
 `from:`/`to:`, `when:` — means exactly what it would mean at the top level;
 being written there is then only a statement about where it is filed. The same
 keys either way, so there is one shape to learn.
+
+An entry carries `sounds:` on exactly the same terms: written there and given no
+range, a sting plays for as long as that placement is on.
 
 ### Scenes — intro screens and title cards
 

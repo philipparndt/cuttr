@@ -191,13 +191,13 @@ public final class PropertiesPanel: NSView {
 			}
 			title.stringValue = "TIMELINE ENTRY"
 			entryForm(path, entry)
-		case .sound(let index):
-			guard index < project.sounds.count else {
+		case .sound(let origin):
+			guard let sound = project.sound(at: origin) else {
 				title.stringValue = "PROJECT"
 				return
 			}
 			title.stringValue = "SOUND"
-			soundForm(index, project.sounds[index])
+			soundForm(origin, sound)
 		case .overlay(let origin):
 			guard let overlay = project.overlay(at: origin) else {
 				title.stringValue = "PROJECT"
@@ -516,11 +516,10 @@ public final class PropertiesPanel: NSView {
 
 	/// Everything a sound has: which file, when it plays, how loud, how it
 	/// arrives and goes, and what it does to the programme underneath it.
-	private func soundForm(_ index: Int, _ sound: Sound) {
+	private func soundForm(_ origin: Origin, _ sound: Sound) {
 		func change(_ edit: @escaping (inout Sound) -> Void) {
 			var next = project
-			guard index < next.sounds.count else { return }
-			edit(&next.sounds[index])
+			next.editSound(at: origin) { edit(&$0) }
 			commit(next)
 		}
 
@@ -529,26 +528,43 @@ public final class PropertiesPanel: NSView {
 			text(sound.file, width: 210, placeholder: "music/opening.wav") { value in
 				change { $0.file = value.trimmingCharacters(in: .whitespaces) }
 			},
-			ellipsis("choose a sound file") { [weak self] _ in self?.chooseSound(index) },
+			ellipsis("choose a sound file") { [weak self] _ in self?.chooseSound(origin) },
 		], note: "relative to the project file, the same as the takes")
 
 		section("when it plays")
 		// The same three ways an overlay says when, in the same order and with
 		// the same words, because it is the same question and the file spells
-		// it the same way.
-		let modes = ["whole clip", "inside a clip", "programme times"]
-		let mode: Int
+		// it the same way — and, for one written inside a timeline entry, the
+		// fourth: nothing at all, which means that entry and no other use of it.
+		let nested = Project.home(of: origin) != nil
+		let spelt = ["whole clip", "inside a clip", "programme times"]
+		let modes = nested ? ["this placement"] + spelt : spelt
+		let offset = nested ? 1 : 0
+		var mode = 0
 		switch sound.span {
-		case .marks: mode = 0
-		case .within: mode = 1
-		case .times: mode = 2
+		case nil: mode = 0
+		case .marks: mode = offset
+		case .within: mode = offset + 1
+		case .times: mode = offset + 2
 		}
 		var controls: [NSView] = [pop(modes, selected: mode) { [weak self] pick in
 			guard let self, pick != mode else { return }
-			let converted = self.convert(sound.span, to: pick)
+			guard pick >= offset else {
+				change { $0.span = nil }
+				return
+			}
+			// Converting from "this placement" needs something to convert, and
+			// the programme is what knows where the placement is.
+			let existing = sound.span
+				?? self.resolved.flatMap { Project.extent(of: Project.home(of: origin) ?? [], in: $0) }
+					.map { Overlay.Span.times(from: $0.start, to: $0.end) }
+				?? .times(from: 0, to: 5)
+			let converted = self.convert(existing, to: pick - offset)
 			change { $0.span = converted }
 		}]
 		switch sound.span {
+		case nil:
+			controls.append(label("as long as this entry is on"))
 		case .marks(let from, let to):
 			controls.append(endpoint(from) { value in
 				change { $0.span = .marks(from: .init(value), to: to) }
@@ -580,12 +596,14 @@ public final class PropertiesPanel: NSView {
 		}
 		let advice: String
 		switch sound.span {
+		case nil: advice = "exactly this placement — the same shot used twice is two of them"
 		case .marks: advice = "the whole of it, however long it turns out to be"
 		case .within: advice = "so many seconds into that clip — it travels with the clip"
 		case .times: advice = "the programme's own clock: moving anything leaves this behind"
 		}
 		field("when", controls, note: advice)
-		if let extent = extent(of: sound.span) {
+		if let extent = sound.span.flatMap({ extent(of: $0) })
+			?? resolved.flatMap({ Project.extent(of: Project.home(of: origin) ?? [], in: $0) }) {
 			field("", [label("\(Timecode.string(extent.0)) → \(Timecode.string(extent.1))"
 				+ "  ·  \(TakeWriter.number(extent.1 - extent.0, places: 2))s")],
 				note: "a sound shorter than that stops rather than starting again")
@@ -627,7 +645,7 @@ public final class PropertiesPanel: NSView {
 	/// A sound file, chosen rather than typed, and written down the way the
 	/// file wants it: relative to the project, because that is what lets a
 	/// project and its music travel as one folder.
-	private func chooseSound(_ index: Int) {
+	private func chooseSound(_ origin: Origin) {
 		let panel = NSOpenPanel()
 		panel.canChooseFiles = true
 		panel.canChooseDirectories = false
@@ -640,14 +658,13 @@ public final class PropertiesPanel: NSView {
 			path = String(path.dropFirst(base.count + 1))
 		}
 		var next = project
-		guard index < next.sounds.count else { return }
-		next.sounds[index].file = path
+		next.editSound(at: origin) { $0.file = path }
 		commit(next)
 	}
 
 	// MARK: - overlay
 
-	private func overlayForm(_ origin: OverlayOrigin, _ overlay: Overlay) {
+	private func overlayForm(_ origin: Origin, _ overlay: Overlay) {
 		// An effect and a scene have no position of their own, so there is
 		// nothing to drag them to: their parts carry their own.
 		switch overlay.kind {
@@ -1215,13 +1232,13 @@ public final class PropertiesPanel: NSView {
 		field(name, controls)
 	}
 
-	private func editOverlay(_ origin: OverlayOrigin, _ change: (inout Overlay) -> Void) {
+	private func editOverlay(_ origin: Origin, _ change: (inout Overlay) -> Void) {
 		var next = project
 		next.editOverlay(at: origin, change)
 		commit(next)
 	}
 
-	private func editEffect(_ origin: OverlayOrigin, _ change: (inout Effect) -> Void) {
+	private func editEffect(_ origin: Origin, _ change: (inout Effect) -> Void) {
 		editOverlay(origin) { overlay in
 			guard case .effect(var effect) = overlay.kind else { return }
 			change(&effect)
@@ -1229,7 +1246,7 @@ public final class PropertiesPanel: NSView {
 		}
 	}
 
-	private func editSpinner(_ origin: OverlayOrigin, _ change: (inout Spinner) -> Void) {
+	private func editSpinner(_ origin: Origin, _ change: (inout Spinner) -> Void) {
 		editOverlay(origin) { overlay in
 			guard case .spinner(var spinner) = overlay.kind else { return }
 			change(&spinner)
@@ -1308,7 +1325,7 @@ public final class PropertiesPanel: NSView {
 	/// purpose: an overlay's moment is a moment with the other overlays and the
 	/// dissolves in it, and against the bare take it would be guesswork again.
 	private func openWithin(
-		_ origin: OverlayOrigin, _ position: Int, _ mark: Overlay.Span.Endpoint,
+		_ origin: Origin, _ position: Int, _ mark: Overlay.Span.Endpoint,
 		from: Double, to: Double, from view: NSView
 	) {
 		guard let where_ = extent(of: .marks(from: mark, to: mark)),
@@ -1329,7 +1346,7 @@ public final class PropertiesPanel: NSView {
 			})
 	}
 
-	private func setSpan(_ origin: OverlayOrigin, _ position: Int, _ span: Overlay.Span) {
+	private func setSpan(_ origin: Origin, _ position: Int, _ span: Overlay.Span) {
 		editOverlay(origin) { overlay in
 			guard position < overlay.appearances.count else { return }
 			overlay.appearances[position].span = span
@@ -1339,7 +1356,7 @@ public final class PropertiesPanel: NSView {
 	// MARK: - When it is on
 
 	/// The programme with this overlay's ranges lying over it, draggable.
-	private func strip(_ origin: OverlayOrigin, _ overlay: Overlay) -> NSView {
+	private func strip(_ origin: Origin, _ overlay: Overlay) -> NSView {
 		let strip = SpanStrip()
 		currentStrip = strip
 		strip.duration = resolved?.duration ?? 0
@@ -1459,7 +1476,7 @@ public final class PropertiesPanel: NSView {
 	// MARK: - Placing it on the picture
 
 	/// The frame the overlay appears on, with the overlay on it, draggable.
-	private func placement(_ origin: OverlayOrigin, _ overlay: Overlay) -> NSView {
+	private func placement(_ origin: Origin, _ overlay: Overlay) -> NSView {
 		let preview = FramePreview()
 		currentPreview = preview
 		preview.aspect = project.output.size
@@ -1527,7 +1544,7 @@ public final class PropertiesPanel: NSView {
 	}
 
 	/// The drag, written back as the file would say it.
-	private func place(_ origin: OverlayOrigin, _ overlay: Overlay, at spot: CGPoint, anchor: CGPoint?) {
+	private func place(_ origin: Origin, _ overlay: Overlay, at spot: CGPoint, anchor: CGPoint?) {
 		let ratio = project.output.size.width / max(1, project.output.size.height)
 		if let anchor {
 			editOverlay(origin) {

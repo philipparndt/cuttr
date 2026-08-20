@@ -21,7 +21,13 @@ public struct Sound: Sendable, Equatable {
 	public var file: String
 
 	/// When it plays.
-	public var span: Overlay.Span
+	///
+	/// `nil` only for a sound written inside a timeline entry, where it means
+	/// "for exactly as long as that entry is on" — the case a name cannot
+	/// express, because `from: intro` finds every use of `intro`. A sound in
+	/// the top-level list has no placement to take its length from, so it says
+	/// when it plays or it is not read.
+	public var span: Overlay.Span?
 
 	/// Decibels, applied to the file as it is. Nought leaves it alone.
 	public var gain: Double
@@ -38,7 +44,7 @@ public struct Sound: Sendable, Equatable {
 
 	public init(
 		file: String,
-		span: Overlay.Span,
+		span: Overlay.Span?,
 		gain: Double = 0,
 		arrival: Overlay.Transition = .cut,
 		departure: Overlay.Transition = .cut,
