@@ -32,8 +32,18 @@ public final class DocumentBar: NSView {
 		didSet {
 			name.isEnabled = setUp != nil
 			more.isHidden = setUp == nil
+			showGroup()
 			setName(documentName)
 		}
+	}
+
+	/// The rule is only worth drawing when there is something on the far side of
+	/// it. A window with no set-up and no controls of its own gets a name and a
+	/// clock, and no furniture between them.
+	private func showGroup() {
+		let anything = group.arrangedSubviews.contains { !$0.isHidden }
+		group.isHidden = !anything
+		divider.isHidden = !anything
 	}
 
 	/// Rolling the tape, from the bar that says where the tape is.
@@ -65,9 +75,17 @@ public final class DocumentBar: NSView {
 	/// tenant; everything else that was in a bar found a home nearer the thing
 	/// it acts on.
 	private let trailing = NSStackView()
-	/// The same, on the near side of the clock, for a switch that says which of
-	/// the document's modes is showing until the rail takes it over.
-	private let leading = NSStackView()
+	/// What this window is playing, and what it is aligned against.
+	///
+	/// One cluster rather than several things that happen to be adjacent: the
+	/// controls a window adds with ``addLeading(_:)`` and the `…` that opens the
+	/// setting-up popover, in that order, evenly spaced, with a rule between
+	/// them and the document's name. The name is a name and nothing else — it
+	/// had the `…` hanging off it as though the two were one thing, and they are
+	/// not: one says which document, the other is a control over it.
+	private let group = NSStackView()
+	/// The line that says where the name stops and the controls begin.
+	private let divider = NSView()
 	private var popover: NSPopover?
 
 	public override init(frame: NSRect) {
@@ -155,13 +173,23 @@ public final class DocumentBar: NSView {
 		progress.controlSize = .small
 		progress.isHidden = true
 
-		for stack in [leading, trailing] {
+		for stack in [group, trailing] {
 			stack.orientation = .horizontal
-			stack.spacing = 6
+			stack.spacing = 8
 			stack.alignment = .centerY
 		}
 
-		for view in [name, more, leading, play, clock, statusLabel, progress, trailing] as [NSView] {
+		group.addView(more, in: .trailing)
+
+		divider.wantsLayer = true
+		divider.layer?.backgroundColor = Theme.rule.cgColor
+		divider.translatesAutoresizingMaskIntoConstraints = false
+		NSLayoutConstraint.activate([
+			divider.widthAnchor.constraint(equalToConstant: 1),
+			divider.heightAnchor.constraint(equalToConstant: 16),
+		])
+
+		for view in [name, divider, group, play, clock, statusLabel, progress, trailing] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			addSubview(view)
 		}
@@ -181,13 +209,14 @@ public final class DocumentBar: NSView {
 			name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
 			name.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-			// On the row's centre, beside the name, and it does not move when
-			// the name changes length.
-			more.leadingAnchor.constraint(equalTo: name.trailingAnchor, constant: 2),
-			more.centerYAnchor.constraint(equalTo: centerYAnchor),
+			// The rule, then the group: a clear gap either side of it, so the
+			// cluster is plainly separate from the name at one end and from the
+			// clock at the other.
+			divider.leadingAnchor.constraint(equalTo: name.trailingAnchor, constant: 14),
+			divider.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-			leading.leadingAnchor.constraint(equalTo: more.trailingAnchor, constant: 14),
-			leading.centerYAnchor.constraint(equalTo: centerYAnchor),
+			group.leadingAnchor.constraint(equalTo: divider.trailingAnchor, constant: 14),
+			group.centerYAnchor.constraint(equalTo: centerYAnchor),
 
 			// The clock is what is centred, and the button hangs off it. Centring
 			// the pair instead would move the number sideways by half a button,
@@ -196,7 +225,7 @@ public final class DocumentBar: NSView {
 			clock.centerYAnchor.constraint(equalTo: centerYAnchor),
 			play.trailingAnchor.constraint(equalTo: clock.leadingAnchor, constant: -6),
 			play.centerYAnchor.constraint(equalTo: centerYAnchor),
-			play.leadingAnchor.constraint(greaterThanOrEqualTo: leading.trailingAnchor, constant: 12),
+			play.leadingAnchor.constraint(greaterThanOrEqualTo: group.trailingAnchor, constant: 16),
 
 			trailing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
 			trailing.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -213,6 +242,7 @@ public final class DocumentBar: NSView {
 			progress.heightAnchor.constraint(equalToConstant: 4),
 		])
 		setName("")
+		showGroup()
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
@@ -256,8 +286,20 @@ public final class DocumentBar: NSView {
 	/// Adds a document-level verb to the far right.
 	public func addTrailing(_ view: NSView) { trailing.addView(view, in: .trailing) }
 
-	/// Adds a control just after the document's name.
-	public func addLeading(_ view: NSView) { leading.addView(view, in: .trailing) }
+	/// Adds a control to the group, before the `…`.
+	///
+	/// The `…` stays last because it is the way to more of the same: files, the
+	/// offset, `Align`. A control the window adds is a thing somebody uses while
+	/// working, and those come first.
+	public func addLeading(_ view: NSView) {
+		let place = group.arrangedSubviews.firstIndex(of: more) ?? group.arrangedSubviews.count
+		group.insertArrangedSubview(view, at: place)
+		showGroup()
+	}
+
+	/// Told when something in the group is shown or hidden, since a stack view
+	/// does not say so itself.
+	public func groupChanged() { showGroup() }
 
 	// MARK: - The popover behind the name
 
@@ -283,6 +325,8 @@ public final class DocumentBar: NSView {
 	var playForTesting: NSButton { play }
 	var nameForTesting: NSButton { name }
 	var moreForTesting: NSButton { more }
+	var groupForTesting: NSStackView { group }
+	var dividerForTesting: NSView { divider }
 	var statusForTesting: NSTextField { statusLabel }
 	var progressForTesting: NSProgressIndicator { progress }
 }

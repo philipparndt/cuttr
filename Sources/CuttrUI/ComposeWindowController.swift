@@ -369,10 +369,26 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		])
 
 		window.contentView = content
+		// Nothing in this window opens with the keyboard in it.
+		//
+		// Left to itself AppKit hands the first responder to the first text
+		// field it can find, which on the project page is the output's frame
+		// width — so a new window opened with a cursor blinking in the size of
+		// the film, where a stray keystroke edits it. It also broke opening a
+		// file: the properties panel refuses to rebuild while one of its fields
+		// is being edited, because a reload mid-word takes the cursor with it,
+		// and a field that had focus merely by default looked exactly like a
+		// field somebody was typing in. The file was read, the panel declined to
+		// show it, and the page stayed on the empty project it had been built
+		// with until somebody switched pages and back.
+		window.initialFirstResponder = rail
 
 		// No marking here: an anchor is marked on the take, in the cutting
 		// window, where the footage is. This window shows what was found.
 	}
+
+	/// For the tests: which of the four is showing.
+	var modeForTesting: Mode { mode }
 
 	/// For the tests: the rail, so its place can be compared with the other
 	/// window's.

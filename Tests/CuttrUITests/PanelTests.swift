@@ -1501,3 +1501,62 @@ import Testing
 		#expect(pressed == 1)
 	}
 }
+
+/// Opening a file shows the file.
+///
+/// The application reuses a blank window when there is one, so a project is
+/// often read into a window that is already on screen — and that window lands on
+/// the project page, because the project it was made with was empty. Left to
+/// itself AppKit had given the keyboard to the first text field it could find,
+/// which on that page is the output's frame width; the properties panel refuses
+/// to rebuild while one of its fields is being edited, because a reload mid-word
+/// takes the cursor with it, and a field holding focus by default looked exactly
+/// like a field somebody was typing in. So the file was read, the panel declined
+/// to show it, and the page stayed on the empty project until somebody switched
+/// away and back.
+@Suite @MainActor struct OpeningAFileTests {
+
+	@Test func theProjectPageShowsTheFileThatWasOpened() throws {
+		_ = NSApplication.shared
+		let controller = ComposeWindowController(document: ComposeDocument())
+		let window = try #require(controller.window)
+		window.setContentSize(NSSize(width: 1400, height: 900))
+		// Key, because that is when AppKit picks a first responder — and this
+		// never reproduced until the window was.
+		window.makeKeyAndOrderFront(nil)
+		window.layoutIfNeeded()
+
+		// Nothing in this window opens with the keyboard in it. A new project
+		// window with a cursor in the size of the film is one keystroke from
+		// resizing the output.
+		#expect(!(window.firstResponder is NSTextView),
+		        "the keyboard is in a text field: \(String(describing: window.firstResponder))")
+
+		let folder = URL(fileURLWithPath: NSTemporaryDirectory())
+			.appendingPathComponent("cuttr-open-\(UUID().uuidString)")
+		try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+		defer { try? FileManager.default.removeItem(at: folder) }
+		let file = folder.appendingPathComponent("dingsda.cuttrproj")
+		try """
+		output:
+		  size: 1920x1080
+		  fps: 25
+		timeline:
+		  - clip: intro
+		""".write(to: file, atomically: true, encoding: .utf8)
+
+		try controller.composeDocument.read(from: file)
+		window.layoutIfNeeded()
+
+		func panels(in view: NSView) -> [PropertiesPanel] {
+			view.subviews.flatMap { sub -> [PropertiesPanel] in
+				((sub as? PropertiesPanel).map { [$0] } ?? []) + panels(in: sub)
+			}
+		}
+		let content = try #require(window.contentView)
+		let shown = try #require(panels(in: content).first)
+		#expect(shown.subjectForTesting.linesForTesting.first == "dingsda",
+		        "the page still shows \(shown.subjectForTesting.linesForTesting)")
+		window.close()
+	}
+}

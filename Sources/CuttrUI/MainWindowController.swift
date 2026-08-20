@@ -483,11 +483,21 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		setup.onAlign = { [weak self] in self?.autoAlign() }
 		swatches.onChoose = { [weak self] color in self?.chooseLane(color) }
 
-		// Which microphone you hear, over the two lanes it chooses between.
+		// Which microphone you hear, in the bar with the rest of the controls
+		// over this take.
 		//
-		// Short labels rather than the full ones: this sits on the waveform, and
-		// a control 220 points wide there is a control in the way of the thing
-		// it is for. The tooltip says the rest, and `U` cycles it.
+		// It was over the waveform lanes it chooses between, on the reasoning
+		// that a control belongs on the thing it acts on and that a row of
+		// transport furniture would cost height. Looked at, it read as
+		// something floating over the timeline rather than as part of the
+		// window, so it has joined the group at the leading end of the bar —
+		// with the `…` that opens the files and the alignment, which is the
+		// same subject: what this window is playing, and what it is aligned
+		// against.
+		//
+		// Short labels still, because it is beside a name and a clock and the
+		// bar is not a place for three full sentences. The tooltip says the
+		// rest, and `U` cycles it.
 		for (index, mode) in Transport.Monitor.allCases.enumerated() {
 			monitor.segmentCount = max(monitor.segmentCount, index + 1)
 			monitor.setLabel(mode.short, forSegment: index)
@@ -500,7 +510,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		monitor.action = #selector(monitorChanged)
 		monitor.toolTip = "Which microphone you hear (U). \u{201C}Both\u{201D} is the alignment tool:\n"
 			+ "nudge until the hollow, flanging sound goes away."
-		timeline.laneAccessory = monitor
+		bar.addLeading(monitor)
 
 		// Right-click the picture to track something in it. The footage is here,
 		// so the marking is here.
@@ -931,6 +941,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 		setup.update(document: takeDocument)
 		let hasAudio = takeDocument.take.audio != nil
 		monitor.isHidden = !hasAudio
+		// A stack view does not notice a child being hidden, and the rule
+		// beside the group should not be drawn for an empty group.
+		bar.groupChanged()
 		monitor.selectedSegment = transport.monitor.rawValue
 	}
 

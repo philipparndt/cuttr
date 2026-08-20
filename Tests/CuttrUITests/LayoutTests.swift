@@ -252,6 +252,60 @@ import Testing
 		#expect(abs(more.midY - bar.bounds.midY) <= 0.5, "the ellipsis is off-centre: \(more)")
 	}
 
+	/// The controls over this document are one group, and the name is a name.
+	///
+	/// The `…` used to hang off the end of the name as though the two were one
+	/// thing. They are not: one says which document, the other is a control over
+	/// it. Everything a window adds joins the `…` in a cluster with a rule
+	/// between it and the name.
+	@Test func theControlsAreAGroupAndTheNameIsNotOneOfThem() {
+		let bar = self.bar()
+		bar.setName("mia-take-1")
+		bar.setUp = TakeSetup()
+		let monitor = NSSegmentedControl(labels: ["rec", "cam", "both"],
+		                                 trackingMode: .selectOne, target: nil, action: nil)
+		bar.addLeading(monitor)
+		bar.layoutSubtreeIfNeeded()
+
+		// Everything the window added, and the `…`, in one stack.
+		#expect(bar.groupForTesting.arrangedSubviews.contains(monitor))
+		#expect(bar.groupForTesting.arrangedSubviews.contains(bar.moreForTesting))
+		// The `…` is last: it is the way to *more* of the same.
+		#expect(bar.groupForTesting.arrangedSubviews.last === bar.moreForTesting)
+
+		let name = bar.nameForTesting.convert(bar.nameForTesting.bounds, to: bar)
+		let rule = bar.dividerForTesting.convert(bar.dividerForTesting.bounds, to: bar)
+		let group = bar.groupForTesting.convert(bar.groupForTesting.bounds, to: bar)
+		let clock = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
+
+		// Name, rule, group, clock — in that order, with the rule between the
+		// name and the group and clear air either side of it.
+		#expect(name.maxX < rule.minX)
+		#expect(rule.maxX < group.minX)
+		#expect(group.maxX < clock.minX)
+		#expect(rule.minX - name.maxX >= 10, "the rule is crowding the name")
+		#expect(group.minX - rule.maxX >= 10, "the rule is crowding the group")
+		#expect(bar.dividerForTesting.isHidden == false)
+
+		// And the spacing inside the group is even.
+		let inside = bar.groupForTesting.arrangedSubviews.map {
+			$0.convert($0.bounds, to: bar)
+		}.sorted { $0.minX < $1.minX }
+		let gaps = zip(inside, inside.dropFirst()).map { $1.minX - $0.maxX }
+		#expect(Set(gaps.map { ($0 * 10).rounded() }).count <= 1,
+		        "ragged spacing inside the group: \(gaps)")
+	}
+
+	/// A window with nothing to put there gets a name and a clock, and no
+	/// furniture between them.
+	@Test func anEmptyGroupDrawsNoRule() {
+		let bar = self.bar()
+		bar.setName("mia-take-1")
+		bar.layoutSubtreeIfNeeded()
+		#expect(bar.dividerForTesting.isHidden, "a rule with nothing on the far side of it")
+		#expect(bar.groupForTesting.isHidden)
+	}
+
 	/// Rolling the tape, from the bar that says where the tape is.
 	@Test func theBarPlaysAndSaysWhichWayRoundItIs() {
 		let bar = self.bar()
