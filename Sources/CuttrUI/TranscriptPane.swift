@@ -27,8 +27,10 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	public var onSelectWords: ((_ start: Double, _ end: Double) -> Void)?
 	/// A word was clicked: take the playhead there.
 	public var onMoveTo: ((Double) -> Void)?
-	/// The button in the heading.
-	public var onTranscribe: (() -> Void)?
+	/// The button in the heading, with the language to listen in.
+	public var onTranscribe: ((Locale) -> Void)?
+	/// Somebody chose a language. Worth remembering for the next take.
+	public var onLanguage: ((String) -> Void)?
 	/// Something worth saying in the window's status line.
 	public var onStatus: ((String) -> Void)?
 
@@ -36,6 +38,7 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	private let scroll = NSScrollView()
 	private let search = NSSearchField()
 	private let provenance = NSTextField(labelWithString: "")
+	private let language = NSPopUpButton()
 	private let button = NSButton()
 
 	private var transcript = Transcript()
@@ -53,6 +56,8 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// about the transcript has changed.
 	private var shown = false
 	private var shownWords: Words?
+	/// The languages offered, parallel to the pop-up's items.
+	private var known: [Transcriber.Language] = []
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
@@ -124,16 +129,77 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		button.action = #selector(transcribePressed)
 		button.toolTip = "Reads the audio on this Mac and writes the words beside the take.\n"
 			+ "Nothing is uploaded. Ask once; the file is kept."
+
+		language.controlSize = .small
+		language.font = Theme.label
+		language.target = self
+		language.action = #selector(languageChanged)
+		language.toolTip = "What language is spoken in this take.\n"
+			+ "A take listened to in the wrong one comes back as confident nonsense."
+		// Forty-five languages named in full make a pop-up wider than the pane
+		// it sits in, and the heading is a row, not a column.
+		language.translatesAutoresizingMaskIntoConstraints = false
+		language.widthAnchor.constraint(lessThanOrEqualToConstant: 190).isActive = true
 	}
 
 	/// The heading's furniture, for the pane that provides the heading — what
 	/// made these words, and the way to ask for them.
 	public func detachedHead() -> NSView {
-		let row = NSStackView(views: [provenance, button])
+		let row = NSStackView(views: [provenance, language, button])
 		row.orientation = .horizontal
 		row.spacing = 8
 		row.alignment = .centerY
 		return row
+	}
+
+	// MARK: - What it listens in
+
+	/// The languages this Mac has, and which of them to use for this take.
+	///
+	/// A take that has been transcribed already says which language it was
+	/// heard in, and that is the one shown — reading a take again in a
+	/// different language than the words beside it were made in is a thing
+	/// somebody has to *choose*, not a thing that happens because the Mac's own
+	/// language is English.
+	public func offer(_ languages: [Transcriber.Language], choosing identifier: String?) {
+		// Rebuilding the menu drops whatever was chosen, so a language this Mac
+		// does not have would silently become the first in the list.
+		let previous = chosenLanguage
+		known = languages
+		language.removeAllItems()
+		for entry in languages {
+			language.addItem(withTitle: entry.installed
+				? "\(entry.name) — \(entry.identifier)"
+				: "\(entry.name) — \(entry.identifier) (fetches)")
+			language.lastItem?.representedObject = entry.identifier
+		}
+		language.isEnabled = !languages.isEmpty
+		if !select(identifier) { _ = select(previous) }
+	}
+
+	/// The language somebody has chosen, as a tag.
+	public var chosenLanguage: String? {
+		language.selectedItem?.representedObject as? String
+	}
+
+	/// Chooses the best match for a tag: the tag itself, then anything in the
+	/// same language — `de` picks `de-DE` — then what is already chosen.
+	@discardableResult
+	private func select(_ identifier: String?) -> Bool {
+		guard let identifier, !identifier.isEmpty else { return false }
+		let index = known.firstIndex { $0.identifier == identifier }
+			?? known.firstIndex { $0.identifier.hasPrefix(identifier.prefix(2) + "-") }
+		guard let index else { return false }
+		language.selectItem(at: index)
+		return true
+	}
+
+	@objc private func languageChanged() {
+		guard let chosen = chosenLanguage else { return }
+		onLanguage?(chosen)
+		if let entry = known.first(where: { $0.identifier == chosen }), !entry.installed {
+			onStatus?("\(entry.name) will be fetched the first time it is used")
+		}
 	}
 
 	// MARK: - Showing it
@@ -176,6 +242,11 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		text.textStorage?.setAttributedString(body)
 		text.setSelectedRange(NSRange(location: 0, length: 0))
 		quiet = false
+
+		// A take that has words says which language they were heard in, and that
+		// is a fact about this take rather than a preference: showing anything
+		// else beside them would be a lie about where they came from.
+		if let words, !words.locale.isEmpty { select(words.locale) }
 
 		if let words, !transcript.isEmpty {
 			provenance.stringValue = "\(transcript.count) words · \(words.recogniser.rawValue)"
@@ -259,7 +330,9 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 
 	@objc private func searchChanged() { find(search.stringValue) }
 
-	@objc private func transcribePressed() { onTranscribe?() }
+	@objc private func transcribePressed() {
+		onTranscribe?(chosenLanguage.map(Locale.init(identifier:)) ?? .current)
+	}
 
 	/// Said while the recogniser is running, in place of the word count.
 	public func setNote(_ note: String) { provenance.stringValue = note }

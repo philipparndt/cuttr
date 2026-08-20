@@ -101,13 +101,49 @@ public final class ComposeDocument {
 		resolve()
 	}
 
-	/// Saves an untitled project to a chosen place, and starts watching it.
+	/// Saves the project to a chosen place, and starts watching it there.
+	///
+	/// Every path a project carries is relative to where the project sits —
+	/// that is what lets a folder be copied to another disk and still work — so
+	/// writing the same text into another folder would point every take at
+	/// nothing. Each path is therefore resolved against where the project *was*
+	/// and written again against where it is going. An absolute path is left
+	/// alone: somebody who typed one meant it.
 	public func saveAs(_ fileURL: URL) throws {
+		if let old = url, old.deletingLastPathComponent().standardized.path
+			!= fileURL.deletingLastPathComponent().standardized.path {
+			repoint(from: old, to: fileURL)
+		}
 		url = fileURL
 		try ProjectWriter.write(project).write(to: fileURL, atomically: true, encoding: .utf8)
 		isDirty = false
 		resolve()
 		watch()
+	}
+
+	/// Rewrites every path in the project so it finds the same file from the
+	/// project's new home.
+	private func repoint(from old: URL, to new: URL) {
+		let from = old.deletingLastPathComponent()
+		func moved(_ path: String) -> String {
+			guard !path.hasPrefix("/"), !path.hasPrefix("~") else { return path }
+			return MemeDownload.relativePath(
+				from: new, to: URL(fileURLWithPath: path, relativeTo: from))
+		}
+		func moved(_ entries: [TimelineEntry]) -> [TimelineEntry] {
+			entries.map { entry in
+				var entry = entry
+				for index in entry.sounds.indices { entry.sounds[index].file = moved(entry.sounds[index].file) }
+				if case .group(let name, let inside) = entry.source {
+					entry.source = .group(name, moved(inside))
+				}
+				return entry
+			}
+		}
+		project.takes = project.takes.map(moved)
+		for index in project.sounds.indices { project.sounds[index].file = moved(project.sounds[index].file) }
+		project.timeline = moved(project.timeline)
+		isDirty = true
 	}
 
 	public func write() throws {

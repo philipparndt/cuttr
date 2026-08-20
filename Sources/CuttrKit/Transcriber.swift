@@ -144,6 +144,50 @@ public enum Transcriber {
 		public let locale: String
 	}
 
+	/// A language this Mac can be asked for, and whether its model is here.
+	///
+	/// Named in the reader's own language rather than in itself, because
+	/// somebody looking for German is as likely to be looking for "German" as
+	/// for "Deutsch", and the tag is shown beside it for anybody who thinks in
+	/// tags.
+	public struct Language: Sendable, Equatable, Identifiable {
+		public let identifier: String
+		public let name: String
+		/// Whether the model is on the machine already. A language that is not
+		/// can still be chosen — it is fetched on the first take — but saying
+		/// so beforehand is the difference between a wait and a hang.
+		public let installed: Bool
+
+		public var id: String { identifier }
+	}
+
+	/// What this Mac will listen in.
+	///
+	/// The one thing this had to have and did not. The language came from the
+	/// system, so a Mac set to English transcribed German footage *as English*
+	/// and produced four hundred words of confident nonsense — the failure that
+	/// looks like a broken recogniser and is really a question nobody was
+	/// asked.
+	public static func languages() async -> [Language] {
+		let display = Locale.current
+		func named(_ identifier: String, installed: Bool) -> Language {
+			Language(identifier: identifier,
+			         name: display.localizedString(forIdentifier: identifier) ?? identifier,
+			         installed: installed)
+		}
+		if #available(macOS 26, *), SpeechTranscriber.isAvailable {
+			let installed = Set(await SpeechTranscriber.installedLocales.map { $0.identifier(.bcp47) })
+			let all = await SpeechTranscriber.supportedLocales.map { $0.identifier(.bcp47) }
+			return all.sorted().map { named($0, installed: installed.contains($0)) }
+		}
+		// The old recogniser downloads its own models and does not say which it
+		// has, so every one it supports is offered as if it were here.
+		return SFSpeechRecognizer.supportedLocales()
+			.map { $0.identifier(.bcp47) }
+			.sorted()
+			.map { named($0, installed: true) }
+	}
+
 	// MARK: - Doing it
 
 	/// Transcribes `source`, on this machine, onto the video's clock.

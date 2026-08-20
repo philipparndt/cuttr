@@ -314,7 +314,16 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			self?.move(to: time)
 			self?.timeline.followPlayhead()
 		}
-		transcriptPane.onTranscribe = { [weak self] in self?.transcribe() }
+		transcriptPane.onTranscribe = { [weak self] locale in self?.transcribe(in: locale) }
+		// Somebody working through a German shoot says so once, not once per
+		// take: the choice is remembered, and a take that has been transcribed
+		// already says for itself which language it was heard in.
+		transcriptPane.onLanguage = { MainWindowController.remember(language: $0) }
+		Task { [weak self] in
+			let languages = await Transcriber.languages()
+			guard let self else { return }
+			self.transcriptPane.offer(languages, choosing: self.preferredLanguage)
+		}
 		transcriptPane.onStatus = { [weak self] note in self?.header.setStatus(note) }
 
 		anchorTable.onRename = { [weak self] old, new in self?.renameAnchor(old, to: new) }
@@ -528,7 +537,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	/// not change: the words are written beside the take and read back when it
 	/// is opened. Pressing the button again is a deliberate act — a re-align, a
 	/// swapped-in re-export — and it says "Again" so that it looks like one.
-	private func transcribe() {
+	private func transcribe(in locale: Locale) {
 		guard wordsTask == nil else { return }
 		guard let source = Transcriber.Source.forTake(
 			takeDocument.take, videoURL: takeDocument.videoURL,
@@ -537,12 +546,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 			header.setStatus("nothing to listen to — give this take a video or an audio file first")
 			return
 		}
-		// The language this take was transcribed in last time, if it has been.
-		// Somebody working through a German shoot should not have to say so
-		// once per take, and the file already knows.
-		let recorded = takeDocument.take.words?.locale ?? ""
-		let locale = recorded.isEmpty ? Locale.current : Locale(identifier: recorded)
-
 		header.setStatus("listening to \(source.url.lastPathComponent)"
 			+ " — on this Mac, and nothing is uploaded")
 		header.setProgress(0)
@@ -1071,7 +1074,25 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 	@objc public func setInAction(_ sender: Any? = nil) { setIn() }
 	@objc public func setOutAction(_ sender: Any? = nil) { setOut() }
 	@objc public func alignAction(_ sender: Any? = nil) { autoAlign() }
-	@objc public func transcribeAction(_ sender: Any? = nil) { transcribe() }
+	@objc public func transcribeAction(_ sender: Any? = nil) {
+		transcribe(in: transcriptPane.chosenLanguage.map(Locale.init(identifier:)) ?? .current)
+	}
+
+	/// What to listen in, before anybody has said: what this take was heard in
+	/// last time, then what was chosen for the last take, then the Mac's own
+	/// language — which is the one that was wrong.
+	private var preferredLanguage: String {
+		let recorded = takeDocument.take.words?.locale ?? ""
+		if !recorded.isEmpty { return recorded }
+		if let remembered = UserDefaults.standard.string(forKey: Self.languageKey) { return remembered }
+		return Locale.current.identifier(.bcp47)
+	}
+
+	private static let languageKey = "de.rnd7.cuttr.transcript.language"
+
+	private static func remember(language: String) {
+		UserDefaults.standard.set(language, forKey: languageKey)
+	}
 	@objc public func nameFromWordsAction(_ sender: Any? = nil) { nameFromWords() }
 	@objc public func zoomIn(_ sender: Any? = nil) { timeline.zoomAroundPlayhead(by: 1 / 1.6) }
 	@objc public func zoomOut(_ sender: Any? = nil) { timeline.zoomAroundPlayhead(by: 1.6) }

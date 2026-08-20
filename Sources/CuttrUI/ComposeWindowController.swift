@@ -869,6 +869,42 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		onOpenTake?(place)
 	}
 
+	// MARK: - Saving
+
+	/// ⌘S. A project edited in this window is written as it is changed, so this
+	/// is mostly for the one that has never been saved — but it is what
+	/// somebody's hands do, and a window where it does nothing is a window
+	/// somebody does not trust.
+	@objc public func save(_ sender: Any?) {
+		guard composeDocument.url != nil else { saveAs(sender); return }
+		do {
+			try composeDocument.write()
+			bar.setStatus("saved \(composeDocument.displayName)")
+		} catch {
+			report(error)
+		}
+	}
+
+	/// ⇧⌘S. Somewhere else, with every path in the project rewritten to find
+	/// the same media from there.
+	@objc public func saveAs(_ sender: Any?) {
+		let panel = NSSavePanel()
+		panel.allowedContentTypes = [UTType(filenameExtension: "cuttrproj") ?? .plainText]
+		panel.nameFieldStringValue = composeDocument.url?.lastPathComponent ?? "programme.cuttrproj"
+		if let directory = composeDocument.url?.deletingLastPathComponent() {
+			panel.directoryURL = directory
+		}
+		guard panel.runModal() == .OK, let url = panel.url else { return }
+		do {
+			try composeDocument.saveAs(url)
+			AppDelegate.remember(url)
+			bar.setStatus("saved \(url.lastPathComponent)")
+			rebuild()
+		} catch {
+			report(error)
+		}
+	}
+
 	/// A project must be on disk before it can point at anything: every path in
 	/// it is relative to where it sits.
 	private func ensureSaved() -> Bool {

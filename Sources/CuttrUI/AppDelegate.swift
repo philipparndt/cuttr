@@ -369,8 +369,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		controllers.first { $0.window?.isKeyWindow == true } ?? controllers.last
 	}
 
-	@objc func save(_ sender: Any?) { current?.save(sender) }
-	@objc func saveAs(_ sender: Any?) { current?.saveAs(sender) }
+	/// The compose window somebody is looking at, if that is what they are
+	/// looking at.
+	/// A scene window belongs to a project, and saving from one saves that
+	/// project — a scene is written inside it, not in a file of its own.
+	private var currentComposer: ComposeWindowController? {
+		if let composer = composers.first(where: { $0.window?.isKeyWindow == true }) { return composer }
+		guard let scene = scenes.first(where: { $0.window?.isKeyWindow == true }),
+		      let owner = sceneOwners[ObjectIdentifier(scene)]
+		else { return nil }
+		return composers.first { ObjectIdentifier($0.composeDocument) == owner }
+	}
+
+	/// ⌘S in a project window used to save *a take* — whichever cutting window
+	/// happened to be open — or nothing at all when none was. Save As opened a
+	/// panel offering to write a `.cuttr` file from a window showing a
+	/// `.cuttrproj`. Both now ask the key window what it is.
+	@objc func save(_ sender: Any?) {
+		if let composer = currentComposer { composer.save(sender) } else { current?.save(sender) }
+	}
+
+	@objc func saveAs(_ sender: Any?) {
+		if let composer = currentComposer { composer.saveAs(sender) } else { current?.saveAs(sender) }
+	}
 	@objc func importSubclips(_ sender: Any?) { current?.importSubclips(sender) }
 
 	@objc func showShortcuts(_ sender: Any?) {
