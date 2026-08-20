@@ -170,7 +170,7 @@ import Testing
 			#expect(motion.clock(at: moment) == Float(moment) * Float(2.5))
 		}
 		#expect(motion.showing(at: 3) == 1)
-		#expect(motion.windy == false)
+		#expect(motion.windBlows == false)
 		// And the wind is worked out per piece the way it always was, because a
 		// lean that never changes comes straight out of the integral.
 		#expect(motion.windMoves == false)

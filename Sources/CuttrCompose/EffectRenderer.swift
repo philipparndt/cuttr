@@ -470,7 +470,7 @@ final class EffectRenderer: @unchecked Sendable {
 			// it, which is what keeps every streak on the same slant.
 			var x: Float = piece.x + sway
 				+ (motion.windMoves ? piece.fall * drift : piece.fall * lean * t)
-			if motion.windy, span > 0 {
+			if motion.windBlows, span > 0 {
 				// Wrapped, or a minute of wind empties the frame from one side.
 				x = (x + span / 2).truncatingRemainder(dividingBy: span)
 				if x < 0 { x += span }

@@ -487,10 +487,12 @@ struct EffectMotion: Sendable {
 	private let wind: Track
 	private let density: Track
 	private let scale: Track
-	/// Whether the wind ever blows, which decides whether the frame wraps
-	/// sideways. Asked of the declaration and the keys rather than of the drift
-	/// so that an effect with no wind renders exactly as it always has.
-	let windy: Bool
+	/// Whether the wind ever blows at all — the question the sideways wrap
+	/// asks, because a cloud with no wind on it must not wrap and never did.
+	///
+	/// Its neighbour ``windMoves`` is a different question: whether the wind
+	/// *changes*, which is what decides whether it has to be integrated.
+	let windBlows: Bool
 
 	/// How much of the cloud is in the air at the fullest. The number of pieces
 	/// is built from this, so that density can rise as well as fall.
@@ -506,7 +508,7 @@ struct EffectMotion: Sendable {
 		wind = track(.wind, -4...4)
 		density = track(.density, 0.05...1000)
 		scale = track(.size, 0.05...1000)
-		windy = wind.declared != 0 || wind.points.contains { $0.v != 0 }
+		windBlows = wind.declared != 0 || wind.points.contains { $0.v != 0 }
 	}
 
 	/// The effect's own clock: how far the cloud has fallen, in the units the
@@ -534,7 +536,8 @@ struct EffectMotion: Sendable {
 	/// which is a question about the programme rather than about the cloud.
 	func time(atClock clock: Double) -> Double { speed.time(reaching: clock) }
 
-	/// Whether the wind has to be integrated at all.
+	/// Whether the wind has to be integrated at all — as against ``windBlows``,
+	/// which is whether there is any wind to feel.
 	///
 	/// It does not when the wind never changes: a constant lean comes straight
 	/// out of the integral, so the lean times the clock *is* the distance, and
