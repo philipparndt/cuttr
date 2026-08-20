@@ -664,6 +664,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	@objc func saveAs(_ sender: Any?) {
 		if let composer = currentComposer { composer.saveAs(sender) } else { current?.saveAs(sender) }
 	}
+
+	/// The versions kept of a project. Only a project window has them: a take is
+	/// kept as part of the project that names it, because a version has to
+	/// restore a coherent state rather than half of one.
+	@objc func showVersions(_ sender: Any?) { currentComposer?.showVersions(sender) }
 	@objc func importSubclips(_ sender: Any?) { current?.importSubclips(sender) }
 
 	@objc func showShortcuts(_ sender: Any?) {

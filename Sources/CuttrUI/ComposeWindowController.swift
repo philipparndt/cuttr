@@ -524,6 +524,22 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 	private func wire() {
 		composeDocument.onChange = { [weak self] in self?.rebuild() }
+		// A version being kept is worth a word in the line that already carries
+		// what just happened, and nothing more. It must never be a sheet: the
+		// save has already happened by the time this runs, and interrupting an
+		// edit to talk about our own bookkeeping would be worse than keeping no
+		// versions at all.
+		composeDocument.history.onOutcome = { [weak self] outcome in
+			guard let self else { return }
+			switch outcome {
+			case .kept(let version): self.bar.setStatus("kept a version — \(version.short)")
+			// Not in a work tree, nothing changed, or somebody is mid-rebase.
+			// All three are ordinary and none is worth a word.
+			case .nothingChanged, .noRepository: break
+			case .busy(let what): self.bar.setStatus("no version kept — \(what) is in progress")
+			case .failed(let why): self.bar.setStatus("no version kept — \(why)")
+			}
+		}
 		strip.onScrub = { [weak self] time in self?.seek(to: time) }
 
 		// Double-click a clip on the programme to open the take it came from,
@@ -1216,6 +1232,39 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		}
 	}
 
+	/// The versions kept while somebody worked, and the way back to one.
+	///
+	/// Whatever is owed goes in first, so the list opens with the state on
+	/// screen already in it — a versions list that does not contain what you are
+	/// looking at is a list you cannot reason about.
+	@objc public func showVersions(_ sender: Any?) {
+		guard let url = composeDocument.url, let view = window?.contentView else { return }
+		let repository = ProjectVersions(project: url)
+		composeDocument.keepAVersion()
+		let shown = VersionsSheet.present(over: view, versions: composeDocument.versions()) {
+			[weak self] commit in
+			guard let self else { return .noRepository }
+			// Refused rather than half-done, exactly as a checkout is: an open
+			// take window would write its stale cuts back over what was just
+			// restored.
+			if let root = repository?.root, let waiting = ProjectVersions.inTheWay(of: root) {
+				return .failed(waiting)
+			}
+			let outcome = self.composeDocument.restore(commit)
+			if case .kept(let version) = outcome {
+				self.bar.setStatus("went back to \(version.short) — \(version.title)")
+				self.rebuild()
+			}
+			return outcome
+		}
+		guard !shown else { return }
+		// Nothing to show, and the reason is worth one line: a project on a
+		// footage volume is not in a work tree and never will have versions.
+		bar.setStatus(repository == nil
+			? "no versions — this project is not in a git repository"
+			: "no versions kept yet")
+	}
+
 	/// A project must be on disk before it can point at anything: every path in
 	/// it is relative to where it sits.
 	private func ensureSaved() -> Bool {
@@ -1336,6 +1385,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		case #selector(render(_:)): return composeDocument.resolved != nil
 		case #selector(exportProject(_:)): return !composeDocument.project.takes.isEmpty
 		case #selector(editScene(_:)): return onEditScene != nil
+		// A project with no file has nowhere to keep versions and no repository
+		// to keep them in.
+		case #selector(showVersions(_:)): return composeDocument.url != nil
 		default: return true
 		}
 	}
@@ -1345,6 +1397,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		keyMonitor = nil
 		buildTask?.cancel()
 		transport.pause()
+		// The last edit of the session is the one somebody most wants back, and
+		// the quiet after it is the quiet in which the window was closed. On
+		// this thread rather than off it: there is no later moment to finish in.
+		composeDocument.keepAVersion()
 	}
 
 	/// One line, whatever happened.

@@ -27,6 +27,15 @@ public final class ComposeDocument {
 
 	public var onChange: (() -> Void)?
 
+	/// The versions kept of this project in the repository it lives in.
+	///
+	/// Here rather than in the window controller because this is the object that
+	/// knows when the project has been *written*, and a version is a fact about
+	/// the files rather than about a window. A window that closes leaves the
+	/// document alone long enough to be flushed; see
+	/// ``ProjectHistory/flushAndWait()``.
+	public let history = ProjectHistory()
+
 	private var watcher: DispatchSourceFileSystemObject?
 	private var watchedDescriptor: CInt = -1
 	private var takeObserver: NSObjectProtocol?
@@ -44,6 +53,13 @@ public final class ComposeDocument {
 				guard let self, let changed = note.object as? URL else { return }
 				guard self.takes.contains(where: { $0.url == changed }) else { return }
 				self.resolve()
+				// A version has to restore a coherent state rather than half of
+				// one, and a take re-cut in another tab is half of this
+				// project's state. So a take being written counts as this
+				// project being saved, even though the `.cuttrproj` did not
+				// change: going back to a project whose takes have since moved
+				// is going back to clips that are not there.
+				self.history.saved(self.url)
 			}
 		}
 	}
@@ -117,6 +133,7 @@ public final class ComposeDocument {
 		url = fileURL
 		try ProjectWriter.write(project).write(to: fileURL, atomically: true, encoding: .utf8)
 		isDirty = false
+		history.saved(fileURL)
 		resolve()
 		watch()
 	}
@@ -153,6 +170,42 @@ public final class ComposeDocument {
 		defer { watch() }
 		try ProjectWriter.write(project).write(to: url, atomically: true, encoding: .utf8)
 		isDirty = false
+		// Not a commit — a commit after this goes quiet. This window writes on
+		// every edit, so committing here would be hundreds of commits in an
+		// afternoon and a log nobody could read. See ``ProjectHistory``.
+		history.saved(url)
+	}
+
+	// MARK: - Versions
+
+	/// The versions kept of this project, newest first.
+	///
+	/// Empty when the project is not in a work tree, which is the ordinary case
+	/// for one sitting on a footage volume.
+	public func versions() -> [ProjectVersions.Version] {
+		guard let url, let git = ProjectVersions(project: url) else { return [] }
+		return git.list()
+	}
+
+	/// Brings a version back onto the disk.
+	///
+	/// Whatever is owed goes in as a version first, so going back is not a way
+	/// to lose the thing you were doing — and then the files are re-read,
+	/// because every one of them has just changed underneath.
+	@discardableResult
+	public func restore(_ commit: String) -> ProjectVersions.Outcome {
+		guard let url, let git = ProjectVersions(project: url) else { return .noRepository }
+		history.flushAndWait()
+		let outcome = git.restore(commit)
+		if case .kept = outcome { reload() }
+		return outcome
+	}
+
+	/// Keep a version now, if one is owed. What a closing window calls: there
+	/// will be no later quiet moment to finish in.
+	@discardableResult
+	public func keepAVersion() -> ProjectVersions.Outcome {
+		history.flushAndWait()
 	}
 
 	private func resolve() {

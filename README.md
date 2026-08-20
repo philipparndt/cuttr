@@ -939,6 +939,43 @@ path to disagree with the first.
 The composing window watches the project file and re-reads it when it changes,
 so the intended way to work is to keep it open beside your editor.
 
+### Every pause leaves a version
+
+Where a project lives in a git repository, saving it leaves a commit, so that
+when something is wrong an hour later there is a version to go back to.
+**File ▸ Versions…** (`⇧⌘Y`) lists them — when, and what changed — and puts one
+back.
+
+A version per thought, not per keystroke. The project window writes its file on
+every edit, so a commit is made after a few seconds of quiet and once more when
+the window closes. Nothing is kept when nothing changed, when the project is not
+in a work tree — a footage volume is not one, and that is the ordinary case — or
+while a merge or a rebase is in progress.
+
+What goes in is the project and everything textual it is made of: the
+`.cuttrproj`, every `.cuttr` it names, and their sidecars — the `words:` files
+and the anchor paths. Not footage, not renders. Going back has to restore a
+coherent state rather than half of one, because a project whose takes have since
+been re-cut points at clips that have moved.
+
+**It does not touch your repository.** Not the working tree, not the index, not
+`HEAD`, not the branch you are on, and it never pushes. Versions are hashed and
+committed with git plumbing onto `refs/cuttr/saves`, which is a ref and not a
+branch — so it stays out of `git branch`, out of Fork's sidebar, and out of this
+program's own branch menu in the title bar, where tens of machine-made commits a
+day would have buried the one useful list. Read it like any other ref:
+
+```
+git log --stat refs/cuttr/saves
+git show refs/cuttr/saves:takes/take-01.cuttr
+```
+
+Restoring writes files and moves nothing, and the state you are leaving is kept
+as a version first — so going back is not a way to lose what you were doing. It
+waits for any take window open on that repository to be closed, for the same
+reason a checkout does: a take window holds its cuts in memory and would write
+them straight back over the version.
+
 ## Layout
 
     Sources/CuttrKit/       takes: clips, slugs, tags, timecode, waveforms, alignment
