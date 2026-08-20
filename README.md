@@ -582,6 +582,67 @@ and the eye finds it in about two seconds. At the start and end of the fade
 nothing at all is applied — the frames on either side of a film sequence go
 through no filter, which is what keeps the rest of the cut exact.
 
+### Effects that come on — `keys:`
+
+`in:` and `out:` scale the whole of an effect on its way in and out. That is one
+shape, and it is the shape of *arriving*. `keys:` move the parameters
+themselves, so an aberration can grow, rain can start as a drizzle and turn into
+a downpour, and a tape can get worse for two seconds and settle — while the
+effect is fully on.
+
+```yaml
+overlays:
+  - aberration: radial
+    amount:  0.2
+    keys:
+      - {t: 0}
+      - {t: 1.5, amount: 1.2, ease: out}
+      - {t: 3.0, amount: 0.1, ease: in}
+```
+
+The vocabulary is the one scenes already use, and deliberately not a second
+spelling of it: `t` is seconds from the start of the overlay's own appearance,
+a key states only what changes, anything it leaves out is what it was at the key
+before, and `ease` is `linear`, `in`, `out` or `inOut`. Before the first key
+everything is what the overlay itself says above, so adding `keys:` never
+silently changes what an overlay was.
+
+| | |
+|---|---|
+| `film:` | `ratio` `strength` `grain` `vignette` |
+| `aberration:` | `amount` `angle` |
+| `tape:` | `jitter` `band` `chroma` `scanlines` `dropouts` |
+| `effect:` | `density` `speed` `size` `wind` |
+
+`ratio` on a key is the single number the shape is — `2.39`, not `2.39:1` —
+because a key states the quantity that moves.
+
+**Anything not in that table is refused by name, with the reason.** A seed
+cannot move: the same number giving the same cloud on every render is the whole
+of what a seed is for, and one that changed half way through would be two clouds
+cut together rather than one cloud moving. A stock, a condition, a finish and a
+style cannot move either — there is nothing half way between `warm` and `noir`.
+Cross-fade a second overlay over the first for those. A key asking for one of
+them stops the file from opening rather than being quietly dropped, because an
+animation that silently does nothing looks exactly like an animation nobody
+wrote.
+
+**`speed` and `wind` are integrated, not multiplied.** A drop's position is the
+area under its speed; multiplying the speed at this instant by the time so far
+surges the whole cloud the moment the number changes — seven times the distance
+in the frame after the key, for a speed going from one to four over a second.
+The wind is integrated *against* the speed, because a piece falling twice as
+fast covers twice the ground sideways while it does it.
+
+**`density` does not make new pieces.** A cloud is built once and cannot grow a
+piece half way through a render, so an animated density is read as the fraction
+of the cloud allowed to fall: the shower is built for the heaviest it ever gets,
+and a piece that is not falling this time round is held back above the top of
+the frame rather than vanishing where you can see it.
+
+`examples/effects/coming-on.cuttrproj` is all of it in ten seconds, and renders
+with no footage at all.
+
 ### Naming clips after whoever is talking
 
 **An anchor is a person.** Rename a tracked face to `mia` and clips she speaks
