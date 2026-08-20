@@ -63,8 +63,35 @@ public final class DocumentBar: NSView {
 	/// This is the reason the program refused `.fullSizeContentView` for so
 	/// long — under a transparent titlebar the alignment field ended up behind
 	/// the close button. The controls have moved since, and the answer to the
-	/// old objection is one number rather than a different window style.
-	public static let trafficLights: CGFloat = 78
+	/// old objection is to leave room for them.
+	///
+	/// A fallback, not the answer. The number was 78 and the buttons ended at
+	/// 79 once the band became a unified toolbar, so the capsule sat one point
+	/// over the zoom button — near enough to look deliberate and wrong. Where
+	/// there is a window to ask, ``roomForTrafficLights(in:)`` asks it; a
+	/// guess about somebody else's furniture goes stale the moment they move
+	/// it.
+	public static let trafficLights: CGFloat = 82
+
+	public override func viewDidMoveToWindow() {
+		super.viewDidMoveToWindow()
+		// The buttons are placed by AppKit, and where they end has changed
+		// under this program once already. Ask them.
+		leading?.constant = Self.roomForTrafficLights(in: window)
+	}
+
+	/// Where the first thing can start in this window, measured from the
+	/// buttons themselves.
+	///
+	/// The gap is the same one the buttons have between each other, so the
+	/// capsule reads as the next thing in the row rather than as a separate
+	/// arrangement that happens to start nearby.
+	public static func roomForTrafficLights(in window: NSWindow?) -> CGFloat {
+		let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+			.compactMap { window?.standardWindowButton($0) }
+		guard let last = buttons.map({ $0.frame.maxX }).max() else { return trafficLights }
+		return last + 20
+	}
 
 	/// The setting-up controls, shown in a popover from the document's name.
 	///
@@ -114,6 +141,9 @@ public final class DocumentBar: NSView {
 	private var documentName = ""
 	/// Which project on the left, which branch on the right, and `⇧⌘P`.
 	private let capsule = DocumentCapsule()
+	/// How far in the capsule starts. Set from the buttons themselves once
+	/// there is a window to measure.
+	private var leading: NSLayoutConstraint?
 	/// The way into the setting-up controls: an ellipsis, which is what a menu
 	/// of more things about the thing beside it looks like everywhere else on
 	/// this machine.
@@ -263,9 +293,10 @@ public final class DocumentBar: NSView {
 		// A progress indicator that appears *beside* a label pushes the label,
 		// and then every message that arrives with one arrives in a different
 		// place.
+		leading = capsule.leadingAnchor.constraint(equalTo: leadingAnchor,
+		                                           constant: Self.trafficLights)
 		NSLayoutConstraint.activate([
-			capsule.leadingAnchor.constraint(equalTo: leadingAnchor,
-			                                 constant: Self.trafficLights),
+			leading!,
 			capsule.centerYAnchor.constraint(equalTo: centerYAnchor),
 
 			// The rule, then the group: a clear gap either side of it, so the
