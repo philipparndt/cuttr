@@ -128,8 +128,8 @@ public struct ResolvedCard: Sendable, Equatable {
 /// A sound, placed on the programme's clock with its file found.
 public struct ResolvedSound: Sendable {
 	public let sound: Sound
-	/// Which of the project's sounds this came from, for the panel.
-	public let source: Int
+	/// Where in the file this one is written, for the panel.
+	public let origin: Origin
 	/// The file, already resolved against the project's own folder.
 	public let url: URL
 	public let start: Double
@@ -140,23 +140,17 @@ public struct ResolvedSound: Sendable {
 /// An overlay with its times worked out.
 public struct ResolvedOverlay: Sendable {
 	public let overlay: Overlay
-	/// Which of the project's overlays this came from.
+	/// Where in the file this one is written.
 	///
 	/// The overlay itself is not the answer: what is resolved is the overlay
 	/// *as it is at one appearance*, so an overlay that says something else the
 	/// second time is not equal to the one in the file. Matching by value found
 	/// nothing, and the panel lost the picture and the anchor as soon as
 	/// anybody typed a word into a range.
-	public let source: Int
+	public let origin: Origin
 	/// Which of that overlay's appearances — a caption on twice is two of
 	/// these, and a drag on the second bar moves the second one.
 	public let appearance: Int
-	/// Which timeline entry put this clip here.
-	///
-	/// A path rather than a name, because that is what the panel has when
-	/// somebody selects a row — and it is the only way to tell one placement of
-	/// a clip from another when the same clip is used twice.
-	public var entry: [Int] = []
 	public let start: Double
 	/// How long this clip overlaps the one before it — a dissolve, in seconds,
 	/// nought for a cut. The programme's clock already has it: the clip starts
@@ -354,6 +348,15 @@ public enum Resolver {
 		/// a group that produced nothing has no extent at all.
 		var groups: [String: (start: Double, end: Double)] = [:]
 		var groupDepth: [String: Int] = [:]
+		/// What each entry laid down, keyed by its path.
+		///
+		/// This is what an overlay written inside an entry covers. A name
+		/// cannot say it: `from: intro` finds every use of `intro`, and the
+		/// whole reason for writing an overlay inside a placement is to mean
+		/// *that* placement and no other. A path is the only thing that tells
+		/// two uses of one clip apart, and the layout is the only thing that
+		/// knows where each of them ended up.
+		var extents: [[Int]: (start: Double, end: Double)] = [:]
 		/// What was skipped along the way, for the panel to say beside the
 		/// picture rather than instead of it.
 		var warnings: [String] = []
@@ -399,6 +402,7 @@ public enum Resolver {
 					let existing = groups[name]
 					groups[name] = (min(existing?.start ?? start, start), max(existing?.end ?? cursor, cursor))
 					groupDepth[name] = min(groupDepth[name] ?? depth, depth)
+					extents[path] = (start, cursor)
 					continue
 				}
 
@@ -421,6 +425,7 @@ public enum Resolver {
 					cursor += card.duration
 					previousLength = card.duration
 					name(entry.label, from: placedAt, to: cursor, depth: depth)
+					extents[path] = (placedAt, cursor)
 					continue
 				}
 
@@ -443,6 +448,10 @@ public enum Resolver {
 
 				let trim = entry.trim
 				let label = entry.label
+				// A list or a query is several clips, and an overlay written on
+				// that entry covers all of them: from where the first one
+				// started to where the last one ended.
+				var laid: (start: Double, end: Double)?
 				for entry in found {
 					// Trimmed for this placement only: the take keeps its own
 					// marks, and the same shot used twice can be a different
@@ -490,7 +499,9 @@ public enum Resolver {
 					cursor += clip.duration
 					previousLength = clip.duration
 					name(label, from: placedAt, to: cursor, depth: depth)
+					laid = (min(laid?.start ?? placedAt, placedAt), cursor)
 				}
+				extents[path] = laid
 			}
 		}
 		guard !project.timeline.isEmpty else { throw ResolveError.nothingOnTheTimeline }
@@ -639,9 +650,34 @@ public enum Resolver {
 		}
 
 		var overlays: [ResolvedOverlay] = []
-		for (index, overlay) in project.overlays.enumerated() {
+
+		/// One overlay, wherever it is written, on to the programme's clock.
+		///
+		/// `covering` is what it falls back to when it says nothing about when
+		/// it is on — the placement it was written inside. There is no such
+		/// thing at the top level, which is why an overlay there without a
+		/// range is dropped by the reader instead.
+		func place(
+			_ overlay: Overlay, from origin: Origin,
+			covering: (start: Double, end: Double)?
+		) throws {
 			if let name = overlay.anchor, anchorsByName[name] == nil {
 				throw ResolveError.unknownAnchor(name)
+			}
+			guard !overlay.appearances.isEmpty else {
+				// Exactly the placement, which is the point of the spelling:
+				// the same clip used twice is two placements, and a caption
+				// written inside the second one is on over the second one.
+				guard let covering else {
+					warnings.append("\(overlay.described) is written on a timeline entry "
+						+ "that lays nothing down, so it is not on the programme.")
+					return
+				}
+				overlays.append(ResolvedOverlay(
+					overlay: overlay, origin: origin, appearance: 0,
+					start: covering.start, end: covering.end,
+					path: overlay.anchor.flatMap { paths[$0] }))
+				return
 			}
 			// One resolved overlay per range. Everything downstream — the layer
 			// tree, the transitions, the anchor following — is about a thing
@@ -660,11 +696,31 @@ public enum Resolver {
 					// the time it reaches the layer tree it is simply two
 					// overlays that agree about everything but their words.
 					overlays.append(ResolvedOverlay(
-						overlay: overlay.shown(at: appearance), source: index, appearance: position,
+						overlay: overlay.shown(at: appearance), origin: origin, appearance: position,
 						start: span.start, end: span.end,
 						path: overlay.anchor.flatMap { paths[$0] }))
 				}
 			}
+		}
+
+		// The ones written inside the timeline first, because that is the order
+		// the file puts them in — and the order of this list is the order they
+		// are drawn, which decides what a film overlay or an aberration is a
+		// lens on. `timeline:` comes before `overlays:` on the page.
+		func nested(_ entries: [TimelineEntry], at prefix: [Int]) throws {
+			for (position, entry) in entries.enumerated() {
+				let path = prefix + [position]
+				for (index, overlay) in entry.overlays.enumerated() {
+					try place(overlay, from: .entry(path: path, index: index),
+					          covering: extents[path])
+				}
+				if case .group(_, let inner) = entry.source { try nested(inner, at: path) }
+			}
+		}
+		try nested(project.timeline, at: [])
+
+		for (index, overlay) in project.overlays.enumerated() {
+			try place(overlay, from: .project(index), covering: nil)
 		}
 
 		// Spelled out rather than chained: the type checker gives up on the
@@ -682,7 +738,16 @@ public enum Resolver {
 		// else the project names. A sound that is on twice is two of these, the
 		// same way an overlay is.
 		var sounds: [ResolvedSound] = []
-		for (index, sound) in project.sounds.enumerated() {
+
+		/// One sound, wherever it is written, on to the programme's clock.
+		///
+		/// `covering` is what it plays for when it says nothing — the placement
+		/// it was written inside, exactly as an overlay written there is drawn
+		/// for. There is no such thing at the top level, which is why a sound
+		/// there without a range is dropped by the reader instead.
+		func lay(
+			_ sound: Sound, from origin: Origin, covering: (start: Double, end: Double)?
+		) throws {
 			let url = URL(fileURLWithPath: sound.file, relativeTo: baseURL).standardizedFileURL
 			// Said now rather than discovered as a silent track. A missing
 			// recording is named when a take is resolved, and a missing piece of
@@ -691,11 +756,36 @@ public enum Resolver {
 			guard FileManager.default.fileExists(atPath: url.path) else {
 				throw ResolveError.missingSound(sound.file)
 			}
-			for span in try when(sound.span) where span.end > span.start {
+			guard let span = sound.span else {
+				guard let covering, covering.end > covering.start else {
+					warnings.append("The sound `\(sound.file)` is written on a timeline entry "
+						+ "that lays nothing down, so it does not play.")
+					return
+				}
 				sounds.append(ResolvedSound(
-					sound: sound, source: index, url: url,
-					start: span.start, end: span.end))
+					sound: sound, origin: origin, url: url,
+					start: covering.start, end: covering.end))
+				return
 			}
+			for where_ in try when(span) where where_.end > where_.start {
+				sounds.append(ResolvedSound(
+					sound: sound, origin: origin, url: url,
+					start: where_.start, end: where_.end))
+			}
+		}
+
+		func nestedSounds(_ entries: [TimelineEntry], at prefix: [Int]) throws {
+			for (position, entry) in entries.enumerated() {
+				let path = prefix + [position]
+				for (index, sound) in entry.sounds.enumerated() {
+					try lay(sound, from: .entry(path: path, index: index), covering: extents[path])
+				}
+				if case .group(_, let inner) = entry.source { try nestedSounds(inner, at: path) }
+			}
+		}
+		try nestedSounds(project.timeline, at: [])
+		for (index, sound) in project.sounds.enumerated() {
+			try lay(sound, from: .project(index), covering: nil)
 		}
 		sounds.sort { $0.start < $1.start }
 

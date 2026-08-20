@@ -48,7 +48,7 @@ import Testing
 
 		let project = self.project()
 		var seen: Set<CGFloat> = []
-		for selection: ProjectSelection in [.output, .entry([0]), .entry([1]), .overlay(0), .overlay(1)] {
+		for selection: ProjectSelection in [.output, .entry([0]), .entry([1]), .overlay(.project(0)), .overlay(.project(1))] {
 			panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: selection)
 			panel.layoutSubtreeIfNeeded()
 			let origins = keyOrigins(panel)
@@ -72,7 +72,7 @@ import Testing
 		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 900),
 		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
 		window.contentView = panel
-		panel.reload(project(), vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(1))
+		panel.reload(project(), vocabulary: ComposeDocument.Vocabulary(), selection: .overlay(.project(1)))
 
 		for width in [300.0, 340.0, 420.0, 560.0, 700.0] {
 			window.setContentSize(NSSize(width: width, height: 900))
@@ -96,7 +96,7 @@ import Testing
 		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
 		window.contentView = panel
 
-		for selection: ProjectSelection in [.output, .overlay(0), .overlay(1), .entry([1])] {
+		for selection: ProjectSelection in [.output, .overlay(.project(0)), .overlay(.project(1)), .entry([1])] {
 			panel.reload(project(), vocabulary: ComposeDocument.Vocabulary(), selection: selection)
 			panel.layoutSubtreeIfNeeded()
 			let first = geometry(of: panel)

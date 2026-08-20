@@ -88,7 +88,7 @@ enum Frame {
 		for shown: ResolvedOverlay, in work: ProgrammeCompositor.Work
 	) -> EffectRenderer? {
 		work.effects.first {
-			$0.overlay.source == shown.source && $0.overlay.appearance == shown.appearance
+			$0.overlay.origin == shown.origin && $0.overlay.appearance == shown.appearance
 		}?.renderer
 	}
 

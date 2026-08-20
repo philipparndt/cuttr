@@ -245,10 +245,10 @@ public final class ProjectInspector: NSView, NSSplitViewDelegate {
 	private func showWhatItWrites() {
 		guard showingWrites else { return }
 		switch selection {
-		case .overlay(let index) where index < project.overlays.count:
-			yaml.string = ProjectWriter.fragment(for: project.overlays[index])
-		case .sound(let index) where index < project.sounds.count:
-			yaml.string = ProjectWriter.fragment(for: project.sounds[index])
+		case .overlay(let origin) where project.overlay(at: origin) != nil:
+			yaml.string = project.overlay(at: origin).map { ProjectWriter.fragment(for: $0) } ?? ""
+		case .sound(let origin) where project.sound(at: origin) != nil:
+			yaml.string = project.sound(at: origin).map { ProjectWriter.fragment(for: $0) } ?? ""
 		case .entry(let path):
 			yaml.string = project.entry(at: path).map { ProjectWriter.fragment(for: $0) } ?? ""
 		default:

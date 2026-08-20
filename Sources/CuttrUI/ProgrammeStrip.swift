@@ -28,16 +28,16 @@ public final class ProgrammeStrip: NSView {
 	/// An overlay's bar was dragged: which overlay it came from, and where its
 	/// ends are now, on the programme's clock. The window writes it back the
 	/// way the file says it — snapped to a clip, or relative to one.
-	public var onMoveOverlay: ((Int, Int, Double, Double) -> Void)?
+	public var onMoveOverlay: ((Origin, Int, Double, Double) -> Void)?
 	/// Whether the anchor markers are drawn over the picture. Kept here because
 	/// the strip is where the switch lives.
 	public var showAnchors = true { didSet { needsDisplay = true } }
 
 	/// Where each overlay's bar is, so a drag can find it again.
-	private var bars: [(source: Int, appearance: Int, rect: NSRect,
+	private var bars: [(origin: Origin, appearance: Int, rect: NSRect,
 	                    start: Double, end: Double)] = []
 	private enum Grip { case body(Double), start, end }
-	private var dragging: (source: Int, appearance: Int, grip: Grip,
+	private var dragging: (origin: Origin, appearance: Int, grip: Grip,
 	                       start: Double, end: Double)?
 
 	private let clipRowHeight: CGFloat = 34
@@ -163,12 +163,12 @@ public final class ProgrammeStrip: NSView {
 			let row = rows.firstIndex { $0 <= overlay.start + 1e-9 } ?? rows.count
 			if row < rows.count { rows[row] = overlay.end } else { rows.append(overlay.end) }
 			let y = top + clipRowHeight + CGFloat(row) * overlayRowHeight
-			let moved = dragging?.source == overlay.source
+			let moved = dragging?.origin == overlay.origin
 				&& dragging?.appearance == overlay.appearance ? dragging : nil
 			let a = x(for: moved?.start ?? overlay.start), b = x(for: moved?.end ?? overlay.end)
 			let rect = NSRect(x: a, y: y + 1, width: max(b - a - 1, 2), height: overlayRowHeight - 3)
-			bars.append((overlay.source, overlay.appearance, rect, overlay.start, overlay.end))
-			let dragged = dragging?.source == overlay.source
+			bars.append((overlay.origin, overlay.appearance, rect, overlay.start, overlay.end))
+			let dragged = dragging?.origin == overlay.origin
 				&& dragging?.appearance == overlay.appearance
 			let colour: NSColor = overlay.path != nil ? Theme.externalWave : Theme.cameraWave
 			colour.withAlphaComponent(dragged ? 0.6 : 0.35).setFill()
@@ -299,7 +299,7 @@ public final class ProgrammeStrip: NSView {
 			} else {
 				grip = .body(t - bar.start)
 			}
-			dragging = (bar.source, bar.appearance, grip, bar.start, bar.end)
+			dragging = (bar.origin, bar.appearance, grip, bar.start, bar.end)
 			needsDisplay = true
 			return
 		}
@@ -332,7 +332,7 @@ public final class ProgrammeStrip: NSView {
 		// Shown while it is being dragged rather than only when it is let go,
 		// so the bar follows the pointer.
 		if let index = bars.firstIndex(where: {
-			$0.source == moving.source && $0.appearance == moving.appearance
+			$0.origin == moving.origin && $0.appearance == moving.appearance
 		}) {
 			bars[index].start = moving.start
 			bars[index].end = moving.end
@@ -347,6 +347,6 @@ public final class ProgrammeStrip: NSView {
 		guard let moving = dragging else { return }
 		dragging = nil
 		needsDisplay = true
-		onMoveOverlay?(moving.source, moving.appearance, moving.start, moving.end)
+		onMoveOverlay?(moving.origin, moving.appearance, moving.start, moving.end)
 	}
 }

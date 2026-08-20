@@ -219,7 +219,7 @@ extension Project {
 	}
 
 	/// Runs `change` on the array that owns `path`, with the index in it.
-	private mutating func modify(at path: [Int], _ change: (inout [TimelineEntry], Int) -> Void) {
+	mutating func modify(at path: [Int], _ change: (inout [TimelineEntry], Int) -> Void) {
 		func recurse(_ list: inout [TimelineEntry], _ path: ArraySlice<Int>) {
 			guard let index = path.first, index < list.count else { return }
 			if path.count == 1 {
@@ -228,9 +228,91 @@ extension Project {
 			}
 			guard case .group(let name, var inner) = list[index].source else { return }
 			recurse(&inner, path.dropFirst())
-			list[index] = TimelineEntry(
-				group: name, entries: inner, transition: list[index].transition)
+			// Only the contents are replaced. Rebuilding the entry from its
+			// name and its transition dropped everything else it carried —
+			// which was harmless while a group carried nothing else, and stops
+			// being harmless the moment it carries overlays of its own.
+			list[index].source = .group(name, inner)
 		}
 		recurse(&timeline, path[...])
+	}
+
+	// MARK: - Overlays, wherever they are written
+
+	/// The overlay an origin names, from the top-level list or from an entry.
+	public func overlay(at origin: Origin) -> Overlay? {
+		switch origin {
+		case .project(let index):
+			return index < overlays.count ? overlays[index] : nil
+		case .entry(let path, let index):
+			guard let entry = entry(at: path), index < entry.overlays.count else { return nil }
+			return entry.overlays[index]
+		}
+	}
+
+	/// Changes it where it is written. One function, so that every panel that
+	/// edits an overlay stops caring which of the two places it came from.
+	public mutating func editOverlay(at origin: Origin, _ change: (inout Overlay) -> Void) {
+		switch origin {
+		case .project(let index):
+			guard index < overlays.count else { return }
+			change(&overlays[index])
+		case .entry(let path, let index):
+			modify(at: path) { list, at in
+				guard index < list[at].overlays.count else { return }
+				change(&list[at].overlays[index])
+			}
+		}
+	}
+
+	/// Takes it off, wherever it is written.
+	public mutating func removeOverlay(at origin: Origin) {
+		switch origin {
+		case .project(let index):
+			guard index < overlays.count else { return }
+			overlays.remove(at: index)
+		case .entry(let path, let index):
+			modify(at: path) { list, at in
+				guard index < list[at].overlays.count else { return }
+				list[at].overlays.remove(at: index)
+			}
+		}
+	}
+
+	/// The sound an origin names, from the top-level list or from an entry.
+	public func sound(at origin: Origin) -> Sound? {
+		switch origin {
+		case .project(let index):
+			return index < sounds.count ? sounds[index] : nil
+		case .entry(let path, let index):
+			guard let entry = entry(at: path), index < entry.sounds.count else { return nil }
+			return entry.sounds[index]
+		}
+	}
+
+	public mutating func editSound(at origin: Origin, _ change: (inout Sound) -> Void) {
+		switch origin {
+		case .project(let index):
+			guard index < sounds.count else { return }
+			change(&sounds[index])
+		case .entry(let path, let index):
+			modify(at: path) { list, at in
+				guard index < list[at].sounds.count else { return }
+				change(&list[at].sounds[index])
+			}
+		}
+	}
+
+	public mutating func removeSound(at origin: Origin) {
+		switch origin {
+		case .project(let index):
+			guard index < sounds.count else { return }
+			sounds.remove(at: index)
+		case .entry(let path, let index):
+			modify(at: path) { list, at in
+				guard index < list[at].sounds.count else { return }
+				list[at].sounds.remove(at: index)
+			}
+		}
 	}
 }

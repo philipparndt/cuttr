@@ -6,8 +6,12 @@ import CuttrKit
 public enum ProjectSelection: Equatable {
 	case output
 	case entry([Int])
-	case overlay(Int)
-	case sound(Int)
+	/// An overlay, wherever it is written: the top-level list, or inside one
+	/// timeline entry. The panel edits both through the same form, so it
+	/// carries the address rather than an index into one particular list.
+	case overlay(Origin)
+	/// A sound, on the same terms.
+	case sound(Origin)
 }
 
 /// The programme: what plays, in order, with what is drawn over it.
@@ -70,6 +74,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// Dragging an entry means dragging its position, so the position is what
 	/// travels: `0.2.1` is the second entry of the third entry of the first.
 	private static let entryType = NSPasteboard.PasteboardType("de.rnd7.cuttr.entry")
+	/// An overlay or a sound being dragged from one home to another, which is a
+	/// different question from where an entry goes and so a different type.
+	private static let carriedType = NSPasteboard.PasteboardType("de.rnd7.cuttr.carried")
 	/// A scene, dragged. Its own type rather than plain text because plain text
 	/// dropped on the programme is read as a clip reference, and a scene is not
 	/// one: it is a thing to be *drawn*, and what it needs underneath it is a
@@ -78,26 +85,56 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	// MARK: - Tree
 
+	/// What a row that is not a timeline entry holds.
+	///
+	/// An overlay and a sound are addressed the same way and moved between the
+	/// same homes, and the tree files both under whatever they belong to — so
+	/// they are one case each of one thing rather than two parallel fields that
+	/// have to be checked in the same order everywhere.
+	enum Carried: Equatable {
+		case overlay(Origin)
+		case sound(Origin)
+
+		var selection: ProjectSelection {
+			switch self {
+			case .overlay(let origin): return .overlay(origin)
+			case .sound(let origin): return .sound(origin)
+			}
+		}
+
+		var home: Project.Home {
+			switch self {
+			case .overlay(let origin), .sound(let origin): return Project.home(of: origin)
+			}
+		}
+	}
+
 	/// One entry, wrapped so the outline view has an object to hold on to.
 	fileprivate final class Node: NSObject {
 		let path: [Int]
 		let entry: TimelineEntry
 		let children: [Node]
-		/// Which overlay this row is, when it is an overlay rather than an
-		/// entry — the tree shows both, because an overlay hung on a clip is
+		/// What this row is, when it is not an entry — the tree shows the
+		/// overlays and the sounds too, because something hung on a clip is
 		/// part of the structure of the programme and looking for it in a
 		/// second list is how somebody loses it.
-		let overlay: Int?
+		let carried: Carried?
+
+		/// The overlay this row is, for the places that are only about those.
+		var overlay: Origin? {
+			if case .overlay(let origin) = carried { return origin }
+			return nil
+		}
 		/// The heading the overlays that hang on nothing in particular live
 		/// under. Closed to begin with: they are the exception.
 		let isOverlayRoot: Bool
 
 		init(path: [Int], entry: TimelineEntry, children: [Node],
-		     overlay: Int? = nil, isOverlayRoot: Bool = false) {
+		     carried: Carried? = nil, isOverlayRoot: Bool = false) {
 			self.path = path
 			self.entry = entry
 			self.children = children
-			self.overlay = overlay
+			self.carried = carried
 			self.isOverlayRoot = isOverlayRoot
 		}
 
@@ -227,13 +264,58 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// A pull-down, so the face of it stays `+` rather than becoming whatever
 	/// was added last: this is a verb, not a choice being remembered.
 	/// For the tests: the menu behind the `+`, without a window to click in.
-	func addOverlayMenu() -> NSMenu? { addMenu().menu }
+	func addOverlayMenu() -> NSMenu? { addMenu(includingEntries: false).menu }
 
-	private func addMenu() -> NSPopUpButton {
+	/// For the tests: the menu behind the timeline's own `+`.
+	func addEntryMenu() -> NSMenu? { addMenu(includingEntries: true).menu }
+
+	/// Everything the `+` menus and the `Add ▸` submenu can make.
+	///
+	/// One list, called from three places, because three lists of the same
+	/// things is three lists that come apart. `nil` is a separator.
+	private func additions(includingEntries: Bool) -> [(String, String, Theme.Kind, Selector)?] {
+		var out: [(String, String, Theme.Kind, Selector)?] = []
+		if includingEntries {
+			out += [
+				("Clip", "film", Theme.Kind.clip, #selector(addClip)),
+				("Section", "folder", .section, #selector(addGroup)),
+				("Card", "rectangle.fill", .card, #selector(addCard)),
+				nil,
+			]
+		}
+		out += [
+			("Caption", "textformat", Theme.Kind.text, #selector(addText)),
+			("Spinner", "circle.dotted", .spinner, #selector(addSpinner)),
+			("Scene", "rectangle.stack", .scene, #selector(addScene)),
+			("Effect", "sparkles", .effect, #selector(addEffect)),
+			("Film mode", "camera.filters", .film, #selector(addFilm)),
+			("Chromatic aberration", "circle.hexagongrid", .aberration, #selector(addAberration)),
+			("VHS tape", "tv.badge.wifi", .tape, #selector(addTape)),
+		]
+		if includingEntries {
+			out += [nil, ("Sound", "speaker.wave.2", Theme.Kind.sound, #selector(addSound))]
+		}
+		return out
+	}
+
+	private func additionItems(includingEntries: Bool) -> [NSMenuItem] {
+		additions(includingEntries: includingEntries).map { entry in
+			guard let (title, symbol, kind, action) = entry else { return .separator() }
+			let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+			item.target = self
+			item.image = Theme.symbol(kind, size: 12)
+				?? NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+			return item
+		}
+	}
+
+	private func addMenu(includingEntries: Bool) -> NSPopUpButton {
 		let button = NSPopUpButton(frame: .zero, pullsDown: true)
 		button.bezelStyle = .rounded
 		button.controlSize = .small
-		button.toolTip = "Add an overlay, bound to what is selected"
+		button.toolTip = includingEntries
+			? "Add something, inside or after what is selected"
+			: "Add an overlay, bound to what is selected"
 		button.translatesAutoresizingMaskIntoConstraints = false
 		button.widthAnchor.constraint(equalToConstant: 44).isActive = true
 
@@ -242,22 +324,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		face.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "add")?
 			.withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
 		button.menu?.addItem(face)
-
-		for (title, symbol, kind, action) in [
-			("Caption", "textformat", Theme.Kind.text, #selector(addText)),
-			("Spinner", "circle.dotted", .spinner, #selector(addSpinner)),
-			("Scene", "rectangle.stack", .scene, #selector(addScene)),
-			("Effect", "sparkles", .effect, #selector(addEffect)),
-			("Film mode", "camera.filters", .film, #selector(addFilm)),
-			("Chromatic aberration", "circle.hexagongrid", .aberration, #selector(addAberration)),
-			("VHS tape", "tv.badge.wifi", .tape, #selector(addTape)),
-		] as [(String, String, Theme.Kind, Selector)] {
-			let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-			item.target = self
-			item.image = Theme.symbol(kind, size: 12)
-				?? NSImage(systemSymbolName: symbol, accessibilityDescription: title)
-			button.menu?.addItem(item)
-		}
+		for item in additionItems(includingEntries: includingEntries) { button.menu?.addItem(item) }
 		return button
 	}
 
@@ -289,8 +356,16 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		// minus button beside it does. A list somebody can select a row in and
 		// not delete from is a list that has to be explained.
 		outline.onKey = { [weak self] event in
-			guard isDelete(event), self?.selectedPath != nil else { return false }
-			self?.removeEntry()
+			guard let self, isDelete(event) else { return false }
+			// A row in this tree is an entry, or something carried by one, and
+			// Delete has to take either off — now that the tree is where they
+			// are made and moved, it is also where they are removed from.
+			if let carried = self.selectedTreeCarried {
+				self.removeCarried(carried)
+				return true
+			}
+			guard self.selectedPath != nil else { return false }
+			self.removeEntry()
 			return true
 		}
 		outline.rowHeight = 26
@@ -316,7 +391,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		outline.outlineTableColumn = column
 
 		// Dropped on from the library, and dragged about within itself.
-		outline.registerForDraggedTypes([.string, Self.entryType, Self.sceneType])
+		outline.registerForDraggedTypes([.string, Self.entryType, Self.carriedType, Self.sceneType])
 		// Several at once: a programme is re-ordered in handfuls more often
 		// than one at a time, and delete on four selected rows should take four
 		// off rather than the last one clicked.
@@ -333,11 +408,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		// and calling it by the key it writes is the same rule every label in
 		// the properties panel follows.
 		return pane("timeline", scroll, [
-			button("plus", #selector(addClip), "Add a clip by slug, or a #tag query"),
-			button("folder.badge.plus", #selector(addGroup),
-			       "Add a named section overlays can be hung on"),
-			button("rectangle.fill", #selector(addCard),
-			       "Add a card: time on the timeline with nothing behind it"),
+			// One `+` for everything that can go on a timeline, including the
+			// overlays and the sounds — because where they go is *here* now,
+			// inside whatever is selected, and a caption added from a pane
+			// somewhere else is a caption that then has to be told which shot
+			// it is about.
+			addMenu(includingEntries: true),
 			button("plus.square.on.square", #selector(duplicateEntry), "Another one just like it"),
 			button("arrow.up", #selector(moveEntryUp), "Earlier"),
 			button("arrow.down", #selector(moveEntryDown), "Later"),
@@ -404,35 +480,29 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// resolved programme is the only thing that knows.
 	func overlaysOver(_ selection: ProjectSelection) -> Set<Int> {
 		guard let resolved, case .entry(let path) = selection else { return [] }
-		guard let span = span(of: path, in: resolved) else { return [] }
+		guard let span = Project.extent(of: path, in: resolved) else { return [] }
 		var found: Set<Int> = []
 		for shown in resolved.overlays
 		where shown.start < span.end - 1e-6 && shown.end > span.start + 1e-6 {
-			found.insert(shown.source)
+			// Only the ones in the top-level list: this answers the overlay
+			// table, which lists that and nothing else. The nested ones are
+			// already shown under the entry they belong to.
+			if let index = shown.origin.projectIndex { found.insert(index) }
 		}
 		return found
 	}
 
-	/// Where an entry sits on the programme's clock — a clip, a card, or a
-	/// section with everything inside it.
-	private func span(of path: [Int], in resolved: ResolvedProject) -> (start: Double, end: Double)? {
-		if let clip = resolved.clips.first(where: { $0.entry == path }) {
-			return (clip.start, clip.end)
-		}
-		if let card = resolved.cards.first(where: { $0.entry == path }) {
-			return (card.start, card.end)
-		}
-		// A section: from the first thing inside it to the last, whatever those
-		// are and however deeply they nest.
-		let inside = resolved.clips.filter { $0.entry.starts(with: path) }.map { ($0.start, $0.end) }
-			+ resolved.cards.filter { $0.entry.starts(with: path) }.map { ($0.start, $0.end) }
-		guard let first = inside.map(\.0).min(), let last = inside.map(\.1).max() else { return nil }
-		return (first, last)
-	}
 
 	/// For the tests: what the tree holds, as text.
 	var treeRowsForTesting: [String] {
 		var out: [String] = []
+		func named(_ origin: Origin) -> String {
+			switch origin {
+			case .project(let index): return "\(index)"
+			case .entry(let path, let index):
+				return path.map(String.init).joined(separator: ".") + "#\(index)"
+			}
+		}
 		func name(_ node: Node) -> String {
 			if node.isOverlayRoot { return "loose" }
 			if let label = node.entry.label { return "entry \(label)" }
@@ -441,8 +511,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		}
 		func walk(_ nodes: [Node], under parent: String?) {
 			for node in nodes {
-				if let index = node.overlay {
-					out.append("\(parent ?? "?") → overlay \(index)")
+				if case .overlay(let origin) = node.carried {
+					out.append("\(parent ?? "?") → overlay \(named(origin))")
+				} else if case .sound(let origin) = node.carried {
+					out.append("\(parent ?? "?") → sound \(named(origin))")
 				} else {
 					walk(node.children, under: name(node))
 				}
@@ -457,6 +529,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		return outline.isItemExpanded(root)
 	}
 
+	/// For the tests: how many rows the tree is showing.
+	var rowCountForTesting: Int { outline.numberOfRows }
+
 	/// For the tests: click a row without a mouse.
 	func selectRow(_ row: Int) {
 		guard row >= 0, row < outline.numberOfRows else { return }
@@ -469,9 +544,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		return node?.path
 	}
 
-	/// The overlay selected in the tree, if that is what is selected.
-	private var selectedTreeOverlay: Int? {
-		(outline.item(atRow: outline.selectedRow) as? Node)?.overlay
+	/// What the tree has selected, when it is not a timeline entry.
+	private var selectedTreeCarried: Carried? {
+		(outline.item(atRow: outline.selectedRow) as? Node)?.carried
 	}
 
 	/// Every entry selected, in the order they appear.
@@ -489,7 +564,14 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	private func insert(_ entry: TimelineEntry) {
 		var next = project
-		next.insertEntry(entry, after: selectedPath)
+		// Inside a selected section rather than after it. A section is a place
+		// to put things, and the commonest reason to have one selected is that
+		// the next thing belongs in it.
+		if let path = selectedPath, case .group = project.entry(at: path)?.source {
+			pending = .entry(next.insertEntry(entry, into: path, at: Int.max))
+		} else {
+			next.insertEntry(entry, after: selectedPath)
+		}
 		onChange?(next)
 	}
 
@@ -513,9 +595,21 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// Exposed because a key press is not the only way to ask: a menu item will
 	/// want the same thing, and the tests want it without a window.
 	public func deleteSelected() {
-		if selectedPath != nil { removeEntry() }
+		if let carried = selectedTreeCarried { removeCarried(carried) }
+		else if selectedPath != nil { removeEntry() }
 		else if overlayTable.selectedRow >= 0 { removeOverlay() }
 		else if soundTable.selectedRow >= 0 { removeSound() }
+	}
+
+	/// Takes an overlay or a sound off, wherever in the file it is written.
+	func removeCarried(_ carried: Carried) {
+		var next = project
+		switch carried {
+		case .overlay(let origin): next.removeOverlay(at: origin)
+		case .sound(let origin): next.removeSound(at: origin)
+		}
+		pending = .output
+		onChange?(next)
 	}
 
 	@objc private func removeEntry() {
@@ -583,7 +677,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			// while a scene, film mode, the aberration and the tape could only
 			// be reached by adding something else and changing what it was.
 			// Another four buttons was not the answer to that.
-			addMenu(),
+			addMenu(includingEntries: false),
 			button("plus.square.on.square", #selector(duplicateOverlay), "Another one just like it"),
 			filterButton,
 			button("arrow.up", #selector(moveOverlayUp), "Draw it earlier — under the one above"),
@@ -621,13 +715,16 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	}
 
 	@objc private func addSound() {
-		var next = project
+		let home = homeForAdding
 		// Under speech more often than not, so it arrives at a level that will
-		// not drown anybody and fades rather than starting flat out.
-		next.sounds.append(Sound(
-			file: "music.wav", span: spanForNewOverlay, gain: -6,
-			arrival: .fade(over: 0.5), departure: .fade(over: 1.5)))
-		pending = .sound(next.sounds.count - 1)
+		// not drown anybody and fades rather than starting flat out. Written
+		// inside the selected entry it plays for exactly that placement, and
+		// says so by saying nothing about when.
+		var next = project
+		let landed = next.addSound(Sound(
+			file: "music.wav", span: home == nil ? spanForNewOverlay : nil, gain: -6,
+			arrival: .fade(over: 0.5), departure: .fade(over: 1.5)), into: home)
+		pending = landed.map { ProjectSelection.sound($0) } ?? .output
 		onChange?(next)
 	}
 
@@ -636,7 +733,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		guard row >= 0, row < project.sounds.count else { return }
 		var next = project
 		next.sounds.insert(project.sounds[row], at: row + 1)
-		pending = .sound(row + 1)
+		pending = .sound(.project(row + 1))
 		onChange?(next)
 	}
 
@@ -675,8 +772,26 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		guard landing >= 0, landing < project.overlays.count else { return }
 		var next = project
 		next.overlays.swapAt(index, landing)
-		pending = .overlay(landing)
+		pending = .overlay(.project(landing))
 		onChange?(next)
+	}
+
+	/// Where a new overlay or sound is written: inside whatever is selected.
+	///
+	/// The point of the whole arrangement. Adding a caption while a shot is
+	/// selected writes it inside that shot, where it covers that placement and
+	/// needs no name to be found by — rather than at the end of a list, hung on
+	/// a name somebody then has to invent.
+	///
+	/// The heading for the loose ones is the way to ask for the top-level list
+	/// on purpose, and nothing selected means the same.
+	private var homeForAdding: Project.Home {
+		guard let node = outline.item(atRow: outline.selectedRow) as? Node,
+		      !node.isOverlayRoot
+		else { return nil }
+		// A selected overlay adds a sibling beside itself, wherever it lives.
+		if let origin = node.overlay { return Project.home(of: origin) }
+		return node.path
 	}
 
 	/// The clip or section a new overlay should cover: whatever is selected on
@@ -726,46 +841,42 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		add(.tape(Tape()), arrival: .fade(over: 0.4), departure: .fade(over: 0.4))
 	}
 
-	/// One overlay, over whatever is selected, and selected itself afterwards.
+	/// One overlay, where it will live, and selected afterwards.
+	///
+	/// Written inside the selected entry when there is one, with no range of
+	/// its own — which is how the file says "all of this placement". At the top
+	/// level it needs a range, so it gets one covering whatever is selected,
+	/// which is what it has always got.
 	private func add(_ kind: Overlay.Kind, arrival: Overlay.Transition = .slide(.left, over: 0.4),
 	                 departure: Overlay.Transition = .slide(.right, over: 0.4)) {
+		let home = homeForAdding
+		let overlay = home == nil
+			? Overlay(kind: kind, span: spanForNewOverlay, arrival: arrival, departure: departure)
+			: Overlay(kind: kind, appearances: [], arrival: arrival, departure: departure)
 		var next = project
-		next.overlays.append(Overlay(kind: kind, span: spanForNewOverlay,
-		                             arrival: arrival, departure: departure))
-		pending = .overlay(next.overlays.count - 1)
+		let landed = next.addOverlay(overlay, into: home)
+		pending = landed.map { ProjectSelection.overlay($0) } ?? .output
 		onChange?(next)
 	}
 
 	@objc private func addText() {
-		var next = project
-		next.overlays.append(Overlay(kind: .text("Caption", style: nil), span: spanForNewOverlay))
-		pending = .overlay(next.overlays.count - 1)
-		onChange?(next)
+		add(.text("Caption", style: nil))
 	}
 
 	@objc private func addSpinner() {
-		var next = project
-		next.overlays.append(Overlay(
-			kind: .spinner(Spinner(words: [SpinnerWord("Working")])), span: spanForNewOverlay,
-			arrival: .fade(over: 0.3), departure: .fade(over: 0.3)))
-		pending = .overlay(next.overlays.count - 1)
-		onChange?(next)
+		add(.spinner(Spinner(words: [SpinnerWord("Working")])),
+		    arrival: .fade(over: 0.3), departure: .fade(over: 0.3))
 	}
 
 	@objc private func addEffect() {
-		var next = project
-		next.overlays.append(Overlay(
-			kind: .effect(Effect()), span: spanForNewOverlay,
-			arrival: .cut, departure: .fall(over: 1.5)))
-		pending = .overlay(next.overlays.count - 1)
-		onChange?(next)
+		add(.effect(Effect()), arrival: .cut, departure: .fall(over: 1.5))
 	}
 
 	@objc private func duplicateOverlay() {
 		guard let index = overlay(at: overlayTable.selectedRow) else { return }
 		var next = project
 		next.overlays.insert(project.overlays[index], at: index + 1)
-		pending = .overlay(index + 1)
+		pending = .overlay(.project(index + 1))
 		onChange?(next)
 	}
 
@@ -793,16 +904,20 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		roots = tree(project.timeline, at: [])
 		// And the ones that hang on nothing in particular, under a heading of
 		// their own at the end, closed unless somebody opened it.
-		let loose = looseOverlays()
-		if !loose.isEmpty {
-			roots.append(Node(
-				path: [], entry: TimelineEntry(clip: ClipReference("")),
-				children: loose.map {
-					Node(path: [], entry: TimelineEntry(clip: ClipReference("")),
-					     children: [], overlay: $0)
-				},
-				isOverlayRoot: true))
-		}
+		//
+		// Always there, even with nothing under it, because it is a *place*:
+		// dropping an overlay on it is how one is made global, and a target
+		// that only exists once something is already in it cannot be the way
+		// the first thing gets there.
+		let loose = looseOverlays().map { Carried.overlay(.project($0)) }
+			+ looseSounds().map { Carried.sound(.project($0)) }
+		roots.append(Node(
+			path: [], entry: TimelineEntry(clip: ClipReference("")),
+			children: loose.map {
+				Node(path: [], entry: TimelineEntry(clip: ClipReference("")),
+				     children: [], carried: $0)
+			},
+			isOverlayRoot: true))
 
 		let keep = pending ?? selection
 		pending = nil
@@ -823,14 +938,27 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			}
 			overlayTable.deselectAll(nil)
 			soundTable.deselectAll(nil)
-		case .overlay(let index) where index < project.overlays.count:
+		case .overlay(.project(let index)) where index < project.overlays.count:
 			overlayTable.selectRowIndexes([index], byExtendingSelection: false)
 			outline.deselectAll(nil)
 			soundTable.deselectAll(nil)
-		case .sound(let index) where index < project.sounds.count:
+		case .sound(.project(let index)) where index < project.sounds.count:
 			soundTable.selectRowIndexes([index], byExtendingSelection: false)
 			outline.deselectAll(nil)
 			overlayTable.deselectAll(nil)
+		case .overlay(let origin) where project.overlay(at: origin) != nil,
+		     .sound(let origin) where project.sound(at: origin) != nil:
+			// Written inside an entry, so the tree is the only place it is
+			// shown. Kept selected across a reload the same way an entry is.
+			var carried = Carried.overlay(origin)
+			if case .sound = keep { carried = .sound(origin) }
+			if let row = row(for: carried) {
+				outline.selectRowIndexes([row], byExtendingSelection: false)
+			} else {
+				outline.deselectAll(nil)
+			}
+			overlayTable.deselectAll(nil)
+			soundTable.deselectAll(nil)
 		default:
 			outline.deselectAll(nil)
 			overlayTable.deselectAll(nil)
@@ -849,20 +977,33 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			if case .group(_, let inner) = entry.source {
 				children = tree(inner, at: path)
 			}
-			// The overlays hung on this entry, under it. Structural rather than
-			// by the clock: an overlay that names this clip or this section
-			// *belongs* to it, while one that merely happens to be on while it
-			// plays belongs to whatever it does name.
+			// What this entry carries, under it — the ones written inside it
+			// first, because those *are* part of the entry.
+			children += entry.overlays.indices.map {
+				Node(path: path, entry: entry, children: [],
+				     carried: .overlay(.entry(path: path, index: $0)))
+			}
+			children += entry.sounds.indices.map {
+				Node(path: path, entry: entry, children: [],
+				     carried: .sound(.entry(path: path, index: $0)))
+			}
+			// And the ones from the top-level lists that name it. Structural
+			// rather than by the clock: an overlay that names this clip or this
+			// section *belongs* to it, while one that merely happens to be on
+			// while it plays belongs to whatever it does name.
 			children += overlaysNaming(entry).map {
-				Node(path: path, entry: entry, children: [], overlay: $0)
+				Node(path: path, entry: entry, children: [], carried: .overlay(.project($0)))
+			}
+			children += soundsNaming(entry).map {
+				Node(path: path, entry: entry, children: [], carried: .sound(.project($0)))
 			}
 			return Node(path: path, entry: entry, children: children)
 		}
 	}
 
-	/// The overlays that name an entry — by its `as:` label, by the section it
-	/// is, or by the clip it plays.
-	private func overlaysNaming(_ entry: TimelineEntry) -> [Int] {
+	/// Every name an entry answers to — its `as:` label, the section it is, or
+	/// the clip it plays.
+	static func names(of entry: TimelineEntry) -> Set<String> {
 		var names: Set<String> = []
 		if let label = entry.label { names.insert("@" + label) }
 		if case .group(let name, _) = entry.source { names.insert("@" + name) }
@@ -870,26 +1011,40 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			names.insert(reference.description)
 			names.insert(reference.slug)
 		}
+		return names
+	}
+
+	/// The overlays from the top-level list that name an entry.
+	private func overlaysNaming(_ entry: TimelineEntry) -> [Int] {
+		let names = Self.names(of: entry)
 		return project.overlays.indices.filter { index in
 			Self.endpoints(of: project.overlays[index]).contains { names.contains($0) }
 		}
 	}
 
+	/// The sounds from the top-level list that name one, by the same rule.
+	private func soundsNaming(_ entry: TimelineEntry) -> [Int] {
+		let names = Self.names(of: entry)
+		return project.sounds.indices.filter { index in
+			guard let span = project.sounds[index].span else { return false }
+			return Self.endpoints(of: span).contains { names.contains($0) }
+		}
+	}
+
 	/// Every name an overlay's spans point at.
 	static func endpoints(of overlay: Overlay) -> Set<String> {
-		var found: Set<String> = []
-		for appearance in overlay.appearances {
-			switch appearance.span {
-			case .marks(let from, let to):
-				found.insert(from.description)
-				found.insert(to.description)
-			case .within(let mark, _, _):
-				found.insert(mark.description)
-			case .times:
-				break
-			}
+		overlay.appearances.reduce(into: Set<String>()) {
+			$0.formUnion(endpoints(of: $1.span))
 		}
-		return found
+	}
+
+	/// And the names one span points at.
+	static func endpoints(of span: Overlay.Span) -> Set<String> {
+		switch span {
+		case .marks(let from, let to): return [from.description, to.description]
+		case .within(let mark, _, _): return [mark.description]
+		case .times: return []
+		}
 	}
 
 	/// The overlays that hang on nothing the timeline names: written in
@@ -906,11 +1061,41 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		return project.overlays.indices.filter { !named.contains($0) }
 	}
 
+	/// The sounds that name nothing the timeline names.
+	private func looseSounds() -> [Int] {
+		var named: Set<Int> = []
+		func walk(_ entries: [TimelineEntry]) {
+			for entry in entries {
+				named.formUnion(soundsNaming(entry))
+				if case .group(_, let inner) = entry.source { walk(inner) }
+			}
+		}
+		walk(project.timeline)
+		return project.sounds.indices.filter { !named.contains($0) }
+	}
+
 	private func row(for path: [Int]) -> Int? {
-		for row in 0..<outline.numberOfRows where (outline.item(atRow: row) as? Node)?.path == path {
+		for row in 0..<outline.numberOfRows
+		where (outline.item(atRow: row) as? Node).map({ $0.overlay == nil && $0.path == path }) == true {
 			return row
 		}
 		return nil
+	}
+
+	private func row(for carried: Carried) -> Int? {
+		for row in 0..<outline.numberOfRows
+		where (outline.item(atRow: row) as? Node)?.carried == carried {
+			return row
+		}
+		return nil
+	}
+
+	/// Whether what a row points at is still in the project.
+	private func exists(_ carried: Carried) -> Bool {
+		switch carried {
+		case .overlay(let origin): return project.overlay(at: origin) != nil
+		case .sound(let origin): return project.sound(at: origin) != nil
+		}
 	}
 
 	/// Sections stand open unless somebody closed them. A collapsed section
@@ -954,18 +1139,26 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		guard let node = item as? Node else { return nil }
 		// An overlay under the entry it hangs on, drawn as the overlay list
 		// draws it, so the two agree about what a caption looks like.
-		if let index = node.overlay, index < project.overlays.count {
+		if case .overlay(let origin) = node.carried, let overlay = project.overlay(at: origin) {
 			let row = (outlineView.makeView(withIdentifier: .init("treeOverlay"), owner: self)
 				as? OverlayRow)
 				?? { let made = OverlayRow(); made.identifier = .init("treeOverlay"); return made }()
-			row.overlay = project.overlays[index]
+			row.overlay = overlay
 			row.stack = ""
 			row.plays = false
 			row.needsDisplay = true
 			return row
 		}
+		if case .sound(let origin) = node.carried, let sound = project.sound(at: origin) {
+			let row = (outlineView.makeView(withIdentifier: .init("treeSound"), owner: self)
+				as? SoundRow)
+				?? { let made = SoundRow(); made.identifier = .init("treeSound"); return made }()
+			row.sound = sound
+			row.needsDisplay = true
+			return row
+		}
 		if node.isOverlayRoot {
-			let label = NSTextField(labelWithString: "OVERLAYS ON THE PROGRAMME'S OWN CLOCK")
+			let label = NSTextField(labelWithString: "ON THE PROGRAMME'S OWN CLOCK")
 			label.font = Theme.heading
 			label.textColor = Theme.faintText
 			return label
@@ -997,20 +1190,51 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	// MARK: - Dragging
 
 	public func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
-		// An overlay is shown here but not moved here: where it goes is what it
-		// hangs on, which is the `when:` field, not a position in a list.
-		guard let node = item as? Node, node.overlay == nil, !node.isOverlayRoot else { return nil }
+		guard let node = item as? Node, !node.isOverlayRoot else { return nil }
 		let pasteboardItem = NSPasteboardItem()
-		pasteboardItem.setString(node.path.map(String.init).joined(separator: "."), forType: Self.entryType)
-		pasteboardItem.setString(node.entry.source.description, forType: .string)
-		return pasteboardItem
+		// An overlay or a sound carries where it is *written* rather than where
+		// it is shown. Dropping it somewhere else is a move between homes,
+		// which is a different thing from re-ordering the timeline and says so.
+		switch node.carried {
+		case .overlay(let origin):
+			pasteboardItem.setString(Self.written(node.carried!), forType: Self.carriedType)
+			pasteboardItem.setString(project.overlay(at: origin)?.described ?? "", forType: .string)
+			return pasteboardItem
+		case .sound(let origin):
+			pasteboardItem.setString(Self.written(node.carried!), forType: Self.carriedType)
+			pasteboardItem.setString(project.sound(at: origin)?.file ?? "", forType: .string)
+			return pasteboardItem
+		case nil:
+			pasteboardItem.setString(node.path.map(String.init).joined(separator: "."),
+			                         forType: Self.entryType)
+			pasteboardItem.setString(node.entry.source.description, forType: .string)
+			return pasteboardItem
+		}
 	}
 
 	public func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo,
 	                        proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
+		// One of these lands *on* a row rather than in the gap between two: what
+		// is being asked is "belong to this", and a gap belongs to nothing.
+		if info.draggingPasteboard.string(forType: Self.carriedType) != nil {
+			guard let node = item as? Node else {
+				// The empty space below everything is not the top-level list;
+				// the heading at the end is, and it is one row away.
+				return []
+			}
+			if let carried = node.carried {
+				// Dropped on another one: it means the entry that one is in,
+				// which is the row somebody was aiming just past.
+				outlineView.setDropItem(self.node(at: carried.home ?? []),
+				                        dropChildIndex: NSOutlineViewDropOnItemIndex)
+			} else {
+				outlineView.setDropItem(node, dropChildIndex: NSOutlineViewDropOnItemIndex)
+			}
+			return .move
+		}
 		// Onto a clip means nothing — a clip holds nothing — so a drop there is
 		// retargeted to the gap after it, which is what the pointer is over.
-		if let node = item as? Node, node.groupName == nil {
+		if let node = item as? Node, node.groupName == nil, !node.isOverlayRoot {
 			let parent = self.node(at: Array(node.path.dropLast()))
 			outlineView.setDropItem(parent, dropChildIndex: (node.path.last ?? 0) + 1)
 		}
@@ -1019,7 +1243,67 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	public func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo,
 	                        item: Any?, childIndex index: Int) -> Bool {
-		dropItems(from: info.draggingPasteboard, into: (item as? Node)?.path ?? [], at: index)
+		if let written = info.draggingPasteboard.string(forType: Self.carriedType),
+		   let carried = Self.carried(written) {
+			let node = item as? Node
+			return rehome(carried, onto: node?.isOverlayRoot == true ? nil : node?.path)
+		}
+		return dropItems(from: info.draggingPasteboard, into: (item as? Node)?.path ?? [], at: index)
+	}
+
+	/// An overlay or a sound dropped on a row: it belongs to that row now.
+	///
+	/// `nil` is the heading at the end, which is the top-level list — the one
+	/// place where these are on the programme's own clock rather than on
+	/// anything in particular. The arithmetic is the model's, because what a
+	/// move has to preserve is when the thing is on and that is not something a
+	/// table view can be asked about.
+	@discardableResult
+	func rehome(_ carried: Carried, onto path: [Int]?) -> Bool {
+		var next = project
+		switch carried {
+		case .overlay(let origin):
+			guard let landed = next.moveOverlay(at: origin, into: path, in: resolved) else {
+				return false
+			}
+			pending = .overlay(landed)
+		case .sound(let origin):
+			guard let landed = next.moveSound(at: origin, into: path, in: resolved) else {
+				return false
+			}
+			pending = .sound(landed)
+		}
+		onChange?(next)
+		return true
+	}
+
+	/// A row's address on the pasteboard. Not a spelling the file uses —
+	/// nothing reads this but the drop it came from, half a second later.
+	private static func written(_ carried: Carried) -> String {
+		let kind: String
+		let origin: Origin
+		switch carried {
+		case .overlay(let where_): kind = "o"; origin = where_
+		case .sound(let where_): kind = "s"; origin = where_
+		}
+		switch origin {
+		case .project(let index): return "\(kind) p \(index)"
+		case .entry(let path, let index):
+			return "\(kind) e \(index) \(path.map(String.init).joined(separator: "."))"
+		}
+	}
+
+	private static func carried(_ written: String) -> Carried? {
+		let parts = written.split(separator: " ")
+		guard parts.count >= 3, let index = Int(parts[2]) else { return nil }
+		let origin: Origin
+		if parts[1] == "p" {
+			origin = .project(index)
+		} else {
+			guard parts.count == 4 else { return nil }
+			origin = .entry(path: parts[3].split(separator: ".").compactMap { Int($0) }, index: index)
+		}
+		return parts[0] == "o" ? .overlay(origin) : .sound(origin)
 	}
 
 	/// What a drop does, without an `NSDraggingInfo` to make one.
@@ -1168,10 +1452,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	// MARK: - Selection
 
 	public func outlineViewSelectionDidChange(_ notification: Notification) {
-		if let index = selectedTreeOverlay, index < project.overlays.count {
+		if let carried = selectedTreeCarried, exists(carried) {
 			if overlayTable.selectedRow >= 0 { overlayTable.deselectAll(nil) }
 			if soundTable.selectedRow >= 0 { soundTable.deselectAll(nil) }
-			selection = .overlay(index)
+			selection = carried.selection
 			onSelect?(selection)
 			return
 		}
@@ -1192,12 +1476,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			guard row >= 0, row < project.sounds.count else { return }
 			if outline.selectedRow >= 0 { outline.deselectAll(nil) }
 			if overlayTable.selectedRow >= 0 { overlayTable.deselectAll(nil) }
-			selection = .sound(row)
+			selection = .sound(.project(row))
 		} else {
 			guard let index = overlay(at: row) else { return }
 			if outline.selectedRow >= 0 { outline.deselectAll(nil) }
 			if soundTable.selectedRow >= 0 { soundTable.deselectAll(nil) }
-			selection = .overlay(index)
+			selection = .overlay(.project(index))
 		}
 		onSelect?(selection)
 	}
@@ -1229,6 +1513,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// with no window has not necessarily laid them out at all.
 	func rowMenu(_ row: Int) -> NSMenu? {
 		guard row >= 0, let node = outline.item(atRow: row) as? Node else { return nil }
+		// Selected first, because everything on this menu acts on the selection
+		// — including `Add ▸`, which is how a caption comes to be written
+		// inside the row somebody pointed at.
 		outline.selectRowIndexes([row], byExtendingSelection: false)
 		let menu = NSMenu()
 
@@ -1240,15 +1527,27 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			play.target = self
 			play.representedObject = name
 			menu.addItem(play)
-			return menu
+		}
+		if case .clip(let reference) = node.entry.source, node.overlay == nil, !node.isOverlayRoot {
+			let open = NSMenuItem(title: "Open “\(reference.slug)” in its take",
+			                      action: #selector(openInTake(_:)), keyEquivalent: "")
+			open.target = self
+			open.representedObject = node.path
+			menu.addItem(open)
 		}
 
-		guard case .clip(let reference) = node.entry.source else { return nil }
-		let open = NSMenuItem(title: "Open “\(reference.slug)” in its take",
-		                      action: #selector(openInTake(_:)), keyEquivalent: "")
-		open.target = self
-		open.representedObject = node.path
-		menu.addItem(open)
+		// And the same list the `+` offers, put where the pointer already is.
+		// Adding a caption to a shot should not mean adding it somewhere else
+		// and then telling it which shot.
+		if !menu.items.isEmpty { menu.addItem(.separator()) }
+		let add = NSMenuItem(title: node.isOverlayRoot
+			? "Add to the programme's own clock" : "Add", action: nil, keyEquivalent: "")
+		let submenu = NSMenu()
+		// Entries go on the timeline, and the heading for the loose overlays is
+		// not on the timeline — nothing can be put *in* it but an overlay.
+		for item in additionItems(includingEntries: !node.isOverlayRoot) { submenu.addItem(item) }
+		add.submenu = submenu
+		menu.addItem(add)
 		return menu
 	}
 
@@ -1387,6 +1686,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 			var where_ = ""
 			switch sound.span {
+			case nil:
+				where_ = "as long as this entry is on"
 			case .within(let mark, let from, let to):
 				where_ = "\(mark.description) + \(Timecode.string(from)) → \(Timecode.string(to))"
 			case .marks(let from, let to):

@@ -82,7 +82,7 @@ import Testing
 			overlays: [ResolvedOverlay(
 				overlay: Overlay(kind: .scene("s", with: [:]), span: .times(from: 0, to: 3),
 				                 arrival: .cut, departure: .cut),
-				source: 0, appearance: 0, start: 0, end: 3, path: nil)],
+				origin: .project(0), appearance: 0, start: 0, end: 3, path: nil)],
 			groups: [], anchors: [])
 	}
 

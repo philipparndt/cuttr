@@ -1,0 +1,62 @@
+# cuttr project — captions written inside the things they are drawn over.
+#
+# Nothing here has an `as:` name, and that is the point. An overlay written
+# inside a timeline entry and given no range of its own covers exactly that
+# entry, so three cards get three different captions without three names
+# invented to tell them apart.
+#
+# The section at the end shows the other half of it: an overlay written on the
+# section covers the whole of it, however many things go in later — and one
+# written inside a card *within* that section covers only the card.
+cuttr-project: 1
+
+output:
+  size: 1280x720
+  fps:  25
+  file: placements.mov
+
+timeline:
+  - card:  00:01.600
+    fill:  "#101828"
+    overlays:
+      - text:  one
+        style: title
+        in:    {fade: true, over: 0.3}
+        out:   {fade: true, over: 0.3}
+
+  - card:  00:01.600
+    fill:  "#182031"
+    overlays:
+      - text:  two
+        style: title
+        in:    {fade: true, over: 0.3}
+        out:   {fade: true, over: 0.3}
+
+  - group: the-pair
+    clips:
+      - card:  00:01.600
+        fill:  "#20283a"
+        overlays:
+          - text:  three
+            style: title
+            in:    {fade: true, over: 0.3}
+            out:   {fade: true, over: 0.3}
+      - card:  00:01.600
+        fill:  "#283043"
+    overlays:
+      # On the section, so it is on for both cards in it — and would still be
+      # on for all of them if a third were added tomorrow.
+      - text:  a section, whatever goes in it
+        style: lower-third-centre
+        in:    {fade: true, over: 0.3}
+        out:   {fade: true, over: 0.3}
+
+# And the list that was always here, for the things that belong to the
+# programme's own clock rather than to anything on it.
+overlays:
+  - text:  0:00 — 0:02
+    style: caption
+    from:  00:00.000
+    to:    00:02.000
+    in:    {fade: true, over: 0.2}
+    out:   {fade: true, over: 0.2}

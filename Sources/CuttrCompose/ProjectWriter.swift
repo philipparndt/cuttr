@@ -221,6 +221,18 @@ public enum ProjectWriter {
 			case .query(_, let source):
 				out += scalarEntry("query", source, entry.transition, indent)
 			}
+			// Last, after everything the entry says about itself, and in the
+			// same shape the top-level list uses — one list to learn, written
+			// two levels in. An entry with none of them writes nothing, which
+			// is what keeps every project that predates this byte-identical.
+			if !entry.overlays.isEmpty {
+				out += "\(indent)  overlays:\n"
+				out += overlays(entry.overlays, indent: indent + "    ")
+			}
+			if !entry.sounds.isEmpty {
+				out += "\(indent)  sounds:\n"
+				out += sounds(entry.sounds, indent: indent + "    ")
+			}
 		}
 		return out
 	}
@@ -307,8 +319,8 @@ public enum ProjectWriter {
 	/// uses.
 	private static func words(_ words: [SpinnerWord]) -> String {
 		"[" + words.map { word in
-			word.duration.map { "{text: \(scalar(word.text)), for: \(trim($0))}" }
-				?? scalar(word.text)
+			word.duration.map { "{text: \(flow(word.text)), for: \(trim($0))}" }
+				?? flow(word.text)
 		}.joined(separator: ", ") + "]"
 	}
 
@@ -342,50 +354,53 @@ public enum ProjectWriter {
 	/// the first line, when it is on under that, and how it arrives and leaves
 	/// at the bottom. Anything that is what a sound is without it — no gain, no
 	/// fades, no ducking — is left out.
-	private static func sounds(_ list: [Sound]) -> String {
+	private static func sounds(_ list: [Sound], indent: String = "  ") -> String {
 		var out = ""
 		for (index, sound) in list.enumerated() {
 			if index > 0 { out += "\n" }
-			out += "  - file:  \(scalar(sound.file))\n"
-			out += range(sound.span, indent: "    ", column: 7)
-			if sound.gain != 0 { out += "    gain:  \(trim(sound.gain))\n" }
+			out += "\(indent)- file:  \(scalar(sound.file))\n"
+			// No range at all is a sound written inside an entry to play for as
+			// long as that entry is on, and the point of that spelling is that
+			// there is nothing to write.
+			if let span = sound.span { out += range(span, indent: indent + "  ", column: 7) }
+			if sound.gain != 0 { out += "\(indent)  gain:  \(trim(sound.gain))\n" }
 			if case .fade(let over) = sound.arrival {
-				out += "    in:    {fade: true, over: \(trim(over))}\n"
+				out += "\(indent)  in:    {fade: true, over: \(trim(over))}\n"
 			}
 			if case .fade(let over) = sound.departure {
-				out += "    out:   {fade: true, over: \(trim(over))}\n"
+				out += "\(indent)  out:   {fade: true, over: \(trim(over))}\n"
 			}
 			if sound.ducks != 0 {
-				out += "    ducks: \(trim(sound.ducks))   # dB off the programme's own sound\n"
+				out += "\(indent)  ducks: \(trim(sound.ducks))   # dB off the programme's own sound\n"
 			}
 		}
 		return out
 	}
 
-	private static func overlays(_ list: [Overlay]) -> String {
+	private static func overlays(_ list: [Overlay], indent: String = "  ") -> String {
 		var out = ""
 		for (index, overlay) in list.enumerated() {
 				if index > 0 { out += "\n" }
 				switch overlay.kind {
 				case .text(let text, let style):
-					out += "  - text:   \(scalar(text))\n"
-					if let style { out += "    style:  \(scalar(style))\n" }
+					out += "\(indent)- text:   \(scalar(text))\n"
+					if let style { out += "\(indent)  style:  \(scalar(style))\n" }
 				case .scene(let name, let parameters):
-					out += "  - scene:   \(scalar(name))\n"
+					out += "\(indent)- scene:   \(scalar(name))\n"
 					if !parameters.isEmpty {
-						let pairs = parameters.keys.sorted().map { "\($0): \(scalar(parameters[$0] ?? ""))" }
-						out += "    with:    {" + pairs.joined(separator: ", ") + "}\n"
+						let pairs = parameters.keys.sorted().map { "\(flow($0)): \(flow(parameters[$0] ?? ""))" }
+						out += "\(indent)  with:    {" + pairs.joined(separator: ", ") + "}\n"
 					}
 				case .effect(let effect):
-					out += "  - effect:  \(effect.style.rawValue)\n"
-					if effect.finish != .matte { out += "    finish:  \(effect.finish.rawValue)\n" }
-					if effect.density != 1 { out += "    density: \(trim(effect.density))\n" }
-					if effect.speed != 1 { out += "    speed:   \(trim(effect.speed))\n" }
-					if effect.size != 1 { out += "    size:    \(trim(effect.size))\n" }
-					if effect.wind != 0 { out += "    wind:    \(trim(effect.wind))\n" }
-					if effect.seed != 1 { out += "    seed:    \(effect.seed)\n" }
+					out += "\(indent)- effect:  \(effect.style.rawValue)\n"
+					if effect.finish != .matte { out += "\(indent)  finish:  \(effect.finish.rawValue)\n" }
+					if effect.density != 1 { out += "\(indent)  density: \(trim(effect.density))\n" }
+					if effect.speed != 1 { out += "\(indent)  speed:   \(trim(effect.speed))\n" }
+					if effect.size != 1 { out += "\(indent)  size:    \(trim(effect.size))\n" }
+					if effect.wind != 0 { out += "\(indent)  wind:    \(trim(effect.wind))\n" }
+					if effect.seed != 1 { out += "\(indent)  seed:    \(effect.seed)\n" }
 					if !effect.palette.isEmpty {
-						out += "    palette: ["
+						out += "\(indent)  palette: ["
 							+ effect.palette.map { scalar($0.hex) }.joined(separator: ", ") + "]\n"
 					}
 				case .film(let film):
@@ -393,62 +408,66 @@ public enum ProjectWriter {
 					// is written only when it is not what a film overlay is
 					// without it.
 					let plain = Film()
-					out += "  - film:    \(film.tint.rawValue)\n"
-					if film.ratio != plain.ratio { out += "    ratio:   \(scalar(film.ratio.written))\n" }
-					if film.strength != plain.strength { out += "    strength: \(trim(film.strength))\n" }
-					if film.grain != plain.grain { out += "    grain:   \(trim(film.grain))\n" }
-					if film.vignette != plain.vignette { out += "    vignette: \(trim(film.vignette))\n" }
+					out += "\(indent)- film:    \(film.tint.rawValue)\n"
+					if film.ratio != plain.ratio { out += "\(indent)  ratio:   \(scalar(film.ratio.written))\n" }
+					if film.strength != plain.strength { out += "\(indent)  strength: \(trim(film.strength))\n" }
+					if film.grain != plain.grain { out += "\(indent)  grain:   \(trim(film.grain))\n" }
+					if film.vignette != plain.vignette { out += "\(indent)  vignette: \(trim(film.vignette))\n" }
 				case .aberration(let aberration):
 					let plain = Aberration()
-					out += "  - aberration: \(aberration.kind.rawValue)\n"
+					out += "\(indent)- aberration: \(aberration.kind.rawValue)\n"
 					if aberration.amount != plain.amount {
-						out += "    amount:  \(trim(aberration.amount))\n"
+						out += "\(indent)  amount:  \(trim(aberration.amount))\n"
 					}
 					// Only the linear kind has one, and nought is straight to
 					// the right, so a radial aberration never writes it.
 					if aberration.kind == .linear, aberration.angle != plain.angle {
-						out += "    angle:   \(trim(aberration.angle))\n"
+						out += "\(indent)  angle:   \(trim(aberration.angle))\n"
 					}
 				case .tape(let tape):
 					// The condition is the thing, so it is the key, and each
 					// knob is written only where it is no longer what the
 					// condition means by it.
 					let plain = Tape(tape.condition)
-					out += "  - tape:    \(tape.condition.rawValue)\n"
-					if tape.jitter != plain.jitter { out += "    jitter:  \(trim(tape.jitter))\n" }
-					if tape.band != plain.band { out += "    band:    \(trim(tape.band))\n" }
-					if tape.chroma != plain.chroma { out += "    chroma:  \(trim(tape.chroma))\n" }
+					out += "\(indent)- tape:    \(tape.condition.rawValue)\n"
+					if tape.jitter != plain.jitter { out += "\(indent)  jitter:  \(trim(tape.jitter))\n" }
+					if tape.band != plain.band { out += "\(indent)  band:    \(trim(tape.band))\n" }
+					if tape.chroma != plain.chroma { out += "\(indent)  chroma:  \(trim(tape.chroma))\n" }
 					if tape.scanlines != plain.scanlines {
-						out += "    scanlines: \(trim(tape.scanlines))\n"
+						out += "\(indent)  scanlines: \(trim(tape.scanlines))\n"
 					}
 					if tape.dropouts != plain.dropouts {
-						out += "    dropouts: \(trim(tape.dropouts))\n"
+						out += "\(indent)  dropouts: \(trim(tape.dropouts))\n"
 					}
-					if tape.seed != plain.seed { out += "    seed:    \(tape.seed)\n" }
+					if tape.seed != plain.seed { out += "\(indent)  seed:    \(tape.seed)\n" }
 				case .spinner(let spinner):
-					out += "  - spinner: \(spinner.style.rawValue)\n"
-					if spinner.size != Spinner().size { out += "    size:    \(trim(spinner.size))\n" }
-					if spinner.speed != Spinner().speed { out += "    speed:   \(trim(spinner.speed))\n" }
-					if spinner.color != Spinner().color { out += "    color:   \(scalar(spinner.color.hex))\n" }
-					if let wordStyle = spinner.wordStyle { out += "    word-style: \(scalar(wordStyle))\n" }
+					out += "\(indent)- spinner: \(spinner.style.rawValue)\n"
+					if spinner.size != Spinner().size { out += "\(indent)  size:    \(trim(spinner.size))\n" }
+					if spinner.speed != Spinner().speed { out += "\(indent)  speed:   \(trim(spinner.speed))\n" }
+					if spinner.color != Spinner().color { out += "\(indent)  color:   \(scalar(spinner.color.hex))\n" }
+					if let wordStyle = spinner.wordStyle { out += "\(indent)  word-style: \(scalar(wordStyle))\n" }
 					if !spinner.words.isEmpty {
-						out += "    words:\n"
+						out += "\(indent)  words:\n"
 						for word in spinner.words {
 							if let duration = word.duration {
-								out += "      - {text: \(scalar(word.text)), for: \(trim(duration))}\n"
+								out += "\(indent)    - {text: \(flow(word.text)), for: \(trim(duration))}\n"
 							} else {
-								out += "      - \(scalar(word.text))\n"
+								out += "\(indent)    - \(scalar(word.text))\n"
 							}
 						}
 					}
 				}
 				// One range that says nothing of its own keeps the shape every
 				// project already has; anything else goes under `when:`, which
-				// is the same keys in a list.
-				if overlay.appearances.count == 1, !overlay.appearances[0].says {
-					out += range(overlay.appearances[0].span, indent: "    ")
+				// is the same keys in a list. No appearances at all is an
+				// overlay written inside an entry to cover it, and the whole
+				// point of that spelling is that there is nothing to write.
+				if overlay.appearances.isEmpty {
+					// nothing
+				} else if overlay.appearances.count == 1, !overlay.appearances[0].says {
+					out += range(overlay.appearances[0].span, indent: indent + "  ")
 				} else {
-					out += "    when:\n"
+					out += "\(indent)  when:\n"
 					for appearance in overlay.appearances {
 						// The block form aligns its values in a column; the flow
 						// form has no column to align to, so the padding goes.
@@ -461,20 +480,20 @@ public enum ProjectWriter {
 								return parts[0].trimmingCharacters(in: .whitespaces) + ": "
 									+ parts[1].trimmingCharacters(in: .whitespaces)
 							}
-						if let text = appearance.text { fields.append("text: \(scalar(text))") }
+						if let text = appearance.text { fields.append("text: \(flow(text))") }
 						if let said = appearance.words { fields.append("words: \(words(said))") }
-						out += "      - {" + fields.joined(separator: ", ") + "}\n"
+						out += "\(indent)    - {" + fields.joined(separator: ", ") + "}\n"
 					}
 				}
 				if overlay.behind != .nothing {
-					out += "    behind: \(overlay.behind.rawValue)\n"
+					out += "\(indent)  behind: \(overlay.behind.rawValue)\n"
 				}
 				if let anchor = overlay.anchor {
-					out += "    anchor: \(scalar(anchor))\n"
-					out += "    offset: [\(trim(overlay.offset.x)), \(trim(overlay.offset.y))]\n"
+					out += "\(indent)  anchor: \(scalar(anchor))\n"
+					out += "\(indent)  offset: [\(trim(overlay.offset.x)), \(trim(overlay.offset.y))]\n"
 				}
-				out += "    in:     \(transition(overlay.arrival))\n"
-				out += "    out:    \(transition(overlay.departure))\n"
+				out += "\(indent)  in:     \(transition(overlay.arrival))\n"
+				out += "\(indent)  out:    \(transition(overlay.departure))\n"
 			}
 		return out
 	}
@@ -498,4 +517,22 @@ public enum ProjectWriter {
 	private static func trim(_ value: CGFloat) -> String { trim(Double(value)) }
 
 	private static func scalar(_ value: String) -> String { TakeWriter.scalar(value) }
+
+	/// The same, for a value going inside `{…}` or `[…]`.
+	///
+	/// A comma ends an entry in a flow collection and a brace ends the
+	/// collection, so a caption reading `clips are named, never timed` written
+	/// bare into one comes back as two entries and the second half of the
+	/// sentence becomes a key with no value. Found by writing the examples out
+	/// twice and comparing: the first pass produced it, the second read it as
+	/// two things. The block form has no such characters to worry about, which
+	/// is why this is a second function and not a change to the first.
+	private static func flow(_ value: String) -> String {
+		let quoted = scalar(value)
+		guard quoted == value else { return quoted }
+		return value.contains(where: { ",{}[]".contains($0) })
+			? "\"" + value.replacingOccurrences(of: "\\", with: "\\\\")
+				.replacingOccurrences(of: "\"", with: "\\\"") + "\""
+			: value
+	}
 }

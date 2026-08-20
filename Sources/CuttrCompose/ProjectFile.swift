@@ -139,32 +139,41 @@ public enum ProjectReader {
 						trim = (try time(fields["head"], key: "trim") ?? 0,
 						        try time(fields["tail"], key: "trim") ?? 0)
 					}
+					// What is drawn over this placement. Read by the same
+					// function the top-level list uses, and kept even when it
+					// says nothing about when it is on — here, that means "all
+					// of this entry", which is the point of writing it here.
+					let over = try list(m["overlays"]).compactMap(mapping).compactMap(readOverlay)
+					let under = try list(m["sounds"]).compactMap(mapping).compactMap(readSound)
 					if let group = (m["group"] as? String).flatMap(nonEmpty) {
 						out.append(TimelineEntry(
 							group: Slug.make(from: group),
 							entries: try readEntries(m["clips"]),
-							transition: transition))
+							transition: transition, overlays: over, sounds: under))
 					} else if let query = (m["query"] as? String).flatMap(nonEmpty) {
-						out.append(try TimelineEntry(query: query, transition: transition))
+						out.append(try TimelineEntry(query: query, transition: transition,
+						                             overlays: over, sounds: under))
 					} else if let tag = (m["tag"] as? String).flatMap(nonEmpty) {
 						// `tag:` is sugar for a one-term query, and the
 						// commonest one — worth its own key so the simple case
 						// reads simply.
-						out.append(try TimelineEntry(query: "#\(tag)", transition: transition))
+						out.append(try TimelineEntry(query: "#\(tag)", transition: transition,
+						                             overlays: over, sounds: under))
 					} else if let seconds = try time(m["card"], key: "card") {
 						// A length where a slug goes, because a card has no
 						// slug: there is no take behind it to name.
 						var card = Card(duration: max(0, seconds))
 						if let said = fill(m["fill"]) { card.fill = said }
-						out.append(TimelineEntry(card: card, transition: transition, label: label))
+						out.append(TimelineEntry(card: card, transition: transition,
+						                         label: label, overlays: over, sounds: under))
 					} else if let clips = m["clips"] as? [Any] {
 						out.append(TimelineEntry(
 							list: clips.compactMap { ($0 as? String).map(ClipReference.init) },
-							transition: transition))
+							transition: transition, overlays: over, sounds: under))
 					} else if let clip = (m["clip"] as? String).flatMap(nonEmpty) {
 						out.append(TimelineEntry(
 							clip: ClipReference(clip), transition: transition,
-							label: label, trim: trim))
+							label: label, trim: trim, overlays: over, sounds: under))
 					}
 				}
 			}
@@ -177,136 +186,11 @@ public enum ProjectReader {
 		let timeline = try readEntries(root.removeValue(forKey: "timeline"))
 		var overlays: [Overlay] = []
 		for entry in list(root.removeValue(forKey: "overlays")) {
-			guard let m = mapping(entry) else { continue }
-			let kind: Overlay.Kind
-			if let text = m["text"] as? String {
-				kind = .text(text, style: (m["style"] as? String).flatMap(nonEmpty))
-			} else if let spinnerValue = m["spinner"] {
-				var spinner = Spinner()
-				// `spinner: dots` and `spinner: {style: dots, size: 0.1}` both.
-				if let name = spinnerValue as? String {
-					spinner.style = Spinner.Style(rawValue: name) ?? .dots
-				} else if let fields = mapping(spinnerValue) {
-					spinner.style = (fields["style"] as? String).flatMap(Spinner.Style.init(rawValue:)) ?? .dots
-					if let size = number(fields["size"]) { spinner.size = size }
-					if let speed = number(fields["speed"]) { spinner.speed = speed }
-					if let color = (fields["color"] as? String).flatMap(RGBA.init(hex:)) { spinner.color = color }
-				}
-				if let size = number(m["size"]) { spinner.size = size }
-				if let speed = number(m["speed"]) { spinner.speed = speed }
-				if let color = (m["color"] as? String).flatMap(RGBA.init(hex:)) { spinner.color = color }
-				spinner.wordStyle = (m["word-style"] as? String).flatMap(nonEmpty)
-				// `words: [a, b]` for the even case, or a list of
-				// `{text:, for:}` when the timings matter.
-				for word in list(m["words"]) {
-					if let text = word as? String {
-						spinner.words.append(SpinnerWord(text))
-					} else if let fields = mapping(word), let text = fields["text"] as? String {
-						spinner.words.append(SpinnerWord(text, duration: number(fields["for"])))
-					}
-				}
-				kind = .spinner(spinner)
-			} else if let scene = (m["scene"] as? String).flatMap(nonEmpty) {
-				var parameters: [String: String] = [:]
-				if let given = mapping(m["with"]) {
-					for (name, value) in given { parameters[name] = "\(value)" }
-				}
-				kind = .scene(scene, with: parameters)
-			} else if let stock = (m["film"] as? String).flatMap(nonEmpty) {
-				// `film: warm`, and the rest only if it is not the usual.
-				var film = Film()
-				film.tint = Film.Tint(rawValue: stock.lowercased()) ?? .warm
-				if let ratio = (m["ratio"] as? String).flatMap(Film.Ratio.init) { film.ratio = ratio }
-				else if let ratio = number(m["ratio"]) { film.ratio = Film.Ratio(ratio, 1) }
-				if let strength = number(m["strength"]) { film.strength = strength }
-				if let grain = number(m["grain"]) { film.grain = grain }
-				if let vignette = number(m["vignette"]) { film.vignette = vignette }
-				kind = .film(film)
-			} else if let value = m["aberration"] {
-				// `aberration: radial`, and `aberration: 0.6` for somebody who
-				// means the amount and does not care which kind — which is the
-				// commoner of the two things to mean.
-				var aberration = Aberration()
-				if let named = (value as? String).flatMap(nonEmpty) {
-					if let kind = Aberration.Kind(rawValue: named.lowercased()) {
-						aberration.kind = kind
-					} else if let amount = Double(named) {
-						aberration.amount = amount
-					}
-				} else if let amount = number(value) {
-					aberration.amount = amount
-				}
-				if let amount = number(m["amount"]) { aberration.amount = amount }
-				if let angle = number(m["angle"]) { aberration.angle = angle }
-				kind = .aberration(aberration)
-			} else if let condition = (m["tape"] as? String).flatMap(nonEmpty) {
-				// `tape: worn`, and then only the knobs that are not what worn
-				// means. The condition fills all five in, so a file that names
-				// one is a file that has changed its mind about one.
-				var tape = Tape(Tape.Condition(rawValue: condition.lowercased()) ?? .worn)
-				if let jitter = number(m["jitter"]) { tape.jitter = jitter }
-				if let band = number(m["band"]) { tape.band = band }
-				if let chroma = number(m["chroma"]) { tape.chroma = chroma }
-				if let scanlines = number(m["scanlines"]) { tape.scanlines = scanlines }
-				if let dropouts = number(m["dropouts"]) { tape.dropouts = dropouts }
-				if let seed = m["seed"] as? Int { tape.seed = seed }
-				kind = .tape(tape)
-			} else if let named = (m["effect"] as? String).flatMap(nonEmpty) {
-				var effect = Effect(style: Effect.Style(rawValue: named.lowercased()) ?? .confetti)
-				if let finish = (m["finish"] as? String).flatMap({ Effect.Finish(rawValue: $0) }) {
-					effect.finish = finish
-				}
-				if let density = number(m["density"]) { effect.density = density }
-				if let speed = number(m["speed"]) { effect.speed = speed }
-				if let size = number(m["size"]) { effect.size = size }
-				if let wind = number(m["wind"]) { effect.wind = wind }
-				if let seed = m["seed"] as? Int { effect.seed = seed }
-				if let palette = m["palette"] as? [Any] {
-					effect.palette = palette.compactMap { ($0 as? String).flatMap(RGBA.init(hex:)) }
-				}
-				kind = .effect(effect)
-			} else {
-				continue
-			}
-
-			// One range, or several under `when:`. The plural is a list of the
-			// singular — the same three keys, in a list — so learning the one
-			// teaches the other.
-
-			// What an appearance says, when it says something of its own.
-			func said(_ fields: [String: Any]) -> [SpinnerWord]? {
-				guard let list = fields["words"] as? [Any] else { return nil }
-				return list.compactMap { word in
-					if let text = word as? String { return SpinnerWord(text) }
-					if let inner = mapping(word), let text = inner["text"] as? String {
-						return SpinnerWord(text, duration: number(inner["for"]))
-					}
-					return nil
-				}
-			}
-
-			var appearances: [Overlay.Appearance] = []
-			if let list = m["when"] as? [Any] {
-				appearances = list.compactMap { entry in
-					guard let fields = mapping(entry), let span = span(fields) else { return nil }
-					return Overlay.Appearance(
-						span, text: (fields["text"] as? String).flatMap(nonEmpty),
-						words: said(fields))
-				}
-			} else if let span = span(m) {
-				appearances = [Overlay.Appearance(span)]
-			}
-			guard !appearances.isEmpty else { continue }
-
-			overlays.append(Overlay(
-				kind: kind,
-				appearances: appearances,
-				arrival: try transition(m["in"], key: "in") ?? .slide(.left, over: 0.4),
-				departure: try transition(m["out"], key: "out") ?? .slide(.right, over: 0.4),
-				behind: (m["behind"] as? String).flatMap { Overlay.Occlusion(rawValue: $0) } ?? .nothing,
-				anchor: (m["anchor"] as? String).flatMap(nonEmpty),
-				offset: try point(m["offset"], key: "offset") ?? .zero
-			))
+			guard let m = mapping(entry), let overlay = try readOverlay(m) else { continue }
+			// An overlay at the top level with no range says nothing about when
+			// it is on, and there is no placement here to ask.
+			guard !overlay.appearances.isEmpty else { continue }
+			overlays.append(overlay)
 		}
 
 		// Sound that is not from a take: music, an atmosphere, a sting. When it
@@ -314,21 +198,11 @@ public enum ProjectReader {
 		// is the same question.
 		var sounds: [Sound] = []
 		for entry in list(root.removeValue(forKey: "sounds")) {
-			guard let m = mapping(entry),
-			      let file = (m["file"] as? String).flatMap(nonEmpty) else { continue }
-			// A `when:` list is read as its first range. A second stretch of the
-			// same music is a second entry under `sounds:` — a lane is a lane,
-			// and repeating four lines is cheaper than a grammar that hides how
-			// many of them there are.
-			let where_ = span(m) ?? (m["when"] as? [Any])?.compactMap(mapping).compactMap(span).first
-			guard let where_ else { continue }
-			sounds.append(Sound(
-				file: file,
-				span: where_,
-				gain: number(m["gain"]) ?? 0,
-				arrival: try fade(m["in"], key: "in"),
-				departure: try fade(m["out"], key: "out"),
-				ducks: number(m["ducks"]) ?? 0))
+			guard let m = mapping(entry), let sound = try readSound(m) else { continue }
+			// A sound in the top-level list has no placement to take its length
+			// from, so one that does not say when it plays is not read.
+			guard sound.span != nil else { continue }
+			sounds.append(sound)
 		}
 
 		return Project(takes: takes, output: output, timeline: timeline,
@@ -344,6 +218,167 @@ public enum ProjectReader {
 	/// its own sensible length. A mapping names the kind, its direction if it
 	/// has one, and how long — `{wipe: left, over: 0.6}`, the same shape the
 	/// overlays use for theirs.
+	/// One overlay, read from the mapping that says it.
+	///
+	/// A function rather than a stretch of the reader, because there are two
+	/// places an overlay can be written now and both have to understand exactly
+	/// the same keys. A second implementation is a second dialect.
+	///
+	/// The appearances may come back empty: an overlay written inside a
+	/// timeline entry and given no range covers that entry, and having nothing
+	/// to say about when it is on is the honest way to say so. The top-level
+	/// list has no placement to cover, so it drops those.
+	static func readOverlay(_ m: [String: Any]) throws -> Overlay? {
+		let kind: Overlay.Kind
+		if let text = m["text"] as? String {
+			kind = .text(text, style: (m["style"] as? String).flatMap(nonEmpty))
+		} else if let spinnerValue = m["spinner"] {
+			var spinner = Spinner()
+			// `spinner: dots` and `spinner: {style: dots, size: 0.1}` both.
+			if let name = spinnerValue as? String {
+				spinner.style = Spinner.Style(rawValue: name) ?? .dots
+			} else if let fields = mapping(spinnerValue) {
+				spinner.style = (fields["style"] as? String).flatMap(Spinner.Style.init(rawValue:)) ?? .dots
+				if let size = number(fields["size"]) { spinner.size = size }
+				if let speed = number(fields["speed"]) { spinner.speed = speed }
+				if let color = (fields["color"] as? String).flatMap(RGBA.init(hex:)) { spinner.color = color }
+			}
+			if let size = number(m["size"]) { spinner.size = size }
+			if let speed = number(m["speed"]) { spinner.speed = speed }
+			if let color = (m["color"] as? String).flatMap(RGBA.init(hex:)) { spinner.color = color }
+			spinner.wordStyle = (m["word-style"] as? String).flatMap(nonEmpty)
+			// `words: [a, b]` for the even case, or a list of
+			// `{text:, for:}` when the timings matter.
+			for word in list(m["words"]) {
+				if let text = word as? String {
+					spinner.words.append(SpinnerWord(text))
+				} else if let fields = mapping(word), let text = fields["text"] as? String {
+					spinner.words.append(SpinnerWord(text, duration: number(fields["for"])))
+				}
+			}
+			kind = .spinner(spinner)
+		} else if let scene = (m["scene"] as? String).flatMap(nonEmpty) {
+			var parameters: [String: String] = [:]
+			if let given = mapping(m["with"]) {
+				for (name, value) in given { parameters[name] = "\(value)" }
+			}
+			kind = .scene(scene, with: parameters)
+		} else if let stock = (m["film"] as? String).flatMap(nonEmpty) {
+			// `film: warm`, and the rest only if it is not the usual.
+			var film = Film()
+			film.tint = Film.Tint(rawValue: stock.lowercased()) ?? .warm
+			if let ratio = (m["ratio"] as? String).flatMap(Film.Ratio.init) { film.ratio = ratio }
+			else if let ratio = number(m["ratio"]) { film.ratio = Film.Ratio(ratio, 1) }
+			if let strength = number(m["strength"]) { film.strength = strength }
+			if let grain = number(m["grain"]) { film.grain = grain }
+			if let vignette = number(m["vignette"]) { film.vignette = vignette }
+			kind = .film(film)
+		} else if let value = m["aberration"] {
+			// `aberration: radial`, and `aberration: 0.6` for somebody who
+			// means the amount and does not care which kind — which is the
+			// commoner of the two things to mean.
+			var aberration = Aberration()
+			if let named = (value as? String).flatMap(nonEmpty) {
+				if let kind = Aberration.Kind(rawValue: named.lowercased()) {
+					aberration.kind = kind
+				} else if let amount = Double(named) {
+					aberration.amount = amount
+				}
+			} else if let amount = number(value) {
+				aberration.amount = amount
+			}
+			if let amount = number(m["amount"]) { aberration.amount = amount }
+			if let angle = number(m["angle"]) { aberration.angle = angle }
+			kind = .aberration(aberration)
+		} else if let condition = (m["tape"] as? String).flatMap(nonEmpty) {
+			// `tape: worn`, and then only the knobs that are not what worn
+			// means. The condition fills all five in, so a file that names
+			// one is a file that has changed its mind about one.
+			var tape = Tape(Tape.Condition(rawValue: condition.lowercased()) ?? .worn)
+			if let jitter = number(m["jitter"]) { tape.jitter = jitter }
+			if let band = number(m["band"]) { tape.band = band }
+			if let chroma = number(m["chroma"]) { tape.chroma = chroma }
+			if let scanlines = number(m["scanlines"]) { tape.scanlines = scanlines }
+			if let dropouts = number(m["dropouts"]) { tape.dropouts = dropouts }
+			if let seed = m["seed"] as? Int { tape.seed = seed }
+			kind = .tape(tape)
+		} else if let named = (m["effect"] as? String).flatMap(nonEmpty) {
+			var effect = Effect(style: Effect.Style(rawValue: named.lowercased()) ?? .confetti)
+			if let finish = (m["finish"] as? String).flatMap({ Effect.Finish(rawValue: $0) }) {
+				effect.finish = finish
+			}
+			if let density = number(m["density"]) { effect.density = density }
+			if let speed = number(m["speed"]) { effect.speed = speed }
+			if let size = number(m["size"]) { effect.size = size }
+			if let wind = number(m["wind"]) { effect.wind = wind }
+			if let seed = m["seed"] as? Int { effect.seed = seed }
+			if let palette = m["palette"] as? [Any] {
+				effect.palette = palette.compactMap { ($0 as? String).flatMap(RGBA.init(hex:)) }
+			}
+			kind = .effect(effect)
+		} else {
+			return nil
+		}
+
+		// One range, or several under `when:`. The plural is a list of the
+		// singular — the same three keys, in a list — so learning the one
+		// teaches the other.
+
+		// What an appearance says, when it says something of its own.
+		func said(_ fields: [String: Any]) -> [SpinnerWord]? {
+			guard let list = fields["words"] as? [Any] else { return nil }
+			return list.compactMap { word in
+				if let text = word as? String { return SpinnerWord(text) }
+				if let inner = mapping(word), let text = inner["text"] as? String {
+					return SpinnerWord(text, duration: number(inner["for"]))
+				}
+				return nil
+			}
+		}
+
+		var appearances: [Overlay.Appearance] = []
+		if let list = m["when"] as? [Any] {
+			appearances = list.compactMap { entry in
+				guard let fields = mapping(entry), let span = span(fields) else { return nil }
+				return Overlay.Appearance(
+					span, text: (fields["text"] as? String).flatMap(nonEmpty),
+					words: said(fields))
+			}
+		} else if let span = span(m) {
+			appearances = [Overlay.Appearance(span)]
+		}
+
+		return Overlay(
+			kind: kind,
+			appearances: appearances,
+			arrival: try transition(m["in"], key: "in") ?? .slide(.left, over: 0.4),
+			departure: try transition(m["out"], key: "out") ?? .slide(.right, over: 0.4),
+			behind: (m["behind"] as? String).flatMap { Overlay.Occlusion(rawValue: $0) } ?? .nothing,
+			anchor: (m["anchor"] as? String).flatMap(nonEmpty),
+			offset: try point(m["offset"], key: "offset") ?? .zero
+		)
+	}
+
+	/// One sound, read from the mapping that says it.
+	///
+	/// The same reason ``readOverlay(_:)`` is a function: there are two places
+	/// a sound can be written and both have to understand the same keys.
+	static func readSound(_ m: [String: Any]) throws -> Sound? {
+		guard let file = (m["file"] as? String).flatMap(nonEmpty) else { return nil }
+		// A `when:` list is read as its first range. A second stretch of the
+		// same music is a second entry under `sounds:` — a lane is a lane,
+		// and repeating four lines is cheaper than a grammar that hides how
+		// many of them there are.
+		let where_ = span(m) ?? (m["when"] as? [Any])?.compactMap(mapping).compactMap(span).first
+		return Sound(
+			file: file,
+			span: where_,
+			gain: number(m["gain"]) ?? 0,
+			arrival: try fade(m["in"], key: "in"),
+			departure: try fade(m["out"], key: "out"),
+			ducks: number(m["ducks"]) ?? 0)
+	}
+
 	private static func cutTransition(_ value: Any?) throws -> Transition {
 		guard let value else { return .cut }
 		// A number, or a timecode: the oldest spelling, and a dissolve.
