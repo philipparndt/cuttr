@@ -912,6 +912,13 @@ public final class TimelineView: NSView {
 		return true
 	}
 
+	/// For the tests: what the rename editor is showing, and typing into it —
+	/// which is a keystroke a test may not dispatch, since an unclaimed one
+	/// reaches `NSResponder` and beeps on somebody's machine.
+	var renamingText: String? { editor?.stringValue }
+
+	func setRenamingTextForTest(_ typed: String) { editor?.stringValue = typed }
+
 	/// Closes the editor. `commit` false is escape, which leaves the name alone.
 	@discardableResult
 	public func endRenaming(commit: Bool) -> Bool {
