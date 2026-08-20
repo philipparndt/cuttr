@@ -243,7 +243,12 @@ import Testing
 		// After the traffic lights, because the bar *is* the title bar now: the
 		// content runs to the top of the frame and this strip stands in the
 		// whole of that band.
-		#expect(abs(name.minX - DocumentBar.trafficLights) < 1,
+		//
+		// Clear of them, not at a particular number. The number was 78 while
+		// the buttons ended at 79, which is how the capsule came to sit one
+		// point over the zoom button; a bar with no window falls back to the
+		// constant, and this one has none.
+		#expect(name.minX >= DocumentBar.trafficLights - 1,
 		        "the name is not clear of the traffic lights: \(name)")
 		#expect(abs(clock.midX - bar.bounds.midX) < 12,
 		        "the clock is not centred: \(clock.midX) against \(bar.bounds.midX)")
