@@ -285,6 +285,12 @@ public final class ComposeDocument {
 			/// What a project would write to mean this clip: bare when the slug
 			/// is unique across the takes, `take/slug` when it is not.
 			public var reference: String
+			/// The lane it was cut on, so this window can show it as a stripe
+			/// the same way the cutting window does. Somebody files their
+			/// alternates on rose and their keepers on green; carrying that
+			/// across is how the filing is worth anything once the programme is
+			/// being assembled.
+			public var color: ClipColor = .default
 		}
 	}
 
@@ -335,7 +341,8 @@ public final class ComposeDocument {
 					take: entry.name, slug: clip.slug, name: clip.name, tags: clip.tags,
 					start: clip.start, length: clip.end - clip.start,
 					reference: (slugCounts[clip.slug] ?? 0) > 1
-						? "\(entry.name)/\(clip.slug)" : clip.slug))
+						? "\(entry.name)/\(clip.slug)" : clip.slug,
+					color: clip.color))
 			}
 		}
 		found.items = items

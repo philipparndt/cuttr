@@ -28,7 +28,12 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 	private let scrubber = SceneScrubber()
 	private let parts = ScenePartsList()
 	private let inspector = SceneInspector()
-	private let bar = Bar()
+	/// The same bar as the other two windows: which document, the clock, what
+	/// just happened. The scene editor had a bar of its own and was left out of
+	/// the redesign — three windows, three arrangements, which is exactly the
+	/// thing this was all for.
+	private let bar = DocumentBar()
+	private let setup = SceneSetup()
 
 	private var playing: Timer?
 	private var keyMonitor: Any?
@@ -38,8 +43,11 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		self.projectURL = projectURL
 		let window = NSWindow(
 			contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
-			styleMask: [.titled, .closable, .miniaturizable, .resizable],
+			styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
 			backing: .buffered, defer: false)
+		window.titlebarAppearsTransparent = true
+		window.titleVisibility = .hidden
+		DocumentBar.centreTrafficLights(in: window)
 		window.appearance = NSAppearance(named: .darkAqua)
 		window.backgroundColor = Theme.background
 		window.minSize = NSSize(width: 860, height: 560)
@@ -97,7 +105,7 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 			bar.topAnchor.constraint(equalTo: content.topAnchor),
 			bar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
 			bar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-			bar.heightAnchor.constraint(equalToConstant: 38),
+			bar.heightAnchor.constraint(equalToConstant: DocumentBar.height),
 			middle.topAnchor.constraint(equalTo: bar.bottomAnchor),
 			middle.leadingAnchor.constraint(equalTo: content.leadingAnchor),
 			middle.trailingAnchor.constraint(equalTo: content.trailingAnchor),
@@ -129,12 +137,16 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 	private func wire() {
 		sceneDocument.onChange = { [weak self] in self?.reload() }
 
-		bar.onScene = { [weak self] name in
+		bar.setUp = setup
+		bar.documents = { [weak self] in
+			AppDelegate.shared?.documentsMenu(for: self?.window)
+		}
+		bar.onPlayPause = { [weak self] in self?.togglePlay(nil) }
+		setup.onScene = { [weak self] name in
 			self?.sceneDocument.show(name)
 		}
-		bar.onNewScene = { [weak self] in self?.newScene(nil) }
-		bar.onPlay = { [weak self] in self?.togglePlay(nil) }
-		bar.onLength = { [weak self] length in
+		setup.onNewScene = { [weak self] in self?.newScene(nil) }
+		setup.onLength = { [weak self] length in
 			guard let self else { return }
 			self.sceneDocument.length = length
 			self.reload()
@@ -314,8 +326,10 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		inspector.reload(document.scene, project: document.project,
 		                 part: document.selectedPart, key: document.selectedKey)
 
-		bar.show(names: document.sceneNames, current: document.name,
-		         time: document.playhead, length: document.length, playing: playing != nil)
+		bar.setName(document.name)
+		bar.setClock(document.playhead)
+		bar.setPlaying(playing != nil)
+		setup.show(names: document.sceneNames, current: document.name, length: document.length)
 	}
 
 	private func seek(to time: Double) {
@@ -426,6 +440,12 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		}
 	}
 
+	/// AppKit puts the traffic lights back where it likes them on every
+	/// resize, so they are placed again here. See `centreTrafficLights`.
+	public func windowDidResize(_ notification: Notification) {
+		if let window { DocumentBar.centreTrafficLights(in: window) }
+	}
+
 	public func windowWillClose(_ notification: Notification) {
 		if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
 		keyMonitor = nil
@@ -433,111 +453,4 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		playing = nil
 	}
 
-	// MARK: - The bar
-
-	/// Which scene, how long it runs while it is being made, and the clock.
-	///
-	/// The length is here rather than in the inspector because it belongs to
-	/// the session and not to the part: it is the one control in this window
-	/// that changes nothing in the file.
-	@MainActor
-	final class Bar: NSView {
-		var onScene: ((String) -> Void)?
-		var onNewScene: (() -> Void)?
-		var onPlay: (() -> Void)?
-		var onLength: ((Double) -> Void)?
-
-		private let scenes = NSPopUpButton()
-		private let create = NSButton()
-		private let play = NSButton()
-		private let clock = NSTextField(labelWithString: "0.00 s")
-		private let length = NSTextField(string: "4")
-		private var names: [String] = []
-
-		override init(frame: NSRect) {
-			super.init(frame: frame)
-			wantsLayer = true
-			layer?.backgroundColor = Theme.panel.cgColor
-
-			scenes.target = self
-			scenes.action = #selector(pickScene)
-			scenes.controlSize = .small
-			scenes.font = Theme.mono
-
-			create.title = "New Scene…"
-			create.bezelStyle = .rounded
-			create.controlSize = .small
-			create.font = NSFont.systemFont(ofSize: 11)
-			create.target = self
-			create.action = #selector(makeScene)
-
-			play.title = "Play"
-			play.bezelStyle = .rounded
-			play.controlSize = .small
-			play.font = NSFont.systemFont(ofSize: 11)
-			play.target = self
-			play.action = #selector(hitPlay)
-
-			clock.font = Theme.mono
-			clock.textColor = Theme.dimText
-
-			length.font = Theme.mono
-			length.target = self
-			length.action = #selector(setLength)
-			length.translatesAutoresizingMaskIntoConstraints = false
-			length.widthAnchor.constraint(equalToConstant: 52).isActive = true
-			length.toolTip = "How long the scene runs while you work on it. "
-				+ "Not written to the file — a scene plays for as long as the overlay using it."
-
-			let caption = NSTextField(labelWithString: "runs for")
-			caption.font = Theme.monoSmall
-			caption.textColor = Theme.faintText
-
-			let stack = NSStackView(views: [scenes, create, play, clock, NSView(), caption, length])
-			stack.orientation = .horizontal
-			stack.spacing = 8
-			stack.alignment = .centerY
-			stack.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
-			stack.translatesAutoresizingMaskIntoConstraints = false
-			addSubview(stack)
-			NSLayoutConstraint.activate([
-				stack.topAnchor.constraint(equalTo: topAnchor),
-				stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-				stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-				stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-			])
-		}
-
-		@available(*, unavailable) required init?(coder: NSCoder) { nil }
-
-		func show(names: [String], current: String, time: Double, length: Double, playing: Bool) {
-			if names != self.names {
-				self.names = names
-				scenes.removeAllItems()
-				scenes.addItems(withTitles: names)
-			}
-			if let index = names.firstIndex(of: current) { scenes.selectItem(at: index) }
-			clock.stringValue = String(format: "%.2f s", time)
-			play.title = playing ? "Pause" : "Play"
-			// Not while somebody is typing in it, or the field rewrites itself
-			// under the cursor on every frame of playback.
-			if window?.firstResponder !== self.length.currentEditor() {
-				self.length.stringValue = TakeWriter.number(length, places: 2)
-			}
-		}
-
-		@objc private func pickScene() {
-			guard let title = scenes.titleOfSelectedItem else { return }
-			onScene?(title)
-		}
-
-		@objc private func makeScene() { onNewScene?() }
-		@objc private func hitPlay() { onPlay?() }
-
-		@objc private func setLength() {
-			guard let value = Double(length.stringValue
-				.replacingOccurrences(of: ",", with: ".")) else { return }
-			onLength?(value)
-		}
-	}
 }

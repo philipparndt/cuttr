@@ -33,7 +33,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	private let modes = NSTabView(frame: .roomToLayOutIn)
 
 	/// Which of the three is showing.
-	public enum Mode: Int { case edit, text, preview }
+	public enum Mode: Int { case project, edit, text, preview }
 	private var mode: Mode = .edit
 	/// Whether the window is showing the picture and nothing else.
 	private var presenting = false
@@ -59,7 +59,33 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// one field of the properties panel is what this callback exists to avoid.
 	/// `nil` means "whichever one, or a new one".
 	public var onEditScene: ((ComposeDocument, String?) -> Void)?
-	private let bar = ComposeBar()
+	private let bar = DocumentBar()
+	/// Which of the three has the window, down the left edge — the same shape
+	/// and the same place as the cutting window's.
+	private let rail = Rail([
+		Rail.Item("Project", "info.circle",
+		          "What this project is, and what it renders to (\u{2318}1)"),
+		Rail.Item("Edit", "list.bullet.indent",
+		          "The programme, and everything about it (\u{2318}2)"),
+		Rail.Item("Text", "curlybraces", "The project file as it stands (\u{2318}3)"),
+		Rail.Item("Play", "play.rectangle", "What it comes to, played (\u{2318}4)"),
+	])
+	/// The project itself: what it renders to, and what it is called.
+	///
+	/// The same panel that edits everything else, held to `output`. It was
+	/// reachable only by deselecting every row in the tree — which is to say, by
+	/// knowing that deselecting was a way of selecting something — and the frame
+	/// size and rate of the thing being made are not an afterthought of the
+	/// timeline.
+	private let projectPanel = PropertiesPanel()
+	private let renderButton = NSButton()
+	/// The two controls that belong to the picture, over the picture: the anchor
+	/// markers, and the way to give the picture the screen. Neither is true of
+	/// the editor or of the file, which is what they were in a bar with.
+	private let pictureControls = NSStackView()
+	private let anchorsSwitch = NSButton(
+		checkboxWithTitle: "Anchors", target: nil, action: nil)
+	private let fullScreenButton = NSButton()
 	private let problemLabel = NSTextField(labelWithString: "")
 
 	/// The overlay tree, held at `speed = 0` and scrubbed by `timeOffset`.
@@ -87,28 +113,50 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		self.composeDocument = document
 		let window = NSWindow(
 			contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
-			styleMask: [.titled, .closable, .miniaturizable, .resizable],
+			styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
 			backing: .buffered, defer: false)
+		window.titlebarAppearsTransparent = true
 		window.appearance = NSAppearance(named: .darkAqua)
 		window.backgroundColor = Theme.background
 		window.minSize = NSSize(width: 900, height: 600)
-		// Takes and projects are tabs of one window rather than windows of
-		// their own.
+		// Each document is a plain window, and the bar says which one.
 		//
-		// The system's own tabbing rather than a tab bar of this program's
-		// making: it is the bar everybody already knows, it comes with the
-		// keyboard shortcuts and the tab-overview gesture, and it costs two
-		// lines against a view-controller hierarchy. What it fixes is not
-		// tidiness — two windows the same size, both centred, sit exactly on
-		// top of each other, and the one underneath may as well not exist.
-		window.tabbingIdentifier = "cuttr"
-		window.tabbingMode = .preferred
+		// These were tabs of one window, on the system's own tabbing. What that
+		// fixed was real — two windows the same size, both centred, sit exactly
+		// on top of each other and the one underneath may as well not exist —
+		// but it cost a permanent row in every window to answer a question
+		// somebody asks a few times an hour, and the bar already answers it in
+		// the one place anybody looks: the document's name, top left. So the
+		// name lists every document open and takes you to one.
+		//
+		// This is a change in how the program behaves in the system, and worth
+		// knowing about: there is no tab bar, no tab overview and no dragging a
+		// tab out. In their place macOS's own window handling does the work —
+		// `⌘\`` cycles the windows and the Window menu lists them — and
+		// `⌘⇧[` / `⌘⇧]` walk the documents in the order the name's menu shows
+		// them, so the keyboard path is the one it was.
+		window.tabbingMode = .disallowed
+		// One band at the top, and the bar is it. See `DocumentBar.height`.
+		window.titleVisibility = .hidden
+		DocumentBar.centreTrafficLights(in: window)
 		super.init(window: window)
 		window.delegate = self
 		build()
 		wire()
 		document.onChange?()
 		rebuild()
+		// A project with nothing in it opens on itself.
+		//
+		// The editor is three empty lists and a form, and that is the first
+		// thing anybody sees when they start this program — a screen whose whole
+		// content is four captions explaining what is not there yet. The project
+		// page has something to say about a new project on the day it is made:
+		// what it is called, what size it is, what rate, where it renders to.
+		// Once there is a programme, the programme is the point and the editor
+		// opens as before.
+		if composeDocument.project.timeline.isEmpty && composeDocument.takes.isEmpty {
+			show(.project)
+		}
 		window.center()
 	}
 
@@ -120,17 +168,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard let window else { return }
 		playerView = PlayerView(player: transport.player)
 
-		bar.onRender = { [weak self] in self?.render(nil) }
-		bar.onReload = { [weak self] in self?.composeDocument.reload() }
-		bar.onMode = { [weak self] index in self?.show(Mode(rawValue: index) ?? .edit) }
-		bar.onFullScreen = { [weak self] in self?.toggleFullScreenPreview(nil) }
+		buildBar()
+		buildPictureControls()
 		controls.onPlayPause = { [weak self] in self?.togglePlay(nil) }
 		controls.onScrub = { [weak self] time in self?.seek(to: time) }
-		bar.onAnchors = { [weak self] shown in
-			// The markers are for placing an overlay against a face, and once it
-			// is placed they are in the way of seeing the thing they placed.
-			self?.markers.isHidden = !shown
-		}
 
 		source.onApply = { [weak self] text in
 			guard let self, let url = self.composeDocument.url else { return }
@@ -199,6 +240,15 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			controls.heightAnchor.constraint(equalToConstant: 76),
 		])
 
+		// The picture's own two controls, in its top corner.
+		pictureControls.translatesAutoresizingMaskIntoConstraints = false
+		picture.addSubview(pictureControls)
+		NSLayoutConstraint.activate([
+			pictureControls.trailingAnchor.constraint(
+				equalTo: picture.trailingAnchor, constant: -12),
+			pictureControls.topAnchor.constraint(equalTo: picture.topAnchor, constant: 12),
+		])
+
 		// A real frame, not zero.
 		//
 		// A split view created at 0x0 has its size turned into a pair of
@@ -242,7 +292,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		// do rather than starting a second row of furniture.
 		modes.tabViewType = .noTabsNoBorder
 		modes.drawsBackground = false
-		for (identifier, view) in [("edit", editing), ("text", source), ("preview", split)] as [(String, NSView)] {
+		for (identifier, view) in [("project", projectPage()), ("edit", editing),
+		                          ("text", source), ("preview", split)] as [(String, NSView)] {
 			let item = NSTabViewItem(identifier: identifier)
 			item.view = view
 			modes.addTabViewItem(item)
@@ -256,7 +307,23 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		content.wantsLayer = true
 		content.layer?.backgroundColor = Theme.background.cgColor
 
-		for view in [bar, problemLabel, modes] as [NSView] {
+		// The bar across the top, the rail down the left, and whatever the rail
+		// has chosen filling the rest. The same three regions as the cutting
+		// window, in the same places, so it is one arrangement to learn.
+		// The content area is one colour and the rail is another.
+		//
+		// The warning line used to sit straight on the window's own ground,
+		// which is what the rail is drawn in — so there was a band of the rail's
+		// colour running along the top of the content, and the rail read as
+		// turning a corner. Two areas, two colours, and this is the ground the
+		// content area stands on.
+		let ground = NSView()
+		ground.wantsLayer = true
+		ground.layer?.backgroundColor = Theme.panel.cgColor
+		ground.translatesAutoresizingMaskIntoConstraints = false
+		content.addSubview(ground)
+
+		for view in [bar, rail, problemLabel, modes] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			content.addSubview(view)
 		}
@@ -264,15 +331,25 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			bar.topAnchor.constraint(equalTo: content.topAnchor),
 			bar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
 			bar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-			bar.heightAnchor.constraint(equalToConstant: 38),
+			bar.heightAnchor.constraint(equalToConstant: DocumentBar.height),
+
+			// The rail says how wide it is; this only says where.
+			rail.topAnchor.constraint(equalTo: bar.bottomAnchor),
+			rail.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+			rail.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+
+			ground.topAnchor.constraint(equalTo: bar.bottomAnchor),
+			ground.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
+			ground.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+			ground.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 
 			problemLabel.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 2),
-			problemLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+			problemLabel.leadingAnchor.constraint(equalTo: rail.trailingAnchor, constant: 10),
 			problemLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
 			problemLabel.heightAnchor.constraint(equalToConstant: 14),
 
 			modes.topAnchor.constraint(equalTo: problemLabel.bottomAnchor, constant: 2),
-			modes.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+			modes.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
 			modes.trailingAnchor.constraint(equalTo: content.trailingAnchor),
 			modes.bottomAnchor.constraint(equalTo: content.bottomAnchor),
 		])
@@ -302,9 +379,106 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		])
 
 		window.contentView = content
+		// Nothing in this window opens with the keyboard in it.
+		//
+		// Left to itself AppKit hands the first responder to the first text
+		// field it can find, which on the project page is the output's frame
+		// width — so a new window opened with a cursor blinking in the size of
+		// the film, where a stray keystroke edits it. It also broke opening a
+		// file: the properties panel refuses to rebuild while one of its fields
+		// is being edited, because a reload mid-word takes the cursor with it,
+		// and a field that had focus merely by default looked exactly like a
+		// field somebody was typing in. The file was read, the panel declined to
+		// show it, and the page stayed on the empty project it had been built
+		// with until somebody switched pages and back.
+		window.initialFirstResponder = rail
 
 		// No marking here: an anchor is marked on the take, in the cutting
 		// window, where the footage is. This window shows what was found.
+	}
+
+	/// For the tests: which of the four is showing.
+	var modeForTesting: Mode { mode }
+
+	/// For the tests: the rail, so its place can be compared with the other
+	/// window's.
+	var railForTesting: Rail { rail }
+
+	/// The bar: the project's name, the clock, what just happened — and two
+	/// things that are true whatever mode is showing.
+	///
+	/// `Render…` is one of them: it is what the whole window is for and it does
+	/// not belong to a mode. The mode switch is the other, and only until the
+	/// rail takes it; `⌘1`/`⌘2`/`⌘3` already do the same thing.
+	private func buildBar() {
+		rail.onSelect = { [weak self] index in self?.show(Mode(rawValue: index) ?? .edit) }
+
+		// A picture rather than the word. It sits beside a clock and a play
+		// button, which are both shapes, and one word among them reads as the
+		// odd one out — `movieclapper` is what this makes: a film, written to a
+		// file. The word is still there on hover and in the File menu.
+		renderButton.isBordered = false
+		renderButton.bezelStyle = .inline
+		renderButton.imagePosition = .imageOnly
+		renderButton.image = NSImage(
+			systemSymbolName: "movieclapper", accessibilityDescription: "render")
+			?? NSImage(systemSymbolName: "film", accessibilityDescription: "render")
+		renderButton.image = renderButton.image?.withSymbolConfiguration(
+			.init(pointSize: 13, weight: .medium).applying(.init(paletteColors: [Theme.text])))
+		renderButton.target = self
+		renderButton.action = #selector(render(_:))
+		renderButton.toolTip = "Render\u{2026} (\u{21E7}\u{2318}R)"
+		renderButton.translatesAutoresizingMaskIntoConstraints = false
+		renderButton.widthAnchor.constraint(equalToConstant: 24).isActive = true
+		bar.addTrailing(renderButton)
+
+		bar.onPlayPause = { [weak self] in self?.playPressed() }
+		bar.documents = { [weak self] in
+			AppDelegate.shared?.documentsMenu(for: self?.window)
+		}
+	}
+
+	/// The controls that belong to the picture, in the corner of the picture.
+	///
+	/// They were in the bar, where they were furniture for something that is not
+	/// on screen two thirds of the time. Over the picture they are only there
+	/// when the thing they are about is.
+	private func buildPictureControls() {
+		anchorsSwitch.state = .on
+		anchorsSwitch.font = NSFont.systemFont(ofSize: 11)
+		anchorsSwitch.target = self
+		anchorsSwitch.action = #selector(anchorsChanged)
+		anchorsSwitch.toolTip = "Show where the tracked faces are. They are for placing an overlay, "
+			+ "and in the way once it is placed."
+
+		fullScreenButton.bezelStyle = .rounded
+		fullScreenButton.controlSize = .small
+		fullScreenButton.imagePosition = .imageOnly
+		fullScreenButton.image = NSImage(
+			systemSymbolName: "arrow.up.left.and.arrow.down.right",
+			accessibilityDescription: "full screen")?
+			.withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+		fullScreenButton.target = self
+		fullScreenButton.action = #selector(toggleFullScreenPreview(_:))
+		fullScreenButton.toolTip = "Watch it full screen \u{2014} the picture and nothing else"
+		fullScreenButton.translatesAutoresizingMaskIntoConstraints = false
+		fullScreenButton.widthAnchor.constraint(equalToConstant: 26).isActive = true
+
+		pictureControls.orientation = .horizontal
+		pictureControls.spacing = 8
+		pictureControls.alignment = .centerY
+		pictureControls.addView(anchorsSwitch, in: .leading)
+		pictureControls.addView(fullScreenButton, in: .leading)
+		pictureControls.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+		pictureControls.wantsLayer = true
+		pictureControls.layer?.backgroundColor = NSColor(calibratedWhite: 0, alpha: 0.45).cgColor
+		pictureControls.layer?.cornerRadius = 6
+	}
+
+	@objc private func anchorsChanged() {
+		// The markers are for placing an overlay against a face, and once it is
+		// placed they are in the way of seeing the thing they placed.
+		markers.isHidden = anchorsSwitch.state != .on
 	}
 
 	// MARK: - Wiring
@@ -378,6 +552,14 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 					.moved(start: start, end: end, in: resolved)
 			}
 			self.composeDocument.apply(next)
+			try? self.composeDocument.write()
+		}
+
+		// The project page writes through the same door as everything else: it
+		// is the same panel, so an edit here is an edit there.
+		projectPanel.onChange = { [weak self] project in
+			guard let self else { return }
+			self.composeDocument.apply(project)
 			try? self.composeDocument.write()
 		}
 
@@ -485,7 +667,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			// The overlay tree is paused; this is what puts it at the same
 			// moment as the picture, exactly, every tick.
 			self.overlayLayer?.timeOffset = time
-			self.bar.setStatus(Timecode.string(time))
+			self.bar.setClock(time)
 			// The full-screen bar shows the same clock, and only while it is
 			// the thing on screen.
 			if self.presenting {
@@ -495,7 +677,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			}
 		}
 		transport.onRateChange = { [weak self] rate in
-			guard let self, self.presenting else { return }
+			guard let self else { return }
+			self.bar.setPlaying(rate != 0)
+			guard self.presenting else { return }
 			self.controls.isPlaying = rate != 0
 			// Pausing is a reason to see the controls: somebody has just
 			// reached for them.
@@ -508,11 +692,15 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard let window else { return }
 		window.title = composeDocument.displayName
 		window.representedURL = composeDocument.url
+		bar.setName(composeDocument.displayName)
 		takesTable.reload(composeDocument.takes, scenes: composeDocument.project.scenes)
 		inspector.resolved = composeDocument.resolved
 		let vocabulary = composeDocument.vocabulary
 		library.reload(vocabulary)
+		// So the file can say which of its names point at nothing.
+		source.vocabulary = vocabulary
 		inspector.reload(composeDocument.project, vocabulary: vocabulary)
+		if mode == .project { reloadProjectPage() }
 		if mode == .text { source.show(sourceText) }
 		strip.resolved = composeDocument.resolved
 		markers.markers = (composeDocument.resolved?.anchors ?? []).compactMap { entry in
@@ -539,7 +727,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		} else {
 			problemLabel.stringValue = ""
 		}
-		bar.setEnabled(composeDocument.resolved != nil)
+		renderButton.isEnabled = composeDocument.resolved != nil
 
 		guard let resolved = composeDocument.resolved else { return }
 		buildTask?.cancel()
@@ -653,22 +841,85 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		CATransaction.commit()
 	}
 
-	/// Switches which of the three has the window.
+	/// What the project page shows: the output, headed by the project's name.
+	///
+	/// Nothing new is written. `output:` is where every one of these already
+	/// lived; this is a way of reaching it that does not require knowing that
+	/// deselecting the tree is how you select the project.
+	private func reloadProjectPage() {
+		projectPanel.documentName = composeDocument.displayName
+		projectPanel.resolved = composeDocument.resolved
+		projectPanel.poster = { [weak self] time, done in
+			guard let self, let composition = self.builtComposition else { return done(nil) }
+			let generator = AVAssetImageGenerator(asset: composition)
+			generator.videoComposition = self.builtVideoComposition
+			generator.requestedTimeToleranceBefore = CMTime(seconds: 0.25, preferredTimescale: 600)
+			generator.requestedTimeToleranceAfter = CMTime(seconds: 0.25, preferredTimescale: 600)
+			generator.generateCGImageAsynchronously(
+				for: CMTime(seconds: max(0, time), preferredTimescale: 600)
+			) { image, _, _ in
+				let picture = image.map { NSImage(cgImage: Self.asShown($0), size: .zero) }
+				Task { @MainActor in done(picture) }
+			}
+		}
+		projectPanel.reload(composeDocument.project,
+		                    vocabulary: composeDocument.vocabulary, selection: .output)
+	}
+
+	/// The project's own page: the output form, in a column rather than smeared
+	/// across a window that may be eighteen hundred points wide.
+	///
+	/// A form is read down its left edge, and a key column with two feet of
+	/// empty space after it is a form nobody can follow from one row to the
+	/// next. The width is a preference and the ceiling is the page, so it gives
+	/// way on a narrow window instead of demanding room that is not there.
+	private func projectPage() -> NSView {
+		let page = NSView(frame: .roomToLayOutIn)
+		page.wantsLayer = true
+		page.layer?.backgroundColor = Theme.panel.cgColor
+		projectPanel.translatesAutoresizingMaskIntoConstraints = false
+		page.addSubview(projectPanel)
+		let wide = projectPanel.widthAnchor.constraint(equalToConstant: 560)
+		wide.priority = NSLayoutConstraint.Priority(250)
+		wide.isActive = true
+		NSLayoutConstraint.activate([
+			projectPanel.topAnchor.constraint(equalTo: page.topAnchor),
+			projectPanel.bottomAnchor.constraint(equalTo: page.bottomAnchor),
+			projectPanel.centerXAnchor.constraint(equalTo: page.centerXAnchor),
+			projectPanel.widthAnchor.constraint(lessThanOrEqualTo: page.widthAnchor),
+		])
+		return page
+	}
+
+	/// Switches which of the four has the window.
 	public func show(_ mode: Mode) {
 		self.mode = mode
 		modes.selectTabViewItem(at: mode.rawValue)
-		bar.setMode(mode.rawValue)
+		rail.select(mode.rawValue)
 		if mode == .preview {
 			// Now that the picture is in the window it has a layer to sit on.
 			attachOverlays()
 			Task { @MainActor [weak self] in self?.attachOverlays() }
 		}
 		if mode == .text { source.show(sourceText) }
+		if mode == .project { reloadProjectPage() }
 		// Nothing plays behind a view that is not the picture: a project window
 		// left on the editor should not keep decoding.
 		if mode != .preview { transport.pause() }
 	}
 
+	/// Play, from wherever somebody happens to be.
+	///
+	/// The picture is only in the window on the preview page — a tab view keeps
+	/// just the selected item's view — so pressing play on the editor started
+	/// the transport with nowhere to draw, and what came out was the sound of a
+	/// programme nobody could see. Play means "show me this", so it shows it.
+	private func playPressed() {
+		if mode != .preview { show(.preview) }
+		togglePlay(nil)
+	}
+
+	@objc public func showProject(_ sender: Any?) { show(.project) }
 	@objc public func showEditor(_ sender: Any?) { show(.edit) }
 	@objc public func showText(_ sender: Any?) { show(.text) }
 	@objc public func showPreview(_ sender: Any?) { show(.preview) }
@@ -709,7 +960,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		presenting.toggle()
 		if presenting { show(.preview) }
 		bar.isHidden = presenting
+		rail.isHidden = presenting
 		strip.isHidden = presenting
+		pictureControls.isHidden = presenting
 		window.toggleFullScreen(nil)
 		if presenting { watchThePointer() } else { stopWatchingThePointer() }
 	}
@@ -746,7 +999,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		presenting = false
 		stopWatchingThePointer()
 		bar.isHidden = false
+		rail.isHidden = false
 		strip.isHidden = false
+		pictureControls.isHidden = false
 	}
 
 	/// The file as it stands, for the text view.
@@ -759,6 +1014,9 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 	public func windowDidResize(_ notification: Notification) {
 		layoutOverlays()
+		// AppKit puts the traffic lights back where it likes them on every
+		// resize, so they are placed again here.
+		if let window { DocumentBar.centreTrafficLights(in: window) }
 	}
 
 	/// One frame of the *output*, which is what a project's timeline is in.
@@ -768,6 +1026,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 	private func seek(to time: Double) {
 		playhead = max(0, time)
+		bar.setClock(playhead)
 		strip.playhead = playhead
 		markers.playhead = playhead
 		overlayLayer?.timeOffset = playhead
@@ -1004,7 +1263,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard panel.runModal() == .OK, let url = panel.url else { return }
 
 		bar.setProgress(0)
-		bar.setRenderEnabled(false)
+		renderButton.isEnabled = false
 		bar.setStatus("rendering…")
 		Task { [weak self] in
 			do {
@@ -1016,7 +1275,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 				self?.bar.setStatus(error.localizedDescription)
 			}
 			self?.bar.setProgress(nil)
-			self?.bar.setRenderEnabled(true)
+			self?.renderButton.isEnabled = true
 		}
 	}
 

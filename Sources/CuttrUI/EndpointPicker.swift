@@ -333,6 +333,12 @@ extension EndpointPicker: NSTableViewDataSource, NSTableViewDelegate {
 		return 22
 	}
 
+	/// One rule for every list in this program: a selected row is a mark and a
+	/// lighter ground, not a bar of saturated blue across it.
+	public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+		MarkedRow.make(in: tableView)
+	}
+
 	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?,
 	                      row: Int) -> NSView? {
 		guard row < rows.count else { return nil }

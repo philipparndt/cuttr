@@ -30,6 +30,15 @@ public final class Transport {
 			case .both: return "Both"
 			}
 		}
+
+		/// The same three, short enough to sit on the waveform they are about.
+		public var short: String {
+			switch self {
+			case .external: return "rec"
+			case .camera: return "cam"
+			case .both: return "both"
+			}
+		}
 	}
 
 	public let player = AVPlayer()

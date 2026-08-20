@@ -82,15 +82,6 @@ public final class TimelineView: NSView {
 	public override var isFlipped: Bool { true }
 	public override var acceptsFirstResponder: Bool { true }
 
-	public override init(frame: NSRect) {
-		super.init(frame: frame)
-		wantsLayer = true
-		layer?.backgroundColor = Theme.background.cgColor
-		addGestureRecognizer(NSMagnificationGestureRecognizer(target: self, action: #selector(magnified(_:))))
-	}
-
-	@available(*, unavailable) required init?(coder: NSCoder) { nil }
-
 	// MARK: - Time and space
 
 	public func x(for time: Double) -> CGFloat { CGFloat((time - scrollTime) / secondsPerPoint) }
@@ -442,9 +433,15 @@ public final class TimelineView: NSView {
 			if clip.id == editingClip { continue }   // the editor is drawing it
 			let rect = barRect(for: clip, row: rows[clip.id] ?? 0)
 			let selected = clip.id == selectedClip
-			Theme.clipFill(clip.color, selected: selected).setFill()
+			// The block is grey and the colour is a stripe down its leading
+			// edge, in line with the tick at the head of the lane.
+			Theme.clipBlock(selected).setFill()
 			rect.fill()
-			Theme.clipStroke(clip.color).setStroke()
+			Theme.clipStripe(clip.color).setFill()
+			NSRect(x: rect.minX, y: rect.minY, width: min(3, rect.width),
+			       height: rect.height).fill()
+			// Selected is the accent, everywhere in this program.
+			(selected ? Theme.accent : Theme.rule).setStroke()
 			NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5)).stroke()
 
 			// Trim handles, on the selected clip only.
@@ -454,7 +451,7 @@ public final class TimelineView: NSView {
 			// the selected clip alone it says what the whole band can do, and
 			// says it about the clip somebody is working on.
 			if selected {
-				Theme.clipStroke(clip.color).setFill()
+				Theme.accent.setFill()
 				for edge in [rect.minX, rect.maxX - 3] {
 					NSRect(x: edge, y: rect.minY, width: 3, height: rect.height).fill()
 				}

@@ -162,13 +162,23 @@ enum MainMenu {
 
 		let viewItem = NSMenuItem()
 		let view = NSMenu(title: "View")
-		// The project window's three views, before the zooms.
-		view.addItem(command("Editor", #selector(ComposeWindowController.showEditor(_:)), "1"))
-		view.addItem(command("Project File", #selector(ComposeWindowController.showText(_:)), "2"))
-		view.addItem(command("Preview", #selector(ComposeWindowController.showPreview(_:)), "3"))
+		// The project window's four views, before the zooms — in the rail's own
+		// order, numbered to match it. A rail whose first item is ⌘2 is a rail
+		// somebody has to remember an exception about.
+		view.addItem(command("Project", #selector(ComposeWindowController.showProject(_:)), "1"))
+		view.addItem(command("Editor", #selector(ComposeWindowController.showEditor(_:)), "2"))
+		view.addItem(command("Project File", #selector(ComposeWindowController.showText(_:)), "3"))
+		view.addItem(command("Preview", #selector(ComposeWindowController.showPreview(_:)), "4"))
 		view.addItem(command("Full-Screen Preview",
 		                     #selector(ComposeWindowController.toggleFullScreenPreview(_:)),
 		                     "f", [.command, .control]))
+		view.addItem(.separator())
+		// And the cutting window's four, in the same place in this menu as the
+		// project window's three, because they are the same rail.
+		view.addItem(bare("Clips", #selector(MainWindowController.showClips(_:))))
+		view.addItem(bare("Faces", #selector(MainWindowController.showFaces(_:))))
+		view.addItem(bare("Words", #selector(MainWindowController.showWords(_:))))
+		view.addItem(bare("Look", #selector(MainWindowController.showLook(_:))))
 		view.addItem(.separator())
 		view.addItem(command("Zoom In", #selector(MainWindowController.zoomIn(_:)), "+"))
 		view.addItem(command("Zoom Out", #selector(MainWindowController.zoomOut(_:)), "-"))
@@ -242,6 +252,16 @@ enum MainMenu {
 		let window = NSMenu(title: "Window")
 		window.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
 		window.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+		window.addItem(.separator())
+		// The keyboard path through the open documents, which the tab bar used
+		// to own. It walks them in the order the name's menu lists them:
+		// projects, each with its takes under it.
+		window.addItem(command("Go to Document…",
+		                       #selector(AppDelegate.showDocumentPalette(_:)), "p", [.command, .shift]))
+		window.addItem(command("Previous Document",
+		                       #selector(AppDelegate.previousDocument(_:)), "[", [.command, .shift]))
+		window.addItem(command("Next Document",
+		                       #selector(AppDelegate.nextDocument(_:)), "]", [.command, .shift]))
 		windowItem.submenu = window
 		main.addItem(windowItem)
 		NSApp.windowsMenu = window
@@ -268,6 +288,12 @@ enum MainMenu {
 		let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
 		item.keyEquivalentModifierMask = modifiers
 		return item
+	}
+
+	/// A menu item with no key equivalent, for the things that have no room for
+	/// one.
+	private static func bare(_ title: String, _ action: Selector) -> NSMenuItem {
+		NSMenuItem(title: title, action: action, keyEquivalent: "")
 	}
 
 	/// Fills Open Recent from the document controller's list.

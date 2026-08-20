@@ -56,7 +56,11 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 		table.dataSource = self
 		table.delegate = self
 		table.headerView = NSTableHeaderView()
-		table.usesAlternatingRowBackgroundColors = true
+		// No alternating stripes. Selection is now said by a row being a shade
+		// lighter, and a list where every other row is already a shade lighter
+		// has nothing left to say it with.
+		table.usesAlternatingRowBackgroundColors = false
+		table.selectionHighlightStyle = .regular
 		table.style = .plain
 		table.rowHeight = 20
 		table.backgroundColor = Theme.panel
@@ -311,6 +315,12 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 
 	public func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
+	/// One rule for every list in this program: a selected row is a mark and a
+	/// lighter ground, not a bar of saturated blue across it.
+	public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+		MarkedRow.make(in: tableView)
+	}
+
 	public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
 		guard let tableColumn, row < rows.count else { return nil }
 		let field = (tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? NSTextField)
@@ -341,11 +351,16 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 			case .take(let entry):
 				cell.field.isEditable = entry.path == renaming
 				cell.field.stringValue = entry.name
-				cell.field.textColor = entry.problem == nil ? Theme.clipStroke(.green) : Theme.playhead
+				// The name is text. The symbol beside it already carries the hue
+				// that says what kind of thing this is, and saying it twice
+				// spends a signal to repeat one that was not in doubt. Red is
+				// the exception and is not a kind — it is a take that will not
+				// resolve, which is news.
+				cell.field.textColor = entry.problem == nil ? Theme.text : Theme.playhead
 			case .scene(let name, _):
 				cell.field.isEditable = false
 				cell.field.stringValue = name
-				cell.field.textColor = Theme.color(.scene)
+				cell.field.textColor = Theme.text
 			}
 			cell.needsDisplay = true
 			return cell
@@ -359,7 +374,7 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 			switch tableColumn.identifier.rawValue {
 			case "take":
 				field.stringValue = entry.name
-				field.textColor = entry.problem == nil ? Theme.clipStroke(.green) : Theme.playhead
+				field.textColor = entry.problem == nil ? Theme.text : Theme.playhead
 			case "clips":
 				field.stringValue = entry.problem == nil ? String(entry.clips) : "—"
 				field.textColor = Theme.dimText
@@ -372,7 +387,7 @@ public final class TakesTable: NSView, NSTableViewDataSource, NSTableViewDelegat
 			switch tableColumn.identifier.rawValue {
 			case "take":
 				field.stringValue = name
-				field.textColor = Theme.color(.scene)
+				field.textColor = Theme.text
 			case "clips":
 				field.stringValue = String(parts)
 				field.textColor = Theme.dimText

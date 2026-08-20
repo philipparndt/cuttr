@@ -850,3 +850,838 @@ import Testing
 		#expect(panel.treeRowsForTesting.contains("entry intro → overlay 1.0#0"))
 	}
 }
+
+/// The head of the properties panel says what depends on what.
+///
+/// It used to say `TIMELINE ENTRY` — the name of a Swift type, which is the one
+/// fact about a selection nobody needs. What is asserted here is that it names
+/// the thing instead, that each of its relationships is a place, and that
+/// clicking one asks the tree for it rather than selecting anything itself.
+@Suite @MainActor struct SubjectLineTests {
+
+	private func project() -> Project {
+		Project(
+			timeline: [
+				TimelineEntry(group: "question1", entries: [
+					TimelineEntry(clip: ClipReference("clip-4"), label: "shot"),
+				]),
+			],
+			overlays: [
+				Overlay(kind: .text("why though", style: nil),
+				        span: .marks(from: .group("shot"), to: .group("shot"))),
+			])
+	}
+
+	private func panel(_ selection: ProjectSelection) -> PropertiesPanel {
+		_ = NSApplication.shared
+		let panel = PropertiesPanel()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 900),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = panel
+		panel.reload(project(), vocabulary: ComposeDocument.Vocabulary(), selection: selection)
+		panel.layoutSubtreeIfNeeded()
+		return panel
+	}
+
+	@Test func itNamesTheThingAndWhatItIsInside() {
+		let panel = self.panel(.entry([0, 0]))
+		let lines = panel.subjectForTesting.linesForTesting
+		#expect(lines.first == "clip-4", "the head says \(lines)")
+		#expect(lines.contains { $0.contains("in @question1") }, "no section in \(lines)")
+		#expect(lines.contains { $0.contains("carries") }, "nothing carried in \(lines)")
+		#expect(lines.allSatisfy { !$0.contains("TIMELINE ENTRY") })
+	}
+
+	@Test func aSectionSaysWhatItIs() {
+		let lines = panel(.entry([0])).subjectForTesting.linesForTesting
+		#expect(lines.first == "@question1", "the head says \(lines)")
+	}
+
+	/// An overlay says what it is over, which is the other direction of the same
+	/// relationship.
+	@Test func anOverlaySaysWhatItIsOver() {
+		let lines = panel(.overlay(.project(0))).subjectForTesting.linesForTesting
+		#expect(lines.first == "\u{201C}why though\u{201D}", "the head says \(lines)")
+		#expect(lines.contains { $0.contains("over @shot") }, "not over anything in \(lines)")
+	}
+
+	/// Clicking a relationship asks for that selection. The panel does not make
+	/// one itself: the tree owns the selection, and two owners is how a panel
+	/// comes to show one thing while a tree highlights another.
+	@Test func clickingARelationshipAsksForIt() {
+		let panel = self.panel(.entry([0, 0]))
+		var asked: [ProjectSelection] = []
+		panel.onGoTo = { asked.append($0) }
+		let buttons = panel.subjectForTesting.relationButtonsForTesting
+		#expect(!buttons.isEmpty)
+		for button in buttons where button.isEnabled { button.performClick(nil) }
+		#expect(asked.contains(.entry([0])), "the section was not offered: \(asked)")
+		#expect(asked.contains(.overlay(.project(0))), "the caption was not offered: \(asked)")
+	}
+
+	/// And the head is the same height whatever is selected, because the panel
+	/// states it and nothing in the head argues.
+	@Test func theHeadDoesNotMoveTheForm() {
+		var tops: Set<CGFloat> = []
+		for selection: ProjectSelection in [.output, .entry([0]), .entry([0, 0]), .overlay(.project(0))] {
+			let panel = self.panel(selection)
+			func scrolls(in view: NSView) -> [NSScrollView] {
+				view.subviews.flatMap { sub -> [NSScrollView] in
+					((sub as? NSScrollView).map { [$0] } ?? []) + scrolls(in: sub)
+				}
+			}
+			guard let form = scrolls(in: panel).first else {
+				Issue.record("no form for \(selection)")
+				continue
+			}
+			tops.insert(form.convert(form.bounds, to: panel).minY)
+		}
+		#expect(tops.count == 1, "the form starts at \(tops.sorted())")
+	}
+}
+
+/// The explanations are kept and put away.
+///
+/// Every field in the properties panel carried three lines of grey prose under
+/// it, permanently. It is good writing and it was most of the reason the column
+/// felt space-demanding. Not one word has gone: it is the field's tooltip, and
+/// it is all behind a `?` in the heading, keyed by the field it explains.
+@Suite @MainActor struct FieldHelpTests {
+
+	private func panel(_ selection: ProjectSelection) -> PropertiesPanel {
+		_ = NSApplication.shared
+		let panel = PropertiesPanel()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 900),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = panel
+		panel.reload(
+			Project(
+				timeline: [TimelineEntry(clip: ClipReference("intro"))],
+				overlays: [Overlay(kind: .spinner(Spinner(words: [SpinnerWord("one")])),
+				                   spans: [.times(from: 0, to: 4)], anchor: "mia-eye")]),
+			vocabulary: ComposeDocument.Vocabulary(), selection: selection)
+		panel.layoutSubtreeIfNeeded()
+		return panel
+	}
+
+	/// Every word is still there, and every heading that has words offers them.
+	@Test func theWordsAreKeptBehindTheHeading() {
+		for selection: ProjectSelection in [.output, .entry([0]), .overlay(.project(0))] {
+			let panel = self.panel(selection)
+			let said = panel.explanationsForTesting
+			#expect(!said.isEmpty, "nothing is explained for \(selection)")
+			#expect(said.allSatisfy { !$0.note.isEmpty })
+			// A `?` on every heading that has something under it, and on none
+			// that has not: a button opening an empty popover is worse than no
+			// button.
+			let withWords = Set(said.map(\.section))
+			#expect(Set(panel.askableSectionsForTesting) == withWords,
+			        "for \(selection): \(panel.askableSectionsForTesting) against \(withWords.sorted())")
+		}
+	}
+
+	/// And none of it is printed under the fields any more.
+	///
+	/// `output` is the case with no standing remarks in it — the few places that
+	/// say "the thing you are looking for is not here, and this is why" are not
+	/// explanations of a field and stay printed.
+	@Test func noneOfItIsPrintedUnderTheFields() {
+		let panel = self.panel(.output)
+		let notes = Set(panel.explanationsForTesting.map(\.note))
+		func labels(in view: NSView) -> [NSTextField] {
+			view.subviews.flatMap { sub -> [NSTextField] in
+				((sub as? NSTextField).map { [$0] } ?? []) + labels(in: sub)
+			}
+		}
+		let printed = labels(in: panel).map(\.stringValue).filter { notes.contains($0) }
+		#expect(printed.isEmpty, "still printed: \(printed)")
+	}
+
+	/// Resting on a row says the same thing.
+	@Test func everyExplainedRowSaysItOnHover() {
+		let panel = self.panel(.output)
+		let notes = Set(panel.explanationsForTesting.map(\.note))
+		func tips(in view: NSView) -> [String] {
+			view.subviews.flatMap { sub -> [String] in
+				(sub.toolTip.map { [$0] } ?? []) + tips(in: sub)
+			}
+		}
+		let shown = Set(tips(in: panel))
+		#expect(notes.isSubset(of: shown),
+		        "not offered on hover: \(notes.subtracting(shown))")
+	}
+}
+
+/// Hue says what kind of thing something is. Selection does not get one.
+///
+/// Measured rather than argued about, because the thing that went wrong here was
+/// measurable: the selection accent was `#4D8FF2` and the camera waveform is
+/// `#6B9ED9` — two blues within a few degrees of each other, on the same screen,
+/// one saying "this is the camera's audio" and the other "this is the row you
+/// clicked".
+@Suite @MainActor struct ColourDisciplineTests {
+
+	private func hsb(_ colour: NSColor) -> (h: CGFloat, s: CGFloat, b: CGFloat) {
+		let it = colour.usingColorSpace(.deviceRGB) ?? colour
+		return (it.hueComponent, it.saturationComponent, it.brightnessComponent)
+	}
+
+	/// The accent is not a hue anybody could mistake for a kind of thing.
+	@Test func theAccentIsAlmostWithoutHue() {
+		let accent = hsb(Theme.accent)
+		#expect(accent.s < 0.15, "the accent is saturated: \(accent)")
+		// And every hue that *does* mean something is properly a hue.
+		for kind: Theme.Kind in [.clip, .query, .list, .section, .spinner, .scene] {
+			#expect(hsb(Theme.color(kind)).s > 0.3,
+			        "\(kind) is washed out: \(hsb(Theme.color(kind)))")
+		}
+	}
+
+	/// Not confusable with either recording, which is what it used to be.
+	@Test func theAccentIsNeitherRecording() {
+		func apart(_ a: NSColor, _ b: NSColor) -> Bool {
+			let one = hsb(a), two = hsb(b)
+			// Either a different hue by a wide margin, or so much less
+			// saturated that hue does not come into it.
+			let hue = min(abs(one.h - two.h), 1 - abs(one.h - two.h))
+			return hue > 0.12 || abs(one.s - two.s) > 0.35
+		}
+		#expect(apart(Theme.accent, Theme.cameraWave))
+		#expect(apart(Theme.accent, Theme.externalWave))
+	}
+
+	/// Amber means the separate recording, and stopped meaning "about to be cut".
+	@Test func thePendingSpanIsNotAmberAnyMore() {
+		let pending = hsb(Theme.pendingStroke)
+		let amber = hsb(Theme.externalWave)
+		#expect(abs(pending.h - amber.h) > 0.1 || pending.s < 0.2,
+		        "the pending span is still amber: \(pending)")
+		#expect(pending.s < 0.15, "the pending span has a hue of its own: \(pending)")
+	}
+
+	/// A clip's colour is a stripe on its block: the block itself is the same
+	/// grey whatever the clip is filed as.
+	@Test func theBlockIsGreyAndTheColourIsTheStripe() {
+		let blocks = ClipColor.allCases.map { _ in Theme.clipBlock(false) }
+		#expect(Set(blocks.map { $0.description }).count == 1)
+		#expect(hsb(Theme.clipBlock(false)).s < 0.05)
+		#expect(hsb(Theme.clipBlock(true)).s < 0.05)
+		// Selected is lighter, not louder.
+		#expect(hsb(Theme.clipBlock(true)).b > hsb(Theme.clipBlock(false)).b)
+		// And the stripes are the six hues, still six.
+		let stripes = ClipColor.allCases.map { hsb(Theme.clipStripe($0)).h }
+		#expect(Set(stripes).count == ClipColor.allCases.count)
+	}
+
+	/// The palette hands out labels; `color(_:)` hands out meanings.
+	///
+	/// Two answers to one question arrived from two directions — this branch
+	/// deciding that hue says what *kind* of thing something is, and `Takes carry
+	/// who is speaking` giving every speaker a hue — and this is the single rule
+	/// they reconcile into. `base(_:)` is six hues that can be told apart and
+	/// nothing more; whoever hands one out says what it means, and both who do
+	/// are the person using the program: a clip's lane, and who is speaking.
+	/// `color(_:)` is where the program itself fixes an assignment, and those are
+	/// the ones that must not be borrowed twice.
+	@Test func speakersBorrowThePaletteRatherThanInventingHues() {
+		for colour in ClipColor.allCases {
+			#expect(Theme.speakerLabel(colour) == Theme.base(colour),
+			        "\(colour) invented a hue for a speaker")
+			// The words are the same hue moved towards the ordinary text
+			// colour, because a page of full-strength amber is a page nobody
+			// reads for five minutes. Measured as saturation rather than
+			// brightness: the lift pulls every channel towards 0.88, which for a
+			// hue that already has a channel above that takes it *down* — the
+			// colour becomes paler without becoming lighter, which is the point.
+			let words = hsb(Theme.speakerText(colour))
+			let name = hsb(Theme.speakerLabel(colour))
+			#expect(words.s < name.s, "\(colour)'s words were not lifted")
+			// And it is still recognisably the same hue as the name at the head
+			// of the line, or the two would not read as one voice.
+			let apart = min(abs(words.h - name.h), 1 - abs(words.h - name.h))
+			#expect(apart < 0.02, "\(colour)'s words are a different hue from its name")
+			// A guess is dimmer than a fact.
+			#expect(Theme.suggestedLabel(colour).alphaComponent
+				< Theme.speakerLabel(colour).alphaComponent)
+		}
+	}
+
+	/// A hue the program has already given a meaning to is not borrowed for a
+	/// second one.
+	///
+	/// Stated as the specific mistake it was: the project file's numbers were
+	/// coloured `heardNotSaid`, which already means `[laughter]` — a thing that
+	/// was heard and not said, and a fixed assignment rather than a palette slot.
+	/// A number is not a kind of thing anyway; it is a quantity. Numbers are told
+	/// apart by weight instead, which is what this program does everywhere it has
+	/// run out of hues and still has something to say.
+	@Test func aFixedHueIsNotBorrowedTwice() {
+		#expect(ProjectSyntax.colour(.number) != Theme.heardNotSaid,
+		        "a number is wearing the colour of a laugh")
+		#expect(ProjectSyntax.isStrong(.number))
+		#expect(!ProjectSyntax.isStrong(.key))
+		// And the four roles are still four, told apart by colour or by weight.
+		let roles: [ProjectSyntax.Role] = [
+			.comment, .key, .number, .reference(.section, resolved: true),
+			.reference(.section, resolved: false),
+		]
+		let marks = roles.map { "\(ProjectSyntax.colour($0))/\(ProjectSyntax.isStrong($0))" }
+		#expect(Set(marks).count == roles.count, "two roles look the same: \(marks)")
+	}
+
+	/// The selected row is a lighter ground, near the panel rather than shouting
+	/// over it.
+	@Test func aSelectedRowIsLiftedNotPainted() {
+		let ground = hsb(Theme.selected)
+		#expect(ground.s < 0.05, "the selected ground has a hue: \(ground)")
+		#expect(ground.b > hsb(Theme.panel).b, "a selected row is not lifted")
+		#expect(ground.b < hsb(Theme.text).b, "a selected row is brighter than its text")
+	}
+}
+
+/// The project file in four roles, and a reference that points at nothing in red.
+///
+/// The last one is the point of the whole exercise: a slug with a typo in it is
+/// the commonest mistake this format admits, it costs a render to find out, and
+/// coloured while it is being typed it costs nothing.
+@Suite @MainActor struct ProjectSyntaxTests {
+
+	private let file = """
+	# the intro
+	timeline:
+	  - clip: mia-take-1/hello
+	  - group: question1
+	    entries:
+	      - clip: nope/missing
+	overlays:
+	  - text: "hi"
+	    from: @question1
+	    to: @nowhere
+	    size: 0.09
+	"""
+
+	private func vocabulary() -> ComposeDocument.Vocabulary {
+		var it = ComposeDocument.Vocabulary()
+		it.takeNames = ["mia-take-1"]
+		it.clips = ["hello"]
+		it.groups = ["question1"]
+		return it
+	}
+
+	/// Every stretch of the file with a given role, as text.
+	private func said(_ role: ProjectSyntax.Role,
+	                  _ vocabulary: ComposeDocument.Vocabulary) -> [String] {
+		let text = file as NSString
+		return ProjectSyntax.roles(in: file, vocabulary: vocabulary)
+			.filter { $0.1 == role }
+			.map { text.substring(with: $0.0).trimmingCharacters(in: .whitespacesAndNewlines) }
+	}
+
+	@Test func theFourRoles() {
+		let it = vocabulary()
+		#expect(said(.comment, it) == ["# the intro"])
+		#expect(said(.key, it) == ["timeline", "clip", "group", "entries", "clip",
+		                           "overlays", "text", "from", "to", "size"])
+		#expect(said(.number, it) == ["0.09"])
+	}
+
+	@Test func aReferenceThatFindsSomethingAndOneThatDoesNot() {
+		let it = vocabulary()
+		#expect(said(.reference(.clip, resolved: true), it) == ["mia-take-1/hello"])
+		#expect(said(.reference(.clip, resolved: false), it) == ["nope/missing"])
+		#expect(said(.reference(.section, resolved: true), it) == ["@question1"])
+		#expect(said(.reference(.section, resolved: false), it) == ["@nowhere"])
+		// Red, and red only there.
+		#expect(ProjectSyntax.colour(.reference(.clip, resolved: false)) == Theme.playhead)
+		#expect(ProjectSyntax.colour(.reference(.clip, resolved: true)) != Theme.playhead)
+	}
+
+	/// A project that has not resolved yet is not a project full of mistakes.
+	@Test func nothingIsWrongWhenThereIsNothingToCheckAgainst() {
+		let blank = ComposeDocument.Vocabulary()
+		#expect(said(.reference(.clip, resolved: false), blank).isEmpty)
+		#expect(said(.reference(.section, resolved: false), blank).isEmpty)
+		#expect(said(.reference(.section, resolved: true), blank) == ["@question1", "@nowhere"])
+	}
+
+	/// `#b-roll` is a tag and `# a note` is a comment, and the space is what
+	/// tells them apart.
+	@Test func aTagIsNotAComment() {
+		var it = ComposeDocument.Vocabulary()
+		it.tags = ["b-roll"]
+		let line = "  - query: #b-roll   # the wide shots\n"
+		let text = line as NSString
+		let roles = ProjectSyntax.roles(in: line, vocabulary: it)
+		let comments = roles.filter { $0.1 == .comment }.map { text.substring(with: $0.0) }
+		let tags = roles.filter { $0.1 == .reference(.query, resolved: true) }
+			.map { text.substring(with: $0.0) }
+		#expect(comments.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+			== ["# the wide shots"])
+		#expect(tags == ["#b-roll"])
+	}
+
+	/// A path to a file is not a reference to a name, and must not be reddened.
+	@Test func aFilePathIsNotAReference() {
+		var it = ComposeDocument.Vocabulary()
+		it.takeNames = ["mia"]
+		let line = "  file: sounds/music.wav\n"
+		let roles = ProjectSyntax.roles(in: line, vocabulary: it)
+		#expect(!roles.contains { $0.1 == .reference(.clip, resolved: false) },
+		        "a file path was marked as a broken reference")
+	}
+}
+
+/// The programme strip's lanes are named, and the clock still agrees with the
+/// pointer.
+///
+/// Making room down the left for the names moved the time axis, and every click
+/// on this strip goes through the two functions that were changed. A strip whose
+/// playhead lands a lane's width away from where somebody clicked is worse than
+/// one with unnamed lanes.
+@Suite @MainActor struct ProgrammeStripLanesTests {
+
+	private func strip() -> ProgrammeStrip {
+		_ = NSApplication.shared
+		let strip = ProgrammeStrip(frame: NSRect(x: 0, y: 0, width: 800, height: 200))
+		strip.resolved = try? Resolver.resolve(
+			Project(timeline: [TimelineEntry(card: Card(duration: 8))]),
+			baseURL: URL(fileURLWithPath: "/tmp"))
+		return strip
+	}
+
+	/// Time to a place and back again.
+	@Test func theClockAndThePointerAgree() {
+		let strip = self.strip()
+		// A card of eight seconds, so there is a duration to divide by: the axis
+		// starts after the names and ends at the right edge.
+		for time in [0.0, 2.0, 4.0, 7.9] {
+			let at = strip.xForTesting(time)
+			#expect(at >= strip.gutterForTesting, "\(time) is drawn in the lane names")
+			#expect(at <= 800.5)
+			// And back again: a click where a moment is drawn is that moment.
+			#expect(abs(strip.timeForTesting(at: at) - time) < 0.01,
+			        "\(time) is drawn at \(at), which reads back as \(strip.timeForTesting(at: at))")
+		}
+		#expect(abs(strip.xForTesting(0) - strip.gutterForTesting) < 0.001,
+		        "nought is not at the head of the axis")
+	}
+
+	/// A click in the lane names is the beginning, not a negative time.
+	@Test func aClickInTheNamesIsTheBeginning() {
+		let strip = self.strip()
+		#expect(strip.timeForTesting(at: 0) == 0)
+		#expect(strip.timeForTesting(at: strip.gutterForTesting / 2) == 0)
+		#expect(strip.timeForTesting(at: -200) == 0)
+	}
+}
+
+/// Every row is tall enough for what it draws.
+///
+/// The overlay and sound rows were written for the 34-point tables that used to
+/// list them. When the tree took those lists over they kept drawing their second
+/// line fourteen points below the middle of a row that only had thirteen — so
+/// the line was not cramped, it was *outside the row*, and what somebody saw was
+/// two rows touching with no space between them.
+@Suite @MainActor struct RowHeightTests {
+
+	private func panel() -> ProgrammePanel {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 460, height: 600))
+		panel.reload(
+			Project(
+				timeline: [
+					TimelineEntry(clip: ClipReference("intro"), label: "opening"),
+					TimelineEntry(group: "middle", entries: [
+						TimelineEntry(clip: ClipReference("demo")),
+					]),
+				],
+				overlays: [
+					Overlay(kind: .text("a caption", style: nil),
+					        span: .marks(from: .group("opening"), to: .group("opening"))),
+				],
+				sounds: [Sound(file: "music.wav",
+				               span: .marks(from: .group("opening"), to: .group("opening")))]),
+			vocabulary: ComposeDocument.Vocabulary())
+		panel.layoutSubtreeIfNeeded()
+		return panel
+	}
+
+	/// A row that draws two lines gets room for two lines.
+	@Test func aTwoLineRowIsTallerThanAOneLineRow() {
+		#expect(ProgrammePanel.carriedRowHeight > ProgrammePanel.entryRowHeight)
+		// The second line is drawn at `midY - 14` and needs its full height
+		// below that, or it falls out of the row.
+		#expect(ProgrammePanel.carriedRowHeight / 2 - 14 >= 0,
+		        "the second line starts below the row")
+	}
+
+	/// And the tree asks for them by what the row actually is.
+	@Test func theTreeGivesEachKindOfRowItsOwnHeight() {
+		let panel = self.panel()
+		let outline = panel.outlineForTesting
+		var seen: Set<CGFloat> = []
+		var carried = 0
+		for row in 0..<outline.numberOfRows {
+			guard let item = outline.item(atRow: row) else { continue }
+			let height = panel.outlineView(outline, heightOfRowByItem: item)
+			seen.insert(height)
+			if height == ProgrammePanel.carriedRowHeight { carried += 1 }
+			// Whatever it is, the row is at least as tall as what it draws.
+			#expect(height >= ProgrammePanel.entryRowHeight)
+		}
+		#expect(carried >= 2, "no two-line rows in the tree to measure")
+		#expect(seen.count == 2, "the tree has one height for everything: \(seen.sorted())")
+	}
+}
+
+/// The project is a place in the rail, not something you reach by deselecting.
+///
+/// The frame size and the rate of the thing being made were behind "click a row
+/// in the tree, then click it again to clear the selection" — which is to say,
+/// behind knowing that deselecting is a way of selecting something. Nothing new
+/// is written: `output:` is where every one of these already lived.
+@Suite @MainActor struct ProjectPageTests {
+
+	private func opened() -> (ComposeWindowController, NSWindow) {
+		_ = NSApplication.shared
+		let document = ComposeDocument(project: Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"))]))
+		let controller = ComposeWindowController(document: document)
+		let window = controller.window!
+		window.setContentSize(NSSize(width: 1400, height: 900))
+		window.layoutIfNeeded()
+		return (controller, window)
+	}
+
+	/// It is the first thing in the rail, and going there shows it.
+	@Test func theProjectIsTheFirstPlaceInTheRail() {
+		let (controller, window) = opened()
+		#expect(controller.railForTesting.countForTesting == 4)
+		#expect(ComposeWindowController.Mode.project.rawValue == 0)
+
+		controller.show(.project)
+		window.layoutIfNeeded()
+		#expect(controller.railForTesting.selected == 0)
+
+		// And the page in the window is the output form, headed by the
+		// project's name rather than by the key it writes.
+		func panels(in view: NSView) -> [PropertiesPanel] {
+			view.subviews.flatMap { sub -> [PropertiesPanel] in
+				((sub as? PropertiesPanel).map { [$0] } ?? []) + panels(in: sub)
+			}
+		}
+		let shown = panels(in: window.contentView!)
+		#expect(shown.count == 1, "\(shown.count) properties panels in the window")
+		let head = shown.first?.subjectForTesting.linesForTesting.first ?? ""
+		#expect(head != "output", "the head still names the key: \(head)")
+		#expect(head == controller.composeDocument.displayName, "the head says \(head)")
+		window.close()
+	}
+
+	/// The rail's order and its numbers agree.
+	@Test func theRailIsNumberedInItsOwnOrder() {
+		for (index, mode) in [ComposeWindowController.Mode.project, .edit, .text, .preview]
+			.enumerated() {
+			#expect(mode.rawValue == index, "\(mode) is not \(index)")
+		}
+	}
+
+	/// And it writes what it always wrote: the output keys, and nothing else.
+	@Test func itReachesOutputWithoutInventingAnything() {
+		let panel = PropertiesPanel()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 800),
+		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = panel
+		panel.documentName = "dingsda"
+		var project = Project()
+		project.output.width = 1920
+		project.output.height = 1080
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .output)
+		panel.layoutSubtreeIfNeeded()
+
+		// Opening the page changes nothing. That is what "a way of reaching
+		// `output:` rather than a new thing to write down" means in practice,
+		// and it is checkable: the file the project would be written to is the
+		// same afterwards, byte for byte.
+		let before = ProjectWriter.write(project)
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: .output)
+		panel.layoutSubtreeIfNeeded()
+		#expect(ProjectWriter.write(project) == before)
+
+		// And every key it offers is one the emitter already writes under
+		// `output:` — no field here invents a key of its own.
+		let keys = Set(panel.explanationsForTesting.map(\.key)).subtracting([""])
+		#expect(!keys.isEmpty, "the page explains nothing")
+		var full = Project()
+		full.output.audio = AudioTarget()
+		full.output.file = "programme.mov"
+		full.output.matchReference = "intro"
+		let written = ProjectWriter.fragment(for: full.output)
+		for key in keys {
+			let head = key.split(separator: ".").first.map(String.init) ?? key
+			#expect(written.contains(head), "\(key) is not a key `output:` has")
+		}
+	}
+}
+
+/// An empty pane is a state, not a caption about a list.
+///
+/// It was one line of `faintText` twenty-four points below the top — the same
+/// grey and roughly the same size as everything else, which is why a program
+/// with nothing in it looked broken rather than new. The block is a tinted
+/// mark, the subject in near-full text, and one sentence in grey, in the middle
+/// of the room.
+@Suite @MainActor struct EmptyStateTests {
+
+	private func hosted(_ state: EmptyState, _ size: NSSize) -> NSView {
+		_ = NSApplication.shared
+		let host = NSView(frame: NSRect(origin: .zero, size: size))
+		host.addSubview(state)
+		NSLayoutConstraint.activate([
+			state.topAnchor.constraint(equalTo: host.topAnchor),
+			state.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+			state.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+			state.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+		])
+		host.layoutSubtreeIfNeeded()
+		return host
+	}
+
+	private func labels(in view: NSView) -> [NSTextField] {
+		view.subviews.flatMap { sub -> [NSTextField] in
+			((sub as? NSTextField).map { [$0] } ?? []) + labels(in: sub)
+		}
+	}
+
+	@Test func itIsThreeSizesInTheMiddleOfTheRoom() {
+		let state = EmptyState(.clip, "Nothing in the programme yet",
+		                       "Drag a clip or a #tag in from the library, or add one with +.")
+		let host = hosted(state, NSSize(width: 440, height: 500))
+
+		let found = labels(in: state).filter { !$0.stringValue.isEmpty }
+		#expect(found.count == 2, "expected a subject and a sentence, got \(found.count)")
+
+		// Three sizes: a mark, a subject, a sentence — and the subject is the
+		// bigger and stronger of the two texts.
+		let sizes = found.map { $0.font?.pointSize ?? 0 }
+		#expect(Set(sizes).count == 2, "the subject and the sentence are one size: \(sizes)")
+		#expect(state.markForTesting.image != nil, "no mark")
+
+		// And it is in the middle of the room rather than near the top.
+		let block = found.map { $0.convert($0.bounds, to: host) }
+			.reduce(NSRect.null) { $0.union($1) }
+		#expect(abs(block.midY - host.bounds.midY) < 30,
+		        "the block is not centred: \(block.midY) against \(host.bounds.midY)")
+		#expect(abs(block.midX - host.bounds.midX) < 2, "the block is not centred sideways")
+	}
+
+	/// The sentence wraps to a measure the eye can come back from, well before
+	/// the pane's own width.
+	@Test func theSentenceWrapsToItsOwnMeasure() {
+		let state = EmptyState(.clip, "Subject",
+		                       String(repeating: "a long sentence about nothing ", count: 6))
+		_ = hosted(state, NSSize(width: 900, height: 400))
+		let sentence = labels(in: state).max { $0.stringValue.count < $1.stringValue.count }
+		let width = sentence?.frame.width ?? 0
+		#expect(width > 0)
+		#expect(width <= 320, "the sentence ran to \(width) in a 900-wide pane")
+	}
+
+	/// No buttons unless they earn their place.
+	@Test func itHasNoButtonsByDefault() {
+		_ = NSApplication.shared
+		let state = EmptyState(.clip, "Subject", "Sentence.")
+		#expect(state.buttonsForTesting.isEmpty)
+
+		var pressed = 0
+		let acting = EmptyState(.clip, "Subject", "Sentence.",
+		                        actions: [.init("Do it", "plus") { pressed += 1 }])
+		#expect(acting.buttonsForTesting.count == 1)
+		acting.buttonsForTesting.first?.performClick(nil)
+		#expect(pressed == 1)
+	}
+}
+
+/// Opening a file shows the file.
+///
+/// The application reuses a blank window when there is one, so a project is
+/// often read into a window that is already on screen — and that window lands on
+/// the project page, because the project it was made with was empty. Left to
+/// itself AppKit had given the keyboard to the first text field it could find,
+/// which on that page is the output's frame width; the properties panel refuses
+/// to rebuild while one of its fields is being edited, because a reload mid-word
+/// takes the cursor with it, and a field holding focus by default looked exactly
+/// like a field somebody was typing in. So the file was read, the panel declined
+/// to show it, and the page stayed on the empty project until somebody switched
+/// away and back.
+@Suite @MainActor struct OpeningAFileTests {
+
+	@Test func theProjectPageShowsTheFileThatWasOpened() throws {
+		_ = NSApplication.shared
+		let controller = ComposeWindowController(document: ComposeDocument())
+		let window = try #require(controller.window)
+		window.setContentSize(NSSize(width: 1400, height: 900))
+		// Key, because that is when AppKit picks a first responder — and this
+		// never reproduced until the window was.
+		window.makeKeyAndOrderFront(nil)
+		window.layoutIfNeeded()
+
+		// Nothing in this window opens with the keyboard in it. A new project
+		// window with a cursor in the size of the film is one keystroke from
+		// resizing the output.
+		#expect(!(window.firstResponder is NSTextView),
+		        "the keyboard is in a text field: \(String(describing: window.firstResponder))")
+
+		let folder = URL(fileURLWithPath: NSTemporaryDirectory())
+			.appendingPathComponent("cuttr-open-\(UUID().uuidString)")
+		try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+		defer { try? FileManager.default.removeItem(at: folder) }
+		let file = folder.appendingPathComponent("dingsda.cuttrproj")
+		try """
+		output:
+		  size: 1920x1080
+		  fps: 25
+		timeline:
+		  - clip: intro
+		""".write(to: file, atomically: true, encoding: .utf8)
+
+		try controller.composeDocument.read(from: file)
+		window.layoutIfNeeded()
+
+		func panels(in view: NSView) -> [PropertiesPanel] {
+			view.subviews.flatMap { sub -> [PropertiesPanel] in
+				((sub as? PropertiesPanel).map { [$0] } ?? []) + panels(in: sub)
+			}
+		}
+		let content = try #require(window.contentView)
+		let shown = try #require(panels(in: content).first)
+		#expect(shown.subjectForTesting.linesForTesting.first == "dingsda",
+		        "the page still shows \(shown.subjectForTesting.linesForTesting)")
+		window.close()
+	}
+}
+
+/// The document's name is the switcher.
+///
+/// A tab bar spends a permanent row of every window answering a question
+/// somebody asks a few times an hour, and it answers it in the one place the bar
+/// already says: the name, top left. So the name lists every document open.
+///
+/// A document's name opening a list of documents is what a name is *for*. The
+/// take's files and its alignment were behind it until now, and they were never
+/// that: one is "which document am I in", the other is "what is this document
+/// made of".
+@Suite @MainActor struct DocumentSwitcherTests {
+
+	/// The name is the way to the list; the `…` is the way to the take's files,
+	/// and they are two different controls.
+	@Test func theNameAndTheEllipsisAreDifferentDoors() {
+		_ = NSApplication.shared
+		let bar = DocumentBar()
+		bar.setName("mia-take-1")
+		bar.setUp = TakeSetup()
+
+		// The name is a way in whether or not the window has a set-up popover:
+		// every window has documents, only a take has files.
+		#expect(bar.nameForTesting.isEnabled)
+		#expect(bar.nameForTesting.action != bar.moreForTesting.action,
+		        "the name and the ellipsis do the same thing")
+
+		let plain = DocumentBar()
+		plain.setName("dingsda")
+		#expect(plain.nameForTesting.isEnabled, "a window with no set-up still has documents")
+		#expect(plain.moreForTesting.isHidden)
+	}
+
+	/// One document open is still a list, and the tick still says which.
+	@Test func theTickIsReadableEvenInAListOfOne() {
+		_ = NSApplication.shared
+		let delegate = AppDelegate()
+		let controller = ComposeWindowController(document: ComposeDocument())
+		defer { controller.window?.close() }
+		delegate.adoptForTesting(composers: [controller])
+
+		let menu = delegate.documentsMenu(for: controller.window)
+		#expect(menu.items.count == 1)
+		#expect(menu.items.first?.state == .on, "the one document open is not ticked")
+		#expect(menu.items.first?.image != nil, "no kind symbol on the row")
+
+		// And from somewhere that is not it, nothing is ticked.
+		let elsewhere = delegate.documentsMenu(for: nil)
+		#expect(elsewhere.items.allSatisfy { $0.state == .off })
+	}
+
+	/// A take shows the project it belongs to, and a take that belongs to none
+	/// says so by standing on its own rather than under an empty heading.
+	@Test func aTakeSitsUnderItsProjectOrOnItsOwn() throws {
+		_ = NSApplication.shared
+		let delegate = AppDelegate()
+		let take = MainWindowController(document: TakeDocument())
+		defer { take.window?.close() }
+		let project = ComposeWindowController(document: ComposeDocument())
+		defer { project.window?.close() }
+		delegate.adoptForTesting(composers: [project], controllers: [take])
+
+		let menu = delegate.documentsMenu(for: take.window)
+		// The take is not in the project, so it is listed on its own — after a
+		// separator, at no indent, and with no claim about a project.
+		let rows = menu.items.filter { !$0.isSeparatorItem }
+		#expect(rows.count == 2)
+		let orphan = try #require(rows.last)
+		#expect(orphan.indentationLevel == 0, "an unowned take was indented under something")
+		#expect(orphan.toolTip == nil, "an unowned take claims a project")
+		#expect(orphan.state == .on, "the take we are in is not ticked")
+	}
+}
+
+/// The palette on ⇧⌘P: type three letters, press return.
+@Suite @MainActor struct DocumentPaletteTests {
+
+	private func entries() -> [DocumentPalette.Entry] {
+		[
+			.init(name: "dingsda", detail: "project", kind: .scene, window: nil),
+			.init(name: "mia-take-1", detail: "in dingsda", kind: .take, window: nil),
+			.init(name: "walter-take-2", detail: "in dingsda", kind: .take, window: nil),
+			.init(name: "intro", detail: "scene", kind: .section, window: nil),
+		]
+	}
+
+	/// The letters in order, not necessarily together — which is the whole
+	/// point of typing at a list instead of reading it.
+	@Test func itMatchesTheLettersInOrder() {
+		#expect(DocumentPalette.matches("mt1", in: "mia-take-1"))
+		#expect(DocumentPalette.matches("wt2", in: "walter-take-2"))
+		#expect(DocumentPalette.matches("ding", in: "dingsda"))
+		#expect(!DocumentPalette.matches("1tm", in: "mia-take-1"),
+		        "the order does not matter, and it should")
+		#expect(!DocumentPalette.matches("zz", in: "mia-take-1"))
+	}
+
+	@Test func typingNarrowsItAndEmptyShowsEverything() {
+		_ = NSApplication.shared
+		let palette = DocumentPalette(entries()) { _ in }
+		#expect(palette.shownForTesting.count == 4)
+
+		palette.filter("mt1")
+		#expect(palette.shownForTesting.map(\.name) == ["mia-take-1"])
+
+		// The detail is matched too, so "dingsda" finds the project and
+		// everything filed under it.
+		palette.filter("dingsda")
+		#expect(palette.shownForTesting.count == 3)
+
+		palette.filter("")
+		#expect(palette.shownForTesting.count == 4)
+
+		palette.filter("qqq")
+		#expect(palette.shownForTesting.isEmpty)
+	}
+
+	/// A take says which project it is in; anything else says what it is, rather
+	/// than showing an empty parenthesis.
+	@Test func everyRowSaysWhatItIs() {
+		for entry in entries() {
+			#expect(!entry.detail.isEmpty, "\(entry.name) says nothing about itself")
+		}
+	}
+}

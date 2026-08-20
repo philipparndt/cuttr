@@ -49,14 +49,18 @@ import Testing
 }
 
 /// A pane's heading and the controls in it.
-@MainActor @Suite struct FoldingHeadTests {
+///
+/// Pointed at `PaneBox`, which is the pane the words live in since the rail
+/// replaced the folding column. The bug it is about is a property of the
+/// heading, not of the folding, and it followed the heading.
+@MainActor @Suite struct PaneHeadTests {
 
 	/// The words pane grew a language pop-up and its provenance label started
 	/// printing itself over the heading, because an accessory pinned only by
 	/// its trailing edge grows leftwards for ever.
 	@Test func theAccessoryDoesNotCrossTheHeading() {
 		let wide = NSTextField(labelWithString: String(repeating: "long ", count: 30))
-		let pane = FoldingPane("words", content: NSView(), accessory: wide)
+		let pane = PaneBox("words", content: NSView(), accessory: wide)
 		pane.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
 		pane.layoutSubtreeIfNeeded()
 		guard let head = wide.superview,

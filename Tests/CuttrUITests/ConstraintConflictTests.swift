@@ -58,12 +58,30 @@ enum ConstraintConflicts {
 		                              NSArray) -> Void = { view, engine, breaking, among in
 			if let view = view as? NSView, view.window != nil, view.window === watching {
 				let all = ((among as? [NSLayoutConstraint]) ?? []).map { "\($0)" }
-				reports.append("broke \(breaking) among:\n    "
+				reports.append("at \(place(of: breaking))\n  broke \(breaking) among:\n    "
 					+ all.joined(separator: "\n    "))
 			}
 			unsafeBitCast(original, to: Fn.self)(view, selector, engine, breaking, among)
 		}
 		method_setImplementation(method, imp_implementationWithBlock(block))
+	}
+
+	/// Where the view a constraint is about sits, by the types it hangs under.
+	///
+	/// A report that names `NSStackView:0x763f176800` says which constraint broke
+	/// and nothing about which view to go and look at, and the pointer is
+	/// different every run. Note that the callback arrives on the window's own
+	/// frame view rather than on the constrained one, so the view has to come out
+	/// of the constraint.
+	static func place(of constraint: NSLayoutConstraint) -> String {
+		guard let view = constraint.firstItem as? NSView else { return "somewhere" }
+		var names: [String] = []
+		var here: NSView? = view
+		while let step = here {
+			names.append(String(describing: type(of: step)))
+			here = step.superview
+		}
+		return names.reversed().joined(separator: " / ")
 	}
 
 	/// What went wrong, ready to put in a failure message.
@@ -108,10 +126,21 @@ enum ConstraintConflicts {
 			])
 	}
 
-	/// Collapsing a pane, at every size the column is worth having.
+	/// Switching the rail's panes, at every size the column is worth having.
 	///
-	/// This is the gesture that crashed, twice.
-	@Test func collapsingAPaneNeverLeavesAnUnsolvableLayout() {
+	/// This is the gesture that crashed, twice, when it was a column of folding
+	/// panes: `isHidden` does not take a view out of Auto Layout, so a folded
+	/// pane went on arranging its table inside a rectangle that is entirely
+	/// heading, and an `NSTableView` given a rectangle it cannot arrange never
+	/// settles. The rail replaced that column, and this is the same guard
+	/// pointed at the same gesture — one pane in the view hierarchy at a time,
+	/// and nothing at all left of the three that are out of it.
+	///
+	/// Adapted rather than deleted, and deliberately not softened. A test that
+	/// finds no panes and therefore drives nothing would pass for ever while
+	/// saying nothing, which is exactly the failure this suite exists to catch —
+	/// so it asserts there is something to drive before it drives it.
+	@Test func switchingRailPanesNeverLeavesAnUnsolvableLayout() {
 		_ = NSApplication.shared
 		let controller = MainWindowController(document: TakeDocument(take: take()))
 		guard let window = controller.window, let content = window.contentView else {
@@ -120,29 +149,35 @@ enum ConstraintConflicts {
 		window.setContentSize(NSSize(width: 1500, height: 1000))
 		window.layoutIfNeeded()
 
-		func panes(in view: NSView) -> [FoldingPane] {
-			view.subviews.flatMap { sub -> [FoldingPane] in
-				((sub as? FoldingPane).map { [$0] } ?? []) + panes(in: sub)
+		let rail = controller.railForTesting
+		#expect(rail.countForTesting == 4, "nothing to switch between")
+		func boxes(in view: NSView) -> [PaneBox] {
+			view.subviews.flatMap { sub -> [PaneBox] in
+				((sub as? PaneBox).map { [$0] } ?? []) + boxes(in: sub)
 			}
 		}
-		let folded = panes(in: content)
+		#expect(boxes(in: content).count == 1, "the pane is not in the window")
 		ConstraintConflicts.watch(window)
 
 		for height in [1000.0, 880.0, 760.0, 660.0, window.minSize.height] {
 			window.setContentSize(NSSize(width: 1400, height: height))
 			window.layoutIfNeeded()
-			for pane in folded {
-				pane.fold(true)
+			// Every pane at this height, and every pane again on the way back:
+			// the crash needed a second visit to a pane that had already been
+			// squeezed once.
+			for index in [0, 1, 2, 3, 2, 1, 0, 3] {
+				rail.clickForTesting(index)
 				window.layoutIfNeeded()
-				pane.fold(false)
+				#expect(boxes(in: content).count == 1,
+				        "at \(height), pane \(index): \(boxes(in: content).count) panes in the window")
+			}
+			// And switching while the window is being resized, which is where a
+			// pane is laid out against a size nothing has settled on yet.
+			for index in 0..<4 {
+				rail.clickForTesting(index)
+				window.setContentSize(NSSize(width: 1400 - CGFloat(index) * 90, height: height))
 				window.layoutIfNeeded()
 			}
-			// And all of them at once, where the panes cannot add up to the
-			// column however hard they try.
-			for pane in folded { pane.fold(true) }
-			window.layoutIfNeeded()
-			for pane in folded { pane.fold(false) }
-			window.layoutIfNeeded()
 		}
 		#expect(ConstraintConflicts.reports.isEmpty, "\(ConstraintConflicts.complaint)")
 		ConstraintConflicts.stop()
@@ -165,7 +200,7 @@ enum ConstraintConflicts {
 		window.setContentSize(NSSize(width: 1600, height: 1000))
 		window.layoutIfNeeded()
 
-		for mode in [ComposeWindowController.Mode.edit, .text, .preview, .edit] {
+		for mode in [ComposeWindowController.Mode.project, .edit, .text, .preview, .edit] {
 			controller.show(mode)
 			window.layoutIfNeeded()
 			for size in [NSSize(width: 1600, height: 1000), NSSize(width: 1300, height: 840),

@@ -123,63 +123,284 @@ import Testing
 		}
 	}
 }
-/// The toolbar has three places, and things stay in theirs.
-@Suite @MainActor struct ComposeBarTests {
+/// The traffic lights sit in the middle of the bar.
+///
+/// AppKit centres them in the *titlebar*, which is 28 points whatever the window
+/// does — so under a 52-point bar they sat ten points high while the name and
+/// the clock were centred below them, and three dots lining up with nothing are
+/// the first thing the eye finds in a window.
+///
+/// Measured, because the obvious fix does not work: an empty titlebar accessory
+/// makes the band taller — the mechanism a unified toolbar uses — and after
+/// adding one the buttons had not moved at all, still sixteen points from the
+/// top of a fifty-two point band.
+@Suite @MainActor struct TrafficLightTests {
 
-	@Test func whereYouAreIsLeftWhatYouCanDoIsRight() {
+	private func buttons(of window: NSWindow) -> [(NSWindow.ButtonType, CGFloat)] {
+		guard let content = window.contentView else { return [] }
+		return [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+			.compactMap { kind in
+				guard let button = window.standardWindowButton(kind) else { return nil }
+				let here = button.convert(button.bounds, to: content)
+				return (kind, content.bounds.maxY - here.midY)
+			}
+	}
+
+	@Test func theySitInTheMiddleOfTheBandInEveryWindow() {
 		_ = NSApplication.shared
-		let bar = ComposeBar()
-		bar.setStatus("00:12.345")
-		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 38),
-		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
-		window.contentView = bar
-		bar.frame = NSRect(x: 0, y: 0, width: 1200, height: 38)
-		bar.layoutSubtreeIfNeeded()
-
-		func find<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
-			view.subviews.flatMap { subview -> [T] in
-				((subview as? T).map { [$0] } ?? []) + find(type, in: subview)
+		let cutting = MainWindowController(document: TakeDocument())
+		let composing = ComposeWindowController(document: ComposeDocument())
+		defer {
+			cutting.window?.close()
+			composing.window?.close()
+		}
+		for controller in [cutting as NSWindowController, composing as NSWindowController] {
+			guard let window = controller.window else { continue }
+			window.setContentSize(NSSize(width: 1400, height: 900))
+			window.makeKeyAndOrderFront(nil)
+			window.layoutIfNeeded()
+			let placed = buttons(of: window)
+			#expect(placed.count == 3, "no traffic lights on \(type(of: controller))")
+			for (kind, fromTop) in placed {
+				#expect(abs(fromTop - DocumentBar.height / 2) < 1,
+				        "\(kind) is \(fromTop) from the top of a \(DocumentBar.height) band")
 			}
 		}
-		let render = find(NSButton.self, in: bar).first { $0.title == "Render…" }
-		let modes = find(NSSegmentedControl.self, in: bar).first
-		let clock = find(NSTextField.self, in: bar).first { $0.stringValue == "00:12.345" }
+	}
 
-		let renderFrame = try! #require(render).convert(render!.bounds, to: bar)
-		let modesFrame = try! #require(modes).convert(modes!.bounds, to: bar)
-		let clockFrame = try! #require(clock).convert(clock!.bounds, to: bar)
-
-		#expect(modesFrame.minX < 20, "the modes are not on the left: \(modesFrame)")
-		#expect(renderFrame.maxX > bar.bounds.width - 120,
-		        "render is not on the right: \(renderFrame)")
-		#expect(abs(clockFrame.midX - bar.bounds.midX) < 12,
-		        "the clock is not centred: \(clockFrame.midX) against \(bar.bounds.midX)")
-		#expect(clockFrame.minX > modesFrame.maxX)
-		#expect(clockFrame.maxX < renderFrame.minX)
+	/// And they are put back after a resize, because AppKit puts them back
+	/// where it likes them.
+	@Test func theyStayThereWhenTheWindowIsResized() {
+		_ = NSApplication.shared
+		let controller = MainWindowController(document: TakeDocument())
+		defer { controller.window?.close() }
+		guard let window = controller.window else { return }
+		window.makeKeyAndOrderFront(nil)
+		for size in [NSSize(width: 1400, height: 900), NSSize(width: 1000, height: 700),
+		             NSSize(width: 1600, height: 1000)] {
+			window.setContentSize(size)
+			window.layoutIfNeeded()
+			// The notification AppKit would send, which is where the placing
+			// happens.
+			(controller as NSWindowDelegate).windowDidResize?(
+				Notification(name: NSWindow.didResizeNotification, object: window))
+			for (kind, fromTop) in buttons(of: window) {
+				#expect(abs(fromTop - DocumentBar.height / 2) < 1,
+				        "at \(size) \(kind) drifted to \(fromTop)")
+			}
+		}
 	}
 }
 
-/// The anchors switch belongs to the picture.
-@Suite @MainActor struct AnchorSwitchTests {
+/// One bar, both windows, and the clock always in it.
+///
+/// This replaces two suites: one that asserted the mode buttons were on the
+/// left of the composing window's bar, and one that asserted a checkbox for
+/// the anchor markers was in it at all. Neither is true now on purpose — the
+/// modes are on their way to the rail and the markers switch is over the
+/// picture it draws on — and what is asserted instead is the arrangement that
+/// is meant to be the same in both windows.
+@Suite @MainActor struct DocumentBarTests {
 
-	@Test func itIsOnlyThereOnThePreview() {
+	private func bar(_ width: CGFloat = 1200) -> DocumentBar {
 		_ = NSApplication.shared
-		let bar = ComposeBar()
-		func anchors(in view: NSView) -> NSButton? {
-			for subview in view.subviews {
-				if let button = subview as? NSButton, button.title == "Anchors" { return button }
-				if let found = anchors(in: subview) { return found }
-			}
-			return nil
+		let bar = DocumentBar()
+		let window = NSWindow(
+			contentRect: NSRect(x: 0, y: 0, width: width, height: DocumentBar.height),
+			styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		window.contentView = bar
+		bar.frame = NSRect(x: 0, y: 0, width: width, height: DocumentBar.height)
+		bar.layoutSubtreeIfNeeded()
+		return bar
+	}
+
+	/// The name on the left, the clock in the middle, what happened on the right.
+	@Test func theDocumentIsLeftTheClockIsMiddleTheNewsIsRight() {
+		let bar = self.bar()
+		bar.setName("mia-take-1")
+		bar.setClock(12.345)
+		bar.setStatus("saved")
+		bar.layoutSubtreeIfNeeded()
+
+		let name = bar.nameForTesting.convert(bar.nameForTesting.bounds, to: bar)
+		let clock = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
+		let status = bar.statusForTesting.convert(bar.statusForTesting.bounds, to: bar)
+
+		// After the traffic lights, because the bar *is* the title bar now: the
+		// content runs to the top of the frame and this strip stands in the
+		// whole of that band.
+		#expect(abs(name.minX - DocumentBar.trafficLights) < 1,
+		        "the name is not clear of the traffic lights: \(name)")
+		#expect(abs(clock.midX - bar.bounds.midX) < 12,
+		        "the clock is not centred: \(clock.midX) against \(bar.bounds.midX)")
+		#expect(status.maxX > bar.bounds.width - 140, "the news is not on the right: \(status)")
+		#expect(name.maxX < clock.minX)
+		#expect(clock.maxX < status.maxX)
+	}
+
+	/// The clock does not move, whatever it says.
+	///
+	/// Tabular figures and a fixed box: a label that sizes itself to its text
+	/// shifts the whole group sideways between `09.900` and `10.000`, and this
+	/// is the number somebody watches while the tape rolls.
+	@Test func theClockKeepsItsPlaceAndItsWidth() {
+		let bar = self.bar()
+		var frames: [NSRect] = []
+		for time in [0.0, 9.9, 10.0, 59.999, 61.5, 3599.0, 3600.0] {
+			bar.setClock(time)
+			bar.layoutSubtreeIfNeeded()
+			frames.append(bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar))
 		}
-		let button = anchors(in: bar)
-		#expect(button != nil)
-		bar.setMode(0)
-		#expect(button?.isHidden == true, "the editor has no picture to put markers on")
-		bar.setMode(2)
-		#expect(button?.isHidden == false)
-		bar.setMode(1)
-		#expect(button?.isHidden == true)
+		#expect(Set(frames.map(\.width)).count == 1,
+		        "the clock changed width: \(frames.map(\.width))")
+		#expect(Set(frames.map(\.minX)).count == 1,
+		        "the clock moved: \(frames.map(\.minX))")
+	}
+
+	/// A long name cannot push the clock off centre, and a long status cannot
+	/// either.
+	@Test func nothingElseMovesTheClock() {
+		let bar = self.bar()
+		bar.setName("a")
+		bar.setStatus("")
+		bar.layoutSubtreeIfNeeded()
+		let quiet = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
+
+		bar.setName("an-extremely-long-project-name-somebody-actually-typed")
+		bar.setStatus(String(repeating: "and then this happened. ", count: 8))
+		bar.layoutSubtreeIfNeeded()
+		let busy = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
+		#expect(abs(quiet.minX - busy.minX) < 0.5, "the clock moved from \(quiet) to \(busy)")
+	}
+
+	/// The progress bar arrives *under* the status rather than beside it, so
+	/// nothing moves when it appears.
+	@Test func progressArrivesWithoutMovingAnything() {
+		let bar = self.bar()
+		bar.setStatus("exporting…")
+		bar.layoutSubtreeIfNeeded()
+		let before = bar.statusForTesting.convert(bar.statusForTesting.bounds, to: bar)
+		#expect(bar.progressForTesting.isHidden)
+
+		bar.setProgress(0.4)
+		bar.layoutSubtreeIfNeeded()
+		let after = bar.statusForTesting.convert(bar.statusForTesting.bounds, to: bar)
+		#expect(bar.progressForTesting.isHidden == false)
+		#expect(before == after, "the status moved: \(before) became \(after)")
+
+		// Under it: the bar is not flipped, so lower on screen is a smaller y.
+		let under = bar.progressForTesting.convert(bar.progressForTesting.bounds, to: bar)
+		#expect(under.maxY <= after.minY + 0.5, "the progress is not under the status")
+		#expect(abs(under.maxX - after.maxX) < 4, "the progress is not lined up with it")
+
+		bar.setProgress(nil)
+		#expect(bar.progressForTesting.isHidden)
+	}
+
+	/// The name is the way to the other documents; the ellipsis is the way to
+	/// this take's files, and it is only there when there are some.
+	///
+	/// The two used to be one control: a `⌄` glued onto the end of the name with
+	/// two spaces, opening the take's files. That was wrong twice over — the
+	/// mark sat on the text's baseline rather than the row's centre, and a
+	/// document's name opening "what is this document made of" is not what a
+	/// name is for. A name opening a list of documents is.
+	@Test func theNameIsAWayIntoTheSetUp() {
+		let bar = self.bar()
+		bar.setName("mia-take-1")
+		// Always a way in: every window has documents, only a take has files.
+		#expect(bar.nameForTesting.isEnabled)
+		#expect(bar.moreForTesting.isHidden, "an ellipsis with nothing behind it")
+		#expect(bar.nameForTesting.attributedTitle.string == "mia-take-1")
+
+		bar.setUp = TakeSetup()
+		#expect(bar.moreForTesting.isHidden == false)
+		// The name is the name, whatever is behind it.
+		#expect(bar.nameForTesting.attributedTitle.string == "mia-take-1")
+
+		// And the ellipsis is on the row's centre, not on the text's baseline.
+		bar.layoutSubtreeIfNeeded()
+		let more = bar.moreForTesting.convert(bar.moreForTesting.bounds, to: bar)
+		// Within half a point: the bar is an even height and the button is not,
+		// so the exact centre lands between two of them. What this is about is
+		// the old mark sitting on the *text's* baseline, which was out by six.
+		#expect(abs(more.midY - bar.bounds.midY) <= 0.5, "the ellipsis is off-centre: \(more)")
+	}
+
+	/// The controls over this document are one group, and the name is a name.
+	///
+	/// The `…` used to hang off the end of the name as though the two were one
+	/// thing. They are not: one says which document, the other is a control over
+	/// it. Everything a window adds joins the `…` in a cluster with a rule
+	/// between it and the name.
+	@Test func theControlsAreAGroupAndTheNameIsNotOneOfThem() {
+		let bar = self.bar()
+		bar.setName("mia-take-1")
+		bar.setUp = TakeSetup()
+		let monitor = NSSegmentedControl(labels: ["rec", "cam", "both"],
+		                                 trackingMode: .selectOne, target: nil, action: nil)
+		bar.addLeading(monitor)
+		bar.layoutSubtreeIfNeeded()
+
+		// Everything the window added, and the `…`, in one stack.
+		#expect(bar.groupForTesting.arrangedSubviews.contains(monitor))
+		#expect(bar.groupForTesting.arrangedSubviews.contains(bar.moreForTesting))
+		// The `…` is last: it is the way to *more* of the same.
+		#expect(bar.groupForTesting.arrangedSubviews.last === bar.moreForTesting)
+
+		let name = bar.nameForTesting.convert(bar.nameForTesting.bounds, to: bar)
+		let rule = bar.dividerForTesting.convert(bar.dividerForTesting.bounds, to: bar)
+		let group = bar.groupForTesting.convert(bar.groupForTesting.bounds, to: bar)
+		let clock = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
+
+		// Name, rule, group, clock — in that order, with the rule between the
+		// name and the group and clear air either side of it.
+		#expect(name.maxX < rule.minX)
+		#expect(rule.maxX < group.minX)
+		#expect(group.maxX < clock.minX)
+		#expect(rule.minX - name.maxX >= 10, "the rule is crowding the name")
+		#expect(group.minX - rule.maxX >= 10, "the rule is crowding the group")
+		#expect(bar.dividerForTesting.isHidden == false)
+
+		// And the spacing inside the group is even.
+		let inside = bar.groupForTesting.arrangedSubviews.map {
+			$0.convert($0.bounds, to: bar)
+		}.sorted { $0.minX < $1.minX }
+		let gaps = zip(inside, inside.dropFirst()).map { $1.minX - $0.maxX }
+		#expect(Set(gaps.map { ($0 * 10).rounded() }).count <= 1,
+		        "ragged spacing inside the group: \(gaps)")
+	}
+
+	/// A window with nothing to put there gets a name and a clock, and no
+	/// furniture between them.
+	@Test func anEmptyGroupDrawsNoRule() {
+		let bar = self.bar()
+		bar.setName("mia-take-1")
+		bar.layoutSubtreeIfNeeded()
+		#expect(bar.dividerForTesting.isHidden, "a rule with nothing on the far side of it")
+		#expect(bar.groupForTesting.isHidden)
+	}
+
+	/// Rolling the tape, from the bar that says where the tape is.
+	@Test func theBarPlaysAndSaysWhichWayRoundItIs() {
+		let bar = self.bar()
+		var asked = 0
+		bar.onPlayPause = { asked += 1 }
+		bar.playForTesting.performClick(nil)
+		#expect(asked == 1)
+
+		bar.setPlaying(true)
+		let playing = bar.playForTesting.image
+		bar.setPlaying(false)
+		#expect(playing != bar.playForTesting.image, "the button looks the same either way")
+
+		// Beside the clock, and the clock is still what is centred.
+		bar.layoutSubtreeIfNeeded()
+		let play = bar.playForTesting.convert(bar.playForTesting.bounds, to: bar)
+		let clock = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
+		#expect(play.maxX <= clock.minX)
+		#expect(abs(clock.midX - bar.bounds.midX) < 12,
+		        "the play button moved the clock: \(clock.midX) against \(bar.bounds.midX)")
 	}
 }
 
@@ -316,59 +537,6 @@ import Testing
 	}
 }
 
-/// A pane that folds away to its heading.
-@Suite @MainActor struct FoldingPaneTests {
-
-	private func pane() -> FoldingPane {
-		_ = NSApplication.shared
-		let content = NSView()
-		content.translatesAutoresizingMaskIntoConstraints = false
-		content.heightAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
-		return FoldingPane("clips", content: content)
-	}
-
-	@Test func foldingLeavesTheHeadingAndNothingElse() {
-		let pane = self.pane()
-		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 400),
-		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
-		window.contentView = pane
-		pane.layoutSubtreeIfNeeded()
-		#expect(pane.frame.height > 120)
-		#expect(pane.content.isHidden == false)
-
-		pane.fold(true)
-		pane.layoutSubtreeIfNeeded()
-		#expect(pane.content.isHidden)
-		#expect(pane.frame.height == FoldingPane.headHeight)
-
-		pane.fold(false)
-		pane.layoutSubtreeIfNeeded()
-		#expect(pane.content.isHidden == false)
-		#expect(pane.frame.height > 120)
-	}
-
-	/// A click on the heading folds it; a click in the content does not.
-	@Test func theHeadingIsWhatFolds() {
-		let pane = self.pane()
-		pane.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
-		pane.layoutSubtreeIfNeeded()
-		var told: [Bool] = []
-		pane.onFold = { told.append($0) }
-
-		func click(at point: NSPoint) -> NSEvent {
-			NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
-			                   timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
-			                   clickCount: 1, pressure: 1)!
-		}
-		// The heading is at the top of the pane, which in AppKit's coordinates
-		// is the highest y.
-		pane.mouseDown(with: click(at: NSPoint(x: 40, y: pane.bounds.maxY - 8)))
-		#expect(told == [true])
-		pane.mouseDown(with: click(at: NSPoint(x: 40, y: 40)))
-		#expect(told == [true], "a click in the content should not fold it")
-	}
-}
-
 /// Every sheet opens at a size somebody can work in.
 ///
 /// A window whose `contentViewController` is set takes its size from the view's
@@ -458,25 +626,23 @@ import Testing
 }
 
 
-/// Collapsing a pane in the cutting window, and everything else staying put.
+/// One pane at a time, chosen from the rail, and nothing arguing about a size.
 ///
-/// A folded pane is exactly its heading, and it says so with a *required*
-/// constraint so that a split view cannot hand it room it does not want. The
-/// window used to state a required floor on the same panes — how short each may
-/// be squeezed — and the two cannot both hold: `height >= 96` and `height == 24`
-/// is a system autolayout cannot solve. What it does instead is break one, log
+/// This replaces the suite that drove the four folding panes down the side of
+/// the cutting window. Those panes are gone: the rail chooses which of the four
+/// has the column, and exactly one of them is in the view hierarchy at a time.
+///
+/// The rule the old suite was defending is the one that matters and it is
+/// asserted here directly. Two *required* constraints about one dimension is a
+/// system autolayout cannot solve; what it does instead is break one, log
 /// `layout constraints are not satisfiable`, and go round the display cycle
-/// again looking for an arrangement that works. Through four nested split views
-/// and the scroll views inside them that is a great many passes for one click,
-/// and AppKit raises out of the layout pass when a window has had more of them
-/// than it has views.
-///
-/// Both of the things somebody sees when that happens are asserted here: a pane
-/// that will not fold because a floor beat it, and panes that come back shorter
-/// than they were because a constraint that got broken stays broken.
-@Suite @MainActor struct CollapsingPanesTests {
+/// again looking for an arrangement that works — and through several nested
+/// split views that is a great many passes for one click. The four-pane version
+/// had a required floor from the window and a required folded height from the
+/// pane, and could not help but have both. One pane in the hierarchy cannot.
+@Suite @MainActor struct RailPaneTests {
 
-	private func opened() -> (MainWindowController, NSWindow, [FoldingPane]) {
+	private func opened() -> (MainWindowController, NSWindow) {
 		_ = NSApplication.shared
 		var clips: [Clip] = []
 		for i in 0..<30 {
@@ -492,104 +658,110 @@ import Testing
 		let window = controller.window!
 		window.setContentSize(NSSize(width: 1500, height: 1100))
 		window.layoutIfNeeded()
-
-		func panes(in view: NSView) -> [FoldingPane] {
-			view.subviews.flatMap { sub -> [FoldingPane] in
-				((sub as? FoldingPane).map { [$0] } ?? []) + panes(in: sub)
-			}
-		}
-		return (controller, window, panes(in: window.contentView!))
+		return (controller, window)
 	}
 
-	@Test func everyPaneCanBeCollapsedToItsHeading() {
-		let (_, window, panes) = opened()
-		#expect(panes.count == 4)
+	/// Four places to be, and clicking one puts you there.
+	@Test func theRailOpensEachPaneInTurn() {
+		let (controller, window) = opened()
+		let rail = controller.railForTesting
+		#expect(rail.countForTesting == 4)
+		var seen: [ObjectIdentifier] = []
+		for index in 0..<4 {
+			rail.clickForTesting(index)
+			window.layoutIfNeeded()
+			#expect(rail.selected == index)
+			let showing = try! #require(controller.panesForTesting?.current)
+			seen.append(ObjectIdentifier(showing))
+			#expect(showing.frame.height > 40,
+			        "pane \(index) came up \(showing.frame.height) tall")
+		}
+		#expect(Set(seen).count == 4, "the rail showed the same pane twice")
+		window.close()
+	}
+
+	/// Only one of them is in the window, at every size the window goes to.
+	///
+	/// This is the whole reason the arrangement changed. A pane that is not
+	/// showing is not laid out, not measured and not negotiated with, so there
+	/// is exactly one opinion about the height of that column.
+	@Test func onlyOnePaneIsEverInTheWindow() {
+		let (controller, window) = opened()
+		let rail = controller.railForTesting
+		func boxes(in view: NSView) -> [PaneBox] {
+			view.subviews.flatMap { sub -> [PaneBox] in
+				((sub as? PaneBox).map { [$0] } ?? []) + boxes(in: sub)
+			}
+		}
 		for height in [1100.0, 900.0, 740.0, 640.0, window.minSize.height] {
 			window.setContentSize(NSSize(width: 1500, height: height))
 			window.layoutIfNeeded()
-			for (index, pane) in panes.enumerated() {
-				pane.fold(true)
+			for index in 0..<4 {
+				rail.clickForTesting(index)
 				window.layoutIfNeeded()
-				#expect(pane.frame.height == FoldingPane.headHeight,
-				        "at \(height), pane \(index) folded to \(pane.frame.height)")
-				pane.fold(false)
-				window.layoutIfNeeded()
+				let found = boxes(in: window.contentView!)
+				#expect(found.count == 1,
+				        "at \(height), pane \(index): \(found.count) panes in the window")
 			}
 		}
 		window.close()
 	}
 
-	/// At every height the column is worth having, because the sizes that show
-	/// this are the ones where the panes are already near their floors — which
-	/// is most of them, on a laptop screen.
-	///
-	/// Not at the very smallest the window goes to. There the column has only a
-	/// few points of slack over the sum of the floors, and which pane gets them
-	/// is a tie: a split view remembers a dragged divider with a constraint of
-	/// its own at priority 250, and the panes ask for their preferred heights at
-	/// the same 250. A tie is decided by whatever the engine did last, so it
-	/// comes out differently after a fold. That is untidy and it long predates
-	/// this; it is not what crashed, and raising the panes above the split
-	/// view would stop a dragged divider from staying where it was put.
-	@Test func thePanesComeBackTheSizeTheyWere() {
-		let (_, window, panes) = opened()
-		for height in [1100.0, 980.0, 900.0, 820.0, 740.0, 680.0, 640.0] {
-			window.setContentSize(NSSize(width: 1500, height: height))
+	/// And nothing says a required thing about that column's height twice.
+	@Test func onlyOneRequiredThingIsSaidAboutThePanesHeight() {
+		let (controller, window) = opened()
+		let rail = controller.railForTesting
+		for index in 0..<4 {
+			rail.clickForTesting(index)
 			window.layoutIfNeeded()
-			let before = panes.map(\.frame.height)
-			for pane in panes {
-				pane.fold(true)
-				window.layoutIfNeeded()
-				pane.fold(false)
-				window.layoutIfNeeded()
-			}
-			let after = panes.map(\.frame.height)
-			// Within a few points, not to the point. Which pane gets the last
-			// of the slack is a tie — a split view remembers a dragged divider
-			// at priority 250 and the panes ask for their preferred heights at
-			// the same 250 — so a fold can move a point or two between
-			// neighbours. What this is looking for is a pane that lost its
-			// room: the bug shrank one by 52 points, and left another at its
-			// heading.
-			let moved = zip(before, after).map { abs($0 - $1) }.max() ?? 0
-			#expect(moved <= 4,
-			        "at \(height) the column shifted by \(moved): \(before) became \(after)")
-		}
-		window.close()
-	}
-
-	/// The rule underneath both of those, stated directly.
-	///
-	/// Autolayout has no opinion about *where* two contradictory required
-	/// constraints came from, so the only way to be sure they can never
-	/// contradict is for there to be one of them. A second required word about a
-	/// pane's height — from the window, from a split view delegate, from
-	/// anywhere — is the bug coming back, whether or not it happens to be
-	/// satisfiable on the day it is added.
-	@Test func onlyOneRequiredThingIsSaidAboutAPanesHeight() {
-		let (_, window, panes) = opened()
-		func requiredHeights(on pane: FoldingPane) -> [NSLayoutConstraint] {
-			let mine = pane.constraints.filter { ($0.firstItem as? NSView) === pane }
-			let theirs = pane.superview?.constraints.filter {
-				($0.firstItem as? NSView) === pane || ($0.secondItem as? NSView) === pane
+			guard let stack = controller.panesForTesting else { continue }
+			let mine = stack.constraints.filter { ($0.firstItem as? NSView) === stack }
+			let theirs = stack.superview?.constraints.filter {
+				($0.firstItem as? NSView) === stack || ($0.secondItem as? NSView) === stack
 			} ?? []
-			// A split view's own stacking and edge constraints are how the
-			// column is assembled and are not an opinion about one pane's
-			// height; what is being counted is height stated as a size.
-			return (mine + theirs).filter {
-				$0.priority == .required && $0.firstAttribute == .height
-					&& $0.secondItem == nil
+			let said = (mine + theirs).filter {
+				$0.priority == .required && $0.firstAttribute == .height && $0.secondItem == nil
 			}
-		}
-		for state in [false, true, false] {
-			for pane in panes { pane.fold(state) }
-			window.layoutIfNeeded()
-			for (index, pane) in panes.enumerated() {
-				let said = requiredHeights(on: pane)
-				#expect(said.count <= 1,
-				        "pane \(index) \(state ? "folded" : "open") has \(said.count) required heights: \(said)")
-			}
+			#expect(said.count <= 1, "pane \(index) has \(said.count) required heights: \(said)")
 		}
 		window.close()
+	}
+
+	/// Switching panes twice over settles: the second layout is the first one.
+	@Test func switchingPanesSettles() {
+		let (controller, window) = opened()
+		let rail = controller.railForTesting
+		for index in [0, 2, 0] {
+			rail.clickForTesting(index)
+			window.layoutIfNeeded()
+		}
+		let first = controller.panesForTesting?.current?.frame
+		window.contentView?.needsLayout = true
+		window.layoutIfNeeded()
+		#expect(controller.panesForTesting?.current?.frame == first,
+		        "the pane moved on its own")
+		window.close()
+	}
+
+	/// The rail is in the same place and the same width in both windows, which
+	/// is the point of there being one of them.
+	@Test func bothWindowsPutTheRailInTheSamePlace() {
+		_ = NSApplication.shared
+		let cutting = MainWindowController(document: TakeDocument())
+		let composing = ComposeWindowController(document: ComposeDocument())
+		var frames: [NSRect] = []
+		for (controller, rail) in [(cutting as NSWindowController, cutting.railForTesting),
+		                           (composing as NSWindowController, composing.railForTesting)] {
+			guard let window = controller.window, let content = window.contentView else { continue }
+			window.setContentSize(NSSize(width: 1400, height: 900))
+			window.layoutIfNeeded()
+			frames.append(rail.convert(rail.bounds, to: content))
+		}
+		#expect(frames.count == 2)
+		#expect(frames[0] == frames[1], "the rails are at \(frames)")
+		#expect(frames[0].minX == 0, "the rail is not at the left edge: \(frames[0])")
+		#expect(frames[0].width == Rail.width)
+		cutting.window?.close()
+		composing.window?.close()
 	}
 }
