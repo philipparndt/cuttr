@@ -26,6 +26,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 	func applicationDidFinishLaunching(_ notification: Notification) {
 		NSApp.mainMenu = MainMenu.build()
+		// A tab group restored from a launch before tabbing was turned off
+		// comes back with its tab bar, and that bar draws over a title bar the
+		// program draws itself. Turning the mechanism off does not undo an
+		// arrangement already on disk, so any window that comes up in a group
+		// is taken out of it.
+		NotificationCenter.default.addObserver(
+			forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+		) { note in
+			MainActor.assumeIsolated {
+				guard let window = note.object as? NSWindow,
+				      let group = window.tabGroup, group.windows.count > 1
+				else { return }
+				window.moveTabToNewWindow(nil)
+			}
+		}
 		NotificationCenter.default.addObserver(
 			forName: NSWindow.willCloseNotification, object: nil, queue: .main
 		) { [weak self] note in

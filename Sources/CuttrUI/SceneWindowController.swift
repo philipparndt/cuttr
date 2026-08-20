@@ -51,9 +51,12 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 		window.appearance = NSAppearance(named: .darkAqua)
 		window.backgroundColor = Theme.background
 		window.minSize = NSSize(width: 860, height: 560)
-		// A tab of the same window as the project it belongs to, like takes.
-		window.tabbingIdentifier = "cuttr"
-		window.tabbingMode = .preferred
+		// Not a tab. This used to be one — a scene window joined the project it
+		// belongs to, the way takes did — and asking for one now brings the
+		// system's tab bar back over a title bar the program draws itself.
+		// Where you are is said by the name in that bar, and what is open is
+		// said by the list behind it.
+		window.tabbingMode = .disallowed
 		super.init(window: window)
 		window.delegate = self
 		build()
