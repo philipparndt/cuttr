@@ -510,13 +510,38 @@ struct EffectMotion: Sendable {
 	}
 
 	/// The effect's own clock: how far the cloud has fallen, in the units the
-	/// renderer thinks in. With a fixed speed this is exactly `time × speed`,
-	/// which is what it always was.
-	func clock(at time: Double) -> Double { speed.integral(to: max(0, time)) }
+	/// renderer thinks in.
+	///
+	/// A speed that never changes has a closed form for its own integral —
+	/// `time × speed` — and this hands back exactly that, in the two `Float`
+	/// conversions the renderer has always made, rather than the same quantity
+	/// rounded in `Double` first.
+	///
+	/// That is not fussiness. Several hundred lit slips of card overlap in a
+	/// depth buffer, and the last bit of a position decides which of two of
+	/// them wins a pixel. Measured on the rendered file, against the same build
+	/// of everything else: doing the multiplication in `Double` and converting
+	/// once moved `examples/effects/looks` by three levels in the mean across
+	/// the frame, with a tenth of the pixels more than eight levels out. A
+	/// project with no keys in it must render what it always rendered, and this
+	/// is the whole of what that costs.
+	func clock(at time: Double) -> Float {
+		guard !speed.isFlat else { return Float(max(0, time)) * Float(speed.declared) }
+		return Float(speed.integral(to: max(0, time)))
+	}
 
 	/// The moment the clock read this. Used to ask when a piece was let go,
 	/// which is a question about the programme rather than about the cloud.
 	func time(atClock clock: Double) -> Double { speed.time(reaching: clock) }
+
+	/// Whether the wind has to be integrated at all.
+	///
+	/// It does not when the wind never changes: a constant lean comes straight
+	/// out of the integral, so the lean times the clock *is* the distance, and
+	/// the renderer works it out per piece the way it always did. That holds
+	/// even when the speed is animated, because the clock is already the
+	/// integral of the speed. Only a wind that itself moves needs ``drift``.
+	var windMoves: Bool { !wind.isFlat }
 
 	/// How far sideways the wind has carried a piece that falls at one unit of
 	/// the clock a second — multiplied by the piece's own fall rate at the call
@@ -524,8 +549,8 @@ struct EffectMotion: Sendable {
 	///
 	/// A quarter of the wind, because that is what one unit of `wind:` means:
 	/// a good breeze, not a gale.
-	func drift(at time: Double) -> Double {
-		Track.integral(of: wind, times: speed, to: max(0, time)) * 0.25
+	func drift(at time: Double) -> Float {
+		Float(Track.integral(of: wind, times: speed, to: max(0, time)) * 0.25)
 	}
 
 	/// The slant of the path right now, which is what a rain streak is turned

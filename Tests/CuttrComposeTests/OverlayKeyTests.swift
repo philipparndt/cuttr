@@ -146,21 +146,38 @@ import Testing
 			Overlay.Key(t: 4, [.speed: 0.2], ease: .inOut),
 		])
 		for moment in stride(from: 0.0, through: 8.0, by: 0.13) {
-			let there = motion.clock(at: moment)
-			#expect(abs(motion.time(atClock: there) - moment) < 1e-6,
+			// The clock is handed to the scene graph as a `Float`, so the round
+			// trip is only as exact as that — which is what the tolerance says.
+			let there = Double(motion.clock(at: moment))
+			#expect(abs(motion.time(atClock: there) - moment) < 1e-5,
 			        "\(moment) came back as \(motion.time(atClock: there))")
 		}
 	}
 
 	/// With nothing animated the clock is the multiplication it always was, to
-	/// the bit — so a project with no keys renders the cloud it always did.
+	/// the bit.
+	///
+	/// Not a nicety. Several hundred lit slips of card overlap in a depth
+	/// buffer, and the last bit of a position decides which of two of them wins
+	/// a pixel: doing this multiplication in `Double` and converting once,
+	/// rather than converting each and multiplying, moved the rendered file of
+	/// `examples/effects/looks` by three levels in the mean across the frame.
+	/// A project with no keys in it must render what it always rendered, and
+	/// this is the equality that says so.
 	@Test func anEffectWithNoKeysKeepsTheClockItHad() {
 		let motion = EffectMotion(Effect(style: .confetti, speed: 2.5), keys: [])
 		for moment in stride(from: 0.0, through: 6.0, by: 0.25) {
-			#expect(motion.clock(at: moment) == moment * 2.5)
+			#expect(motion.clock(at: moment) == Float(moment) * Float(2.5))
 		}
 		#expect(motion.showing(at: 3) == 1)
 		#expect(motion.windy == false)
+		// And the wind is worked out per piece the way it always was, because a
+		// lean that never changes comes straight out of the integral.
+		#expect(motion.windMoves == false)
+		#expect(EffectMotion(Effect(style: .rain, wind: 2), keys: []).windMoves == false)
+		#expect(EffectMotion(Effect(style: .rain), keys: [
+			Overlay.Key(t: 0), Overlay.Key(t: 1, [.wind: 2]),
+		]).windMoves)
 	}
 
 	/// A density that moves is a fraction of the cloud allowed to fall, against

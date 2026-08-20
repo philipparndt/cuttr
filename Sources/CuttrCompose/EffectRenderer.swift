@@ -381,18 +381,20 @@ final class EffectRenderer: @unchecked Sendable {
 		let now = max(0, time)
 		// The effect's own clock: the *area* under the speed, not the speed at
 		// this instant multiplied by the time so far. With a speed that never
-		// changes the two are the same number and this is what it always was;
-		// with one that does, only the area is continuous. Multiplying moves
-		// every piece in the cloud the instant the speed changes, which is a cut
-		// rather than an acceleration — measured at a third of the frame.
-		let t = Float(motion.clock(at: now))
+		// changes the two are the same number, worked out the way they always
+		// were; with one that does, only the area is continuous. Multiplying
+		// moves every piece in the cloud the instant the speed changes, which
+		// is a cut rather than an acceleration.
+		let t = motion.clock(at: now)
 		let world = Self.worldHeight
 		let floor = -world / 2 - 1.5
 		// How far the wind has carried a piece that falls at one unit of the
 		// clock a second — again an area, and this one under the wind *times*
 		// the speed, because a piece going twice as fast covers twice the ground
-		// sideways while it does it.
-		let drift = Float(motion.drift(at: now))
+		// sideways while it does it. Only worked out when the wind itself
+		// moves: a lean that never changes comes out of the integral, and the
+		// lean times the clock is the same distance.
+		let drift = motion.windMoves ? motion.drift(at: now) : 0
 		// The slant of the path right now, which is what a rain streak turns to.
 		let lean = Float(motion.lean(at: now))
 		let scale = Float(max(0.05, motion.size(at: now)))
@@ -466,7 +468,8 @@ final class EffectRenderer: @unchecked Sendable {
 			// Carried sideways by the wind, at the speed it is falling: a drop
 			// that is going twice as fast covers twice the ground while it does
 			// it, which is what keeps every streak on the same slant.
-			var x: Float = piece.x + sway + piece.fall * drift
+			var x: Float = piece.x + sway
+				+ (motion.windMoves ? piece.fall * drift : piece.fall * lean * t)
 			if motion.windy, span > 0 {
 				// Wrapped, or a minute of wind empties the frame from one side.
 				x = (x + span / 2).truncatingRemainder(dividingBy: span)
