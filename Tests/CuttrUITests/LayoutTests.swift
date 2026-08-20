@@ -130,10 +130,13 @@ import Testing
 /// the clock were centred below them, and three dots lining up with nothing are
 /// the first thing the eye finds in a window.
 ///
-/// Measured, because the obvious fix does not work: an empty titlebar accessory
-/// makes the band taller — the mechanism a unified toolbar uses — and after
-/// adding one the buttons had not moved at all, still sixteen points from the
-/// top of a fifty-two point band.
+/// The mechanism is an empty `NSToolbar` in the `.unified` style: macOS gives
+/// one a 52-point band and centres the buttons in it. This test outlived the
+/// first attempt — setting the frames by hand and setting them again on every
+/// resize — which put the buttons in the same place but left the *band* at 32,
+/// so anything asking the window how much room the titlebar wanted got the
+/// wrong answer. Both pass this; only one of them makes `contentLayoutRect`
+/// true, which is why the band is measured here too.
 @Suite @MainActor struct TrafficLightTests {
 
 	private func buttons(of window: NSWindow) -> [(NSWindow.ButtonType, CGFloat)] {
@@ -168,8 +171,23 @@ import Testing
 		}
 	}
 
-	/// And they are put back after a resize, because AppKit puts them back
-	/// where it likes them.
+	/// And the band the window reports is the band the bar fills, which is the
+	/// half the hand-placed version got wrong.
+	@Test func theBandIsAsTallAsTheBar() {
+		_ = NSApplication.shared
+		let controller = MainWindowController(document: TakeDocument())
+		defer { controller.window?.close() }
+		guard let window = controller.window, let content = window.contentView else { return }
+		window.setContentSize(NSSize(width: 1400, height: 900))
+		window.makeKeyAndOrderFront(nil)
+		window.layoutIfNeeded()
+		let layout = window.contentLayoutRect
+		let band = content.bounds.height - layout.height - layout.origin.y
+		#expect(abs(band - DocumentBar.height) < 1,
+		        "the window says its titlebar is \(band), the bar is \(DocumentBar.height)")
+	}
+
+	/// And they stay put across resizes.
 	@Test func theyStayThereWhenTheWindowIsResized() {
 		_ = NSApplication.shared
 		let controller = MainWindowController(document: TakeDocument())
@@ -180,10 +198,6 @@ import Testing
 		             NSSize(width: 1600, height: 1000)] {
 			window.setContentSize(size)
 			window.layoutIfNeeded()
-			// The notification AppKit would send, which is where the placing
-			// happens.
-			(controller as NSWindowDelegate).windowDidResize?(
-				Notification(name: NSWindow.didResizeNotification, object: window))
 			for (kind, fromTop) in buttons(of: window) {
 				#expect(abs(fromTop - DocumentBar.height / 2) < 1,
 				        "at \(size) \(kind) drifted to \(fromTop)")

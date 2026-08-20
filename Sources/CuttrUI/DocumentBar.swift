@@ -29,37 +29,33 @@ public final class DocumentBar: NSView {
 	/// title has always sat.
 	public static let height: CGFloat = 52
 
-	/// Puts the close, minimise and zoom buttons in the middle of the bar.
+	/// Makes the window's title band as tall as this bar, with the close,
+	/// minimise and zoom buttons in the middle of it.
 	///
-	/// AppKit centres them in the *titlebar*, which is 28 points whatever the
-	/// window does — so under a 52-point bar they sat ten points high, while the
-	/// name and the clock were centred below them. Three dots that line up with
-	/// nothing are the first thing the eye finds in a window.
+	/// An empty `NSToolbar` in the `.unified` style, and nothing else. macOS
+	/// gives a unified toolbar a 52-point band and centres the traffic lights in
+	/// it — which is exactly this bar's height, and exactly the arrangement
+	/// wanted. Nothing goes *in* the toolbar: the bar is a view in the content
+	/// view, which runs up behind the titlebar because the window is
+	/// `.fullSizeContentView`.
 	///
-	/// Moved rather than asked, because asking does not work. An empty titlebar
-	/// accessory makes the band taller — that is the mechanism a unified toolbar
-	/// uses — and it was tried first: measured afterwards the buttons had not
-	/// moved at all, still sixteen points from the top of a fifty-two point
-	/// band. So this sets the frames, and does it again whenever the window
-	/// changes size, because AppKit puts them back.
+	/// This replaced setting the buttons' frames by hand and setting them again
+	/// on every resize, because AppKit put them back. Measured, both put the
+	/// buttons in the same place — but only this one makes the *band* 52 points:
+	/// by hand the buttons were centred while `contentLayoutRect` still reported
+	/// a 32-point titlebar, so anything asking the window how much room the
+	/// titlebar wanted got the wrong answer.
 	///
-	/// Not in full screen, where there is no titlebar to be in the middle of.
-	public static func centreTrafficLights(in window: NSWindow) {
-		guard !window.styleMask.contains(.fullScreen), let content = window.contentView else {
-			return
-		}
-		// Worked out in the content view, which is the thing the bar is pinned
-		// to, and converted back — rather than in whatever coordinate space the
-		// titlebar happens to hand out.
-		let middle = content.bounds.maxY - height / 2
-		for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-			guard let button = window.standardWindowButton(kind),
-			      let holder = button.superview
-			else { continue }
-			let wanted = holder.convert(NSPoint(x: 0, y: middle), from: content)
-			button.setFrameOrigin(NSPoint(x: button.frame.origin.x,
-			                              y: wanted.y - button.frame.height / 2))
-		}
+	/// The empty row does not take the clicks. Hit-testing a point in the middle
+	/// of the band lands on the bar's own clock, not on the toolbar: with no
+	/// items in it there is nothing there to hit.
+	public static func growTitleBand(of window: NSWindow) {
+		let toolbar = NSToolbar(identifier: "cuttr.band")
+		toolbar.displayMode = .iconOnly
+		toolbar.allowsUserCustomization = false
+		toolbar.showsBaselineSeparator = false
+		window.toolbar = toolbar
+		window.toolbarStyle = .unified
 	}
 
 	/// How far in the first thing starts, so it clears the traffic lights.
