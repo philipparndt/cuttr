@@ -164,8 +164,13 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// itself and an interview is a run of keystrokes and nothing else.
 	private var wantedCaret: Int?
 
-	private let castRow = NSStackView()
-	private let castScroll = NSScrollView()
+	/// Both with a real frame, for the reason in `roomToLayOutIn`: an empty
+	/// stack view inside a scroll view, both built at zero, is `width == 0` at
+	/// required priority against AppKit's own required `width >= 4` for an
+	/// empty stack. Every take has an empty cast row until somebody labels a
+	/// line, so this is the ordinary case rather than an edge of one.
+	private let castRow = NSStackView(frame: .roomToLayOutIn)
+	private let castScroll = NSScrollView(frame: .roomToLayOutIn)
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
