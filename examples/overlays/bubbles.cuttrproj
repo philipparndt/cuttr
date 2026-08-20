@@ -10,6 +10,10 @@
 # The other thing to look at is that none of these says how big it is. The words
 # wrap to `width` — a fraction of the frame, not a pixel count — and the paper
 # grows to whatever comes out, downwards.
+#
+# And they are all alive: the line is redrawn eight times a second, held between
+# times, by about a pixel at 720p. The last card is the same bubble with that
+# turned off, turned on, and turned up too far.
 cuttr-project: 1
 
 output:
@@ -89,3 +93,30 @@ timeline:
         at:     [0.8, 0.4]
         offset: [0, 0.16]
         seed:   3
+
+  # And the line breathes. Every bubble above is redrawn eight times a second —
+  # not twenty-five: a line redrawn every frame boils, and a cartoon holds each
+  # drawing for two or three frames. Watch one of them and then watch the still
+  # one below it. Frozen the difference is a pixel; running, one of them is
+  # drawn and the other is a sticker.
+  #
+  # `breath:` is the dial. 0 is the still drawing, exactly as this example
+  # rendered before any of it existed; 1 is the amount chosen by looking; 4 is
+  # here to show what "slightly" was protecting you from.
+  - card:  00:04.000
+    fill:  "#f2ece4"
+    overlays:
+      - bubble: still, on purpose
+        at:     [0.18, 0.42]
+        offset: [0, 0.16]
+        seed:   5
+        breath: 0
+      - bubble: alive
+        at:     [0.5, 0.42]
+        offset: [0, 0.16]
+        seed:   5
+      - bubble: too much
+        at:     [0.82, 0.42]
+        offset: [0, 0.16]
+        seed:   5
+        breath: 4

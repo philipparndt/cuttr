@@ -1222,6 +1222,10 @@ public final class PropertiesPanel: NSView {
 			field("seed", [number(Double(bubble.seed), width: 72) { [weak self] value in
 				self?.editBubble(origin) { $0.seed = Int(value) }
 			}], note: "the same number gives the same wobble, every render, on every machine")
+			field("breath", [number(bubble.breath, width: 72) { [weak self] value in
+				self?.editBubble(origin) { $0.breath = max(0, value) }
+			}, label(bubble.breath > 0 ? "redrawn 8 times a second" : "one still drawing")],
+			      note: "how much the line breathes — 1 is alive, 0 is the still drawing")
 			field("points at", [label(overlay.anchor.map { "the anchor `\($0)`" }
 				?? (bubble.at.map { "the spot [\(Self.trimmed($0.x)), \(Self.trimmed($0.y))]" }
 					?? "nothing — it keeps its words and loses its tail"))],

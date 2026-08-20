@@ -17,7 +17,7 @@ effects, no footage — so every one of them renders on any machine:
 | `effects/coming-on.cuttrproj` | `keys:` — a drizzle becoming a downpour, bars closing in, a lens giving up and recovering |
 | `overlays/placements.cuttrproj` | captions written inside the entries they cover, and one on the programme's own clock |
 | `overlays/at-the-mark.cuttrproj` | `at:` — the same fade placed before, across and after the mark, at both ends of a span |
-| `overlays/bubbles.cuttrproj` | speech, thought and a box with an arrow — drawn by hand, and the same hand on every render |
+| `overlays/bubbles.cuttrproj` | speech, thought and a box with an arrow — drawn by hand, redrawn eight times a second, and the same hand on every render |
 
 Three things these are meant to teach, all of which cost a render to learn:
 
@@ -42,3 +42,13 @@ condition or a finish cannot, because there is nothing half way between two
 names. Ask for one of those on a key and the file will not open, with a sentence
 saying which and why — an animation that silently does nothing looks exactly
 like an animation nobody wrote.
+
+**Watch the bubbles rather than looking at them.** `overlays/bubbles.cuttrproj`
+is the one example whose point is invisible in a still: every bubble in it is
+redrawn eight times a second and each drawing is held, the way a cartoon holds a
+drawing for two or three frames instead of redrawing on every one. The last card
+is the same bubble three times — `breath: 0`, the default, and `breath: 4` —
+which is the comparison worth pausing on. Frozen, the three differ by about a
+pixel. Running, the first is a sticker, the second is drawn, and the third is
+having a seizure. Twenty-five drawings a second looks like the third one; that is
+why the rate is eight and not the frame rate.

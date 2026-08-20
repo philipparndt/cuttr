@@ -253,6 +253,10 @@ public enum ProjectReader {
 			if let line = (m["line"] as? String).flatMap(RGBA.init(hex:)) { bubble.line = line }
 			if let width = number(m["width"]) { bubble.width = width }
 			if let seed = m["seed"] as? Int { bubble.seed = seed }
+			// How much the line breathes: one is alive, nought is the still
+			// drawing. Clamped rather than refused, because a negative amount of
+			// liveliness is a typo and not a question.
+			if let breath = number(m["breath"]) { bubble.breath = max(0, breath) }
 			// A spot in the frame to point at, for the things that are not
 			// faces — and for a programme with no footage in it at all.
 			bubble.at = try point(m["at"], key: "at")

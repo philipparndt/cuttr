@@ -68,6 +68,22 @@ public struct Bubble: Sendable, Equatable {
 	/// one. It is the same idea, and the same word, as an effect's `seed:`.
 	public var seed: Int
 
+	/// How much the line breathes, as a multiple of what reads as alive.
+	///
+	/// A drawn bubble that is perfectly still next to a moving face reads as a
+	/// sticker. So the line is redrawn a few times a second — see
+	/// ``Bubbling/drawingsPerSecond`` and ``Bubbling/breath`` for how often and
+	/// by how much — and this is the dial on it: one is the amount that was
+	/// chosen by looking, two is twice as lively, and **nought is the still
+	/// drawing**, exactly the bubble this program drew before any of it existed.
+	///
+	/// A multiple rather than a distance, because the distance is a fraction of
+	/// the frame with a reason beside it and nobody nudging a bubble wants to
+	/// rediscover that reason. What moves is the outline, the thought bubble's
+	/// puffs and the box arrow's shaft. Never the words: text that moves is text
+	/// nobody can read, and the bubble exists to be read.
+	public var breath: Double
+
 	/// A fixed point to point at, normalised, origin bottom-left.
 	///
 	/// For the things that are not faces — a hat on a table, a corner of a
@@ -84,6 +100,7 @@ public struct Bubble: Sendable, Equatable {
 		line: RGBA = Bubble.ink,
 		width: Double = 0.32,
 		seed: Int = 1,
+		breath: Double = 1,
 		at: CGPoint? = nil
 	) {
 		self.shape = shape
@@ -93,6 +110,7 @@ public struct Bubble: Sendable, Equatable {
 		self.line = line
 		self.width = width
 		self.seed = seed
+		self.breath = max(0, breath)
 		self.at = at
 	}
 

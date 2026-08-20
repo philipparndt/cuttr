@@ -675,6 +675,8 @@ if describe {
 		case .bubble(let bubble):
 			what = "bubble \(bubble.shape.rawValue) \(bubble.text.debugDescription)"
 				+ " seed \(bubble.seed) width \(bubble.width)"
+				+ (bubble.breath == 1 ? "" : bubble.breath == 0
+					? " still" : " breath \(bubble.breath)")
 				+ (bubble.at.map { " at [\($0.x), \($0.y)]" } ?? "")
 		}
 		/// Where a movement sits, said only when it is not where it usually

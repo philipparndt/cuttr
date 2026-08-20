@@ -97,7 +97,7 @@ public enum OverlayPainter {
 			bubble, box: box, words: words?.image, wordSize: words?.size ?? .zero,
 			pointingAt: OverlayLayers.bubbleTarget(bubble, resolved: resolved,
 			                                       at: time, size: size),
-			frame: size, into: context)
+			frame: size, at: time, into: context)
 		return context.makeImage()
 	}
 

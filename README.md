@@ -672,6 +672,7 @@ and for a programme with no footage in it at all, which is what lets
 | `fill:` `line:` | the paper and the drawn line |
 | `width:` | how wide the words may get, as a fraction of the frame. **A maximum, not a size** |
 | `seed:` | the wobble |
+| `breath:` | how much the line breathes. 1 by default, 0 for the still drawing |
 | `at:` | a fixed spot to point at, when no anchor does |
 | `offset:` | how far off that spot the bubble stands. Written into the file the first time it is saved, because a default nobody can see is a default nobody can nudge |
 
@@ -684,6 +685,33 @@ too near an edge.
 the same shaky line on every machine and in every render, so a bubble somebody
 approved is a bubble they can get back. Two renders of one project decode to the
 same bytes, and the suite checks it by rendering both and comparing.
+
+**And the line breathes.** A drawn bubble that is perfectly still next to a
+moving face reads as a sticker, so it is redrawn — eight times a second, each
+drawing *held* until the next, which is what a cartoon does when it holds a
+drawing for two or three frames. Twenty-five a second is not more alive, it is
+noise: above the rate an eye can follow, a drawn line stops reading as a hand and
+starts reading as a fault, and it is exhausting to watch next to a face. The line
+moves by about a pixel at 720p — a third of its own width — so what is seen is
+the same bubble put down again, not a bubble changing shape.
+
+The beat is the programme's, and the drawing is a function of the seed and the
+time and nothing else: the same instant of the same project is the same drawing
+however it was reached, so a preview scrubbed backwards and an export agree, and
+nudging a `from:` does not redraw a single frame. What breathes is the outline,
+the thought bubble's puffs and the box arrow's shaft — never the words, and never
+the arrow's tip, which goes on pointing at exactly what it pointed at.
+
+`breath: 0` is the still drawing, byte for byte the bubble this program drew
+before any of this existed, for a bubble pinned to a corner of a graphic where
+being alive is not the point. `breath: 2` is twice as lively; four is what the
+last card of `examples/overlays/bubbles.cuttrproj` is there to warn about.
+
+An anchored bubble's tail is stepped with everything else while it is breathing:
+where the tail points is part of the drawing, and a tail sliding smoothly under an
+outline that is stepping is two different hands. It costs the tail up to an eighth
+of a second behind the face — less than the spacing the anchor was solved at. A
+still bubble's tail interpolates as it always did.
 
 `keys:` are refused, by name: a bubble has nothing a keyframe could honestly
 move. It arrives and leaves by `in:` and `out:` — a fade, by default, because a

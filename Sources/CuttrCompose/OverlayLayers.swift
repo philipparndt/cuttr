@@ -532,7 +532,7 @@ public enum OverlayLayers {
 		// from the clip's first frame, which is the reason somebody would ask
 		// for it; a tail frozen on the mark's position over those frames would
 		// be pointing at where the face is about to be.
-		let moments = tailMoments(resolved)
+		let (moments, held) = bubbleMoments(resolved)
 		func target(at time: Double) -> CGPoint? {
 			bubbleTarget(bubble, resolved: resolved, at: time, size: size)
 		}
@@ -540,13 +540,24 @@ public enum OverlayLayers {
 
 		func animate(_ layer: CAShapeLayer, _ path: @escaping (Double) -> CGPath?) {
 			guard moments.count > 1 else {
-				layer.path = path(timing.drawnFrom)
+				layer.path = path(moments[0])
 				return
 			}
 			let animation = CAKeyframeAnimation(keyPath: "path")
 			animation.values = moments.map { path($0) ?? CGMutablePath() }
 			animation.keyTimes = moments.map { NSNumber(value: timing.fraction(at: $0)) }
-			animation.calculationMode = .linear
+			if held {
+				// Discrete wants one key time more than it has values: each pair
+				// of them is when one drawing is up, so the last one closes the
+				// final drawing's turn rather than opening another. Given the
+				// same count as the values, Core Animation drops the last
+				// drawing — and given no key times at all it would space them
+				// evenly and lose the beat.
+				animation.keyTimes?.append(NSNumber(value: 1))
+				animation.calculationMode = .discrete
+			} else {
+				animation.calculationMode = .linear
+			}
 			animation.beginTime = host.beginTime(timing.drawnFrom)
 			animation.duration = timing.drawnSpan
 			animation.fillMode = .both
@@ -571,12 +582,12 @@ public enum OverlayLayers {
 			// paper rather than over it — the same order the painter draws in.
 			if !Bubbling.tailIsInTheBody(bubble.shape) {
 				let tail = made()
-				let paths = Bubbling.paths(bubble, box: box, pointingAt: target(at: timing.drawnFrom),
-				                           frame: size, pass: pass)
+				let paths = Bubbling.paths(bubble, box: box, pointingAt: target(at: moments[0]),
+				                           frame: size, pass: pass, at: moments[0])
 				if paths.tailIsPaper, pass == 0 { tail.fillColor = Bubbling.cg(bubble.fill) }
 				animate(tail) { time in
 					Bubbling.paths(bubble, box: box, pointingAt: target(at: time),
-					               frame: size, pass: pass).tail
+					               frame: size, pass: pass, at: time).tail
 				}
 				container.addSublayer(tail)
 			}
@@ -585,11 +596,21 @@ public enum OverlayLayers {
 			if Bubbling.tailIsInTheBody(bubble.shape) {
 				animate(body) { time in
 					Bubbling.paths(bubble, box: box, pointingAt: target(at: time),
-					               frame: size, pass: pass).body
+					               frame: size, pass: pass, at: time).body
+				}
+			} else if held {
+				// The outline breathes whether or not its tail is part of it, so
+				// a thought bubble's cloud and a box's rectangle get a drawing a
+				// beat as well. Only when it is breathing: a still one of these
+				// is the same paper all the way through, and keyframing one
+				// drawing sixteen times is sixteen copies of a path to no end.
+				animate(body) { time in
+					Bubbling.paths(bubble, box: box, pointingAt: nil,
+					               frame: size, pass: pass, at: time).body
 				}
 			} else {
 				body.path = Bubbling.paths(bubble, box: box, pointingAt: nil,
-				                           frame: size, pass: pass).body
+				                           frame: size, pass: pass, at: moments[0]).body
 			}
 			container.addSublayer(body)
 		}
@@ -607,20 +628,40 @@ public enum OverlayLayers {
 		return container
 	}
 
-	/// The times a bubble's tail is redrawn at.
+	/// The moments a bubble is redrawn at, and whether each drawing is *held*.
 	///
-	/// Nothing at all for a bubble pointing at a fixed spot: there is one
-	/// drawing and it is the same all the way through. A bubble on a face gets
-	/// the anchor's own samples, which is ten a second — finer than the tail
-	/// moves and coarser than the frame rate, exactly as the anchor was solved.
-	static func tailMoments(_ resolved: ResolvedOverlay) -> [Double] {
+	/// Two answers, because a bubble has two reasons to be redrawn and they do
+	/// not want the same treatment:
+	///
+	/// - **The face moved.** The anchor's own samples, ten a second, which is
+	///   how finely it was solved. Interpolated, so the tail sweeps round
+	///   smoothly as somebody walks.
+	/// - **The hand redrew it.** The programme's drawing beats,
+	///   ``Bubbling/drawingsPerSecond`` of them a second. *Held*, because a
+	///   drawing that slides into the next one is a rubber line rather than a
+	///   second drawing.
+	///
+	/// **A breathing bubble takes the second answer for both**, and that is the
+	/// only interesting decision in here. The tail's position is part of the
+	/// drawing: when the whole cel is redrawn eight times a second, so is where
+	/// the tail points, and a tail sliding smoothly under an outline that is
+	/// stepping is two different hands. What it costs is that the tail lags the
+	/// face by up to an eighth of a second — which is what a drawn tail does,
+	/// and which is smaller than the anchor's own sample spacing was already.
+	///
+	/// A still bubble is exactly what it was: the anchor's samples, interpolated,
+	/// or a single drawing where there is nothing to follow.
+	static func bubbleMoments(_ resolved: ResolvedOverlay) -> (times: [Double], held: Bool) {
 		let timing = resolved.timing
-		guard let path = resolved.path, !path.isEmpty else { return [timing.drawnFrom] }
+		if case .bubble(let bubble) = resolved.overlay.kind, bubble.breath > 0 {
+			return (Bubbling.drawings(from: timing.drawnFrom, to: timing.drawnUntil), true)
+		}
+		guard let path = resolved.path, !path.isEmpty else { return ([timing.drawnFrom], false) }
 		var times: [Double] = [timing.drawnFrom]
 		times += path.samples.map(\.time)
 			.filter { $0 > timing.drawnFrom && $0 < timing.drawnUntil }
 		times.append(timing.drawnUntil)
-		return times
+		return (times, false)
 	}
 
 	/// What the bubble points at, at one moment, in frame coordinates.

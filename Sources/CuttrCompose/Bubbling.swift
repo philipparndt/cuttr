@@ -28,6 +28,84 @@ enum Bubbling {
 	/// which is finer than the wobble it is drawing.
 	static let steps = 240
 
+	// MARK: - When it is redrawn
+
+	/// How many drawings a second a bubble is made of.
+	///
+	/// **A drawing rate, not a frame rate**, and that is the whole of it. A line
+	/// redrawn on every frame boils: at 25 a second the wobble is above the
+	/// frequency an eye can follow, so it stops reading as a hand and starts
+	/// reading as noise — and noise next to a face is exhausting to watch for
+	/// the length of a sentence. Cartoons hold each drawing for two or three
+	/// frames and move the line between *drawings*, so eight a second is three
+	/// frames at 24 and 25 and a hair over three at 30. Slow enough to see each
+	/// drawing as a drawing; fast enough that it is alive rather than ticking.
+	///
+	/// Held rather than interpolated, for the same reason: a line that slides
+	/// from one drawing to the next is a rubber line, which is a different
+	/// effect and not this one. The layer path says `.discrete` and the frame
+	/// path quantises the time it is given, so the two agree by construction.
+	///
+	/// One rate for every bubble in the programme, taken off the programme's own
+	/// clock, so two bubbles on screen together change drawing on the same
+	/// beat — which is what redrawing a cel does, and what two bubbles boiling
+	/// out of step conspicuously does not.
+	static let drawingsPerSecond = 8.0
+
+	/// How far the line moves between one drawing and the next, as a fraction
+	/// of the frame **height**.
+	///
+	/// A pixel and a half at 720p, two and a bit at 1080p, four and a half at
+	/// 4K — under half the width of the line being drawn
+	/// (``lineWidth(for:)`` is `0.0045`), which is the number this was chosen
+	/// against. Under that, the line is seen to have been *redrawn*: the
+	/// silhouette is the same silhouette and the hand landed somewhere slightly
+	/// else. Over it, the outline visibly changes shape between drawings, and at
+	/// ten times this a bubble is having a seizure.
+	///
+	/// Scaled by the frame rather than by the bubble, because it is a fact about
+	/// the hand and not about how big the thing being drawn is: a small bubble
+	/// and a large one drawn by the same person shake by the same amount. The
+	/// standing wobble is not — see ``paths(_:box:pointingAt:frame:pass:at:)``,
+	/// where it is the larger of a fraction of the frame and a fraction of the
+	/// bubble.
+	static let breath = 0.002
+
+	/// Which drawing is on screen at a moment on the programme's clock.
+	///
+	/// From the programme's time and not from the bubble's own start, so that
+	/// the same frame is the same drawing however it was reached: scrubbed to in
+	/// the window, encoded by the exporter, or arrived at because somebody moved
+	/// the bubble's first mark half a second later. The alternative — counting
+	/// from ``OverlayTiming/drawnFrom`` — would redraw every bubble in the
+	/// programme the moment one `from:` was nudged, and would put two bubbles
+	/// with different spans on different beats.
+	static func drawing(at time: Double) -> Int {
+		Int(floor(time * drawingsPerSecond))
+	}
+
+	/// The instants the drawing changes, over a window, on the programme's
+	/// clock.
+	///
+	/// The first is the window's own start — whatever drawing was up when the
+	/// bubble came on is the one it comes on with — and the rest are the beats
+	/// of the programme's drawing clock inside it.
+	static func drawings(from start: Double, to end: Double) -> [Double] {
+		var times = [start]
+		var beat = drawing(at: start) + 1
+		while Double(beat) / drawingsPerSecond < end {
+			times.append(Double(beat) / drawingsPerSecond)
+			beat += 1
+			// A bubble left on for an hour is 28,800 drawings, and every one of
+			// them is a path per stroke in the layer tree. Nothing sane asks for
+			// that, so stop counting rather than exhaust the machine over it: a
+			// bubble that has been breathing for twenty minutes has made its
+			// point.
+			if times.count >= 10_000 { break }
+		}
+		return times
+	}
+
 	/// The paths a bubble is made of at one moment.
 	struct Paths {
 		/// The paper: filled, then stroked. For a speech bubble the tail is
@@ -94,14 +172,20 @@ enum Bubbling {
 	/// confidently at wherever the face last was: a tail frozen on a doorway
 	/// somebody left through looks exactly like a tracker that has failed, and
 	/// this program says so elsewhere too.
+	///
+	/// `time` is on the programme's clock, and all it decides is which *drawing*
+	/// this is — the wobble is the same for every moment inside one drawing's
+	/// turn on the screen. So a caller that wants the still bubble has nothing to
+	/// do but leave `breath:` at nought; it does not have to lie about the time.
 	static func paths(
 		_ bubble: Bubble, box: CGRect, pointingAt target: CGPoint?,
-		frame: CGSize, pass: Int
+		frame: CGSize, pass: Int, at time: Double
 	) -> Paths {
-		let wobble = Wobble(seed: bubble.seed, pass: pass)
 		let centre = CGPoint(x: box.midX, y: box.midY)
 		let half = CGSize(width: box.width / 2, height: box.height / 2)
 		let amplitude = max(0.005 * frame.height, 0.05 * min(half.width, half.height))
+		let wobble = Wobble(seed: bubble.seed, pass: pass, drawing: drawing(at: time),
+		                    breath: bubble.breath * breath * frame.height)
 		let aimed = target.map { clamped($0, in: frame) }
 
 		var spike: (angle: Double, reach: Double)?
@@ -168,7 +252,9 @@ enum Bubbling {
 				// a wavy ellipse.
 				r *= 1 + 0.15 * abs(sin(4.5 * angle + wobble.puffPhase))
 			}
-			r += amplitude * wobble.at(angle)
+			// The standing wobble, which is this bubble's line for ever, and the
+			// breath, which is where the hand landed on *this* drawing.
+			r += amplitude * wobble.at(angle) + wobble.shiver(angle)
 			if let spike {
 				let width = 0.3 * (turn(angle - spike.angle) < 0 ? lean : 2 - lean)
 				let away = abs(turn(angle - spike.angle))
@@ -220,6 +306,7 @@ enum Bubbling {
 			for step in 0 ..< 28 {
 				let round = 2 * Double.pi * Double(step) / 28
 				let r = size * (1 + 0.1 * wobble.at(round + Double(index) * 2.1))
+					+ wobble.shiver(round + Double(index) * 2.1)
 				let point = CGPoint(x: middle.x + across.x + cos(round) * r,
 				                    y: middle.y + across.y + sin(round) * r)
 				if step == 0 { path.move(to: point) } else { path.addLine(to: point) }
@@ -263,8 +350,11 @@ enum Bubbling {
 				x: inverse * inverse * start.x + 2 * inverse * t * control.x + t * t * tip.x,
 				y: inverse * inverse * start.y + 2 * inverse * t * control.y + t * t * tip.y)
 			// The shaft shakes as well, and least at its two ends, where a hand
-			// is steadied by where it is going.
-			let shake = sin(Double.pi * t) * 0.004 * frame.height * wobble.at(t * 5.3)
+			// is steadied by where it is going. Which is also why the breath is
+			// inside the taper: the arrow goes on pointing at exactly the thing
+			// it was pointing at, however much its middle is redrawn.
+			let shake = sin(Double.pi * t)
+				* (0.004 * frame.height * wobble.at(t * 5.3) + wobble.shiver(t * 5.3))
 			point = CGPoint(x: point.x - sin(angle) * shake, y: point.y + cos(angle) * shake)
 			if step == 0 { path.move(to: point) } else { path.addLine(to: point) }
 			last = point
@@ -296,13 +386,24 @@ enum Bubbling {
 	///
 	/// Five harmonics with seeded amplitudes and phases, which is a smooth
 	/// closed curve rather than noise: a hand wanders, it does not buzz. And
-	/// because it is a function of the angle rather than of the frame, the body
-	/// of the bubble is drawn identically at every moment while the tail sweeps
-	/// through it — the words do not shimmer.
+	/// because it is a function of the angle and of the *drawing* rather than of
+	/// the frame, the body of the bubble is the same for the whole of a drawing's
+	/// turn on the screen — redrawn eight times a second, not twenty-five, and
+	/// the words not redrawn at all.
 	///
 	/// `pass` is which of the two strokes this is. The look of a drawn line is
 	/// two passes that nearly agree, so the second pass is the same seed one
 	/// turn further on.
+	///
+	/// **And `drawing` is which redrawing of it this is.** The standing wobble —
+	/// ``at(_:)``, the line this bubble has for ever — does not depend on it at
+	/// all. What does is ``shiver(_:)``, a second and much smaller wobble whose
+	/// phases advance a step for every drawing, so the wanders travel round the
+	/// outline and the line is put down somewhere slightly else each time. Two
+	/// separate terms rather than one animated one, for two reasons: the amount
+	/// of movement is then a number of its own that can be set to nought, and
+	/// with it at nought the arithmetic is exactly the arithmetic that was here
+	/// before, down to the order the seeded numbers are drawn in.
 	struct Wobble {
 		private var amplitudes: [Double] = []
 		private var phases: [Double] = []
@@ -311,8 +412,12 @@ enum Bubbling {
 		/// Where the thought bubble's scallops start.
 		let puffPhase: Double
 		private var drifts: [Double] = []
+		/// How far the line moves between drawings, in pixels. Nought is still.
+		private let breath: Double
+		private var breathAmplitudes: [Double] = []
+		private var breathPhases: [Double] = []
 
-		init(seed: Int, pass: Int) {
+		init(seed: Int, pass: Int, drawing: Int = 0, breath: Double = 0) {
 			// The seed alone decides the line. The second pass is the *same*
 			// line drawn again slightly off — a nudge in phase and a little less
 			// of it — rather than an independent one off a second seed.
@@ -338,6 +443,39 @@ enum Bubbling {
 			lean = Double.random(in: 0.7 ... 1.3, using: &random)
 			puffPhase = Double.random(in: 0 ..< (2 * Double.pi), using: &random)
 			drifts = (0 ..< 4).map { _ in Double.random(in: -0.5 ... 0.5, using: &random) }
+
+			// Everything above is drawn off the stream in the order it always
+			// was, so a still bubble is the bubble it always was. The breath is
+			// drawn after it, and takes nothing from anything else.
+			//
+			// Three harmonics rather than five: what changes between one drawing
+			// and the next is where the hand *landed*, which is a slow thing.
+			// Adding high harmonics here would be adding fuzz that appears and
+			// disappears, and fuzz that flickers is exactly the boil this rate
+			// was chosen to avoid.
+			self.breath = max(0, breath)
+			var breathTotal = 0.0
+			var amounts: [Double] = []
+			for harmonic in 1 ... 3 {
+				let amount = Double.random(in: 0.4 ... 1, using: &random) / Double(harmonic)
+				amounts.append(amount)
+				breathTotal += amount
+				// How far this harmonic turns per drawing. Two thirds of a turn
+				// or so, and a different amount for each: enough that two
+				// consecutive drawings are two placements of the line rather
+				// than one placement crawling, and incommensurate so the trio
+				// does not come back round to where it started on a count
+				// anybody could notice.
+				let spin = Double.random(in: 1.9 ... 2.9, using: &random)
+				breathPhases.append(
+					Double.random(in: 0 ..< (2 * Double.pi), using: &random)
+						+ Double(drawing) * spin
+						// The second stroke breathes with the first rather than
+						// against it: two passes that disagree about where the
+						// hand went are two lines, not one drawn twice.
+						+ Double(pass) * 0.42)
+			}
+			breathAmplitudes = amounts.map { $0 / breathTotal }
 		}
 
 		/// How far off the true line the hand is, at an angle, in `-1 ... 1`.
@@ -347,6 +485,24 @@ enum Bubbling {
 				sum += amplitudes[harmonic - 1] * sin(Double(harmonic) * angle + phases[harmonic - 1])
 			}
 			return sum
+		}
+
+		/// Where the hand landed on *this* drawing, at an angle, in pixels.
+		///
+		/// Added to the radius on top of ``at(_:)`` rather than replacing it, so
+		/// the bubble keeps its own shaky silhouette and is redrawn within it.
+		/// Nought for a still bubble — the one branch here, and it is a
+		/// multiplication rather than an `if`, so a still bubble and a breathing
+		/// one go down the same path and there is nowhere for the two to drift
+		/// apart.
+		func shiver(_ angle: Double) -> Double {
+			guard breath > 0 else { return 0 }
+			var sum = 0.0
+			for harmonic in 1 ... 3 {
+				sum += breathAmplitudes[harmonic - 1]
+					* sin(Double(harmonic) * angle + breathPhases[harmonic - 1])
+			}
+			return breath * sum
 		}
 
 		/// How far the nth puff sits off the line to the face.
@@ -428,13 +584,15 @@ enum Bubbling {
 	/// the paths themselves come from the one function above.
 	static func draw(
 		_ bubble: Bubble, box: CGRect, words: CGImage?, wordSize: CGSize,
-		pointingAt target: CGPoint?, frame: CGSize, into context: CGContext
+		pointingAt target: CGPoint?, frame: CGSize, at time: Double,
+		into context: CGContext
 	) {
 		let weight = lineWidth(for: frame)
 		context.setLineJoin(.round)
 		context.setLineCap(.round)
 		for pass in 0 ..< 2 {
-			let drawing = paths(bubble, box: box, pointingAt: target, frame: frame, pass: pass)
+			let drawing = paths(bubble, box: box, pointingAt: target, frame: frame,
+			                    pass: pass, at: time)
 			// The paper goes down once, on the first pass. Twice would double
 			// the alpha of a translucent fill and leave a rim where the two
 			// outlines disagree.
