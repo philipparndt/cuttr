@@ -646,13 +646,34 @@ overlays:
     to:     00:06.000
 ```
 
-**`anchor:` here means what it points at, not where it sits** — the one place in
-this format where that word does something different, and the difference is the
-point. Every other overlay travels with its anchor. A bubble is *read*, and
-words that move under the reader cannot be: so the bubble is placed once, where
-the face was when it came on, and stays there. What follows the face is the
-tail, redrawn at every sample of the tracked path — so she can walk across the
-shot with the tail swinging round to keep up and the sentence never moves.
+**`anchor:` here means what it points at as well as where it sits** — the one
+place in this format where that word does two things, and the difference is the
+point. The paper stands off from the anchor by `offset:` and travels with it; the
+tail reaches back to it and is redrawn at every sample of the tracked path. So
+she can walk across the shot with the bubble going along beside her and the tail
+swinging round to keep up.
+
+**How it travels is the interesting half.** A bubble is *read*, and words that
+jitter under the reader cannot be — and a tracker's answer does jitter, because
+each sample is a fresh measurement and not an object with momentum. So the paper
+follows the *slow* part of the anchor: a centred, cosine-weighted average over
+six tenths of a second, which is nine of the anchor's ten-a-second samples.
+Centred, so it costs no lag at all — a symmetric average reproduces a steady walk
+exactly, and the suite measures it at 575.99 px where the face moved 576.00.
+What it costs instead is three tenths of a second of anticipation: the paper
+begins to drift a moment before the face does, which on a walk is invisible and
+is much the better trade, since a bubble that trails a face looks dragged. The
+jitter comes out a hundred times smaller: 0.03 px a frame against 2.91.
+
+A face that walks out of the side of the shot cannot take the words with it. The
+paper slows as it comes up to the frame's margin and settles against it — a soft
+knee rather than a clamp, so it comes to rest instead of stopping dead on one
+frame — and the tail goes on alone.
+
+`follow: false` puts it back the way it was: placed once, where the face was when
+it came on, and still, with only the tail following. Right for a bubble pinned to
+the corner of a graphic, and for a shot where the stillest thing is the best
+thing.
 
 Where the tracking stops, the tail stops: outside the stretch the anchor was
 actually solved over, the bubble keeps its words and simply loses its tail. A
@@ -664,6 +685,31 @@ tail lies along the edge she went out by and goes on pointing that way.
 and for a programme with no footage in it at all, which is what lets
 `examples/overlays/bubbles.cuttrproj` render on any machine.
 
+**Two positions, and they are two words.** A tracker follows what a tracker can
+follow, which in practice is an eye. Where the tail should *land* is usually
+somewhere else — the mouth, the top of the head, the hand, the thing she is
+holding — so a bubble carries both:
+
+```yaml
+overlays:
+  - bubble: the good chair
+    shape:  box
+    anchor: mia-eye
+    offset: [0.14, 0.2]     # where the paper sits
+    tail:   [0, -0.18]      # where the tip goes — her mouth, below the eye
+```
+
+Both are measured from the same place, the thing the bubble is about, and both
+are in fractions of the frame **height** on each axis, as every offset in this
+format is. `offset:` moves the paper; `tail:` moves the tip; neither moves the
+other. `tail:` is nought by default — the anchor itself — so the two-line bubble
+stays two lines, and because it is measured from the anchor rather than from the
+frame, a tail aimed at her mouth is still on her mouth once she has walked.
+
+The tail follows the raw anchor rather than the smoothed one the paper uses: a
+tail is a line and is allowed to be lively, and one lagging the face by the width
+of the smoothing would visibly miss the mouth it is coming out of.
+
 | | |
 |---|---|
 | `bubble:` | what it says. The whole of the common case |
@@ -672,8 +718,11 @@ and for a programme with no footage in it at all, which is what lets
 | `fill:` `line:` | the paper and the drawn line |
 | `width:` | how wide the words may get, as a fraction of the frame. **A maximum, not a size** |
 | `seed:` | the wobble |
+| `breath:` | how much the line breathes. 1 by default, 0 for the still drawing |
+| `follow:` | whether the paper travels with the anchor. It does; `false` leaves it where it was put |
 | `at:` | a fixed spot to point at, when no anchor does |
-| `offset:` | how far off that spot the bubble stands. Written into the file the first time it is saved, because a default nobody can see is a default nobody can nudge |
+| `offset:` | **where the paper sits**, from that spot. Written into the file the first time it is saved, because a default nobody can see is a default nobody can nudge |
+| `tail:` | **where the tip goes**, from the same spot. `[0, 0.08]` on an eye is the head above it |
 
 **Nothing says how big it is.** The words wrap to `width` and the paper grows to
 whatever comes out — downwards. A long joke gives a taller bubble, never one off
@@ -684,6 +733,36 @@ too near an edge.
 the same shaky line on every machine and in every render, so a bubble somebody
 approved is a bubble they can get back. Two renders of one project decode to the
 same bytes, and the suite checks it by rendering both and comparing.
+
+**And the line breathes.** A drawn bubble that is perfectly still next to a
+moving face reads as a sticker, so it is redrawn — eight times a second, each
+drawing *held* until the next, which is what a cartoon does when it holds a
+drawing for two or three frames. Twenty-five a second is not more alive, it is
+noise: above the rate an eye can follow, a drawn line stops reading as a hand and
+starts reading as a fault, and it is exhausting to watch next to a face. The line
+moves by about a pixel at 720p — a third of its own width — so what is seen is
+the same bubble put down again, not a bubble changing shape.
+
+The beat is the programme's, and the drawing is a function of the seed and the
+time and nothing else: the same instant of the same project is the same drawing
+however it was reached, so a preview scrubbed backwards and an export agree, and
+nudging a `from:` does not redraw a single frame. What breathes is the outline,
+the thought bubble's puffs and the box arrow's shaft — never the words, and never
+the arrow's tip, which goes on pointing at exactly what it pointed at.
+
+`breath: 0` is the still drawing, byte for byte the bubble this program drew
+before any of this existed, for a bubble pinned to a corner of a graphic where
+being alive is not the point. `breath: 2` is twice as lively; four is what the
+last card of `examples/overlays/bubbles.cuttrproj` is there to warn about.
+
+An anchored bubble's tail — and the paper, and the words on it — is stepped with
+everything else while it is breathing: where the bubble sits and where the tail
+points are both part of the drawing, and a bubble gliding under an outline that is
+stepping is two different hands. It costs up to an eighth of a second behind the
+face, less than the spacing the anchor was solved at, and it buys type that is
+*identical* for three frames at a time rather than resampled onto the pixel grid
+on every one of them — a travelling bubble is as sharp as a still one, which is
+the thing following usually costs. A still bubble interpolates as it always did.
 
 `keys:` are refused, by name: a bubble has nothing a keyframe could honestly
 move. It arrives and leaves by `in:` and `out:` — a fade, by default, because a

@@ -253,6 +253,17 @@ public enum ProjectReader {
 			if let line = (m["line"] as? String).flatMap(RGBA.init(hex:)) { bubble.line = line }
 			if let width = number(m["width"]) { bubble.width = width }
 			if let seed = m["seed"] as? Int { bubble.seed = seed }
+			// How much the line breathes: one is alive, nought is the still
+			// drawing. Clamped rather than refused, because a negative amount of
+			// liveliness is a typo and not a question.
+			if let breath = number(m["breath"]) { bubble.breath = max(0, breath) }
+			// Whether the paper travels with the anchor. It does unless somebody
+			// says not to.
+			if let follow = m["follow"] as? Bool { bubble.follow = follow }
+			// Where the tail's tip goes, from the same origin as `offset:`. The
+			// second of the two positions a bubble carries: `offset:` moves the
+			// paper, this moves the tip.
+			bubble.tail = try point(m["tail"], key: "tail") ?? .zero
 			// A spot in the frame to point at, for the things that are not
 			// faces — and for a programme with no footage in it at all.
 			bubble.at = try point(m["at"], key: "at")

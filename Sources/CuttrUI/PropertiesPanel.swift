@@ -1222,10 +1222,29 @@ public final class PropertiesPanel: NSView {
 			field("seed", [number(Double(bubble.seed), width: 72) { [weak self] value in
 				self?.editBubble(origin) { $0.seed = Int(value) }
 			}], note: "the same number gives the same wobble, every render, on every machine")
+			field("breath", [number(bubble.breath, width: 72) { [weak self] value in
+				self?.editBubble(origin) { $0.breath = max(0, value) }
+			}, label(bubble.breath > 0 ? "redrawn 8 times a second" : "one still drawing")],
+			      note: "how much the line breathes — 1 is alive, 0 is the still drawing")
+			field("follow", [check("travels with the anchor", on: bubble.follow) {
+				[weak self] on in
+				self?.editBubble(origin) { $0.follow = on }
+			}], note: overlay.anchor == nil
+				? "nothing to follow — it sits where `at:` and `offset:` put it"
+				: "off, it stays where the face was when it came on and only the tail follows")
 			field("points at", [label(overlay.anchor.map { "the anchor `\($0)`" }
 				?? (bubble.at.map { "the spot [\(Self.trimmed($0.x)), \(Self.trimmed($0.y))]" }
 					?? "nothing — it keeps its words and loses its tail"))],
 			      note: "an anchor is a face and follows it; `at:` is a fixed spot in the frame")
+			field("tail", [
+				number(bubble.tail.x, width: 72) { [weak self] value in
+					self?.editBubble(origin) { $0.tail.x = value }
+				},
+				number(bubble.tail.y, width: 72) { [weak self] value in
+					self?.editBubble(origin) { $0.tail.y = value }
+				},
+				label("from there, of frame height"),
+			], note: "the tip, not the paper — `[0, 0.08]` on an eye is the head above it")
 
 		case .spinner(let spinner):
 			field("style", [pop(Spinner.Style.allCases.map(\.rawValue),

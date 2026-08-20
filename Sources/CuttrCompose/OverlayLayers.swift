@@ -520,10 +520,17 @@ public enum OverlayLayers {
 		container.frame = CGRect(origin: .zero, size: size)
 		let style = project.style(named: bubble.style ?? "bubble")
 		let drawn = Bubbling.words(bubble.text, style: style, frame: size, width: bubble.width)
-		let box = Bubbling.box(words: drawn?.size ?? .zero, shape: bubble.shape,
-		                       style: style, home: bubbleHome(bubble, resolved: resolved,
-		                                                      style: style, size: size),
-		                       frame: size)
+		// Where the paper is at a moment. The words are measured once — a bubble
+		// says the same thing all the way through, so it is the same size all the
+		// way through — but where that rectangle *sits* is a question per moment
+		// now that it travels with the face.
+		let travelling = bubble.follow && resolved.path != nil
+		func box(at time: Double) -> CGRect {
+			Bubbling.box(words: drawn?.size ?? .zero, shape: bubble.shape, style: style,
+			             home: bubbleHome(bubble, resolved: resolved, style: style,
+			                              size: size, at: time),
+			             frame: size, give: travelling ? Bubbling.give * size.height : 0)
+		}
 
 		// When the tail is redrawn: at every sample the anchor has inside the
 		// window this bubble is drawn for, with the ends pinned — the same list
@@ -532,25 +539,42 @@ public enum OverlayLayers {
 		// from the clip's first frame, which is the reason somebody would ask
 		// for it; a tail frozen on the mark's position over those frames would
 		// be pointing at where the face is about to be.
-		let moments = tailMoments(resolved)
+		let (moments, held) = bubbleMoments(resolved)
 		func target(at time: Double) -> CGPoint? {
 			bubbleTarget(bubble, resolved: resolved, at: time, size: size)
 		}
 		let timing = resolved.timing
 
-		func animate(_ layer: CAShapeLayer, _ path: @escaping (Double) -> CGPath?) {
-			guard moments.count > 1 else {
-				layer.path = path(timing.drawnFrom)
-				return
-			}
-			let animation = CAKeyframeAnimation(keyPath: "path")
-			animation.values = moments.map { path($0) ?? CGMutablePath() }
+		/// One property of one layer, over this bubble's moments.
+		func keyframed(_ key: String, _ value: (Double) -> Any) -> CAKeyframeAnimation {
+			let animation = CAKeyframeAnimation(keyPath: key)
+			animation.values = moments.map(value)
 			animation.keyTimes = moments.map { NSNumber(value: timing.fraction(at: $0)) }
-			animation.calculationMode = .linear
+			if held {
+				// Discrete wants one key time more than it has values: each pair
+				// of them is when one drawing is up, so the last one closes the
+				// final drawing's turn rather than opening another. Given the
+				// same count as the values, Core Animation drops the last
+				// drawing — and given no key times at all it would space them
+				// evenly and lose the beat.
+				animation.keyTimes?.append(NSNumber(value: 1))
+				animation.calculationMode = .discrete
+			} else {
+				animation.calculationMode = .linear
+			}
 			animation.beginTime = host.beginTime(timing.drawnFrom)
 			animation.duration = timing.drawnSpan
 			animation.fillMode = .both
 			animation.isRemovedOnCompletion = false
+			return animation
+		}
+
+		func animate(_ layer: CAShapeLayer, _ path: @escaping (Double) -> CGPath?) {
+			guard moments.count > 1 else {
+				layer.path = path(moments[0])
+				return
+			}
+			let animation = keyframed("path") { path($0) ?? CGMutablePath() }
 			layer.path = animation.values?.first as! CGPath?
 			layer.add(animation, forKey: "path")
 		}
@@ -571,12 +595,13 @@ public enum OverlayLayers {
 			// paper rather than over it — the same order the painter draws in.
 			if !Bubbling.tailIsInTheBody(bubble.shape) {
 				let tail = made()
-				let paths = Bubbling.paths(bubble, box: box, pointingAt: target(at: timing.drawnFrom),
-				                           frame: size, pass: pass)
+				let paths = Bubbling.paths(bubble, box: box(at: moments[0]),
+				                           pointingAt: target(at: moments[0]),
+				                           frame: size, pass: pass, at: moments[0])
 				if paths.tailIsPaper, pass == 0 { tail.fillColor = Bubbling.cg(bubble.fill) }
 				animate(tail) { time in
-					Bubbling.paths(bubble, box: box, pointingAt: target(at: time),
-					               frame: size, pass: pass).tail
+					Bubbling.paths(bubble, box: box(at: time), pointingAt: target(at: time),
+					               frame: size, pass: pass, at: time).tail
 				}
 				container.addSublayer(tail)
 			}
@@ -584,46 +609,101 @@ public enum OverlayLayers {
 			if pass == 0 { body.fillColor = Bubbling.cg(bubble.fill) }
 			if Bubbling.tailIsInTheBody(bubble.shape) {
 				animate(body) { time in
-					Bubbling.paths(bubble, box: box, pointingAt: target(at: time),
-					               frame: size, pass: pass).body
+					Bubbling.paths(bubble, box: box(at: time), pointingAt: target(at: time),
+					               frame: size, pass: pass, at: time).body
+				}
+			} else if held || travelling {
+				// The outline moves whether or not its tail is part of it: the
+				// hand redraws it, and the paper travels. So a thought bubble's
+				// cloud and a box's rectangle get a keyframe a moment as well.
+				// Only when one of those is true: a still bubble pinned to a spot
+				// is the same paper all the way through, and keyframing one
+				// drawing sixteen times is sixteen copies of a path to no end.
+				animate(body) { time in
+					Bubbling.paths(bubble, box: box(at: time), pointingAt: nil,
+					               frame: size, pass: pass, at: time).body
 				}
 			} else {
-				body.path = Bubbling.paths(bubble, box: box, pointingAt: nil,
-				                           frame: size, pass: pass).body
+				body.path = Bubbling.paths(bubble, box: box(at: moments[0]), pointingAt: nil,
+				                           frame: size, pass: pass, at: moments[0]).body
 			}
 			container.addSublayer(body)
 		}
 
 		if let drawn {
 			let words = CALayer()
-			words.frame = CGRect(x: box.midX - drawn.size.width / 2,
-			                     y: box.midY - drawn.size.height / 2,
+			let middle = box(at: moments[0])
+			words.frame = CGRect(x: middle.midX - drawn.size.width / 2,
+			                     y: middle.midY - drawn.size.height / 2,
 			                     width: drawn.size.width, height: drawn.size.height)
 			words.contents = drawn.image
 			words.contentsGravity = .resize
 			words.contentsScale = 2
+			// The type is one image, moved — never redrawn, never re-wrapped, and
+			// never scaled. What travels with the face is where the sentence is,
+			// not what it is made of, so there is nothing here for the following
+			// to smear. And it moves exactly as the paper does, on the same
+			// moments and by the same rule: held where the drawing is held, and
+			// interpolated where it is not. Words gliding under an outline that
+			// steps would be the type and the paper coming apart.
+			if travelling, moments.count > 1 {
+				words.add(keyframed("position") { time in
+					let at = box(at: time)
+					return NSValue(point: CGPoint(x: at.midX, y: at.midY))
+				}, forKey: "position")
+			}
 			container.addSublayer(words)
 		}
 		return container
 	}
 
-	/// The times a bubble's tail is redrawn at.
+	/// The moments a bubble is redrawn at, and whether each drawing is *held*.
 	///
-	/// Nothing at all for a bubble pointing at a fixed spot: there is one
-	/// drawing and it is the same all the way through. A bubble on a face gets
-	/// the anchor's own samples, which is ten a second — finer than the tail
-	/// moves and coarser than the frame rate, exactly as the anchor was solved.
-	static func tailMoments(_ resolved: ResolvedOverlay) -> [Double] {
+	/// Two answers, because a bubble has two reasons to be redrawn and they do
+	/// not want the same treatment:
+	///
+	/// - **The face moved.** The anchor's own samples, ten a second, which is
+	///   how finely it was solved. Interpolated, so the tail sweeps round
+	///   smoothly as somebody walks.
+	/// - **The hand redrew it.** The programme's drawing beats,
+	///   ``Bubbling/drawingsPerSecond`` of them a second. *Held*, because a
+	///   drawing that slides into the next one is a rubber line rather than a
+	///   second drawing.
+	///
+	/// **A breathing bubble takes the second answer for both**, and that is the
+	/// only interesting decision in here. The tail's position is part of the
+	/// drawing: when the whole cel is redrawn eight times a second, so is where
+	/// the tail points, and a tail sliding smoothly under an outline that is
+	/// stepping is two different hands. What it costs is that the tail lags the
+	/// face by up to an eighth of a second — which is what a drawn tail does,
+	/// and which is smaller than the anchor's own sample spacing was already.
+	///
+	/// A still bubble is exactly what it was: the anchor's samples, interpolated,
+	/// or a single drawing where there is nothing to follow.
+	static func bubbleMoments(_ resolved: ResolvedOverlay) -> (times: [Double], held: Bool) {
 		let timing = resolved.timing
-		guard let path = resolved.path, !path.isEmpty else { return [timing.drawnFrom] }
+		if case .bubble(let bubble) = resolved.overlay.kind, bubble.breath > 0 {
+			return (Bubbling.drawings(from: timing.drawnFrom, to: timing.drawnUntil), true)
+		}
+		guard let path = resolved.path, !path.isEmpty else { return ([timing.drawnFrom], false) }
 		var times: [Double] = [timing.drawnFrom]
 		times += path.samples.map(\.time)
 			.filter { $0 > timing.drawnFrom && $0 < timing.drawnUntil }
 		times.append(timing.drawnUntil)
-		return times
+		return (times, false)
 	}
 
 	/// What the bubble points at, at one moment, in frame coordinates.
+	///
+	/// The anchor's own point plus the bubble's ``Bubble/tail`` — the second of
+	/// the two positions a bubble carries, and the reason an arrow can land on a
+	/// head while the thing being tracked is an eye. Added to the tracked point
+	/// rather than to the frame, so it goes on being her head as she walks.
+	///
+	/// The *raw* anchor, not the smoothed one the paper uses. A tail is allowed
+	/// to be lively — it is a line, not a sentence — and a tail that lagged the
+	/// face by the width of the smoothing would visibly miss the mouth it is
+	/// meant to be coming out of.
 	///
 	/// `nil` where there is nothing to point at: outside the stretch the anchor
 	/// was actually solved over, and for a bubble with no anchor and no `at:`.
@@ -633,30 +713,90 @@ public enum OverlayLayers {
 	static func bubbleTarget(
 		_ bubble: Bubble, resolved: ResolvedOverlay, at time: Double, size: CGSize
 	) -> CGPoint? {
+		// In fractions of the frame height on both axes, as every offset in this
+		// format is — so a tail asked for the top of a head is the same tail in a
+		// 4:3 frame and a 21:9 one.
+		let tail = CGPoint(x: bubble.tail.x * size.height, y: bubble.tail.y * size.height)
 		if let path = resolved.path, !path.isEmpty {
 			guard path.covers(time), let point = path.point(at: time) else { return nil }
-			return CGPoint(x: point.x * size.width, y: point.y * size.height)
+			return CGPoint(x: point.x * size.width + tail.x, y: point.y * size.height + tail.y)
 		}
-		return bubble.at.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) }
+		return bubble.at.map {
+			CGPoint(x: $0.x * size.width + tail.x, y: $0.y * size.height + tail.y)
+		}
 	}
 
-	/// Where the middle of the paper goes: beside the thing it points at, or
-	/// where the style says for a bubble that points at nothing.
+	/// How long the anchor is averaged over to place a travelling bubble, in
+	/// seconds.
+	///
+	/// A tracker's answer jitters by a pixel or two from one sample to the next.
+	/// It is a fresh measurement each time and not a physical object with
+	/// momentum, so the jitter is at the sample rate — and type that jitters is
+	/// type nobody can read. A face crossing a shot, on the other hand, takes
+	/// seconds. Six tenths of a second sits comfortably between the two: it
+	/// averages nine of the anchor's ten-a-second samples, which flattens the
+	/// jitter to nothing and lets the walk through.
+	static let settling = 0.6
+
+	/// Where the anchor is, slowly.
+	///
+	/// A cosine-weighted average of the path over ``settling`` seconds, centred
+	/// on the moment. Three things about it are the reasons it is this and not
+	/// something else:
+	///
+	/// - **Centred, so it costs no lag at all.** A live filter can only look
+	///   backwards and therefore always trails. The path is solved before
+	///   anything is drawn, so this can look forward as well — and a symmetric
+	///   average reproduces movement at a constant speed *exactly*. Only changes
+	///   of speed are softened. What it costs instead is three tenths of a second
+	///   of anticipation: the paper begins to drift a moment before the face
+	///   does, which on a walk is invisible, and is the better trade, because a
+	///   bubble that trails a face looks dragged along behind it.
+	/// - **Weighted rather than flat.** With a plain average, a sample entering
+	///   or leaving the window steps the answer by a ninth of the jitter the
+	///   window was put there to remove. A weight that goes to nothing at both
+	///   ends means nothing enters or leaves except at nothing.
+	/// - **No state between frames.** It is an average over a path that is
+	///   already entirely known, so a preview scrubbed backwards draws exactly
+	///   what playing forwards drew, and a render agrees with both.
+	static func settled(_ path: AnchorPath, at time: Double) -> CGPoint? {
+		guard !path.isEmpty else { return nil }
+		let taps = 8
+		let step = settling / 2 / Double(taps)
+		var total = 0.0, x = 0.0, y = 0.0
+		for tap in -taps ... taps {
+			// Hann: one in the middle, nothing at either end.
+			let weight = 0.5 * (1 + cos(Double.pi * Double(tap) / Double(taps)))
+			guard weight > 0, let point = path.point(at: time + Double(tap) * step) else { continue }
+			x += point.x * weight
+			y += point.y * weight
+			total += weight
+		}
+		guard total > 0 else { return path.point(at: time) }
+		return CGPoint(x: x / total, y: y / total)
+	}
+
+	/// Where the middle of the paper goes at a moment: beside the thing it points
+	/// at, or where the style says for a bubble that points at nothing.
 	static func bubbleHome(
-		_ bubble: Bubble, resolved: ResolvedOverlay, style: TextStyle, size: CGSize
+		_ bubble: Bubble, resolved: ResolvedOverlay, style: TextStyle, size: CGSize,
+		at time: Double
 	) -> CGPoint {
 		let offset = resolved.overlay.offset
-		// Where the face was when the bubble came on — clamped rather than
-		// covered, because placing it once is a different question from pointing
-		// at it, and a bubble that refuses to appear because the tracking has a
-		// hole at that exact instant is no use to anybody.
+		// Travelling with the face, or placed once where the face was when the
+		// bubble came on — clamped rather than covered, because placing it is a
+		// different question from pointing at it, and a bubble that refuses to
+		// appear because the tracking has a hole at that exact instant is no use
+		// to anybody.
 		//
 		// "Came on" is the first frame it is *drawn*, not its first mark. For
 		// everything written before placements existed those are the same
 		// instant; for a bubble whose arrival is placed before the mark, the
 		// first frame is the one somebody sees it appear on, and that is the
 		// frame its paper should be beside the face on.
-		if let path = resolved.path, let point = path.point(at: resolved.timing.drawnFrom) {
+		if let path = resolved.path,
+		   let point = bubble.follow ? settled(path, at: time)
+			   : path.point(at: resolved.timing.drawnFrom) {
 			return CGPoint(x: point.x * size.width + offset.x * size.height,
 			               y: point.y * size.height + offset.y * size.height)
 		}

@@ -455,8 +455,17 @@ public enum ProjectWriter {
 					if bubble.line != plain.line { out += "\(indent)  line:   \(scalar(bubble.line.hex))\n" }
 					if bubble.width != plain.width { out += "\(indent)  width:  \(trim(bubble.width))\n" }
 					if bubble.seed != plain.seed { out += "\(indent)  seed:   \(bubble.seed)\n" }
+					if bubble.breath != plain.breath {
+						out += "\(indent)  breath: \(trim(bubble.breath))\n"
+					}
+					if bubble.follow != plain.follow {
+						out += "\(indent)  follow: \(bubble.follow)\n"
+					}
 					if let at = bubble.at {
 						out += "\(indent)  at:     [\(trim(at.x)), \(trim(at.y))]\n"
+					}
+					if bubble.tail != plain.tail {
+						out += "\(indent)  tail:   [\(trim(bubble.tail.x)), \(trim(bubble.tail.y))]\n"
 					}
 				case .spinner(let spinner):
 					out += "\(indent)- spinner: \(spinner.style.rawValue)\n"
