@@ -14,16 +14,20 @@ import Testing
 
 	// MARK: - Catching what it made up
 
-	/// The failure this exists for. Asked to label "Alles von A bis Z" the
-	/// model has answered `Geburtstagssuppe` — a soup nobody mentioned, and a
-	/// name that would be believed.
+	/// The failure this exists for. Asked to label a passage listing things
+	/// from A to Z, the model answered with a soup nobody had mentioned — a
+	/// name that would have been believed.
+	///
+	/// The sentences here are invented. The real ones are a child's interview
+	/// and this repository is public; what is being tested is the arithmetic,
+	/// which does not care whose words they are.
 	@Test func aWordNobodySaidIsNotGrounded() {
-		#expect(!ClipNamer.isGrounded("Geburtstagssuppe", in: "Alles von A bis Z"))
-		#expect(!ClipNamer.isGrounded("Der Unfall", in: "Er hat manchmal so einen Arbeitsanzug an"))
-		// Measured: this one really was answered, for a passage about a man
-		// with no hair, and it is the sort of name that would be believed.
+		#expect(!ClipNamer.isGrounded("Gemüsesuppe", in: "Alles von A bis Z"))
+		#expect(!ClipNamer.isGrounded("Der Unfall", in: "Im Schuppen steht noch ein alter Werkzeugkasten"))
+		// The shape of a real answer: two words, one of them in the passage and
+		// one of them from nowhere, which is the case a naive check passes.
 		#expect(!ClipNamer.isGrounded(
-			"Alter fertig", in: "Ja, ich bin fertig. Wie sieht der Opa aus? Er hat keine Haare."))
+			"Alter fertig", in: "Ja, ich bin fertig. Und was kommt als Nächstes?"))
 	}
 
 	/// Little words are not checked, and that is the rule that makes the rest
@@ -32,13 +36,13 @@ import Testing
 	/// inside almost every German word.
 	@Test func anArticleTheModelAddedIsNotAnInvention() {
 		#expect(ClipNamer.isGrounded(
-			"Die Fahrradtour", in: "Ich weiß so lange bei keiner Fahrradtour mehr"))
-		#expect(ClipNamer.isGrounded("Der Arbeitsanzug", in: "Er hat manchmal so einen Arbeitsanzug an"))
+			"Die Fahrradtour", in: "Wir sind lange keine Fahrradtour mehr gefahren"))
+		#expect(ClipNamer.isGrounded("Der Werkzeugkasten", in: "Im Schuppen steht ein Werkzeugkasten"))
 	}
 
 	@Test func aWordSomebodySaidIsGrounded() {
-		#expect(ClipNamer.isGrounded("Arbeitsanzug", in: "Er hat manchmal so einen Arbeitsanzug an"))
-		#expect(ClipNamer.isGrounded("kurze Haare", in: "Oma hat kurze Haare, und eine rote Jacke"))
+		#expect(ClipNamer.isGrounded("Werkzeugkasten", in: "Im Schuppen steht ein Werkzeugkasten"))
+		#expect(ClipNamer.isGrounded("rote Jacke", in: "Draußen hängt eine rote Jacke am Haken"))
 	}
 
 	/// Loose on purpose, and the looseness is measured. German compounds and
@@ -46,9 +50,9 @@ import Testing
 	/// last of them is it quietly fixing something the recogniser misheard,
 	/// which is better than the transcript and would be a shame to throw away.
 	@Test func compoundingAndInflectionAreReadingNotInventing() {
-		#expect(ClipNamer.isGrounded("Radfahren", in: "Am liebsten tut sie Fahrradfahren"))
-		#expect(ClipNamer.isGrounded("Salate", in: "Und ganz viele Kartoffelsalat, Gurkensalat"))
-		#expect(ClipNamer.isGrounded("Hackfleischsoße", in: "Nudel und Hackfleischsoce-Auflauf"))
+		#expect(ClipNamer.isGrounded("Radfahren", in: "Am liebsten geht es zum Fahrradfahren"))
+		#expect(ClipNamer.isGrounded("Salate", in: "Dazu gibt es Kartoffelsalat und Gurkensalat"))
+		#expect(ClipNamer.isGrounded("Hackfleischsoße", in: "Nudeln mit Hackfleischsoce-Auflauf"))
 	}
 
 	/// Folded the way this program folds everything else it compares: case,
@@ -56,11 +60,11 @@ import Testing
 	/// not a second answer here to "are these the same word".
 	@Test func itComparesWordsTheWayTheRestOfTheProgramDoes() {
 		#expect(ClipNamer.isGrounded("GRÖSSE", in: "die Größe des Hauses"))
-		#expect(ClipNamer.isGrounded("„Quatsch machen“", in: "Mit Opa kann man immer Quatsch machen"))
+		#expect(ClipNamer.isGrounded("„Quatsch machen“", in: "In der Werkstatt kann man immer Quatsch machen"))
 	}
 
 	@Test func anEmptyProposalIsNotGrounded() {
-		#expect(!ClipNamer.isGrounded("", in: "Er hat eine Brille"))
+		#expect(!ClipNamer.isGrounded("", in: "Auf dem Tisch liegt eine Brille"))
 		#expect(!ClipNamer.isGrounded("Brille", in: ""))
 	}
 
@@ -70,8 +74,8 @@ import Testing
 	/// ten, and answers twice as often as it is asked about as often as that.
 	@Test func theAnswerArrivesAsAClipName() {
 		#expect(ClipNamer.tidy("\"Fahrradfahren\"") == "Fahrradfahren")
-		#expect(ClipNamer.tidy("Arbeitsanzug.") == "Arbeitsanzug")
-		#expect(ClipNamer.tidy("„Kurze Haare“") == "Kurze Haare")
+		#expect(ClipNamer.tidy("Werkzeugkasten.") == "Werkzeugkasten")
+		#expect(ClipNamer.tidy("„Rote Jacke“") == "Rote Jacke")
 		#expect(ClipNamer.tidy("Werkstatt\n\nThat is the label.") == "Werkstatt")
 		#expect(ClipNamer.tidy("   ") == "")
 	}
@@ -82,8 +86,8 @@ import Testing
 	/// switched off sometimes. Every one of those paths ends in the first
 	/// words, which is what this program did before there was a model.
 	@Test func withNoModelItIsTheFirstWords() async {
-		let said = "Am liebsten tut sie Fahrradfahren"
-		let naming = await ClipNamer.propose(for: said, orFirstWords: "Am liebsten tut sie")
+		let said = "Am liebsten geht es zum Fahrradfahren"
+		let naming = await ClipNamer.propose(for: said, orFirstWords: "Am liebsten geht es")
 		switch naming.source {
 		case .model:
 			// This Mac has one. The name still has to be something.
