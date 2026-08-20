@@ -350,7 +350,7 @@ public enum OverlayPainter {
 			// A background is the frame, so it is not moved, scaled or turned:
 			// its keys say when it is there and how solid, and nothing else.
 			if case .background(let background) = part.content {
-				paint(background, tinted: key.color, in: context, size: size)
+				paint(background.at(elapsed, keys: keys), in: context, size: size)
 				context.restoreGState()
 				continue
 			}
@@ -476,10 +476,13 @@ public enum OverlayPainter {
 	}
 
 	/// A background across the whole frame: one colour, or a ramp between two.
+	///
+	/// Given the background as it is at this moment — both stops and the angle,
+	/// with the keys already applied by ``Scene/Background/at(_:keys:)``.
 	private static func paint(
-		_ background: Scene.Background, tinted: RGBA?, in context: CGContext, size: CGSize
+		_ background: Scene.Background, in context: CGContext, size: CGSize
 	) {
-		let from = tinted ?? background.from
+		let from = background.from
 		guard let to = background.to else {
 			context.setFillColor(CGColor(srgbRed: from.r, green: from.g, blue: from.b, alpha: from.a))
 			context.fill(CGRect(origin: .zero, size: size))

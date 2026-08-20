@@ -27,6 +27,9 @@ public final class SceneInspector: NSView {
 	public var onColor: ((Int, RGBA?) -> Void)?
 	/// A key names a shape kind, or gives it back to the key before.
 	public var onShape: ((Int, Scene.ShapeKind?) -> Void)?
+	/// A key states the far stop of a background's ramp, or gives it back to
+	/// the key before.
+	public var onSecondStop: ((Int, RGBA?) -> Void)?
 
 	private var project = Project()
 	private var scene = Scene()
@@ -116,6 +119,9 @@ public final class SceneInspector: NSView {
 
 	private func rebuild() {
 		sinks.removeAll()
+		helps.removeAll()
+		help = nil
+		explaining = nil
 		for row in form.arrangedSubviews {
 			form.removeArrangedSubview(row)
 			row.removeFromSuperview()
@@ -129,8 +135,17 @@ public final class SceneInspector: NSView {
 		let subject = scene.parts[part]
 		title.stringValue = "PART \(part + 1) · \(name(of: subject.content))".uppercased()
 
+		section("the part")
 		content(of: subject, at: part)
 		section("keys")
+		// Printed, where every other word of explanation in here is behind the
+		// `?`. This is not an explanation of a field — it is what the two groups
+		// above and below are *to each other*, and somebody who has to infer
+		// that reads the values at the top as global settings the keys ought to
+		// obey. A background's `from` and `to` looked exactly like that.
+		remark("A key states only what changes at it. Everything it does not say "
+			+ "is what it was at the key before — and before the first key, what "
+			+ "the part says above.")
 		keys(of: subject)
 	}
 
@@ -247,7 +262,8 @@ public final class SceneInspector: NSView {
 				var next = background
 				next.from = value
 				self?.onContent?(.background(next))
-			}])
+			}], note: "the near stop of the ramp, before any key says otherwise. A key "
+				+ "states this one as `color`.")
 			field("to", [
 				colour(background.to ?? background.from) { [weak self] value in
 					var next = background
@@ -260,12 +276,15 @@ public final class SceneInspector: NSView {
 					                                b: next.from.b * 0.4, a: next.from.a)) : nil
 					self?.onContent?(.background(next))
 				},
-			], note: "off for one flat colour")
+			], note: "the far stop. Off for one flat colour — which is a ramp whose two "
+				+ "stops are the same, and is why a key can ramp a flat background into "
+				+ "a gradient.")
 			field("angle", [number(background.angle, width: 66) { [weak self] value in
 				var next = background
 				next.angle = value
 				self?.onContent?(.background(next))
-			}], note: "degrees; 90 runs up the frame, 0 across it")
+			}], note: "degrees; 90 runs up the frame, 0 across it. A key can state this "
+				+ "too, and between two keys it turns the short way round.")
 		}
 	}
 
@@ -278,17 +297,20 @@ public final class SceneInspector: NSView {
 	private func keys(of subject: Scene.Part) {
 		let fields = Scene.fields(for: subject.content)
 		let filled = Scene.filled(subject.keys)
+		explainTheKeyRows(of: subject.content, fields: fields)
 
 		for (index, key) in subject.keys.enumerated() {
 			let chosen = index == self.key
 			let time = number(key.t, width: 56) { [weak self] value in
 				self?.onKeyTime?(index, value)
 			}
+			time.toolTip = note("t")
 			let ease = choice(Scene.Ease.allCases.map(\.rawValue),
 			                  selected: Scene.Ease.allCases.firstIndex(of: key.ease) ?? 3,
 			                  width: 86) { [weak self] picked in
 				self?.onEase?(index, Scene.Ease.allCases[picked])
 			}
+			ease.toolTip = note("ease")
 			let says = stated(key, fields: fields)
 			let summary = label(says.isEmpty ? "inherits everything" : says)
 			let pick = small(chosen ? "●" : "○") { [weak self] in self?.onSelectKey?(index) }
@@ -303,7 +325,10 @@ public final class SceneInspector: NSView {
 			add(row)
 
 			guard chosen else { continue }
-			for field in fields {
+			// The angle is held back to the end so that the three words a
+			// background's gradient is made of come out in the order the part
+			// declares them and the file writes them: `color`, `to`, `angle`.
+			for field in fields where field != .angle {
 				add(fieldRow(for: field, of: key, at: index,
 				             inherited: filled.indices.contains(index) ? filled[index][field] : nil))
 			}
@@ -314,21 +339,81 @@ public final class SceneInspector: NSView {
 			}
 			add(colourRow(key, at: index, inherited: filled.indices.contains(index)
 				? filled[index].color : nil))
+			if case .background = subject.content {
+				add(secondStopRow(key, at: index, inherited: filled.indices.contains(index)
+					? filled[index].to : nil))
+			}
+			if fields.contains(.angle) {
+				add(fieldRow(for: .angle, of: key, at: index,
+				             inherited: filled.indices.contains(index)
+				             	? filled[index].angle : nil))
+			}
 		}
 
 		let addKey = small("Add a key at the playhead") { [weak self] in self?.onAddKey?() }
 		let row = NSStackView(views: [addKey, NSView()])
 		row.orientation = .horizontal
 		add(row)
-		add(caption("A key states only what changes. Everything else is what it was at the key "
-			+ "before, which is why a part that only moves says its position twice and its "
-			+ "opacity once."))
 	}
 
+	/// What the rows under a key mean, filed under the `keys` heading.
+	///
+	/// The rows themselves are built by hand rather than by ``field(_:_:note:)``
+	/// — a key's row is a value, a `set`/`inherit` button and a bracket around
+	/// whichever of the two it is — so the words they would have carried are
+	/// registered here instead, and come out of the same `?`.
+	private func explainTheKeyRows(of content: Scene.Part.Content, fields: [Scene.Field]) {
+		explains("t", "when this key is, in seconds from the start of the scene")
+		explains("ease", "how it gets here from the key before")
+		for field in fields {
+			switch field {
+			case .x, .y:
+				explains(field.rawValue, "where the middle of the part sits, as a fraction "
+					+ "of the frame from the bottom left")
+			case .opacity: explains("opacity", "nought to one")
+			case .scale: explains("scale", "1 is the size the part is drawn at")
+			case .rotation: explains("rotation", "degrees, anticlockwise")
+			case .width, .height:
+				explains(field.rawValue, "as a fraction of the frame")
+			case .progress: explains("progress", "how far it has got, nought to one")
+			case .angle:
+				explains("angle", "which way the ramp runs here. Between two keys it turns "
+					+ "the short way round, so 350 and 10 are twenty degrees apart — which "
+					+ "means a whole turn is written as the keys it turns through, not as 0 "
+					+ "and 360.")
+			}
+		}
+		if Scene.morphs(content) {
+			explains("shape", "what it is the shape of here. A different one from the key "
+				+ "before morphs into it over the interval ending here.")
+		}
+		switch content {
+		case .background:
+			explains("color", "the near stop of the ramp here: the part's `from`, moved.")
+			explains("to", "the far stop here. State it equal to `color` for a flat colour, "
+				+ "and a background ramps out of one gradient and into another.")
+		default:
+			explains("color", "the part's colour here, if it is not the one the part was "
+				+ "declared with")
+		}
+	}
+
+	/// What was said about a row this form builds by hand, so the row can carry
+	/// it as its tooltip as well. Said twice and printed neither time, which is
+	/// the rule the whole panel keeps.
+	private func note(_ key: String) -> String? {
+		help?.lines.first { $0.key == key }?.note
+	}
+
+	/// What this key states, in the order the writer puts it on the line — so
+	/// the summary beside a key and the line in the file read the same way
+	/// round.
 	private func stated(_ key: Scene.Key, fields: [Scene.Field]) -> String {
-		var said = fields.filter { key[$0] != nil }.map(\.rawValue)
+		var said = fields.filter { $0 != .angle && key[$0] != nil }.map(\.rawValue)
 		if key.shape != nil { said.append("shape") }
 		if key.color != nil { said.append("color") }
+		if key.to != nil { said.append("to") }
+		if key.angle != nil, fields.contains(.angle) { said.append("angle") }
 		return said.joined(separator: " ")
 	}
 
@@ -372,6 +457,9 @@ public final class SceneInspector: NSView {
 		row.spacing = 5
 		row.alignment = .centerY
 		row.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
+		row.toolTip = note(field.rawValue)
+		name.toolTip = row.toolTip
+		box.toolTip = row.toolTip
 		return row
 	}
 
@@ -411,31 +499,58 @@ public final class SceneInspector: NSView {
 		row.spacing = 5
 		row.alignment = .centerY
 		row.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
+		row.toolTip = note("shape")
+		name.toolTip = row.toolTip
+		picker.toolTip = row.toolTip
 		return row
 	}
 
 	private func colourRow(_ key: Scene.Key, at index: Int, inherited: RGBA?) -> NSView {
-		let name = NSTextField(labelWithString: "color")
+		stopRow("color", stated: key.color, inherited: inherited) { [weak self] value in
+			self?.onColor?(index, value)
+		}
+	}
+
+	/// The far stop of a background's ramp on this key.
+	///
+	/// Shown exactly as `color` is, beside it, because the two are the two ends
+	/// of the same thing — which is the whole reason a background can now be
+	/// animated in what it actually is rather than only in a flat tint.
+	private func secondStopRow(_ key: Scene.Key, at index: Int, inherited: RGBA?) -> NSView {
+		stopRow("to", stated: key.to, inherited: inherited) { [weak self] value in
+			self?.onSecondStop?(index, value)
+		}
+	}
+
+	/// A colour on a key: this key's, or the one before it's, with the button
+	/// beside it offering to swap which.
+	private func stopRow(_ label: String, stated: RGBA?, inherited: RGBA?,
+	                     set: @escaping (RGBA?) -> Void) -> NSView {
+		let name = NSTextField(labelWithString: label)
 		name.font = Theme.mono
-		name.textColor = key.color == nil ? Theme.faintText : Theme.text
+		name.textColor = stated == nil ? Theme.faintText : Theme.text
 		name.translatesAutoresizingMaskIntoConstraints = false
 		let wide = name.widthAnchor.constraint(equalToConstant: Self.keyWidth)
 		wide.priority = NSLayoutConstraint.Priority(900)
 		wide.isActive = true
 
-		let shown = key.color ?? inherited
-		let well = colour(shown ?? .white) { [weak self] value in
-			self?.onColor?(index, value)
+		let shown = stated ?? inherited
+		let well = colour(shown ?? .white) { value in set(value) }
+		well.alphaValue = stated == nil ? 0.45 : 1
+		let button = small(stated == nil ? "set" : "inherit") {
+			set(stated == nil ? (shown ?? .white) : nil)
 		}
-		well.alphaValue = key.color == nil ? 0.45 : 1
-		let button = small(key.color == nil ? "set" : "inherit") { [weak self] in
-			self?.onColor?(index, key.color == nil ? (shown ?? .white) : nil)
-		}
+		button.toolTip = stated == nil
+			? "State this here, at what it already is"
+			: "Take it back to whatever the key before says"
 		let row = NSStackView(views: [name, well, button, NSView()])
 		row.orientation = .horizontal
 		row.spacing = 5
 		row.alignment = .centerY
 		row.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
+		row.toolTip = note(label)
+		name.toolTip = row.toolTip
+		well.toolTip = row.toolTip
 		return row
 	}
 
@@ -447,15 +562,148 @@ public final class SceneInspector: NSView {
 		row.widthAnchor.constraint(equalTo: form.widthAnchor, constant: -24).isActive = true
 	}
 
+	/// A heading, a `?`, and a hairline running to the far edge.
+	///
+	/// The same arrangement — and the same reasoning — as the properties
+	/// panel's. Every field in this form used to carry its explanation printed
+	/// under it in grey, permanently, which is most of a screenful of prose for
+	/// a part with six fields and four keys. Not a word of it is gone: it is the
+	/// field's tooltip, and it is all here behind this button, keyed by the
+	/// field it explains. Printed once when somebody asks, rather than always
+	/// because somebody might.
 	private func section(_ name: String) {
 		let label = NSTextField(labelWithString: name.uppercased())
 		label.font = Theme.heading
 		label.textColor = Theme.faintText
-		let row = NSStackView(views: [label, NSView()])
+		label.setContentHuggingPriority(.required, for: .horizontal)
+
+		let help = Help(section: name)
+		self.help = help
+		helps.append(help)
+
+		let ask = NSButton()
+		ask.isBordered = false
+		ask.bezelStyle = .inline
+		ask.image = NSImage(systemSymbolName: "questionmark.circle",
+		                    accessibilityDescription: "what these mean")?
+			.withSymbolConfiguration(.init(pointSize: 10, weight: .medium)
+				.applying(.init(paletteColors: [Theme.faintText])))
+		ask.imagePosition = .imageOnly
+		ask.toolTip = "What the keys in \(name) mean"
+		ask.translatesAutoresizingMaskIntoConstraints = false
+		ask.widthAnchor.constraint(equalToConstant: 16).isActive = true
+		// Hidden until something is said under this heading. A `?` that opens an
+		// empty popover is worse than no `?`.
+		ask.isHidden = true
+		let sink = Sink { [weak self, weak ask] _ in
+			guard let ask else { return }
+			self?.explain(help, from: ask)
+		}
+		sinks.append(sink)
+		ask.target = sink
+		ask.action = #selector(Sink.fire(_:))
+		help.button = ask
+
+		let rule = NSBox()
+		rule.boxType = .separator
+		rule.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+		rule.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1),
+		                                             for: .horizontal)
+
+		let row = NSStackView(views: [label, ask, rule])
 		row.orientation = .horizontal
-		row.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 0, right: 0)
+		row.spacing = 6
+		row.alignment = .centerY
+		row.edgeInsets = NSEdgeInsets(
+			top: form.arrangedSubviews.isEmpty ? 0 : 8, left: 0, bottom: 0, right: 0)
 		add(row)
 	}
+
+	/// Everything said about the fields under one heading.
+	private final class Help {
+		let section: String
+		var lines: [(key: String, note: String)] = []
+		weak var button: NSButton?
+		init(section: String) { self.section = section }
+	}
+
+	/// The heading being filled now, and all of them, kept because a `Sink`
+	/// holds only a closure.
+	private var help: Help?
+	private var helps: [Help] = []
+	private var explaining: NSPopover?
+
+	/// For the tests: every word of explanation this form carries, and which
+	/// heading it is filed under.
+	var explanationsForTesting: [(section: String, key: String, note: String)] {
+		helps.flatMap { help in help.lines.map { (help.section, $0.key, $0.note) } }
+	}
+
+	/// For the tests: the headings that offer a `?`.
+	var askableSectionsForTesting: [String] {
+		helps.filter { $0.button?.isHidden == false }.map(\.section)
+	}
+
+	/// For the tests: every row of the form in order, as the words on it — so
+	/// that "the note is near the thing it explains" is a thing a test can
+	/// check rather than a thing somebody remembers.
+	var rowsForTesting: [String] {
+		func words(in view: NSView) -> [String] {
+			view.subviews.flatMap { sub -> [String] in
+				((sub as? NSTextField).map { [$0.stringValue] } ?? []) + words(in: sub)
+			}
+		}
+		return form.arrangedSubviews.map { words(in: $0).joined(separator: " ") }
+	}
+
+	/// A word of explanation for a row this form builds by hand, so it reaches
+	/// the `?` even though no ``field(_:_:note:)`` put it there.
+	private func explains(_ key: String, _ note: String) {
+		help?.lines.append((key, note))
+		help?.button?.isHidden = false
+	}
+
+	private func explain(_ help: Help, from button: NSButton) {
+		if let explaining, explaining.isShown { explaining.close(); return }
+		let text = NSTextView()
+		text.isEditable = false
+		text.drawsBackground = false
+		text.textContainerInset = NSSize(width: 14, height: 12)
+		let body = NSMutableAttributedString()
+		for (key, note) in help.lines {
+			if !body.string.isEmpty { body.append(NSAttributedString(string: "\n\n")) }
+			if !key.isEmpty {
+				body.append(NSAttributedString(
+					string: key + "\n",
+					attributes: [.font: Theme.mono, .foregroundColor: Theme.text]))
+			}
+			body.append(NSAttributedString(
+				string: note,
+				attributes: [.font: Theme.body, .foregroundColor: Theme.dimText]))
+		}
+		text.textStorage?.setAttributedString(body)
+		text.textContainer?.containerSize = NSSize(width: 340,
+		                                           height: CGFloat.greatestFiniteMagnitude)
+		text.textContainer?.widthTracksTextView = true
+		text.frame = NSRect(x: 0, y: 0, width: 368, height: 100)
+		text.layoutManager?.ensureLayout(for: text.textContainer!)
+		let used = text.layoutManager?.usedRect(for: text.textContainer!).height ?? 100
+		text.frame = NSRect(x: 0, y: 0, width: 368, height: min(520, used + 24))
+
+		let holder = NSViewController()
+		holder.view = text
+		holder.preferredContentSize = text.frame.size
+		let popover = NSPopover()
+		popover.contentViewController = holder
+		popover.behavior = .transient
+		popover.appearance = NSAppearance(named: .darkAqua)
+		explaining = popover
+		popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
+	}
+
+	/// A remark that is not about one field, so there is nothing to rest on and
+	/// it stays printed.
+	private func remark(_ message: String) { add(caption(message)) }
 
 	private func field(_ key: String, _ controls: [NSView], note: String? = nil) {
 		let name = NSTextField(labelWithString: key)
@@ -478,7 +726,14 @@ public final class SceneInspector: NSView {
 		row.spacing = 5
 		row.alignment = .centerY
 		add(row)
-		if let note { add(caption(note)) }
+
+		// Said twice and printed neither time: on the row, so resting on it says
+		// it, and under the heading's `?`, so all of them can be read at once.
+		guard let note else { return }
+		row.toolTip = note
+		name.toolTip = note
+		for control in controls where control.toolTip == nil { control.toolTip = note }
+		explains(key, note)
 	}
 
 	private func caption(_ message: String) -> NSView {

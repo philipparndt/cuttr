@@ -691,6 +691,10 @@ public enum ProjectReader {
 				progress: number(key["progress"]),
 				shape: (key["shape"] as? String).flatMap(Scene.ShapeKind.init(rawValue:)),
 				color: (key["color"] as? String).flatMap(RGBA.init(hex:)),
+				// A background's ramp, stated at a key: the far stop and the
+				// direction, beside the `color` that is the near stop.
+				to: (key["to"] as? String).flatMap(RGBA.init(hex:)),
+				angle: number(key["angle"]),
 				ease: (key["ease"] as? String).flatMap(Scene.Ease.init(rawValue:)) ?? .inOut)
 		}
 		guard !keys.isEmpty else {

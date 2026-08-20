@@ -287,6 +287,14 @@ public final class SceneWindowController: NSWindowController, NSWindowDelegate,
 			next.parts[part].keys[key].color = colour
 			self.sceneDocument.apply(next, actionName: colour == nil ? "Inherit Colour" : "Colour Key")
 		}
+		inspector.onSecondStop = { [weak self] key, colour in
+			guard let self, let part = self.sceneDocument.selectedPart,
+			      part < self.sceneDocument.scene.parts.count,
+			      key < self.sceneDocument.scene.parts[part].keys.count else { return }
+			var next = self.sceneDocument.scene
+			next.parts[part].keys[key].to = colour
+			self.sceneDocument.apply(next, actionName: colour == nil ? "Inherit Stop" : "Ramp Key")
+		}
 
 		// The same arrangement the other two windows use: a monitor, so the
 		// keys work wherever the focus happens to be — except inside a text

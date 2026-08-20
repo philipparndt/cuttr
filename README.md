@@ -474,12 +474,21 @@ Each part has `keys:`, one to a line, and **a key states only what changes**:
 everything else is what it was at the key before, which is why a part that only
 moves says its position twice and its opacity once. A key can say `t`, `x`,
 `y`, `opacity`, `scale`, `rotation`, `width`, `height`, `progress`, `shape`,
-`color` and `ease`.
+`color`, `to`, `angle` and `ease`.
 
-Three of those are what make a scene do things rather than sit there:
+Four of those are what make a scene do things rather than sit there:
 
 - **`color:`** overrides whatever the part was declared with, so a title
   arriving white and settling into the house colour is two keys and one field.
+  On a background it is the *near* stop of the ramp — the part's `from`.
+- **`to:`** and **`angle:`** are the rest of a background's gradient: the far
+  stop and the direction. With them a ground ramps out of one gradient and into
+  another, and it turns. A flat fill is a gradient whose two stops are the same
+  colour, which is why a flat background can ramp into a gradient with nothing
+  said about it beyond the `to:` it arrives at. The angle turns the **short way
+  round** between two keys — 350 and 10 are twenty degrees apart — so a whole
+  turn is written as the keys it turns through rather than as `0` and `360`,
+  which are the same direction. `examples/scenes/gradient.cuttrproj` is both.
 - **`progress:`** is how full a bar is, nought to one — and a spinner given one
   stops going round and fills a ring to that fraction instead. A bar filling
   over three seconds is `progress: 0` at one key and `progress: 1` at another,
@@ -497,8 +506,12 @@ Scenes…, or File ▸ New Scene…. It has the scene drawn at the output's size
 playing, with the parts dragged on it directly: a corner handle scales, the
 handle above turns, and a drag writes into the key at the playhead or makes one
 there. A shape's kind is a menu on the part and again on a key, where naming a
-different one is how a morph gets written down. The panel beside it shows every key, with the inherited values dim and
-in brackets and a button to claim them.
+different one is how a morph gets written down. The panel beside it is in two
+halves under two headings — **the part**, which is what it is before the first
+key says otherwise, and **keys**, which is what changes and when — with the rule
+relating them printed between the two, and every field's explanation behind the
+`?` on its heading, the same as the properties panel. Inherited values are dim
+and in brackets, with a button to claim them.
 
 A scene has no length of its own, and the editor's "runs for" box is not
 written to the file. A scene plays for as long as the overlay using it is on

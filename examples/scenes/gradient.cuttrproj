@@ -1,0 +1,85 @@
+# cuttr project — a background animated in the thing it actually is.
+#
+# A background's `from`, `to` and `angle` are what the part is *before the first
+# key says otherwise*. A key then states what changes at it: `color` is the near
+# stop, `to` is the far one, `angle` is the direction. So a ground can ramp out
+# of one gradient and into another, and it can turn.
+#
+# No takes, no footage: two cards are time on the programme with nothing behind
+# them, and a scene is drawn on each.
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: gradient.mov
+
+timeline:
+  - card:  00:03.000
+    as:    dusk
+  - card:  00:04.400
+    as:    turn
+
+overlays:
+  - scene:  dusk
+    with:   {title: "one gradient into another", under: "both stops move, and not the same way"}
+    from:   "@dusk"
+    in:     {fade: true, over: 0.3}
+    out:    {fade: true, over: 0.3}
+
+  - scene:  turn
+    with:   {title: "and the angle turns", under: "a whole turn is the keys it turns through"}
+    from:   "@turn"
+    in:     {fade: true, over: 0.3}
+    out:    {fade: true, over: 0.3}
+
+scenes:
+  # Night into sunrise. The near stop goes from almost-black to a warm plum and
+  # the far stop from cold blue to orange, so the two ends of the ramp arrive
+  # from opposite directions — which is the whole difference between animating
+  # the gradient and animating a flat tint of it.
+  dusk:
+    parts:
+      - background: {from: "#050510", to: "#101c34", angle: 90}
+        keys:
+          - {t: 0, opacity: 1}
+          - {t: 2.6, color: "#3a1d2e", to: "#f4a261", ease: out}
+      - text:  "{{title}}"
+        style: title
+        tracking: 0.08
+        keys:
+          - {t: 0.3, x: 0.5, y: 0.54, opacity: 0, scale: 0.96}
+          - {t: 1.2, opacity: 1, scale: 1, ease: out}
+      - text:  "{{under}}"
+        style: caption
+        keys:
+          - {t: 0.6, x: 0.5, y: 0.44, opacity: 0}
+          - {t: 1.4, opacity: 1, ease: out}
+
+  # This one starts as one flat colour — which is a ramp whose two stops are the
+  # same — so the second stop arriving is a gradient growing out of nothing, and
+  # needs no rule of its own.
+  #
+  # Then it goes round. It cannot be written as `angle: 0` and `angle: 360`,
+  # because those are the same direction and the ramp turns the *short* way
+  # between two keys: 350 and 10 are twenty degrees apart, which is what anybody
+  # writing them means. A whole turn is the keys it turns through.
+  turn:
+    parts:
+      - background: "#0b1220"
+        keys:
+          - {t: 0, opacity: 1, angle: 0}
+          - {t: 1.4, to: "#7b2d5e", angle: 120, ease: linear}
+          - {t: 2.6, angle: 240, ease: linear}
+          - {t: 3.8, angle: 360, ease: linear}
+      - text:  "{{title}}"
+        style: title
+        tracking: 0.08
+        keys:
+          - {t: 0.3, x: 0.5, y: 0.54, opacity: 0, scale: 0.96}
+          - {t: 1.2, opacity: 1, scale: 1, ease: out}
+      - text:  "{{under}}"
+        style: caption
+        keys:
+          - {t: 0.6, x: 0.5, y: 0.44, opacity: 0}
+          - {t: 1.4, opacity: 1, ease: out}

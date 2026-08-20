@@ -11,6 +11,7 @@ effects, no footage — so every one of them renders on any machine:
 | `scenes/shapes.cuttrproj` | bars that draw themselves, a rule sweeping, a square turning through two colours |
 | `scenes/kinetic.cuttrproj` | one word at a time, each under a block that wipes off it |
 | `scenes/morph.cuttrproj` | a square becoming a circle, a triangle becoming a star, and parts that fill themselves |
+| `scenes/gradient.cuttrproj` | a ground ramping out of one gradient and into another, and an angle turning a whole circle |
 | `effects/celebrate.cuttrproj` | metallic confetti over a title card, then snow |
 | `effects/weather.cuttrproj` | rain, snow and sparks — the same machinery with different numbers |
 | `effects/looks.cuttrproj` | film mode, the tape and chromatic aberration, working on confetti and rain |
