@@ -132,7 +132,8 @@ struct BubbleCanvas {
 		let bubble = Bubble(
 			shape: .thought, text: "maybe it is a colour", style: "caption",
 			fill: RGBA(hex: "#e8f0ff")!, line: RGBA(hex: "#203040")!,
-			width: 0.24, seed: 12, breath: 1.5, at: CGPoint(x: 0.36, y: 0.52))
+			width: 0.24, seed: 12, breath: 1.5, follow: false,
+			at: CGPoint(x: 0.36, y: 0.52))
 		let project = Project(
 			timeline: [TimelineEntry(clip: ClipReference("intro"))],
 			overlays: [Overlay(kind: .bubble(bubble), span: .times(from: 0, to: 4),
@@ -249,6 +250,32 @@ struct BubbleCanvas {
 			.contains("breath"))
 	}
 
+	/// `follow: false` is how a project asks for the bubble to stay where it was
+	/// put, and it survives the file for the same reason `breath: 0` does.
+	@Test func aPinnedBubbleIsSpelledOut() throws {
+		let project = try ProjectReader.read("""
+			overlays:
+			  - bubble: still thinks glitter is a colour
+			    anchor: mia-eye
+			    follow: false
+			    from:   0
+			    to:     2
+			""")
+		guard case .bubble(let bubble) = project.overlays.first?.kind else {
+			Issue.record("not a bubble")
+			return
+		}
+		#expect(!bubble.follow)
+		let written = ProjectWriter.write(project)
+		#expect(written.contains("follow: false"), "it did not write it:\n\(written)")
+		#expect(ProjectWriter.write(try ProjectReader.read(written)) == written)
+		// A bubble that says nothing follows, and writes nothing about it.
+		#expect(Bubble().follow)
+		#expect(!ProjectWriter.fragment(for: Overlay(
+			kind: .bubble(Bubble(text: "hello")), span: .times(from: 0, to: 1)))
+			.contains("follow"))
+	}
+
 	/// A shape nobody has heard of is an error with the offending word in it,
 	/// which is the rule everywhere else in this format.
 	@Test func anUnknownShapeIsRefusedByName() {
@@ -321,7 +348,7 @@ struct BubbleCanvas {
 		#expect(extent.maxX <= size.width && extent.minX >= 0, "it ran off the side: \(extent)")
 	}
 
-	/// The tail follows the face, and the words do not.
+	/// The tail follows the face.
 	///
 	/// Two positions for the same anchor, and the measurement is the one that
 	/// matters: ink lands next to wherever the face is now, and does not land
@@ -345,25 +372,41 @@ struct BubbleCanvas {
 		// And it is not pointing at both at once.
 		#expect(atStart.nearest(to: frame(late)) > 60,
 		        "there is ink where she has not got to yet")
+	}
 
-		// The words stayed exactly where they were: the paper is the same
-		// pixels at both moments, whatever the tail is doing.
+	/// `follow: false` is the bubble this program used to draw: placed once,
+	/// where the face was when it came on, and still. The paper is the same
+	/// pixels at both moments, whatever the tail is doing.
+	@Test func aPinnedBubbleStaysWhereItWasPut() throws {
+		let early = CGPoint(x: 0.25, y: 0.2)
+		let late = CGPoint(x: 0.78, y: 0.16)
+		let path = AnchorPath(samples: [(0, early), (2, late)])
+		let bubble = Bubble(text: "still thinks glitter is a colour", seed: 4,
+		                    breath: 0, follow: false)
+
+		let atStart = try painted(bubble, path: path, at: 0)
+		let atEnd = try painted(bubble, path: path, at: 2)
 		let box = try wordBox(bubble, path: path)
 		for point in [CGPoint(x: box.midX, y: box.midY), CGPoint(x: box.midX + 20, y: box.midY)] {
 			#expect(atStart.alpha(x: Int(point.x), y: Int(point.y))
 				== atEnd.alpha(x: Int(point.x), y: Int(point.y)),
 			        "the paper moved under the reader at \(point)")
 		}
+		// And the tail still went after the face, which is the whole of what a
+		// pinned bubble does.
+		#expect(atEnd.nearest(to: CGPoint(x: late.x * size.width, y: late.y * size.height)) < 8)
 	}
 
-	private func wordBox(_ bubble: Bubble, path: AnchorPath?) throws -> CGRect {
+	private func wordBox(_ bubble: Bubble, path: AnchorPath?, at time: Double = 0) throws -> CGRect {
 		let resolved = shown(bubble, path: path)
 		let style = Project().style(named: bubble.style ?? "bubble")
 		let words = Bubbling.words(bubble.text, style: style, frame: size, width: bubble.width)
 		return Bubbling.box(
 			words: words?.size ?? .zero, shape: bubble.shape, style: style,
-			home: OverlayLayers.bubbleHome(bubble, resolved: resolved, style: style, size: size),
-			frame: size)
+			home: OverlayLayers.bubbleHome(bubble, resolved: resolved, style: style,
+			                               size: size, at: time),
+			frame: size,
+			give: bubble.follow && path != nil ? Bubbling.give * size.height : 0)
 	}
 
 	/// Where the tracking stops, the tail stops. The bubble keeps its words.
@@ -490,7 +533,7 @@ struct BubbleCanvas {
 		return Bubbling.box(
 			words: words?.size ?? .zero, shape: bubble.shape, style: style,
 			home: OverlayLayers.bubbleHome(bubble, resolved: shown(bubble),
-			                               style: style, size: size),
+			                               style: style, size: size, at: 0),
 			frame: size)
 	}
 
@@ -662,6 +705,219 @@ struct BubbleCanvas {
 			#expect(try drawn(1) != drawn(1.125), "a \(shape.rawValue) bubble is still")
 			#expect(try drawn(1) == drawn(1.1), "a \(shape.rawValue) bubble boils")
 		}
+	}
+}
+
+// MARK: - What travels
+
+/// The paper goes with the face — and the words stay readable while it does.
+///
+/// Measured on the paper's own middle rather than on the box the code computed,
+/// so that what is checked is the picture: the middle of the drawn ink, frame by
+/// frame, against where the anchor actually was.
+@Suite struct BubbleFollowTests {
+
+	private let size = CGSize(width: 1280, height: 720)
+
+	/// A bubble with no line drawn on it.
+	///
+	/// So that the only ink on the paper is the type. Every measurement in this
+	/// suite is about where the *sentence* is, and the outline and the tail are
+	/// ink too — the tail follows the face exactly, on purpose, so counting it
+	/// would be measuring the thing these tests are trying to hold still.
+	private func said(_ words: String = "still thinks glitter is a colour",
+	                  breath: Double = 1, follow: Bool = true) -> Bubble {
+		Bubble(text: words, line: RGBA(r: 0, g: 0, b: 0, a: 0), seed: 4,
+		       breath: breath, follow: follow)
+	}
+
+	/// A face walking steadily across the shot, sampled ten a second as the
+	/// solver samples, with a pixel of jitter on every sample — which is what a
+	/// tracker's answer actually looks like and the thing the smoothing is for.
+	private func walking(jitter: Double = 0.0015) -> AnchorPath {
+		AnchorPath(samples: (0 ... 40).map { step in
+			let t = Double(step) / 10
+			// Deterministic "jitter": a fast wobble at the sample rate, which is
+			// what a fresh measurement per sample looks like. Not random, because
+			// a test that is a different test every run is not a test.
+			let shake = sin(Double(step) * 2.7) * jitter
+			return (t, CGPoint(x: 0.2 + t * 0.15 + shake, y: 0.3 + shake))
+		})
+	}
+
+	private func shown(_ bubble: Bubble, path: AnchorPath) -> ResolvedOverlay {
+		ResolvedOverlay(
+			overlay: Overlay(kind: .bubble(bubble), span: .times(from: 0, to: 4),
+			                 arrival: .cut, departure: .cut,
+			                 anchor: "mia-eye", offset: Bubble.standoff),
+			origin: .project(0), appearance: 0, start: 0, end: 4, path: path)
+	}
+
+	private func painted(_ bubble: Bubble, path: AnchorPath,
+	                     at time: Double) throws -> BubbleCanvas {
+		BubbleCanvas(try #require(OverlayPainter.bubbleImage(
+			bubble, resolved: shown(bubble, path: path), project: Project(),
+			size: size, at: time)))
+	}
+
+	/// Where the words are on the frame: the middle of the ink, weighted by how
+	/// much ink there is.
+	///
+	/// Weighted rather than counted, and that is not a detail. A count of the
+	/// pixels over a threshold moves in whole pixels — it jumps as each edge
+	/// pixel crosses the line — so measuring a sentence that has slid half a
+	/// pixel with one would report several pixels of judder that is not in the
+	/// picture. Weighting by the ink makes the answer continuous, and a
+	/// sub-pixel movement measures as a sub-pixel movement.
+	private func lettering(_ canvas: BubbleCanvas) -> CGPoint? {
+		var x = 0.0, y = 0.0, total = 0.0
+		for row in 0 ..< canvas.height {
+			// Fully covered pixels only. The paper's own edge is antialiased
+			// against nothing, and a half-covered pale pixel reads as half-dark
+			// — so the rim of the bubble would be counted as ink, and it is the
+			// one part of the drawing that wobbles on purpose.
+			for column in 0 ..< canvas.width where canvas.alpha(x: column, y: row) > 0.99 {
+				// The paper is not quite white, so the floor keeps a bubble's
+				// worth of pale from outvoting a sentence's worth of black.
+				let ink = max(0, canvas.darkness(x: column, y: row) - 0.25)
+				x += Double(column) * ink; y += Double(row) * ink; total += ink
+			}
+		}
+		guard total > 20 else { return nil }
+		return CGPoint(x: x / total, y: y / total)
+	}
+
+	/// **It follows.** Over three seconds of walking, the words travel as far as
+	/// the face does, and in the same direction.
+	@Test func thePaperTravelsWithTheAnchor() throws {
+		let path = walking()
+		let bubble = said()
+		let first = try #require(lettering(try painted(bubble, path: path, at: 0.5)))
+		let last = try #require(lettering(try painted(bubble, path: path, at: 3.5)))
+		// The anchor moved 0.15 of the frame width a second for three seconds.
+		let anchor = (3.5 - 0.5) * 0.15 * size.width
+		let moved = last.x - first.x
+		// Measured: 575.99 px where the face moved 576.00, and three ten-
+		// thousandths of a pixel of vertical drift. A centred average reproduces a
+		// steady walk exactly, which is the whole reason it is centred.
+		#expect(abs(moved - anchor) < 0.06 * anchor,
+		        "the words moved \(moved) px where the face moved \(anchor) px")
+		#expect(abs(last.y - first.y) < 4, "it wandered up or down: \(last.y - first.y)")
+
+		// And a pinned one does not move at all, which is what the key is for.
+		let pinned = said(follow: false)
+		let held = try #require(lettering(try painted(pinned, path: path, at: 0.5)))
+		let stillHeld = try #require(lettering(try painted(pinned, path: path, at: 3.5)))
+		#expect(abs(stillHeld.x - held.x) < 1, "a pinned bubble moved")
+	}
+
+	/// **It follows the slow part.** The tracker's answer shakes at the sample
+	/// rate; the words must not.
+	///
+	/// Judder is the second difference — how much the movement changes from one
+	/// frame to the next. Nought for a steady glide, and the jitter's whole
+	/// amplitude for anything that follows every sample. Measured twice: on the
+	/// filter itself, where it can be measured exactly, and then on the picture,
+	/// where what is left is the rasteriser rounding a sentence onto a pixel
+	/// grid rather than anything the bubble did.
+	@Test func theWordsFollowOnlyTheSlowPartOfTheAnchor() throws {
+		let path = walking()
+		func judder(_ places: [Double]) -> Double {
+			var worst = 0.0
+			for index in 1 ..< places.count - 1 {
+				worst = max(worst, abs(places[index - 1] - 2 * places[index] + places[index + 1]))
+			}
+			return worst
+		}
+		let times = (0 ..< 50).map { 1 + Double($0) / 25 }
+		let raw = judder(times.map { (path.point(at: $0)?.x ?? 0) * size.width })
+		let slow = judder(times.map {
+			(OverlayLayers.settled(path, at: $0)?.x ?? 0) * size.width
+		})
+		// Measured: 2.91 px of judder a frame on the raw path, 0.029 px on the
+		// smoothed one. A hundred to one.
+		#expect(slow < raw / 20,
+		        "the smoothing is not doing much: \(slow) px against \(raw) px of judder")
+		#expect(slow < 0.05, "the paper is still shaking: \(slow) px a frame")
+
+		// And on the picture: a sentence's worth of ink, where it lands, frame by
+		// frame. Under a pixel, which is the rasteriser and not the bubble — the
+		// filter above says the bubble is moving by five hundredths of one.
+		let bubble = said(breath: 0)
+		var places: [Double] = []
+		for at in times.prefix(25) {
+			places.append(try #require(lettering(try painted(bubble, path: path, at: at))).x)
+		}
+		#expect(judder(places) < 1.2, "the words are shaking: \(judder(places)) px a frame")
+	}
+
+	/// **It does not leave the frame.** A face that walks out of the side of the
+	/// shot cannot take the words with it: the paper slows as it comes up to the
+	/// margin and settles against it, and the tail goes on alone.
+	@Test func theWordsStayInTheFrameWhenTheFaceLeaves() throws {
+		// Straight out of the right-hand side, and the standoff is to the right
+		// as well, so the paper reaches the edge well before the face does.
+		let path = AnchorPath(samples: (0 ... 40).map { step in
+			let t = Double(step) / 10
+			return (t, CGPoint(x: 0.3 + t * 0.3, y: 0.4))
+		})
+		let bubble = said(breath: 0)
+		var places: [Double] = []
+		for frame in 0 ..< 40 {
+			let canvas = try painted(bubble, path: path, at: Double(frame) / 10)
+			#expect(canvas.extent.maxX <= size.width,
+			        "the words left the frame at \(Double(frame) / 10)s: \(canvas.extent)")
+			places.append(try #require(lettering(canvas)).x)
+		}
+		// It came to a stop rather than stopping: the last stretch of movement
+		// gets smaller and smaller instead of going from a walk to nothing on one
+		// frame.
+		let steps = zip(places, places.dropFirst()).map { $1 - $0 }
+		let fastest = steps.max() ?? 0
+		let landing = steps.suffix(4).max() ?? 0
+		// Measured: 38.9 px a frame at full tilt, and 0.0 over the last four —
+		// it does not slow to a crawl, it stops.
+		#expect(landing < fastest / 3,
+		        "it is still travelling at the edge: \(landing) against \(fastest)")
+		#expect(steps.suffix(8).allSatisfy { $0 >= -0.5 }, "it bounced off the edge: \(steps)")
+	}
+
+	/// **The type does not smear.** Where the drawing is held, the words are the
+	/// same pixels — so a bubble travelling with a face is as sharp on every
+	/// frame as one standing still, which is the thing following usually costs.
+	@Test func theTypeIsAsSharpTravellingAsStill() throws {
+		let path = walking()
+		let travelling = said()
+		let pinned = said(follow: false)
+
+		/// How much of the lettering is properly black rather than half-way to
+		/// the paper. Smeared type loses this and gains grey.
+		func sharpness(_ canvas: BubbleCanvas) -> Double {
+			var ink = 0.0, edge = 0.0
+			for row in 0 ..< canvas.height {
+				for column in 0 ..< canvas.width where canvas.alpha(x: column, y: row) > 0.99 {
+					let dark = canvas.darkness(x: column, y: row)
+					if dark > 0.8 { ink += 1 } else if dark > 0.25 { edge += 1 }
+				}
+			}
+			return ink / max(1, ink + edge)
+		}
+		for frame in 0 ..< 8 {
+			let at = 1 + Double(frame) / 25
+			let moving = sharpness(try painted(travelling, path: path, at: at))
+			let still = sharpness(try painted(pinned, path: path, at: at))
+			#expect(moving > still - 0.02,
+			        "the travelling words are blurrier at \(at)s: \(moving) against \(still)")
+		}
+		// And within one drawing they are not merely as sharp but identical,
+		// which is the reason: the paper steps with the drawing rather than
+		// creeping under it.
+		let beat = 1 / Bubbling.drawingsPerSecond
+		let held = try painted(travelling, path: path, at: 1)
+		#expect(try painted(travelling, path: path, at: 1 + beat * 0.9).bytes == held.bytes,
+		        "the paper crept inside its own drawing")
+		#expect(try painted(travelling, path: path, at: 1 + beat).bytes != held.bytes,
+		        "it did not move on the beat")
 	}
 }
 

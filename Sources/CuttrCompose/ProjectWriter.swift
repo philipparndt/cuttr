@@ -458,6 +458,9 @@ public enum ProjectWriter {
 					if bubble.breath != plain.breath {
 						out += "\(indent)  breath: \(trim(bubble.breath))\n"
 					}
+					if bubble.follow != plain.follow {
+						out += "\(indent)  follow: \(bubble.follow)\n"
+					}
 					if let at = bubble.at {
 						out += "\(indent)  at:     [\(trim(at.x)), \(trim(at.y))]\n"
 					}

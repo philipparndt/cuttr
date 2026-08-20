@@ -84,6 +84,26 @@ enum Bubbling {
 		Int(floor(time * drawingsPerSecond))
 	}
 
+	/// The moment the drawing that is on screen at `time` was made.
+	///
+	/// For a still bubble, the moment itself: nothing is held, so every frame is
+	/// its own drawing. For a breathing one, the beat that drawing began on — and
+	/// never earlier than the first frame it is drawn on, because the first
+	/// drawing of a bubble begins when the bubble comes on and not on the beat
+	/// before that.
+	///
+	/// **The frame path asks this and then asks everything else at that one
+	/// moment**: where the paper sits, what the tail is reaching for, which
+	/// drawing to wobble by. The layer path instead builds a keyframe per moment
+	/// and lets Core Animation hold it. Two implementations of one clock, and
+	/// this is the line that keeps them the same clock — without it the painted
+	/// bubble's tail would track the face smoothly inside a drawing that is
+	/// standing still, which is the one thing neither host should do alone.
+	static func drawn(at time: Double, from start: Double, breath: Double) -> Double {
+		guard breath > 0 else { return time }
+		return max(start, Double(drawing(at: time)) / drawingsPerSecond)
+	}
+
 	/// The instants the drawing changes, over a window, on the programme's
 	/// clock.
 	///
@@ -129,8 +149,12 @@ enum Bubbling {
 	/// whole bubble stays on screen, which is the other half of not running off
 	/// the side: the words wrap to a measure, and then the box that holds them
 	/// is pushed back into the picture if it was written too near an edge.
+	///
+	/// `give` is how much room there is at the edge for the box to *slow down*
+	/// in rather than stop dead in, in pixels. Nought for a bubble that is not
+	/// going anywhere, which is every bubble that was written before one could.
 	static func box(words: CGSize, shape: Bubble.Shape, style: TextStyle,
-	                home: CGPoint, frame: CGSize) -> CGRect {
+	                home: CGPoint, frame: CGSize, give: Double = 0) -> CGRect {
 		let padding = style.padding * frame.height
 		// The outline passes *inside* the corners of the rectangle it is drawn
 		// round — that is what a rounded corner is — so the half-extents are
@@ -146,11 +170,45 @@ enum Bubbling {
 		size.width = min(size.width, frame.width - 4)
 		size.height = min(size.height, frame.height - 4)
 		let margin = 0.01 * frame.height
-		let x = min(max(home.x, size.width / 2 + margin), frame.width - size.width / 2 - margin)
-		let y = min(max(home.y, size.height / 2 + margin), frame.height - size.height / 2 - margin)
+		let x = eased(home.x, into: size.width / 2 + margin,
+		              to: frame.width - size.width / 2 - margin, by: give)
+		let y = eased(home.y, into: size.height / 2 + margin,
+		              to: frame.height - size.height / 2 - margin, by: give)
 		return CGRect(x: x - size.width / 2, y: y - size.height / 2,
 		              width: size.width, height: size.height)
 	}
+
+	/// A position brought inside a range: clamped to it, or eased into it.
+	///
+	/// Where a bubble travelling with a face meets the edge of the frame. A hard
+	/// clamp stops the paper dead: it glides across the shot and then, on one
+	/// frame, parks — which reads as the follow having broken rather than as the
+	/// frame having run out. With `give`, the last of the movement is bent into
+	/// an asymptote instead: the paper slows as it comes up to the margin, comes
+	/// to rest against it, and a face that walks further only presses it closer.
+	/// Continuous in value *and* in speed at the knee, which is the whole point —
+	/// a soft stop with a corner in it is still a corner.
+	///
+	/// With no give it is the clamp this has always been, to the pixel. A pinned
+	/// bubble written too near an edge has always been pushed exactly inside it,
+	/// and easing that would move every one ever written.
+	static func eased(_ value: Double, into low: Double, to high: Double,
+	                  by give: Double) -> Double {
+		guard give > 0, high > low else { return min(max(value, low), high) }
+		let give = min(give, (high - low) / 2)
+		if value > high - give { return high - give * exp(-(value - high + give) / give) }
+		if value < low + give { return low + give * exp((value - low - give) / give) }
+		return value
+	}
+
+	/// How much room a travelling bubble has to slow down in at the edge of the
+	/// frame, as a fraction of the frame height.
+	///
+	/// Half a bubble's height, near enough: enough that the slowing is a movement
+	/// somebody can see happening rather than a frame on which it stops, and not
+	/// so much that a bubble beside a face at the edge of the shot is visibly
+	/// held off the margin it could have reached.
+	static let give = 0.05
 
 	/// How square the outline is. Two is an ellipse and infinity is a
 	/// rectangle; a speech bubble is between the two and a box is nearly one.

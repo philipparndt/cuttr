@@ -3,9 +3,10 @@
 # Every bubble here points at a fixed spot with `at:`, because a programme with
 # no footage in it has no faces to track. In a real one you write `anchor:
 # mia-eye` instead and nothing else changes — and then the interesting half
-# happens: the tail is redrawn for every sample of the tracked face while the
-# words stay exactly where they were put. A bubble is read, and words that move
-# under the reader cannot be.
+# happens: the paper goes along beside her and the tail swings round to keep up.
+# The paper follows only the slow part of the tracking, because a bubble is read
+# and words that jitter under the reader cannot be; `follow: false` leaves it
+# where it was put and lets the tail do all the travelling.
 #
 # The other thing to look at is that none of these says how big it is. The words
 # wrap to `width` — a fraction of the frame, not a pixel count — and the paper

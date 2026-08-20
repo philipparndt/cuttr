@@ -1226,6 +1226,12 @@ public final class PropertiesPanel: NSView {
 				self?.editBubble(origin) { $0.breath = max(0, value) }
 			}, label(bubble.breath > 0 ? "redrawn 8 times a second" : "one still drawing")],
 			      note: "how much the line breathes — 1 is alive, 0 is the still drawing")
+			field("follow", [check("travels with the anchor", on: bubble.follow) {
+				[weak self] on in
+				self?.editBubble(origin) { $0.follow = on }
+			}], note: overlay.anchor == nil
+				? "nothing to follow — it sits where `at:` and `offset:` put it"
+				: "off, it stays where the face was when it came on and only the tail follows")
 			field("points at", [label(overlay.anchor.map { "the anchor `\($0)`" }
 				?? (bubble.at.map { "the spot [\(Self.trimmed($0.x)), \(Self.trimmed($0.y))]" }
 					?? "nothing — it keeps its words and loses its tail"))],

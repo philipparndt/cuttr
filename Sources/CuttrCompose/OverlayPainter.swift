@@ -89,15 +89,24 @@ public enum OverlayPainter {
 		else { return nil }
 		let style = project.style(named: bubble.style ?? "bubble")
 		let words = Bubbling.words(bubble.text, style: style, frame: size, width: bubble.width)
+		// The moment this frame's drawing was made, which for a breathing bubble
+		// is the beat it began on. Every question below is asked at that moment
+		// and not at this frame's own: a tail that tracked the face smoothly
+		// through a drawing that is standing still would be the frame path and
+		// the layer path drawing two different bubbles.
+		let moment = Bubbling.drawn(at: time, from: resolved.timing.drawnFrom,
+		                            breath: bubble.breath)
 		let box = Bubbling.box(
 			words: words?.size ?? .zero, shape: bubble.shape, style: style,
-			home: OverlayLayers.bubbleHome(bubble, resolved: resolved, style: style, size: size),
-			frame: size)
+			home: OverlayLayers.bubbleHome(bubble, resolved: resolved, style: style,
+			                               size: size, at: moment),
+			frame: size,
+			give: bubble.follow && resolved.path != nil ? Bubbling.give * size.height : 0)
 		Bubbling.draw(
 			bubble, box: box, words: words?.image, wordSize: words?.size ?? .zero,
 			pointingAt: OverlayLayers.bubbleTarget(bubble, resolved: resolved,
-			                                       at: time, size: size),
-			frame: size, at: time, into: context)
+			                                       at: moment, size: size),
+			frame: size, at: moment, into: context)
 		return context.makeImage()
 	}
 

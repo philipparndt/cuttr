@@ -17,11 +17,15 @@ import Foundation
 /// ```
 ///
 /// `anchor:` means something slightly different here than it does anywhere
-/// else, and the difference is the whole point. Every other overlay *sits* on
-/// its anchor and travels with it. A bubble is read, and words that move under
-/// the reader cannot be. So a bubble is placed once — where the anchor was when
-/// it came on, plus its ``Overlay/offset`` — and stays there; what follows the
-/// face is the tail, which is recomputed for every frame the anchor moves in.
+/// else, and the difference is worth knowing. Every other overlay *sits* on its
+/// anchor. A bubble stands off from it by its ``Overlay/offset`` and points at
+/// it — and it travels with the face, which is the whole reason a tail can stay
+/// short.
+///
+/// What a bubble does not do is follow the anchor *exactly*. Words that move
+/// under the reader cannot be read, and a tracker's answer jitters from one
+/// sample to the next, so the paper follows the slow part of the movement and
+/// the tail follows the rest. See ``follow``.
 public struct Bubble: Sendable, Equatable {
 
 	/// Which of the three drawings.
@@ -84,6 +88,26 @@ public struct Bubble: Sendable, Equatable {
 	/// nobody can read, and the bubble exists to be read.
 	public var breath: Double
 
+	/// Whether the paper travels with the anchor.
+	///
+	/// It does. A bubble that stays where the face was when it came on is a
+	/// bubble with a tail stretching further across the shot every second, and it
+	/// stops looking like something she is saying.
+	///
+	/// **What it costs, and what pays for it.** Words that move under the reader
+	/// cannot be read, and a tracker's answer jitters from sample to sample — so
+	/// what the paper follows is not the anchor but the *slow part* of the anchor:
+	/// a centred average over ``OverlayLayers/settling`` seconds, which passes a
+	/// walk through untouched and flattens the jitter to nothing. And where a
+	/// breathing bubble steps its drawing, the paper steps with it, because where
+	/// the paper sits is part of the drawing. See ``OverlayLayers/settled(_:at:)``.
+	///
+	/// `false` puts it back where it was: placed once, where the face was when it
+	/// came on, and still. Which is right for a bubble pinned to the corner of a
+	/// graphic, and for a shot where the face barely moves and the stillest thing
+	/// is the best thing.
+	public var follow: Bool
+
 	/// A fixed point to point at, normalised, origin bottom-left.
 	///
 	/// For the things that are not faces — a hat on a table, a corner of a
@@ -101,6 +125,7 @@ public struct Bubble: Sendable, Equatable {
 		width: Double = 0.32,
 		seed: Int = 1,
 		breath: Double = 1,
+		follow: Bool = true,
 		at: CGPoint? = nil
 	) {
 		self.shape = shape
@@ -111,6 +136,7 @@ public struct Bubble: Sendable, Equatable {
 		self.width = width
 		self.seed = seed
 		self.breath = max(0, breath)
+		self.follow = follow
 		self.at = at
 	}
 
