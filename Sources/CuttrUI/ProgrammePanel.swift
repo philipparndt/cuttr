@@ -66,6 +66,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// Somebody wants to see one section on its own: play from where it starts
 	/// to where it ends and stop there.
 	public var onPreviewSection: ((String) -> Void)?
+	/// The programme as the preview plays it, for a look taken from here.
+	///
+	/// A closure rather than a composition, because the window rebuilds one
+	/// whenever the project changes and a look must be at the current
+	/// assembly — and because a look that assembled its own would be a look
+	/// somebody waits for. See ``QuickLookPanel``.
+	public var playable: QuickLookPanel.Playable?
 
 	private var project = Project()
 	private var roots: [Node] = []
@@ -413,7 +420,24 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		// minus button beside it does. A list somebody can select a row in and
 		// not delete from is a list that has to be explained.
 		outline.onKey = { [weak self] event in
-			guard let self, isDelete(event) else { return false }
+			guard let self else { return false }
+			// Space is a look at whatever is selected, and the same key again
+			// puts it away; escape does too, and only while it is open — the
+			// tree keeps whatever escape meant to it otherwise.
+			//
+			// Both questions are asked of `QuickLook` rather than answered
+			// here, because space belongs to four other things in this program
+			// and the only safe way to take it is to be able to prove, without
+			// a keyboard, where it is *not* taken.
+			if QuickLook.dismisses(event), self.isLooking {
+				self.closeLook()
+				return true
+			}
+			if QuickLook.claims(event, editing: self.isNaming, hasSpan: self.lookSpan() != nil) {
+				if self.isLooking { self.closeLook() } else { self.showLook() }
+				return true
+			}
+			guard isDelete(event) else { return false }
 			// A row in this tree is an entry, or something carried by one, and
 			// Delete has to take either off — now that the tree is where they
 			// are made and moved, it is also where they are removed from.
@@ -912,6 +936,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	// MARK: - Loading
 
 	public func reload(_ project: Project, vocabulary: ComposeDocument.Vocabulary) {
+		// An edit puts a look away. What it was a look at may not be there any
+		// more, and the composition it was playing has been replaced by the one
+		// the window is building for the project as it now is.
+		closeLook()
 		self.project = project
 		self.vocabulary = vocabulary
 		roots = tree(project.timeline, at: [])
@@ -1452,6 +1480,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	// MARK: - Selection
 
 	public func outlineViewSelectionDidChange(_ notification: Notification) {
+		// An open look follows the selection. It is anchored to the selected
+		// row and the tree still has the keyboard, so arrowing down the tree
+		// with one open is somebody comparing two shots — and a panel pinned
+		// beside a row that shows something else is a panel lying about where
+		// it is pointing. `defer`, because every path out of here has moved the
+		// selection, including the ones that give up early.
+		defer { if isLooking { showLook() } }
 		if let carried = selectedTreeCarried, exists(carried) {
 			selection = carried.selection
 			onSelect?(selection)
@@ -1577,6 +1612,148 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	@objc private func openInTake(_ sender: NSMenuItem) {
 		guard let path = sender.representedObject as? [Int] else { return }
 		onOpenInTake?(path)
+	}
+
+	// MARK: - A look
+
+	/// The panel a look happens in.
+	///
+	/// Made when one is first asked for and kept after that: it belongs to the
+	/// tree rather than to the window, because it is a way of looking at *this*
+	/// list — and a tree with a window nobody has opened should not have made one.
+	private var look: QuickLookPanel?
+	/// How to undo what is watched while a look is open. One list, because the
+	/// rule is single: anything that is not moving about the tree puts it away.
+	private var lookWatch: [() -> Void] = []
+
+	/// Whether a look is open. For the window, and for the tests.
+	public var isLooking: Bool { look?.isShowing == true }
+
+	/// Whether somebody is typing rather than navigating.
+	///
+	/// A field editor is an `NSTextView` and it is the first responder while it is
+	/// up, so it — not the outline — is what a key press reaches. This asks the
+	/// question out loud anyway: it is the one that has to be answerable in a
+	/// test, and it means a row that grows a name field later cannot quietly take
+	/// the space bar off somebody in the middle of a word.
+	var isNaming: Bool {
+		window?.firstResponder is NSTextView || outline.currentEditor() != nil
+	}
+
+	/// Which rows a look would be of.
+	///
+	/// The heading the loose overlays live under is not one of them: it is a
+	/// place, not a thing, and it occupies no time.
+	func lookRows() -> [QuickLook.Row] {
+		outline.selectedRowIndexes.compactMap { row -> QuickLook.Row? in
+			guard let node = outline.item(atRow: row) as? Node, !node.isOverlayRoot else { return nil }
+			switch node.carried {
+			case .overlay(let origin): return .overlay(origin)
+			case .sound(let origin): return .sound(origin)
+			case nil:
+				// A section carries its name, so that space and the right-click
+				// menu beside it agree about where that section ends.
+				if let name = node.groupName { return .section(name, path: node.path) }
+				return .entry(node.path)
+			}
+		}
+	}
+
+	/// What a look would play, and therefore whether space means anything here at
+	/// all. `nil` is the tree declining the key.
+	func lookSpan() -> QuickLook.Span? {
+		guard let resolved else { return nil }
+		return QuickLook.span(of: lookRows(), in: resolved)
+	}
+
+	/// What the caption calls it. Several rows are said as a count: the panel is
+	/// showing the run between them and naming one of them would be a claim about
+	/// which one mattered.
+	private func lookTitle(_ rows: [QuickLook.Row]) -> String {
+		guard rows.count == 1, let row = rows.first else { return "\(rows.count) rows" }
+		switch row {
+		case .entry(let path), .section(_, let path):
+			return project.entry(at: path)?.source.description ?? "the programme"
+		case .overlay(let origin):
+			return project.overlay(at: origin).map { OverlayRow.name($0) } ?? "overlay"
+		case .sound(let origin):
+			return (project.sound(at: origin)?.file as NSString?)?.lastPathComponent ?? "sound"
+		}
+	}
+
+	/// Takes a look at whatever is selected, or re-aims one already open.
+	///
+	/// Anchored on the first selected row and clear of the whole column — see
+	/// ``QuickLook/place(_:beside:row:inside:)``. The window's own transport is
+	/// not touched: the tree is only ever on screen in the editor, and the editor
+	/// pauses the preview on the way in, so the playhead the strip and the clock
+	/// are showing stands still while a look is taken and there is nothing to put
+	/// back afterwards.
+	public func showLook() {
+		guard let window, let span = lookSpan(), let first = outline.selectedRowIndexes.min()
+		else { closeLook(); return }
+		let panel = look ?? QuickLookPanel()
+		look = panel
+		let row = window.convertToScreen(outline.convert(outline.rect(ofRow: first), to: nil))
+		let column = window.convertToScreen(convert(bounds, to: nil))
+		panel.show(
+			span, titled: lookTitle(lookRows()),
+			saying: "\(Timecode.string(span.start)) → \(Timecode.string(span.end))"
+				+ "   \(TakeWriter.number(span.duration, places: 1))s",
+			playing: playable, over: window, beside: column, row: row,
+			output: project.output.size)
+		watchTheLook()
+	}
+
+	/// Puts it away, and takes the watch off with it.
+	public func closeLook() {
+		look?.hide()
+		for undo in lookWatch { undo() }
+		lookWatch = []
+	}
+
+	/// A look lasts as long as somebody is looking.
+	///
+	/// Which is to say: while the tree is being moved about in. A click anywhere
+	/// else — the properties beside it, the panel itself, another window — is
+	/// somebody finished, and so is the window being resized, moved, deactivated
+	/// or closed. A click *in* the tree is not: it selects a row, and the look
+	/// follows the selection.
+	private func watchTheLook() {
+		guard lookWatch.isEmpty, let window else { return }
+		let mouse = NSEvent.addLocalMonitorForEvents(
+			matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+		) { [weak self] event in
+			guard let self else { return event }
+			if event.window !== self.window
+				|| !self.bounds.contains(self.convert(event.locationInWindow, from: nil)) {
+				self.closeLook()
+			}
+			return event
+		}
+		lookWatch.append { if let mouse { NSEvent.removeMonitor(mouse) } }
+		for name in [NSWindow.didResizeNotification, NSWindow.didMoveNotification,
+		             NSWindow.didResignKeyNotification, NSWindow.willCloseNotification] {
+			let token = NotificationCenter.default.addObserver(
+				forName: name, object: window, queue: nil
+			) { [weak self] _ in
+				MainActor.assumeIsolated { self?.closeLook() }
+			}
+			lookWatch.append { NotificationCenter.default.removeObserver(token) }
+		}
+	}
+
+	/// For the tests: where the look landed, and whether it is playing.
+	var lookFrameForTesting: NSRect? { look?.frame }
+	var lookPlayingForTesting: Bool { look?.isPlayingForTesting == true }
+	var lookTimeForTesting: Double { look?.timeForTesting ?? 0 }
+
+	/// The tree leaving the window takes the look with it. A panel hovering
+	/// beside a list that is no longer there is the sort of thing that outlives
+	/// the window it was about.
+	public override func viewDidMoveToWindow() {
+		super.viewDidMoveToWindow()
+		if window == nil { closeLook() }
 	}
 
 	// MARK: - Rows
