@@ -123,63 +123,119 @@ import Testing
 		}
 	}
 }
-/// The toolbar has three places, and things stay in theirs.
-@Suite @MainActor struct ComposeBarTests {
+/// One bar, both windows, and the clock always in it.
+///
+/// This replaces two suites: one that asserted the mode buttons were on the
+/// left of the composing window's bar, and one that asserted a checkbox for
+/// the anchor markers was in it at all. Neither is true now on purpose — the
+/// modes are on their way to the rail and the markers switch is over the
+/// picture it draws on — and what is asserted instead is the arrangement that
+/// is meant to be the same in both windows.
+@Suite @MainActor struct DocumentBarTests {
 
-	@Test func whereYouAreIsLeftWhatYouCanDoIsRight() {
+	private func bar(_ width: CGFloat = 1200) -> DocumentBar {
 		_ = NSApplication.shared
-		let bar = ComposeBar()
-		bar.setStatus("00:12.345")
-		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 38),
-		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+		let bar = DocumentBar()
+		let window = NSWindow(
+			contentRect: NSRect(x: 0, y: 0, width: width, height: DocumentBar.height),
+			styleMask: [.titled, .resizable], backing: .buffered, defer: false)
 		window.contentView = bar
-		bar.frame = NSRect(x: 0, y: 0, width: 1200, height: 38)
+		bar.frame = NSRect(x: 0, y: 0, width: width, height: DocumentBar.height)
+		bar.layoutSubtreeIfNeeded()
+		return bar
+	}
+
+	/// The name on the left, the clock in the middle, what happened on the right.
+	@Test func theDocumentIsLeftTheClockIsMiddleTheNewsIsRight() {
+		let bar = self.bar()
+		bar.setName("mia-take-1")
+		bar.setClock(12.345)
+		bar.setStatus("saved")
 		bar.layoutSubtreeIfNeeded()
 
-		func find<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
-			view.subviews.flatMap { subview -> [T] in
-				((subview as? T).map { [$0] } ?? []) + find(type, in: subview)
-			}
-		}
-		let render = find(NSButton.self, in: bar).first { $0.title == "Render…" }
-		let modes = find(NSSegmentedControl.self, in: bar).first
-		let clock = find(NSTextField.self, in: bar).first { $0.stringValue == "00:12.345" }
+		let name = bar.nameForTesting.convert(bar.nameForTesting.bounds, to: bar)
+		let clock = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
+		let status = bar.statusForTesting.convert(bar.statusForTesting.bounds, to: bar)
 
-		let renderFrame = try! #require(render).convert(render!.bounds, to: bar)
-		let modesFrame = try! #require(modes).convert(modes!.bounds, to: bar)
-		let clockFrame = try! #require(clock).convert(clock!.bounds, to: bar)
-
-		#expect(modesFrame.minX < 20, "the modes are not on the left: \(modesFrame)")
-		#expect(renderFrame.maxX > bar.bounds.width - 120,
-		        "render is not on the right: \(renderFrame)")
-		#expect(abs(clockFrame.midX - bar.bounds.midX) < 12,
-		        "the clock is not centred: \(clockFrame.midX) against \(bar.bounds.midX)")
-		#expect(clockFrame.minX > modesFrame.maxX)
-		#expect(clockFrame.maxX < renderFrame.minX)
+		#expect(name.minX < 20, "the name is not on the left: \(name)")
+		#expect(abs(clock.midX - bar.bounds.midX) < 12,
+		        "the clock is not centred: \(clock.midX) against \(bar.bounds.midX)")
+		#expect(status.maxX > bar.bounds.width - 140, "the news is not on the right: \(status)")
+		#expect(name.maxX < clock.minX)
+		#expect(clock.maxX < status.maxX)
 	}
-}
 
-/// The anchors switch belongs to the picture.
-@Suite @MainActor struct AnchorSwitchTests {
-
-	@Test func itIsOnlyThereOnThePreview() {
-		_ = NSApplication.shared
-		let bar = ComposeBar()
-		func anchors(in view: NSView) -> NSButton? {
-			for subview in view.subviews {
-				if let button = subview as? NSButton, button.title == "Anchors" { return button }
-				if let found = anchors(in: subview) { return found }
-			}
-			return nil
+	/// The clock does not move, whatever it says.
+	///
+	/// Tabular figures and a fixed box: a label that sizes itself to its text
+	/// shifts the whole group sideways between `09.900` and `10.000`, and this
+	/// is the number somebody watches while the tape rolls.
+	@Test func theClockKeepsItsPlaceAndItsWidth() {
+		let bar = self.bar()
+		var frames: [NSRect] = []
+		for time in [0.0, 9.9, 10.0, 59.999, 61.5, 3599.0, 3600.0] {
+			bar.setClock(time)
+			bar.layoutSubtreeIfNeeded()
+			frames.append(bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar))
 		}
-		let button = anchors(in: bar)
-		#expect(button != nil)
-		bar.setMode(0)
-		#expect(button?.isHidden == true, "the editor has no picture to put markers on")
-		bar.setMode(2)
-		#expect(button?.isHidden == false)
-		bar.setMode(1)
-		#expect(button?.isHidden == true)
+		#expect(Set(frames.map(\.width)).count == 1,
+		        "the clock changed width: \(frames.map(\.width))")
+		#expect(Set(frames.map(\.minX)).count == 1,
+		        "the clock moved: \(frames.map(\.minX))")
+	}
+
+	/// A long name cannot push the clock off centre, and a long status cannot
+	/// either.
+	@Test func nothingElseMovesTheClock() {
+		let bar = self.bar()
+		bar.setName("a")
+		bar.setStatus("")
+		bar.layoutSubtreeIfNeeded()
+		let quiet = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
+
+		bar.setName("an-extremely-long-project-name-somebody-actually-typed")
+		bar.setStatus(String(repeating: "and then this happened. ", count: 8))
+		bar.layoutSubtreeIfNeeded()
+		let busy = bar.clockForTesting.convert(bar.clockForTesting.bounds, to: bar)
+		#expect(abs(quiet.minX - busy.minX) < 0.5, "the clock moved from \(quiet) to \(busy)")
+	}
+
+	/// The progress bar arrives *under* the status rather than beside it, so
+	/// nothing moves when it appears.
+	@Test func progressArrivesWithoutMovingAnything() {
+		let bar = self.bar()
+		bar.setStatus("exporting…")
+		bar.layoutSubtreeIfNeeded()
+		let before = bar.statusForTesting.convert(bar.statusForTesting.bounds, to: bar)
+		#expect(bar.progressForTesting.isHidden)
+
+		bar.setProgress(0.4)
+		bar.layoutSubtreeIfNeeded()
+		let after = bar.statusForTesting.convert(bar.statusForTesting.bounds, to: bar)
+		#expect(bar.progressForTesting.isHidden == false)
+		#expect(before == after, "the status moved: \(before) became \(after)")
+
+		// Under it: the bar is not flipped, so lower on screen is a smaller y.
+		let under = bar.progressForTesting.convert(bar.progressForTesting.bounds, to: bar)
+		#expect(under.maxY <= after.minY + 0.5, "the progress is not under the status")
+		#expect(abs(under.maxX - after.maxX) < 4, "the progress is not lined up with it")
+
+		bar.setProgress(nil)
+		#expect(bar.progressForTesting.isHidden)
+	}
+
+	/// The setting-up controls are behind the name, and the name only says so
+	/// when there is something there.
+	@Test func theNameIsAWayIntoTheSetUp() {
+		let bar = self.bar()
+		bar.setName("mia-take-1")
+		#expect(bar.nameForTesting.isEnabled == false)
+		#expect(bar.nameForTesting.attributedTitle.string == "mia-take-1")
+
+		bar.setUp = TakeSetup()
+		#expect(bar.nameForTesting.isEnabled)
+		#expect(bar.nameForTesting.attributedTitle.string.hasPrefix("mia-take-1"))
+		#expect(bar.nameForTesting.attributedTitle.string != "mia-take-1")
 	}
 }
 

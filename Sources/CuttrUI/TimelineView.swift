@@ -82,6 +82,37 @@ public final class TimelineView: NSView {
 	public override var isFlipped: Bool { true }
 	public override var acceptsFirstResponder: Bool { true }
 
+	/// A control the timeline puts over its waveform lanes.
+	///
+	/// The monitor switch lives here. It chooses between the two recordings, and
+	/// the two recordings are these two lanes — so it sits on the thing it acts
+	/// on rather than in a strip at the top of the window that is on screen
+	/// whether or not there is a second recording at all.
+	///
+	/// Placed by this view, from a frame, because this view is the only one that
+	/// knows where the lanes are: the band above them grows a row per colour in
+	/// use, so the rectangle moves. A constraint from outside would be a second
+	/// opinion about the same measurement.
+	public var laneAccessory: NSView? {
+		didSet {
+			oldValue?.removeFromSuperview()
+			if let laneAccessory {
+				laneAccessory.translatesAutoresizingMaskIntoConstraints = true
+				addSubview(laneAccessory)
+			}
+			needsLayout = true
+		}
+	}
+
+	public override func layout() {
+		super.layout()
+		guard let laneAccessory else { return }
+		let size = laneAccessory.fittingSize
+		let lanes = lanesRect
+		laneAccessory.frame = NSRect(x: max(0, bounds.width - size.width - 10),
+		                             y: lanes.minY + 5, width: size.width, height: size.height)
+	}
+
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
 		wantsLayer = true

@@ -59,7 +59,18 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	/// one field of the properties panel is what this callback exists to avoid.
 	/// `nil` means "whichever one, or a new one".
 	public var onEditScene: ((ComposeDocument, String?) -> Void)?
-	private let bar = ComposeBar()
+	private let bar = DocumentBar()
+	/// Which of the three has the window. In the bar for now; it becomes the
+	/// rail down the left edge, in the same place as the cutting window's.
+	private let modeSwitch = NSSegmentedControl()
+	private let renderButton = NSButton()
+	/// The two controls that belong to the picture, over the picture: the anchor
+	/// markers, and the way to give the picture the screen. Neither is true of
+	/// the editor or of the file, which is what they were in a bar with.
+	private let pictureControls = NSStackView()
+	private let anchorsSwitch = NSButton(
+		checkboxWithTitle: "Anchors", target: nil, action: nil)
+	private let fullScreenButton = NSButton()
 	private let problemLabel = NSTextField(labelWithString: "")
 
 	/// The overlay tree, held at `speed = 0` and scrubbed by `timeOffset`.
@@ -120,17 +131,10 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard let window else { return }
 		playerView = PlayerView(player: transport.player)
 
-		bar.onRender = { [weak self] in self?.render(nil) }
-		bar.onReload = { [weak self] in self?.composeDocument.reload() }
-		bar.onMode = { [weak self] index in self?.show(Mode(rawValue: index) ?? .edit) }
-		bar.onFullScreen = { [weak self] in self?.toggleFullScreenPreview(nil) }
+		buildBar()
+		buildPictureControls()
 		controls.onPlayPause = { [weak self] in self?.togglePlay(nil) }
 		controls.onScrub = { [weak self] time in self?.seek(to: time) }
-		bar.onAnchors = { [weak self] shown in
-			// The markers are for placing an overlay against a face, and once it
-			// is placed they are in the way of seeing the thing they placed.
-			self?.markers.isHidden = !shown
-		}
 
 		source.onApply = { [weak self] text in
 			guard let self, let url = self.composeDocument.url else { return }
@@ -197,6 +201,15 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			controls.trailingAnchor.constraint(equalTo: picture.trailingAnchor),
 			controls.bottomAnchor.constraint(equalTo: picture.bottomAnchor),
 			controls.heightAnchor.constraint(equalToConstant: 76),
+		])
+
+		// The picture's own two controls, in its top corner.
+		pictureControls.translatesAutoresizingMaskIntoConstraints = false
+		picture.addSubview(pictureControls)
+		NSLayoutConstraint.activate([
+			pictureControls.trailingAnchor.constraint(
+				equalTo: picture.trailingAnchor, constant: -12),
+			pictureControls.topAnchor.constraint(equalTo: picture.topAnchor, constant: 12),
 		])
 
 		// A real frame, not zero.
@@ -305,6 +318,82 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 		// No marking here: an anchor is marked on the take, in the cutting
 		// window, where the footage is. This window shows what was found.
+	}
+
+	/// The bar: the project's name, the clock, what just happened — and two
+	/// things that are true whatever mode is showing.
+	///
+	/// `Render…` is one of them: it is what the whole window is for and it does
+	/// not belong to a mode. The mode switch is the other, and only until the
+	/// rail takes it; `⌘1`/`⌘2`/`⌘3` already do the same thing.
+	private func buildBar() {
+		for (index, title) in ["Edit", "Text", "Preview"].enumerated() {
+			modeSwitch.segmentCount = max(modeSwitch.segmentCount, index + 1)
+			modeSwitch.setLabel(title, forSegment: index)
+			modeSwitch.setWidth(62, forSegment: index)
+		}
+		modeSwitch.trackingMode = .selectOne
+		modeSwitch.controlSize = .small
+		modeSwitch.selectedSegment = 0
+		modeSwitch.target = self
+		modeSwitch.action = #selector(modeChanged)
+		modeSwitch.toolTip = "\u{2318}1 the editor \u{00B7} \u{2318}2 the file \u{00B7} \u{2318}3 the picture"
+		bar.addLeading(modeSwitch)
+
+		renderButton.title = "Render\u{2026}"
+		renderButton.bezelStyle = .rounded
+		renderButton.controlSize = .small
+		renderButton.font = NSFont.systemFont(ofSize: 11)
+		renderButton.target = self
+		renderButton.action = #selector(render(_:))
+		bar.addTrailing(renderButton)
+	}
+
+	@objc private func modeChanged() {
+		show(Mode(rawValue: modeSwitch.selectedSegment) ?? .edit)
+	}
+
+	/// The controls that belong to the picture, in the corner of the picture.
+	///
+	/// They were in the bar, where they were furniture for something that is not
+	/// on screen two thirds of the time. Over the picture they are only there
+	/// when the thing they are about is.
+	private func buildPictureControls() {
+		anchorsSwitch.state = .on
+		anchorsSwitch.font = NSFont.systemFont(ofSize: 11)
+		anchorsSwitch.target = self
+		anchorsSwitch.action = #selector(anchorsChanged)
+		anchorsSwitch.toolTip = "Show where the tracked faces are. They are for placing an overlay, "
+			+ "and in the way once it is placed."
+
+		fullScreenButton.bezelStyle = .rounded
+		fullScreenButton.controlSize = .small
+		fullScreenButton.imagePosition = .imageOnly
+		fullScreenButton.image = NSImage(
+			systemSymbolName: "arrow.up.left.and.arrow.down.right",
+			accessibilityDescription: "full screen")?
+			.withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
+		fullScreenButton.target = self
+		fullScreenButton.action = #selector(toggleFullScreenPreview(_:))
+		fullScreenButton.toolTip = "Watch it full screen \u{2014} the picture and nothing else"
+		fullScreenButton.translatesAutoresizingMaskIntoConstraints = false
+		fullScreenButton.widthAnchor.constraint(equalToConstant: 26).isActive = true
+
+		pictureControls.orientation = .horizontal
+		pictureControls.spacing = 8
+		pictureControls.alignment = .centerY
+		pictureControls.addView(anchorsSwitch, in: .leading)
+		pictureControls.addView(fullScreenButton, in: .leading)
+		pictureControls.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+		pictureControls.wantsLayer = true
+		pictureControls.layer?.backgroundColor = NSColor(calibratedWhite: 0, alpha: 0.45).cgColor
+		pictureControls.layer?.cornerRadius = 6
+	}
+
+	@objc private func anchorsChanged() {
+		// The markers are for placing an overlay against a face, and once it is
+		// placed they are in the way of seeing the thing they placed.
+		markers.isHidden = anchorsSwitch.state != .on
 	}
 
 	// MARK: - Wiring
@@ -485,7 +574,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 			// The overlay tree is paused; this is what puts it at the same
 			// moment as the picture, exactly, every tick.
 			self.overlayLayer?.timeOffset = time
-			self.bar.setStatus(Timecode.string(time))
+			self.bar.setClock(time)
 			// The full-screen bar shows the same clock, and only while it is
 			// the thing on screen.
 			if self.presenting {
@@ -508,6 +597,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard let window else { return }
 		window.title = composeDocument.displayName
 		window.representedURL = composeDocument.url
+		bar.setName(composeDocument.displayName)
 		takesTable.reload(composeDocument.takes, scenes: composeDocument.project.scenes)
 		inspector.resolved = composeDocument.resolved
 		let vocabulary = composeDocument.vocabulary
@@ -539,7 +629,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		} else {
 			problemLabel.stringValue = ""
 		}
-		bar.setEnabled(composeDocument.resolved != nil)
+		renderButton.isEnabled = composeDocument.resolved != nil
 
 		guard let resolved = composeDocument.resolved else { return }
 		buildTask?.cancel()
@@ -657,7 +747,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 	public func show(_ mode: Mode) {
 		self.mode = mode
 		modes.selectTabViewItem(at: mode.rawValue)
-		bar.setMode(mode.rawValue)
+		modeSwitch.selectedSegment = mode.rawValue
 		if mode == .preview {
 			// Now that the picture is in the window it has a layer to sit on.
 			attachOverlays()
@@ -710,6 +800,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		if presenting { show(.preview) }
 		bar.isHidden = presenting
 		strip.isHidden = presenting
+		pictureControls.isHidden = presenting
 		window.toggleFullScreen(nil)
 		if presenting { watchThePointer() } else { stopWatchingThePointer() }
 	}
@@ -747,6 +838,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		stopWatchingThePointer()
 		bar.isHidden = false
 		strip.isHidden = false
+		pictureControls.isHidden = false
 	}
 
 	/// The file as it stands, for the text view.
@@ -768,6 +860,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 
 	private func seek(to time: Double) {
 		playhead = max(0, time)
+		bar.setClock(playhead)
 		strip.playhead = playhead
 		markers.playhead = playhead
 		overlayLayer?.timeOffset = playhead
@@ -1004,7 +1097,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		guard panel.runModal() == .OK, let url = panel.url else { return }
 
 		bar.setProgress(0)
-		bar.setRenderEnabled(false)
+		renderButton.isEnabled = false
 		bar.setStatus("rendering…")
 		Task { [weak self] in
 			do {
@@ -1016,7 +1109,7 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 				self?.bar.setStatus(error.localizedDescription)
 			}
 			self?.bar.setProgress(nil)
-			self?.bar.setRenderEnabled(true)
+			self?.renderButton.isEnabled = true
 		}
 	}
 
