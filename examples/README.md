@@ -16,6 +16,7 @@ effects, no footage — so every one of them renders on any machine:
 | `effects/looks.cuttrproj` | film mode, the tape and chromatic aberration, working on confetti and rain |
 | `effects/coming-on.cuttrproj` | `keys:` — a drizzle becoming a downpour, bars closing in, a lens giving up and recovering |
 | `overlays/placements.cuttrproj` | captions written inside the entries they cover, and one on the programme's own clock |
+| `overlays/bubbles.cuttrproj` | speech, thought and a box with an arrow — drawn by hand, and the same hand on every render |
 
 Three things these are meant to teach, all of which cost a render to learn:
 
