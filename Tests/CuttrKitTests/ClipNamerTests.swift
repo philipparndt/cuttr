@@ -108,7 +108,7 @@ import Testing
 	/// Whatever happens, there is a name. It is a proposal, so an empty field
 	/// in front of somebody would be a worse answer than a poor name.
 	@Test func thereIsAlwaysAName() async {
-		for said in ["", "ja", "Was ist das Besondere an Oma?"] {
+		for said in ["", "ja", "Was ist das Besondere an dieser Werkstatt?"] {
 			let naming = await ClipNamer.propose(for: said, orFirstWords: "clip-1")
 			#expect(!naming.name.isEmpty)
 		}
