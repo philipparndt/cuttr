@@ -603,6 +603,8 @@ public final class ComposeWindowController: NSWindowController, NSWindowDelegate
 		inspector.resolved = composeDocument.resolved
 		let vocabulary = composeDocument.vocabulary
 		library.reload(vocabulary)
+		// So the file can say which of its names point at nothing.
+		source.vocabulary = vocabulary
 		inspector.reload(composeDocument.project, vocabulary: vocabulary)
 		if mode == .text { source.show(sourceText) }
 		strip.resolved = composeDocument.resolved

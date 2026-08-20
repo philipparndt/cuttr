@@ -1106,6 +1106,29 @@ import Testing
 		}
 	}
 
+	/// A hue the program has already given a meaning to is not borrowed for a
+	/// second one.
+	///
+	/// Stated as the specific mistake it was: the project file's numbers were
+	/// coloured `heardNotSaid`, which already means `[laughter]` — a thing that
+	/// was heard and not said, and a fixed assignment rather than a palette slot.
+	/// A number is not a kind of thing anyway; it is a quantity. Numbers are told
+	/// apart by weight instead, which is what this program does everywhere it has
+	/// run out of hues and still has something to say.
+	@Test func aFixedHueIsNotBorrowedTwice() {
+		#expect(ProjectSyntax.colour(.number) != Theme.heardNotSaid,
+		        "a number is wearing the colour of a laugh")
+		#expect(ProjectSyntax.isStrong(.number))
+		#expect(!ProjectSyntax.isStrong(.key))
+		// And the four roles are still four, told apart by colour or by weight.
+		let roles: [ProjectSyntax.Role] = [
+			.comment, .key, .number, .reference(.section, resolved: true),
+			.reference(.section, resolved: false),
+		]
+		let marks = roles.map { "\(ProjectSyntax.colour($0))/\(ProjectSyntax.isStrong($0))" }
+		#expect(Set(marks).count == roles.count, "two roles look the same: \(marks)")
+	}
+
 	/// The selected row is a lighter ground, near the panel rather than shouting
 	/// over it.
 	@Test func aSelectedRowIsLiftedNotPainted() {
@@ -1113,5 +1136,97 @@ import Testing
 		#expect(ground.s < 0.05, "the selected ground has a hue: \(ground)")
 		#expect(ground.b > hsb(Theme.panel).b, "a selected row is not lifted")
 		#expect(ground.b < hsb(Theme.text).b, "a selected row is brighter than its text")
+	}
+}
+
+/// The project file in four roles, and a reference that points at nothing in red.
+///
+/// The last one is the point of the whole exercise: a slug with a typo in it is
+/// the commonest mistake this format admits, it costs a render to find out, and
+/// coloured while it is being typed it costs nothing.
+@Suite @MainActor struct ProjectSyntaxTests {
+
+	private let file = """
+	# the intro
+	timeline:
+	  - clip: mia-take-1/hello
+	  - group: question1
+	    entries:
+	      - clip: nope/missing
+	overlays:
+	  - text: "hi"
+	    from: @question1
+	    to: @nowhere
+	    size: 0.09
+	"""
+
+	private func vocabulary() -> ComposeDocument.Vocabulary {
+		var it = ComposeDocument.Vocabulary()
+		it.takeNames = ["mia-take-1"]
+		it.clips = ["hello"]
+		it.groups = ["question1"]
+		return it
+	}
+
+	/// Every stretch of the file with a given role, as text.
+	private func said(_ role: ProjectSyntax.Role,
+	                  _ vocabulary: ComposeDocument.Vocabulary) -> [String] {
+		let text = file as NSString
+		return ProjectSyntax.roles(in: file, vocabulary: vocabulary)
+			.filter { $0.1 == role }
+			.map { text.substring(with: $0.0).trimmingCharacters(in: .whitespacesAndNewlines) }
+	}
+
+	@Test func theFourRoles() {
+		let it = vocabulary()
+		#expect(said(.comment, it) == ["# the intro"])
+		#expect(said(.key, it) == ["timeline", "clip", "group", "entries", "clip",
+		                           "overlays", "text", "from", "to", "size"])
+		#expect(said(.number, it) == ["0.09"])
+	}
+
+	@Test func aReferenceThatFindsSomethingAndOneThatDoesNot() {
+		let it = vocabulary()
+		#expect(said(.reference(.clip, resolved: true), it) == ["mia-take-1/hello"])
+		#expect(said(.reference(.clip, resolved: false), it) == ["nope/missing"])
+		#expect(said(.reference(.section, resolved: true), it) == ["@question1"])
+		#expect(said(.reference(.section, resolved: false), it) == ["@nowhere"])
+		// Red, and red only there.
+		#expect(ProjectSyntax.colour(.reference(.clip, resolved: false)) == Theme.playhead)
+		#expect(ProjectSyntax.colour(.reference(.clip, resolved: true)) != Theme.playhead)
+	}
+
+	/// A project that has not resolved yet is not a project full of mistakes.
+	@Test func nothingIsWrongWhenThereIsNothingToCheckAgainst() {
+		let blank = ComposeDocument.Vocabulary()
+		#expect(said(.reference(.clip, resolved: false), blank).isEmpty)
+		#expect(said(.reference(.section, resolved: false), blank).isEmpty)
+		#expect(said(.reference(.section, resolved: true), blank) == ["@question1", "@nowhere"])
+	}
+
+	/// `#b-roll` is a tag and `# a note` is a comment, and the space is what
+	/// tells them apart.
+	@Test func aTagIsNotAComment() {
+		var it = ComposeDocument.Vocabulary()
+		it.tags = ["b-roll"]
+		let line = "  - query: #b-roll   # the wide shots\n"
+		let text = line as NSString
+		let roles = ProjectSyntax.roles(in: line, vocabulary: it)
+		let comments = roles.filter { $0.1 == .comment }.map { text.substring(with: $0.0) }
+		let tags = roles.filter { $0.1 == .reference(.query, resolved: true) }
+			.map { text.substring(with: $0.0) }
+		#expect(comments.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+			== ["# the wide shots"])
+		#expect(tags == ["#b-roll"])
+	}
+
+	/// A path to a file is not a reference to a name, and must not be reddened.
+	@Test func aFilePathIsNotAReference() {
+		var it = ComposeDocument.Vocabulary()
+		it.takeNames = ["mia"]
+		let line = "  file: sounds/music.wav\n"
+		let roles = ProjectSyntax.roles(in: line, vocabulary: it)
+		#expect(!roles.contains { $0.1 == .reference(.clip, resolved: false) },
+		        "a file path was marked as a broken reference")
 	}
 }

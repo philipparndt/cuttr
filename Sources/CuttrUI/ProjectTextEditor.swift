@@ -22,6 +22,12 @@ public final class ProjectTextEditor: NSView {
 	private let status = NSTextField(labelWithString: "")
 	private let apply = NSButton()
 	private var loaded = ""
+	private var gutter: LineNumberRuler?
+	/// What the names in the file can point at, for deciding which of them point
+	/// at nothing. Set by the window whenever the project resolves.
+	public var vocabulary = ComposeDocument.Vocabulary() {
+		didSet { recolour() }
+	}
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
@@ -50,6 +56,14 @@ public final class ProjectTextEditor: NSView {
 
 		let scroll = TableScroll.wrap(text, horizontal: false)
 		scroll.translatesAutoresizingMaskIntoConstraints = false
+
+		// Line numbers down the side. The parser says `line 34`, and without a
+		// gutter that sentence is an instruction to count.
+		let ruler = LineNumberRuler(for: text, in: scroll)
+		scroll.verticalRulerView = ruler
+		scroll.hasVerticalRuler = true
+		scroll.rulersVisible = true
+		gutter = ruler
 
 		status.font = Theme.monoSmall
 		status.lineBreakMode = .byTruncatingTail
@@ -104,6 +118,37 @@ public final class ProjectTextEditor: NSView {
 		loaded = source
 		text.string = source
 		check()
+		recolour()
+	}
+
+	/// Four roles, coloured.
+	///
+	/// The whole storage on every change rather than the line that changed.
+	/// A reference's colour depends on whether it resolves, and what resolves
+	/// changes when a name is defined *elsewhere in the file* — rename a section
+	/// on line 4 and every reference to it further down becomes right or wrong at
+	/// the same moment. Colouring only the edited line would leave the rest
+	/// lying. A project file is a few hundred lines; this is not the expensive
+	/// part of a keystroke.
+	private func recolour() {
+		guard let storage = text.textStorage else { return }
+		let whole = NSRange(location: 0, length: storage.length)
+		let plain = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+		let strong = NSFont.monospacedSystemFont(ofSize: 12, weight: .bold)
+		storage.beginEditing()
+		storage.setAttributes([.font: plain, .foregroundColor: Theme.dimText], range: whole)
+		for (range, role) in ProjectSyntax.roles(in: text.string, vocabulary: vocabulary)
+		where NSMaxRange(range) <= storage.length {
+			storage.addAttribute(.foregroundColor, value: ProjectSyntax.colour(role), range: range)
+			if ProjectSyntax.isStrong(role) {
+				storage.addAttribute(.font, value: strong, range: range)
+			}
+		}
+		storage.endEditing()
+		// So the next character somebody types is plain text rather than
+		// whatever the character before it happened to be.
+		text.typingAttributes = [.font: plain, .foregroundColor: Theme.dimText]
+		gutter?.needsDisplay = true
 	}
 
 	public var hasUnappliedEdits: Bool { text.string != loaded }
@@ -117,6 +162,7 @@ public final class ProjectTextEditor: NSView {
 	@objc private func revertTapped() {
 		text.string = loaded
 		check()
+		recolour()
 	}
 
 	/// Parses on every keystroke and says what is wrong.
@@ -136,5 +182,14 @@ public final class ProjectTextEditor: NSView {
 }
 
 extension ProjectTextEditor: NSTextViewDelegate {
-	public func textDidChange(_ notification: Notification) { check() }
+	public func textDidChange(_ notification: Notification) {
+		check()
+		recolour()
+	}
+
+	/// The gutter marks the line the cursor is in, so it has to be redrawn when
+	/// the cursor moves.
+	public func textViewDidChangeSelection(_ notification: Notification) {
+		gutter?.needsDisplay = true
+	}
 }
