@@ -1946,6 +1946,16 @@ public final class PropertiesPanel: NSView {
 		let strip = SpanStrip()
 		currentStrip = strip
 		strip.duration = resolved?.duration ?? 0
+		// An overlay written inside a timeline entry is on while that entry
+		// plays and at no other time, so the strip is about that entry. Showing
+		// the whole programme offered times that cannot mean anything, and
+		// squeezed the ones that can into a thumbnail at one end.
+		if case .entry(let path, _) = origin, let resolved,
+		   let extent = Project.extent(of: path, in: resolved) {
+			strip.showing = (extent.0, extent.1)
+		} else {
+			strip.showing = nil
+		}
 		strip.blocks = (resolved?.clips ?? []).map {
 			SpanStrip.Block(start: $0.start, end: $0.end, name: $0.clip.slug)
 		}

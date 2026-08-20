@@ -47,6 +47,24 @@ public final class SpanStrip: NSView {
 	}
 
 	public var duration: Double = 0 { didSet { needsDisplay = true } }
+	/// The stretch of the programme this strip is about, which is not always all
+	/// of it.
+	///
+	/// An overlay written inside a timeline entry can only be on while that
+	/// entry is playing, so a strip offering the whole programme offers times
+	/// that cannot mean anything — and makes the seconds that *can* mean
+	/// something a thumbnail at one end of it. Left `nil`, it is the whole
+	/// programme, which is what a top-level overlay is about.
+	public var showing: (start: Double, end: Double)? {
+		didSet { needsDisplay = true }
+	}
+
+	/// What the strip is showing, resolved: the window if there is one, and the
+	/// whole programme if there is not.
+	private var shown: (start: Double, end: Double) {
+		guard let showing, showing.end > showing.start else { return (0, duration) }
+		return (max(0, showing.start), min(duration, showing.end))
+	}
 	public var blocks: [Block] = [] { didSet { needsDisplay = true } }
 	public var ranges: [Range] = [] { didSet { needsDisplay = true } }
 	public var selected = 0 { didSet { needsDisplay = true } }
@@ -83,13 +101,23 @@ public final class SpanStrip: NSView {
 	private var track: NSRect { bounds.insetBy(dx: 8, dy: 0) }
 
 	private func x(_ time: Double) -> CGFloat {
-		guard duration > 0 else { return track.minX }
-		return track.minX + CGFloat(time / duration) * track.width
+		let shown = shown
+		let span = shown.end - shown.start
+		guard span > 0 else { return track.minX }
+		return track.minX + CGFloat((time - shown.start) / span) * track.width
 	}
 
 	private func time(_ x: CGFloat) -> Double {
-		guard duration > 0, track.width > 0 else { return 0 }
-		return min(duration, max(0, Double((x - track.minX) / track.width) * duration))
+		let shown = shown
+		let span = shown.end - shown.start
+		guard span > 0, track.width > 0 else { return shown.start }
+		let at = shown.start + Double((x - track.minX) / track.width) * span
+		return min(shown.end, max(shown.start, at))
+	}
+
+	/// For the tests: what time a fraction of the way along the track means.
+	func timeForTesting(atFraction fraction: CGFloat) -> Double {
+		time(track.minX + fraction * track.width)
 	}
 
 	// MARK: - Drawing
@@ -149,8 +177,12 @@ public final class SpanStrip: NSView {
 		let attributes: [NSAttributedString.Key: Any] = [
 			.font: Theme.monoSmall, .foregroundColor: Theme.faintText,
 		]
-		("0:00" as NSString).draw(at: NSPoint(x: track.minX, y: 2), withAttributes: attributes)
-		let end = Timecode.string(duration) as NSString
+		// The times at the ends are the ends of what is *shown*, which for an
+		// overlay inside an entry is that entry and not the programme.
+		let shown = shown
+		(Timecode.string(shown.start) as NSString)
+			.draw(at: NSPoint(x: track.minX, y: 2), withAttributes: attributes)
+		let end = Timecode.string(shown.end) as NSString
 		end.draw(at: NSPoint(x: track.maxX - end.size(withAttributes: attributes).width, y: 2),
 		         withAttributes: attributes)
 	}
