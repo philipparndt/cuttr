@@ -1070,10 +1070,19 @@ struct BubbleCanvas {
 			+ ((layer as? CAShapeLayer).map { [$0] } ?? [])
 	}
 
-	private func tree(_ path: AnchorPath?, breath: Double = 1) -> CALayer {
+	/// The layers the words are on: a plain layer with an image in it, which is
+	/// the one thing in a bubble's tree that is not a drawn path.
+	private func lettering(in layer: CALayer) -> [CALayer] {
+		((layer.sublayers ?? []).flatMap { lettering(in: $0) })
+			+ (layer is CAShapeLayer || layer.contents == nil ? [] : [layer])
+	}
+
+	private func tree(_ path: AnchorPath?, breath: Double = 1,
+	                  follow: Bool = true) -> CALayer {
 		let overlay = Overlay(
 			kind: .bubble(Bubble(text: "still thinks glitter is a colour", seed: 3,
-			                     breath: breath, at: CGPoint(x: 0.3, y: 0.2))),
+			                     breath: breath, follow: follow,
+			                     at: CGPoint(x: 0.3, y: 0.2))),
 			span: .times(from: 0, to: 2), arrival: .cut, departure: .cut,
 			anchor: path == nil ? nil : "mia-eye", offset: Bubble.standoff)
 		let resolved = ResolvedProject(
@@ -1088,6 +1097,36 @@ struct BubbleCanvas {
 	@Test func aBubbleIsALayer() {
 		#expect(OverlayLayers.isLayered(Overlay(kind: .bubble(Bubble(text: "hi")),
 		                                        span: .times(from: 0, to: 1))))
+	}
+
+	/// The words travel with the paper in the exported tree, on the same moments
+	/// and by the same rule — because a sentence gliding under an outline that is
+	/// stepping would be the type and the paper coming apart.
+	@Test func theWordsAreCarriedWithThePaper() throws {
+		let path = AnchorPath(samples: (0 ... 20).map {
+			(Double($0) / 10, CGPoint(x: 0.2 + Double($0) * 0.03, y: 0.2))
+		})
+		let words = try #require(lettering(in: tree(path)).first)
+		let moving = try #require(words.animation(forKey: "position") as? CAKeyframeAnimation)
+		#expect(moving.calculationMode == .discrete,
+		        "the type glides while the drawing steps: \(moving.calculationMode)")
+		let places = try #require(moving.values as? [NSValue]).map(\.pointValue)
+		#expect(places.count == 16, "two seconds came out as \(places.count) drawings")
+		#expect(places.last!.x > places.first!.x + 100,
+		        "the words went nowhere: \(places.first!) to \(places.last!)")
+
+		// Still, it interpolates instead — there is no drawing beat to step on,
+		// and a sentence sliding smoothly is the best a still bubble can do.
+		let gliding = try #require(lettering(in: tree(path, breath: 0)).first
+			.flatMap { $0.animation(forKey: "position") as? CAKeyframeAnimation })
+		#expect(gliding.calculationMode == .linear)
+
+		// And a pinned one is not animated at all: the words are laid down once
+		// and the file pays for nothing.
+		#expect(lettering(in: tree(path, breath: 0, follow: false)).first?
+			.animation(forKey: "position") == nil)
+		#expect(lettering(in: tree(nil)).first?.animation(forKey: "position") == nil,
+		        "a bubble with nothing to follow is following something")
 	}
 
 	/// The tail is keyframed, at the anchor's own sample times, and every
