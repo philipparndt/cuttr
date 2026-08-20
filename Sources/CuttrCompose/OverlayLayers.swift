@@ -798,7 +798,7 @@ public enum OverlayLayers {
 						overlay: Overlay(kind: .spinner(spinner),
 						                 span: .times(from: resolved.start, to: resolved.end),
 						                 arrival: .cut, departure: .cut),
-						source: resolved.source, appearance: resolved.appearance,
+						origin: resolved.origin, appearance: resolved.appearance,
 						start: resolved.start, end: resolved.end, path: nil)
 					let built = spinnerLayer(spinner, style: TextStyle.caption, size: size,
 					                         resolved: standing, host: host)

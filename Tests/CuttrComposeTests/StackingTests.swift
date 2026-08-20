@@ -19,7 +19,7 @@ import Testing
 			size: pixels.size, project: Project(overlays: overlays),
 			baseURL: URL(fileURLWithPath: "/"),
 			overlays: overlays.enumerated().map { index, overlay in
-				ResolvedOverlay(overlay: overlay, source: index, appearance: 0,
+				ResolvedOverlay(overlay: overlay, origin: .project(index), appearance: 0,
 				                start: 0, end: 10, path: nil)
 			},
 			effects: [], people: nil)

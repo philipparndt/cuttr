@@ -157,7 +157,7 @@ import Testing
 			span: .times(from: 0, to: 4))
 		let resolved = ResolvedProject(
 			project: Project(overlays: [overlay]), clips: [],
-			overlays: [ResolvedOverlay(overlay: overlay, source: 0, appearance: 0, start: 0, end: 4, path: nil)],
+			overlays: [ResolvedOverlay(overlay: overlay, origin: .project(0), appearance: 0, start: 0, end: 4, path: nil)],
 			groups: [], anchors: [])
 		return OverlayLayers.build(resolved, size: CGSize(width: 1920, height: 1080), host: .export)
 	}

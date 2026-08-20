@@ -137,7 +137,7 @@ import Testing
 			overlays: [ResolvedOverlay(
 				overlay: Overlay(kind: .scene("intro", with: [:]), span: .times(from: 0, to: 4),
 				                 arrival: .cut, departure: .cut),
-				source: 0, appearance: 0, start: 0, end: 4, path: nil)],
+				origin: .project(0), appearance: 0, start: 0, end: 4, path: nil)],
 			groups: [], anchors: [])
 	}
 
