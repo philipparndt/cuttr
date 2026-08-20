@@ -363,6 +363,16 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		guard !shown || transcript != self.transcript || words != shownWords
 			|| heard != self.sounds || cast != shownCast
 			|| suggestions != shownSuggestions else { return }
+		// Where the reader is, before the text under them is replaced.
+		//
+		// Naming a speaker lays the pane out again, and setting an attributed
+		// string puts the view back at the top — so somebody labelling line
+		// forty was thrown to line one on every keystroke. The words have not
+		// moved, so neither should the page: kept only when this is the same
+		// take with the same number of words, since a different transcript has
+		// no position worth keeping.
+		let sameText = shown && transcript.count == self.transcript.count
+		let wasAt = scroll.contentView.bounds.origin
 		shown = true
 		shownWords = words
 		shownCast = cast
@@ -525,6 +535,13 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		text.textStorage?.setAttributedString(body)
 		text.setSelectedRange(NSRange(location: 0, length: 0))
 		quiet = false
+		// Before anything asks to be revealed, so that what follows scrolls from
+		// where the reader was rather than from the top. Another take starts at
+		// its beginning, and says so rather than leaving the old offset to be
+		// clamped by whatever happens next.
+		text.layoutManager?.ensureLayout(for: text.textContainer!)
+		scroll.contentView.scroll(to: sameText ? wasAt : .zero)
+		scroll.reflectScrolledClipView(scroll.contentView)
 		if let wanted = wantedCaret {
 			wantedCaret = nil
 			putCaret(at: wanted)
@@ -722,7 +739,20 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		quiet = true
 		text.setSelectedRange(NSRange(location: range.location, length: 0))
 		quiet = false
-		text.scrollRangeToVisible(range)
+		// Only if it is not already on screen. Asking to reveal something that
+		// is visible still nudges the view, and a page that shifts a little on
+		// every keystroke is a page nobody can read while they work.
+		if !isVisible(range) { text.scrollRangeToVisible(range) }
+	}
+
+	/// Whether a stretch of the text is on screen already.
+	private func isVisible(_ range: NSRange) -> Bool {
+		guard let manager = text.layoutManager, let container = text.textContainer else { return false }
+		let glyphs = manager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+		var rect = manager.boundingRect(forGlyphRange: glyphs, in: container)
+		rect.origin.x += text.textContainerInset.width
+		rect.origin.y += text.textContainerInset.height
+		return text.visibleRect.contains(rect)
 	}
 
 	/// The word the caret is in, which is the line a keystroke is about.
@@ -1159,6 +1189,15 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			windowNumber: 0, context: nil, characters: " ",
 			charactersIgnoringModifiers: " ", isARepeat: false, keyCode: 49)!
 		text.keyDown(with: event)
+	}
+
+	/// For the tests: where the pane is scrolled to, and putting it there.
+	var scrollOffsetForTesting: CGFloat { scroll.contentView.bounds.origin.y }
+
+	func scrollForTesting(to y: CGFloat) {
+		text.layoutManager?.ensureLayout(for: text.textContainer!)
+		scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+		scroll.reflectScrolledClipView(scroll.contentView)
 	}
 
 	/// For the tests: the laid-out text, and the menu without a mouse.
