@@ -29,6 +29,14 @@
 	<!-- Dark by default; the timeline is drawn against a fixed dark palette. -->
 	<key>NSRequiresAquaSystemAppearance</key>
 	<false/>
+	<!-- Transcribing a take. The sentence is what somebody reads in the
+	     permission alert, so it says the thing they will want to know: this
+	     happens here, on their Mac, and the footage is not going anywhere.
+	     Required by `SFSpeechRecognizer`, which is the fallback on a system
+	     without `SpeechAnalyzer`; the app would be killed for asking without
+	     it. -->
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>cuttr transcribes a take on this Mac, so you can cut it by selecting the words. Nothing is uploaded.</string>
 	<!-- The cut list. Declared so that a double-click opens it here and so
 	     that the open panel can filter to it; it is UTF-8 YAML, and the
 	     conformance says so rather than pretending it is opaque. -->

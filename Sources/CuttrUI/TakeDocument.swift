@@ -106,7 +106,7 @@ public final class TakeDocument {
 	}
 
 	/// Renames a clip, and re-derives its slug unless somebody has claimed it.
-	public func setName(_ name: String, for id: Clip.ID) {
+	public func setName(_ name: String, for id: Clip.ID, actionName: String = "Rename Clip") {
 		guard let index = take.clips.firstIndex(where: { $0.id == id }) else { return }
 		var next = take
 		next.clips[index].name = name
@@ -115,7 +115,7 @@ public final class TakeDocument {
 			taken.remove(next.clips[index].slug)
 			next.clips[index].slug = Slug.unique(Slug.make(from: name), taken: taken)
 		}
-		apply(next, actionName: "Rename Clip")
+		apply(next, actionName: actionName)
 	}
 
 	/// Sets a slug by hand, and stops deriving it from the name from now on.
@@ -249,6 +249,55 @@ public final class TakeDocument {
 			else { continue }
 			anchorPaths[anchor.name] = AnchorPath.read(text)
 		}
+	}
+
+	// MARK: - Words
+
+	/// What was said, once it has been worked out or read back.
+	///
+	/// Empty until one or the other happens, and it is asked for *once*: the
+	/// sidecar is read when the take is opened and the recogniser is run only
+	/// when somebody asks for it. Transcribing on every open would be a minute
+	/// of somebody's machine, every time, for an answer that has not changed.
+	public private(set) var transcript = Transcript()
+
+	/// Records a transcript and writes it beside the take.
+	///
+	/// The take gains a `words:` key, so this is an edit and it is undoable.
+	/// The sidecar is written straight away rather than at save: it is a
+	/// measurement and not a decision, and the alternative is a take file
+	/// pointing at a file that is not there yet.
+	public func setTranscript(
+		_ transcript: Transcript, recogniser: Words.Recogniser, locale: String
+	) throws {
+		self.transcript = transcript
+		var next = take
+		next.words = Words(
+			path: take.words?.path ?? "words/\(Slug.make(from: displayName)).words",
+			recogniser: recogniser, locale: locale)
+		apply(next, actionName: "Transcribe")
+		try writeWords()
+	}
+
+	private func writeWords() throws {
+		guard let baseURL, let words = take.words else { onChange?(); return }
+		let url = URL(fileURLWithPath: words.path, relativeTo: baseURL)
+		try FileManager.default.createDirectory(
+			at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+		try transcript
+			.write(name: displayName, recogniser: words.recogniser.rawValue, locale: words.locale)
+			.write(to: url, atomically: true, encoding: .utf8)
+		onChange?()
+	}
+
+	/// Reads the sidecar the take names. Called after opening one.
+	public func loadWords() {
+		transcript = Transcript()
+		guard let baseURL, let words = take.words,
+		      let text = try? String(
+			      contentsOf: URL(fileURLWithPath: words.path, relativeTo: baseURL), encoding: .utf8)
+		else { return }
+		transcript = Transcript.read(text)
 	}
 
 	/// Trimming from the table or the context menu.
@@ -428,6 +477,7 @@ public final class TakeDocument {
 		manualSlugs = Set(take.clips.map(\.id))   // every slug in a file is somebody's
 		undoManager.removeAllActions()
 		loadAnchorPaths()
+		loadWords()
 		onChange?()
 		loadMedia()
 	}
@@ -447,6 +497,10 @@ public final class TakeDocument {
 		}
 		take = next
 		try TakeWriter.write(take).write(to: fileURL, atomically: true, encoding: .utf8)
+		// A take transcribed before it was ever saved has its words in memory
+		// and nowhere else. This is the first moment there is a folder to put
+		// them beside, so they go now rather than at the next transcription.
+		if !transcript.isEmpty { try? writeWords() }
 		savedTake = take
 		onChange?()
 		NotificationCenter.default.post(name: .cuttrTakeChanged, object: fileURL.standardizedFileURL)

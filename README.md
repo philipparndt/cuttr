@@ -46,6 +46,8 @@ Needs macOS 14 or newer. To build it yourself instead, see [Building](#building)
 - Lines the two up — automatically, by correlating what both microphones heard,
   and then by ear and by hand to the millisecond.
 - Cuts the take into named subclips, at speed, from the keyboard.
+- Transcribes it on your own machine, so a sentence you can read is a clip you
+  can make.
 - Writes a cut list an editor and a `git diff` can both read.
 - Imports subclips you already made in DaVinci Resolve.
 
@@ -111,6 +113,8 @@ naming a clip is the same keystroke that made it.
 | `I` `O` | set in / out |
 | `⏎` | make a clip from the in/out span — or, with none, jump to the selected clip's start |
 | `N`, double-click | rename the selected clip, in place on its bar |
+| `W` | name the selected clip after its first words |
+| `⌥⌘T` | transcribe this take, on this Mac |
 | `1`…`6` | colour the selected clip, and the next one you cut |
 | `⌫` | delete the selected clip |
 | `A` | find the audio offset automatically |
@@ -179,6 +183,69 @@ Then use your ears. Set the monitor to **Both** and nudge with `[` and `]`:
 two recordings of one room comb-filter against each other, and the hollow,
 flanging sound disappears at exactly the right offset. That is a far finer
 instrument than lining up two waveforms by eye.
+
+## The transcript — cutting by reading
+
+`⌥⌘T`, or the button on the **words** pane, transcribes the take **on this
+Mac**. `SpeechAnalyzer` with a `SpeechTranscriber` module, asked for word-level
+times; on a system without it, `SFSpeechRecognizer` pinned to on-device. Nothing
+is uploaded, and the one recogniser that might have — an `SFSpeechRecognizer`
+that says it cannot work offline for your language — is refused rather than
+used, with a message saying so. The first take in a language may spend a minute
+fetching the model; it stays on the machine.
+
+Then the take is words you can cut with:
+
+- **drag across a sentence** and it becomes the in/out span — `⏎` makes a clip
+  of exactly what was said;
+- **click a word** and the playhead goes there;
+- **play**, and the word being spoken is lit;
+- **type a phrase** in the field to be taken to it, selected and ready for `⏎`;
+- **`W`** names the selected clip after its first words, which is how `clip-7`
+  becomes `so-the-driver-installs` without anybody typing it.
+
+**The times are on the video's clock.** The recogniser listens to whichever file
+has the better microphone — the separate recorder, on a real shoot — and that
+file has a clock of its own, so `audio + offset = video` is applied to every
+word before it is written down. Re-align the take afterwards and the transcript
+is as re-alignable as the cuts are.
+
+The words go in a sidecar the take names, the way an anchor's path does:
+
+```yaml
+words:
+  path:       words/take-01.words
+  recogniser: speech-analyzer   # on this machine; nothing was uploaded
+  locale:     de-DE
+```
+
+```
+# cuttr transcript — take-01
+# speech-analyzer, de-DE, times on the video's clock
+# start      end        word
+7.867      8.167      Jetzt
+8.167      8.407      hat
+```
+
+Three columns, because a recogniser mishears a name once per take and always
+the same way, and in this format that is one line to correct in an editor. The
+recogniser and the locale are in the take file because a transcript is a claim,
+and next year "what wrote this, and in what language" is the first question.
+`words: words/by-hand.words` on its own is the short form, for a file you made
+yourself.
+
+It is asked for **once**. The sidecar is read when the take is opened; the
+button says "Again" when there are already words, because re-transcribing is a
+minute of your machine for an answer that has not changed.
+
+Measured against a five-minute German take whose recorder was rolling 11.093 s
+before the camera: 430 words in twelve seconds of wall clock. Twenty-seven
+places where speech restarts after a pause, checked against the camera's *own*
+microphone with ffmpeg's `silencedetect`, agreed to a median of 89 ms and were
+as close at 303 seconds as at 7 — no drift, only the difference between a close
+mic and one across the room. Transcribing the camera's track instead needs no
+offset at all, and the two independent transcripts agree on when speech starts
+to a median of **7 ms**.
 
 ## Importing from DaVinci Resolve
 
@@ -762,6 +829,7 @@ so the intended way to work is to keep it open beside your editor.
 
 ## What is next
 
-- **A transcript pane.** The model was built for it: a transcript is one more
-  way to place a mark, not a different kind of document.
+- **Splitting on pauses, finding filler words, grouping repeated takes.** All
+  three are easy now that the words and their times exist, and all three are
+  about a transcript rather than about transcribing.
 - **Cross-fades.** `transition:` is in the format and read; the renderer cuts.

@@ -149,6 +149,27 @@ public enum TakeReader {
 				path: nonEmpty(m["path"] as? String ?? "")))
 		}
 
+		// The words, and what made them. Two spellings for the same reason the
+		// audio has two: `words: words/take-01.words` is the whole thing when
+		// nobody has anything to add, and it is what somebody writes by hand
+		// after correcting a file themselves.
+		var words: Words?
+		if let raw = root.removeValue(forKey: "words") {
+			if let path = nonEmpty(raw as? String ?? "") {
+				words = Words(path: path, recogniser: .hand, locale: "")
+			} else if let m = mapping(raw), let path = nonEmpty(m["path"] as? String ?? "") {
+				words = Words(
+					path: path,
+					// An unfamiliar recogniser reads as a hand-made file rather
+					// than failing the read: a later version may add one, and a
+					// take is worth more than the name of the model that wrote
+					// its transcript.
+					recogniser: (m["recogniser"] as? String)
+						.flatMap(Words.Recogniser.init(rawValue:)) ?? .hand,
+					locale: nonEmpty(m["locale"] as? String ?? "") ?? "")
+			}
+		}
+
 		var measured = Measured()
 		if let m = root.removeValue(forKey: "measured").flatMap(mapping) {
 			measured.loudness = number(m["loudness"])
@@ -171,7 +192,7 @@ public enum TakeReader {
 			}
 		}
 
-		return Take(video: video, audio: audio, clips: clips, anchors: anchors,
+		return Take(video: video, audio: audio, clips: clips, anchors: anchors, words: words,
 		            measured: measured, look: look, source: source, unknownKeys: root)
 	}
 
@@ -300,6 +321,24 @@ public enum TakeWriter {
 			if let gain = take.look.gain {
 				out += "  gain:       [\(gain.map { number($0, places: 4) }.joined(separator: ", "))]"
 				out += "   # matched to the reference\n"
+			}
+		}
+
+		// The transcript, above the anchors: both are sidecars this take names,
+		// and both are analysis rather than anything somebody typed.
+		if let words = take.words {
+			if words.recogniser == .hand, words.locale.isEmpty {
+				// Nothing to say beyond where the file is — which is the shape
+				// a hand-written or hand-corrected take arrives in.
+				out += "\nwords: \(scalar(words.path))\n"
+			} else {
+				out += "\nwords:\n"
+				out += "  path:       \(scalar(words.path))\n"
+				out += "  recogniser: \(words.recogniser.rawValue)"
+				out += "   # on this machine; nothing was uploaded\n"
+				if !words.locale.isEmpty {
+					out += "  locale:     \(scalar(words.locale))\n"
+				}
 			}
 		}
 

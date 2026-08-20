@@ -151,6 +151,49 @@ import Testing
 		#expect(!TakeWriter.write(take).contains("anchors:"))
 	}
 
+	@Test func theTranscriptIsANamedSidecarAndRoundTrips() throws {
+		let take = Take(video: "a.mov",
+		                clips: [Clip(slug: "a", start: 0, end: 1)],
+		                words: Words(path: "words/take-01.words",
+		                             recogniser: .speechAnalyzer, locale: "de-DE"))
+		let text = TakeWriter.write(take)
+		#expect(text.contains("words:"))
+		#expect(text.contains("path:       words/take-01.words"))
+		// Which model, and in which language. A suggestion nobody can trace is
+		// one nobody trusts next year.
+		#expect(text.contains("recogniser: speech-analyzer"))
+		#expect(text.contains("locale:     de-DE"))
+		#expect(try TakeReader.read(text) == take)
+		#expect(TakeWriter.write(take) == text)
+	}
+
+	@Test func aTranscriptSomebodyWroteThemselvesIsOneLine() throws {
+		// The same two spellings the audio has: the short form is what a person
+		// writes when there is nothing to say beyond where the file is.
+		let take = try TakeReader.read("video: a.mov\nwords: words/by-hand.words\n")
+		#expect(take.words?.path == "words/by-hand.words")
+		#expect(take.words?.recogniser == .hand)
+		let text = TakeWriter.write(take)
+		#expect(text.contains("words: words/by-hand.words"))
+		#expect(try TakeReader.read(text) == take)
+	}
+
+	@Test func aRecogniserThisVersionDoesNotKnowIsNotAFailure() throws {
+		let take = try TakeReader.read("""
+		video: a.mov
+		words:
+		  path: words/a.words
+		  recogniser: whisper-large-v9
+		  locale: de-DE
+		""")
+		#expect(take.words?.path == "words/a.words")
+		#expect(take.words?.recogniser == .hand)
+	}
+
+	@Test func aTakeWithNoTranscriptWritesNoWordsBlock() {
+		#expect(!TakeWriter.write(Take(video: "a.mov")).contains("words:"))
+	}
+
 	@Test func keysFromANewerVersionAreNotDeleted() throws {
 		let original = """
 		cuttr: 1
