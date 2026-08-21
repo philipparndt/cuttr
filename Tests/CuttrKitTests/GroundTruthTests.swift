@@ -129,6 +129,31 @@ import Testing
 		#expect(score.wrong.first?.truth == "papa")
 	}
 
+	/// A pass taught by lines somebody answered has no permutation to hide
+	/// behind, and the two figures say so separately.
+	///
+	/// Blind, the clusters have no names of their own and calling the same two
+	/// people A and B rather than B and A is not an error. Taught, the names are
+	/// the ones somebody chose, and calling `mia` `papa` throughout is exactly
+	/// as wrong as it sounds — letting it permute would flatter it into a
+	/// hundred per cent.
+	@Test func aTaughtPassIsMarkedUnderTheNamesItChose() {
+		let said = fourLines()
+		let starts = said.lines.map(\.lowerBound)
+		let swapped = [starts[0]: "papa", starts[1]: "mia",
+		               starts[2]: "papa", starts[3]: "mia"]
+		let score = alternating.score(swapped, against: said)
+		#expect(score.correct == 4)
+		#expect(score.agreed == 0)
+		#expect(score.agreement == 0)
+		// And right in the names it chose scores full marks on both counts.
+		let straight = [starts[0]: "mia", starts[1]: "papa",
+		                starts[2]: "mia", starts[3]: "papa"]
+		let right = alternating.score(straight, against: said)
+		#expect(right.agreed == 4)
+		#expect(right.agreement == 1)
+	}
+
 	/// Labels that belong to a different recording line up with nothing, and
 	/// that is answered rather than scored as a rout.
 	@Test func labelsForAnotherTakeMatchNothing() {

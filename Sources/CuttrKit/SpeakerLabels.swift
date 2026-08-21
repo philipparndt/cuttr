@@ -91,6 +91,15 @@ public struct SpeakerLabels: Sendable, Equatable {
 	/// How a pass did.
 	public struct Score: Sendable {
 		public let correct: Int
+		/// Lines it got right under the names it actually chose, with no
+		/// permutation allowed.
+		///
+		/// The honest figure whenever the voices were *named* rather than
+		/// numbered — a pass taught by two answered lines has no freedom to
+		/// have called the same two people the other way round, so letting it
+		/// permute would flatter it. Read ``correct`` for a blind pass and this
+		/// for a taught one.
+		public let agreed: Int
 		/// Lines the method answered *and* the labels have an answer for.
 		public let placed: Int
 		/// Lines the labels have an answer for at all — the denominator that
@@ -104,6 +113,11 @@ public struct SpeakerLabels: Sendable, Equatable {
 		/// Of every line somebody labelled, whether the method answered or not.
 		public var accuracy: Double {
 			labelled > 0 ? Double(correct) / Double(labelled) : 0
+		}
+
+		/// The same, by the names it chose. See ``agreed``.
+		public var agreement: Double {
+			labelled > 0 ? Double(agreed) / Double(labelled) : 0
 		}
 
 		/// Of the lines it was willing to answer.
@@ -144,7 +158,9 @@ public struct SpeakerLabels: Sendable, Equatable {
 		let wrong = said
 			.filter { line in line.given.flatMap { best.1[$0] } != line.truth }
 			.map { (at: $0.at, said: $0.given.flatMap { best.1[$0] }, truth: $0.truth) }
-		return Score(correct: best.0, placed: said.filter { $0.given != nil }.count,
+		let agreed = said.reduce(0) { $0 + ($1.given == $1.truth ? 1 : 0) }
+		return Score(correct: best.0, agreed: agreed,
+		             placed: said.filter { $0.given != nil }.count,
 		             labelled: said.count, naming: best.1, wrong: wrong)
 	}
 

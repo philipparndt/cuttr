@@ -50,14 +50,26 @@ func usage() -> Never {
 	            in are named after her.
 
 	  --speakers <take.cuttr> [--truth labels] [--method m] [--voices n]
+	            [--taught n] [--trials t] [--blind]
 	            work out who is speaking in each line of that take's transcript,
 	            and print it. With --truth, score it against a file of hand-made
 	            labels — a time and a name per line, see Tests/Fixtures — and
 	            print the accuracy, which is the only honest way to decide
-	            whether a method is worth offering at all.
+	            whether a method is worth offering at all. Where the sidecar
+	            already names speakers, those are the labels and --truth is not
+	            needed.
+	            --taught n hands the pass only n answered lines per speaker and
+	            scores it on the rest, which is the workflow the pane has:
+	            answer two lines, ask, check the other sixty-six. --trials t
+	            repeats that with t different draws and averages, because which
+	            two lines somebody happened to answer moves the figure by twenty
+	            points and one draw is not a measurement.
+	            --blind makes it cluster instead of being taught by the names
+	            already there, which is what it used to do and is the column the
+	            table in docs/speakers.md is read against.
 	            Methods: timbre (the default; no model, nothing fetched),
 	            voice-analytics, embedding, mouth. See docs/speakers.md for what
-	            each one scored on the take this was built against.
+	            each one scored on the takes this was built against.
 
 	  --faces   what Vision can see in one frame, and where. Answers "is there
 	            a face here for an anchor to lock on to?" before spending a
@@ -81,6 +93,9 @@ var speakersIn: String?
 var truthPath: String?
 var method = SpeakerProposal.Method.timbre
 var voices = 2
+var taught = 0
+var trials = 1
+var blind = false
 var mouthSamples = SpeakerProposal.mouthSamples
 var spanFrom = 0.0
 var spanTo = 0.0
@@ -122,6 +137,16 @@ while index < arguments.count {
 		index += 1
 		guard index < arguments.count, let value = Int(arguments[index]), value >= 2 else { usage() }
 		voices = value
+	case "--blind":
+		blind = true
+	case "--taught":
+		index += 1
+		guard index < arguments.count, let value = Int(arguments[index]), value >= 0 else { usage() }
+		taught = value
+	case "--trials":
+		index += 1
+		guard index < arguments.count, let value = Int(arguments[index]), value >= 1 else { usage() }
+		trials = value
 	case "--speaking":
 		index += 1
 		guard index < arguments.count else { usage() }
@@ -168,6 +193,33 @@ func fail(_ message: String) -> Never {
 	exit(1)
 }
 
+/// A shuffle with the seed written down.
+///
+/// For `--taught`: which lines somebody happened to answer moves the accuracy
+/// by twenty points, so one draw is an anecdote and the average of twenty-five
+/// is a measurement. Seeded rather than random, because a figure quoted in
+/// `docs/speakers.md` has to come back the same tomorrow.
+struct Dice {
+	var state: UInt64
+
+	mutating func next() -> UInt64 {
+		state = state &+ 0x9E37_79B9_7F4A_7C15
+		var z = state
+		z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+		z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+		return z ^ (z >> 31)
+	}
+
+	mutating func shuffled<T>(_ items: [T]) -> [T] {
+		var out = items
+		guard out.count > 1 else { return out }
+		for index in (1 ..< out.count).reversed() {
+			out.swapAt(index, Int(next() % UInt64(index + 1)))
+		}
+		return out
+	}
+}
+
 if let speakersIn {
 	let takeURL = URL(fileURLWithPath: speakersIn).standardizedFileURL
 	let directory = takeURL.deletingLastPathComponent()
@@ -211,19 +263,93 @@ if let speakersIn {
 			URL(fileURLWithPath: $0, relativeTo: directory).standardizedFileURL
 		}
 
-		let clock = Date()
-		let offer = try await SpeakerProposal.propose(
-			for: said, audio: listenTo, offset: offset, method: method, voices: voices,
-			locale: take.words?.locale ?? "", video: videoURL, faces: faces,
-			samples: mouthSamples)
-		let took = Date().timeIntervalSince(clock)
-
 		let lines = said.lines
+
+		// Where the labels come from. A file when one is named; otherwise the
+		// sidecar's own `# speaker:` markers, which is what somebody labelling
+		// a take by hand in the app has already produced. Either way a label is
+		// a time and a name and never a word — see `SpeakerLabels`.
+		var truth = SpeakerLabels()
+		if let truthPath {
+			truth = SpeakerLabels.read(
+				try String(contentsOf: URL(fileURLWithPath: truthPath), encoding: .utf8))
+			guard !truth.isEmpty else { fail("no labels in \(truthPath)") }
+		} else {
+			truth = SpeakerLabels(labels: lines.compactMap { line in
+				guard let span = said.span(line), let who = said.speaker(ofLine: line)
+				else { return nil }
+				return SpeakerLabels.Label(at: span.start, who: who)
+			})
+		}
+
+		/// One measurement: hand the pass `asked` and score what comes back
+		/// against the lines it was not told about.
+		func measure(_ asked: Transcript, withheld: SpeakerLabels) async throws
+			-> (offer: SpeakerProposal.Offer, score: SpeakerLabels.Score?, took: Double) {
+			let clock = Date()
+			let offer = try await SpeakerProposal.propose(
+				for: asked, audio: listenTo, offset: offset, method: method, voices: voices,
+				locale: take.words?.locale ?? "", video: videoURL, faces: faces,
+				samples: mouthSamples, blind: blind)
+			let took = Date().timeIntervalSince(clock)
+			guard !withheld.isEmpty else { return (offer, nil, took) }
+			return (offer, withheld.score(offer.byLine, against: asked), took)
+		}
+
+		if taught > 0 {
+			guard !truth.isEmpty else { fail("nothing to teach it — this take has no labels") }
+			// Which lines are given away, and a different draw each trial. The
+			// dice are seeded, so the same command prints the same number.
+			var dice = Dice(state: 0x5EED)
+			var totals = (agreement: 0.0, placed: 0.0, withheld: 0.0, separation: 0.0, runs: 0.0)
+			for trial in 0 ..< trials {
+				var pool: [String: [Int]] = [:]
+				for (index, line) in lines.enumerated() {
+					guard let who = said.speaker(ofLine: line) else { continue }
+					pool[who, default: []].append(index)
+				}
+				var given = Set<Int>()
+				for who in pool.keys.sorted() {
+					// The first n in time order for the first trial, so one run
+					// of this command is reproducible without a seed in it.
+					let order = trial == 0 ? pool[who]! : dice.shuffled(pool[who]!)
+					given.formUnion(order.prefix(taught))
+				}
+				var asked = said
+				var withheld: [SpeakerLabels.Label] = []
+				for (index, line) in lines.enumerated() where !given.contains(index) {
+					if let span = said.span(line), let who = truth.who(at: span.start) {
+						withheld.append(SpeakerLabels.Label(at: span.start, who: who))
+					}
+					asked.assign(nil, to: line)
+				}
+				let (offer, score, _) = try await measure(
+					asked, withheld: SpeakerLabels(labels: withheld))
+				guard let score, score.labelled > 0 else { continue }
+				totals.agreement += score.agreement
+				totals.placed += Double(score.placed)
+				totals.withheld += Double(score.labelled)
+				totals.separation += offer.separation
+				totals.runs += 1
+			}
+			guard totals.runs > 0 else { fail("no trial had anything to score") }
+			print("\(method.rawValue), taught \(taught) line(s) per speaker,"
+				+ " \(Int(totals.runs)) draw(s) of \(lines.count) lines")
+			print(String(
+				format: "agreement %.1f%% of the %.0f lines withheld, %.0f offered, separation %.3f",
+				totals.agreement / totals.runs * 100, totals.withheld / totals.runs,
+				totals.placed / totals.runs, totals.separation / totals.runs))
+			print(String(format: "always answering the commonest: %.1f%%", truth.commonest * 100))
+			exit(0)
+		}
+
+		let (offer, score, took) = try await measure(said, withheld: truth)
 		print("\(method.rawValue): \(lines.count) lines, \(offer.byLine.count) placed,"
 			+ " \(offer.skipped) too short or too quiet,"
+			+ (offer.taught ? " taught by the names already there," : " clustered blind,")
 			+ String(format: " separation %.3f, %.1fs", offer.separation, took))
 
-		guard let truthPath else {
+		guard let score else {
 			for line in lines {
 				let who = offer.byLine[line.lowerBound] ?? "\u{2014}"
 				print(who.padding(toLength: 12, withPad: " ", startingAt: 0)
@@ -231,14 +357,6 @@ if let speakersIn {
 			}
 			exit(0)
 		}
-
-		// Labels are a time and a name, with no words in them — see
-		// `SpeakerLabels`. They are matched to the take by time, so a change to
-		// how lines are divided cannot silently shift every label by one.
-		let truth = SpeakerLabels.read(
-			try String(contentsOf: URL(fileURLWithPath: truthPath), encoding: .utf8))
-		guard !truth.isEmpty else { fail("no labels in \(truthPath)") }
-		let score = truth.score(offer.byLine, against: said)
 		guard score.labelled > 0 else {
 			fail("none of the \(truth.count) labels line up with this take's lines —"
 				+ " are they the same recording?")
@@ -246,6 +364,7 @@ if let speakersIn {
 		print(String(format: "accuracy %.1f%% of the %d lines labelled, %.1f%% of the %d it placed",
 		             score.accuracy * 100, score.labelled,
 		             score.accuracyWherePlaced * 100, score.placed))
+		print(String(format: "agreement under the names it chose: %.1f%%", score.agreement * 100))
 		print(String(format: "always answering the commonest: %.1f%%", truth.commonest * 100))
 		print("wrong lines:")
 		for line in score.wrong {

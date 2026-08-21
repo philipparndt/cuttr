@@ -8,6 +8,14 @@ import Foundation
 /// back which cluster each belongs to, which is the part with a right answer
 /// and the part worth testing on numbers somebody wrote down.
 ///
+/// **Two questions, and the second is much easier.** ``cluster(_:into:distance:rounds:)``
+/// is handed unnamed points and has to find the clumps; ``place(_:as:rounds:prior:shrink:trust:)``
+/// is handed a few points somebody has already named and only has to say which
+/// of *those* each remaining point resembles. Measured on real footage the
+/// second is worth twenty points of accuracy over the first, which is the whole
+/// reason it exists: answering two lines by hand is cheap and it turns the
+/// problem into one with a right answer to aim at. See `docs/speakers.md`.
+///
 /// **Deterministic on purpose.** The usual k-means starts from random centres
 /// and gives a different answer every run. Here that would mean the same take
 /// proposed as two speakers this morning and the other way round this
@@ -162,6 +170,183 @@ public enum SpeakerClustering {
 			guard left > 1e-12, right > 1e-12 else { return 1 }
 			return 1 - dot / (left.squareRoot() * right.squareRoot())
 		}
+	}
+
+	// MARK: - Placing lines against voices somebody has named
+
+	/// A voice, as the spread of the measurements that belong to it.
+	///
+	/// A mean and a variance per dimension and no covariance between them.
+	/// That is not a shortcut taken for speed: a full covariance over
+	/// twenty-four dimensions has three hundred numbers in it and needs
+	/// hundreds of examples to estimate, and the whole point here is to work
+	/// from the two lines somebody could be bothered to answer.
+	public struct Voice: Sendable, Equatable {
+		public let mean: [Double]
+		public let variance: [Double]
+		/// How many measurements went into it. What decides how much of the
+		/// mean is believed and how much is borrowed.
+		public let count: Int
+
+		public init(mean: [Double], variance: [Double], count: Int) {
+			self.mean = mean
+			self.variance = variance
+			self.count = count
+		}
+
+		/// The mean and variance of these points, per dimension.
+		public static func fit(_ points: [[Double]], width: Int) -> Voice {
+			var mean = [Double](repeating: 0, count: width)
+			guard !points.isEmpty else {
+				return Voice(mean: mean, variance: [Double](repeating: 1, count: width), count: 0)
+			}
+			for point in points {
+				for column in 0 ..< Swift.min(width, point.count) { mean[column] += point[column] }
+			}
+			for column in 0 ..< width { mean[column] /= Double(points.count) }
+			var variance = [Double](repeating: 0, count: width)
+			for point in points {
+				for column in 0 ..< Swift.min(width, point.count) {
+					let step = point[column] - mean[column]
+					variance[column] += step * step
+				}
+			}
+			for column in 0 ..< width { variance[column] /= Double(points.count) }
+			return Voice(mean: mean, variance: variance, count: points.count)
+		}
+
+		/// This voice pulled towards the take's own average.
+		///
+		/// Two lines do not know the shape of a voice. They know a little about
+		/// where it sits, and nothing at all about how much it moves — one line
+		/// has a variance of exactly zero, which as a likelihood says every
+		/// other line in the take is impossible. So the variance is mostly
+		/// borrowed from the take as a whole, and the mean is pulled towards it
+		/// by a fixed weight: with `prior` at a fifth of a line, two answered
+		/// lines are believed nearly outright and one is held at arm's length.
+		///
+		/// This is the relevance factor every speaker system since the
+		/// nineties has had in it, under one name or another.
+		public func tempered(towards world: Voice, prior: Double, shrink: Double) -> Voice {
+			let weight = Double(count)
+			var mean = self.mean
+			var variance = self.variance
+			for column in mean.indices {
+				mean[column] = (weight * self.mean[column] + prior * world.mean[column])
+					/ (weight + prior)
+				variance[column] = Swift.max(
+					shrink * world.variance[column] + (1 - shrink) * self.variance[column], 1e-9)
+			}
+			return Voice(mean: mean, variance: variance, count: count)
+		}
+
+		/// How likely this voice is to have produced that measurement, as a
+		/// logarithm. Only differences between voices are ever read off it, so
+		/// the constant term is kept for tidiness rather than for use.
+		public func likelihood(of point: [Double]) -> Double {
+			var total = 0.0
+			for column in 0 ..< Swift.min(mean.count, point.count) {
+				let step = point[column] - mean[column]
+				total -= 0.5 * (Foundation.log(2 * Double.pi * variance[column])
+					+ step * step / variance[column])
+			}
+			return total
+		}
+	}
+
+	/// Which named voice each point sounds most like.
+	public struct Placing: Sendable, Equatable {
+		/// The voices, in the order the names sort.
+		public let names: [String]
+		/// Per point, an index into ``names``.
+		public let chosen: [Int]
+		/// Per point, how much likelier the chosen voice is than the next one,
+		/// as a difference of logarithms. Zero is a coin toss.
+		public let margin: [Double]
+		/// The silhouette of the arrangement it settled on — a remark rather
+		/// than a gate. Where the voices are given, a low figure says the two
+		/// people sound alike, not that a line was drawn through one blob.
+		public let separation: Double
+
+		public init(names: [String], chosen: [Int], margin: [Double], separation: Double) {
+			self.names = names
+			self.chosen = chosen
+			self.margin = margin
+			self.separation = separation
+		}
+	}
+
+	/// Which of the named voices each point belongs to.
+	///
+	/// `named` says who some of the points are, by index. Everything else is
+	/// placed with whichever of those voices makes it likeliest — a
+	/// nearest-neighbour question with the variance of the take in it, which is
+	/// a far easier question than "how many voices are there and where".
+	///
+	/// `rounds` is self-training: after the first pass, the points that were
+	/// sure of themselves join their voice and everything is asked again. One
+	/// round measured better than none and better than four — more data per
+	/// voice helps, and a model taught by its own guesses eventually only
+	/// believes itself.
+	public static func place(
+		_ points: [[Double]], as named: [Int: String],
+		rounds: Int = 1, prior: Double = 0.2, shrink: Double = 0.5, trust: Double = 1
+	) -> Placing {
+		let names = Set(named.values).sorted()
+		guard let width = points.first?.count, width > 0, names.count >= 2 else {
+			return Placing(names: names, chosen: [], margin: [], separation: 0)
+		}
+		let world = Voice.fit(points, width: width)
+
+		// In index order, not dictionary order. Swift seeds its hashing per
+		// process, so summing a voice's points in the order a dictionary
+		// happens to hold them gives a slightly different mean every launch —
+		// and a line near the boundary between two voices then changes its
+		// answer between one run and the next. A suggestion that moves is a
+		// suggestion nobody can check.
+		func voices(_ owners: [Int: String]) -> [Voice] {
+			names.map { name in
+				let mine = points.indices.filter { owners[$0] == name }.map { points[$0] }
+				return Voice.fit(mine, width: width)
+					.tempered(towards: world, prior: prior, shrink: shrink)
+			}
+		}
+		func place(_ voices: [Voice]) -> (chosen: [Int], margin: [Double]) {
+			var chosen = [Int](repeating: 0, count: points.count)
+			var margin = [Double](repeating: 0, count: points.count)
+			for (index, point) in points.enumerated() {
+				let scores = voices.map { $0.likelihood(of: point) }
+				var best = (0, -Double.infinity), second = -Double.infinity
+				for (voice, score) in scores.enumerated() {
+					if score > best.1 { second = best.1; best = (voice, score) }
+					else if score > second { second = score }
+				}
+				chosen[index] = best.0
+				margin[index] = second.isFinite ? best.1 - second : 0
+			}
+			return (chosen, margin)
+		}
+
+		var answer = place(voices(named))
+		for _ in 0 ..< Swift.max(rounds, 0) {
+			var owners = named
+			for index in points.indices where named[index] == nil {
+				guard answer.margin[index] >= trust else { continue }
+				owners[index] = names[answer.chosen[index]]
+			}
+			answer = place(voices(owners))
+		}
+		// The lines somebody answered are what they said they were, whatever the
+		// arithmetic makes of them. Anything else would quietly contradict the
+		// person who is being helped.
+		for (index, name) in named {
+			guard let voice = names.firstIndex(of: name) else { continue }
+			answer.chosen[index] = voice
+			answer.margin[index] = .infinity
+		}
+		return Placing(
+			names: names, chosen: answer.chosen, margin: answer.margin,
+			separation: silhouette(points, labels: answer.chosen))
 	}
 
 	// MARK: - Whether the split is real

@@ -62,12 +62,23 @@ public enum SpeakerProposal {
 		/// The lines that were too short or too quiet to measure, and so were
 		/// left alone rather than guessed at.
 		public let skipped: Int
+		/// Whether the answer was taught by lines somebody had already
+		/// answered, or found from nothing.
+		///
+		/// Worth telling apart, because the two are not equally good and they
+		/// do not fail in the same way. Taught, the voices are given and the
+		/// names are the ones somebody chose; blind, the clusters are found and
+		/// then numbered, and ``separation`` is the only thing standing between
+		/// a real split and a line drawn through one blob.
+		public let taught: Bool
 
-		public init(byLine: [Int: String], separation: Double, method: Method, skipped: Int) {
+		public init(byLine: [Int: String], separation: Double, method: Method,
+		            skipped: Int, taught: Bool = false) {
 			self.byLine = byLine
 			self.separation = separation
 			self.method = method
 			self.skipped = skipped
+			self.taught = taught
 		}
 
 		public var isEmpty: Bool { byLine.isEmpty }
@@ -98,11 +109,18 @@ public enum SpeakerProposal {
 
 	/// Who is speaking in each line of `transcript`.
 	///
-	/// `names` is what the clusters are called. When somebody has already
-	/// labelled a few lines by hand, pass their slugs and the clusters take the
-	/// name of whoever is already in them — which is the useful way round:
-	/// answer two lines, and the pass does the other sixty-six. With nothing to
-	/// go on it numbers them, and accepting the offer puts those numbers in the
+	/// **Two lines answered by hand change the question.** With two or more
+	/// speakers already named in the transcript, this does not cluster at all:
+	/// it takes those lines as examples of what each person sounds like and asks
+	/// of every other line which of them it resembles — see
+	/// ``SpeakerClustering/place(_:as:rounds:prior:shrink:trust:)``. That is
+	/// worth twenty points of accuracy on real footage, and it is the workflow
+	/// the pane was always described as having: answer two lines, and the pass
+	/// does the other sixty-six.
+	///
+	/// With nothing to go on it falls back to clustering blind into `voices`
+	/// clusters, names them from `names` or numbers them, and refuses outright
+	/// below ``leastSeparation``. Accepting that offer puts the numbers in the
 	/// cast.
 	public static func propose(
 		for transcript: Transcript,
@@ -114,7 +132,8 @@ public enum SpeakerProposal {
 		locale: String = "",
 		video: URL? = nil,
 		faces: [SpeakerDetector.Candidate] = [],
-		samples: Int = mouthSamples
+		samples: Int = mouthSamples,
+		blind: Bool = false
 	) async throws -> Offer {
 		let lines = transcript.lines
 		guard lines.count >= voices * 2, voices >= 2 else {
@@ -187,13 +206,42 @@ public enum SpeakerProposal {
 			distance = .euclidean
 		}
 
-		// Clustered on the lines worth measuring only. A line of silence
-		// dragged into the arithmetic pulls a centre towards the room tone.
+		// Measured on the lines worth measuring only. A line of silence dragged
+		// into the arithmetic pulls a centre towards the room tone.
 		let kept = usable.indices.filter { usable[$0] }
 		guard kept.count >= voices * 2 else {
 			return Offer(byLine: [:], separation: 0, method: method,
 			             skipped: lines.count)
 		}
+
+		// Who is already named, by position among the lines kept. `unknown` is
+		// not a voice — it is an answer meaning nobody knows, and two lines
+		// answered that way are quite possibly two different people, so it
+		// would poison the example it was taken for.
+		var taught: [Int: String] = [:]
+		for (position, line) in kept.enumerated() {
+			guard let slug = transcript.speaker(ofLine: lines[line]),
+			      slug != Speaker.unknown else { continue }
+			taught[position] = slug
+		}
+
+		// `blind` is there so the two can be held against each other: it makes
+		// the pass ignore the names it could have been taught by and cluster
+		// anyway, which is what this did before and what `cuttr-render
+		// --speakers --blind` measures. Nothing in the app passes it.
+		if !blind, Set(taught.values).count >= 2 {
+			let placing = SpeakerClustering.place(kept.map { vectors[$0] }, as: taught)
+			var byLine: [Int: String] = [:]
+			for (position, line) in kept.enumerated() where taught[position] == nil {
+				byLine[lines[line].lowerBound] = placing.names[placing.chosen[position]]
+			}
+			// No separation gate here. The voices are not a guess — somebody
+			// named them — and on footage where two people genuinely sound
+			// alike the silhouette is low and the answer is still worth having.
+			return Offer(byLine: byLine, separation: placing.separation, method: method,
+			             skipped: lines.count - kept.count, taught: true)
+		}
+
 		let grouping = SpeakerClustering.cluster(
 			kept.map { vectors[$0] }, into: voices, distance: distance)
 		guard grouping.separation >= leastSeparation else {
@@ -211,13 +259,19 @@ public enum SpeakerProposal {
 		             skipped: lines.count - kept.count)
 	}
 
-	/// What to call each cluster.
+	/// What to call each cluster, on the blind path.
 	///
-	/// Whoever is already named in it, by majority — so answering two lines by
-	/// hand and then asking teaches the pass both names at once, and the offer
-	/// comes back in the words somebody chose rather than as `speaker-1`. A
-	/// cluster nobody has touched is numbered, and two clusters never end up
-	/// with the same name.
+	/// Whoever is already named in it, by majority, then whatever was offered,
+	/// then numbers — and never a name twice.
+	///
+	/// **Only reached with fewer than two names to go on**, and that is what
+	/// makes the majority vote per cluster good enough. It is not good enough in
+	/// general: with three people named and six answered lines it once put the
+	/// cluster holding forty of one person's lines under somebody else's name,
+	/// because one stray answer was the only one that landed there. Naming
+	/// clusters after the fact is the wrong way round when there are names to be
+	/// had — with two or more, ``propose`` places the lines against them instead
+	/// and never asks this question.
 	static func name(
 		clusters: [Int], at kept: [Int], in lines: [Range<Int>],
 		of transcript: Transcript, offered: [String], voices: Int

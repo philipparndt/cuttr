@@ -823,6 +823,13 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	/// already following, because that is the one that scored above chance on
 	/// real footage. Otherwise timbre, which needs nothing at all. Neither
 	/// touches the network. See `docs/speakers.md`.
+	///
+	/// **Answer two lines first.** With two people already named in the
+	/// transcript the pass is taught by those lines rather than left to find the
+	/// voices for itself, and that is worth twenty points of accuracy. Nothing
+	/// here has to arrange it — ``SpeakerProposal/propose`` reads the transcript
+	/// it is handed — but it is why the button is worth pressing a second time
+	/// after correcting a few of its answers.
 	private func guessSpeakers() {
 		guard speakerTask == nil else { return }
 		guard !takeDocument.transcript.isEmpty else {
@@ -849,24 +856,35 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			guard let self, !Task.isCancelled else { return }
 			self.speakerTask = nil
 			guard let offer, !offer.isEmpty else {
-				// Saying nothing is an answer, and it is the right one when the
-				// voices did not separate. See `SpeakerClustering.silhouette`.
-				self.say("the voices in this take did not separate —"
-					+ " nothing worth offering")
+				// Saying nothing is an answer. Which answer depends on why:
+				// taught, there was nothing left to ask about; blind, the voices
+				// did not separate. See `SpeakerClustering.silhouette`.
+				self.say(offer?.taught == true
+					? "every line it could measure is already answered"
+					: "the voices in this take did not separate —"
+						+ " nothing worth offering")
 				return
 			}
 			self.takeDocument.suggest(offer.byLine)
-			// Counted as changes, not as guesses. A pass proposes a name for
-			// every line it could measure, so on a take somebody has half
-			// answered most of the offer agrees with what is already there —
-			// and "68 lines guessed" over three actual changes is a number
-			// nobody can act on.
+			// Taught, the offer is only about lines nobody has answered, so
+			// every line in it is a line to look at. Blind, it proposes a name
+			// for every line it could measure, and on a take somebody has half
+			// answered most of that agrees with what is already there — "68
+			// lines guessed" over three actual changes is a number nobody can
+			// act on.
 			let lines = self.takeDocument.transcript.lines
 			let changed = lines.filter { line in
 				guard let slug = offer.byLine[line.lowerBound] else { return false }
 				return slug != self.takeDocument.transcript.speaker(ofLine: line)
 			}.count
-			if changed == 0 {
+			if offer.taught {
+				self.say(String(
+					format: "%d lines offered, from the ones you answered."
+						+ " %d left alone, too short or too quiet."
+						+ " Keep them, or correct a few and ask again."
+						+ " (separation %.2f)",
+					changed, offer.skipped, offer.separation))
+			} else if changed == 0 {
 				self.say(String(
 					format: "the guess agrees with every name already there —"
 						+ " nothing to change (separation %.2f)", offer.separation))

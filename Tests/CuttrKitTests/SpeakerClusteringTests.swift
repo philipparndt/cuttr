@@ -172,4 +172,130 @@ import Testing
 		#expect(Set(titles).count == 2)
 		#expect(titles.contains("speaker-1"))
 	}
+
+	// MARK: - Placing lines against voices somebody has named
+
+	/// Twelve lines of two voices, interleaved the way an interview is, with
+	/// one line of each answered by hand.
+	///
+	/// The point of the numbers is that they are plainly two clumps and that the
+	/// answered line of each is an ordinary member of its own. Whether real mel
+	/// cepstra look like this is a question for real footage; whether the
+	/// arithmetic puts a point with the voice it sits on top of is a question
+	/// with an answer.
+	private func twoNamedVoices() -> (points: [[Double]], named: [Int: String]) {
+		var points: [[Double]] = []
+		for index in 0 ..< 12 {
+			let nudge = Double(index) * 0.05
+			points.append(index % 2 == 0 ? [4 + nudge, 4, 4] : [-4, -4 - nudge, -4])
+		}
+		return (points, [0: "papa", 1: "mia"])
+	}
+
+	@Test func everyLineGoesWithTheVoiceItSitsOn() {
+		let (points, named) = twoNamedVoices()
+		let placing = SpeakerClustering.place(points, as: named)
+		#expect(placing.names == ["mia", "papa"])
+		#expect(placing.chosen.count == points.count)
+		for index in points.indices {
+			#expect(placing.names[placing.chosen[index]] == (index % 2 == 0 ? "papa" : "mia"))
+		}
+		#expect(placing.separation > 0.9)
+	}
+
+	/// One name is not two, and there is nothing to place lines against.
+	///
+	/// The caller is meant to cluster blind instead. Answering the question with
+	/// "everybody is mia" would be worse than saying nothing, because it looks
+	/// like an answer.
+	@Test func oneNameIsNotEnoughToPlaceAnything() {
+		let (points, _) = twoNamedVoices()
+		let placing = SpeakerClustering.place(points, as: [0: "papa", 2: "papa"])
+		#expect(placing.chosen.isEmpty)
+		#expect(placing.separation == 0)
+		#expect(SpeakerClustering.place(points, as: [:]).chosen.isEmpty)
+	}
+
+	/// A line somebody answered comes back as what they said, even when the
+	/// arithmetic would have put it elsewhere.
+	///
+	/// Contradicting the person being helped is the one failure that makes a
+	/// feature untrustworthy rather than merely wrong.
+	@Test func anAnsweredLineIsNotSecondGuessed() {
+		var (points, named) = twoNamedVoices()
+		// The line answered `papa` is sitting in the middle of mia's crowd.
+		points[0] = [-4, -4, -4]
+		named = [0: "papa", 3: "mia"]
+		let placing = SpeakerClustering.place(points, as: named)
+		#expect(placing.names[placing.chosen[0]] == "papa")
+		#expect(placing.margin[0] == .infinity)
+	}
+
+	/// A line in the middle is offered with less confidence than one on top of
+	/// a voice. What "propose only where the margin is clear" would be read off.
+	@Test func theMarginSaysHowSureItIs() {
+		var (points, named) = twoNamedVoices()
+		points.append([0, 0, 0])
+		let placing = SpeakerClustering.place(points, as: named)
+		let halfway = placing.margin[points.count - 1]
+		let obvious = placing.margin[4]
+		#expect(halfway >= 0)
+		#expect(obvious > halfway * 4)
+	}
+
+	/// One answered line has no spread of its own, and a variance of zero says
+	/// every other line in the take is impossible. It has to borrow one.
+	@Test func aSingleAnsweredLineStillGivesUsableNumbers() {
+		let voice = SpeakerClustering.Voice.fit([[1, 2, 3]], width: 3)
+		#expect(voice.variance == [0, 0, 0])
+		let world = SpeakerClustering.Voice.fit([[-1, -1, -1], [1, 1, 1]], width: 3)
+		let tempered = voice.tempered(towards: world, prior: 0.2, shrink: 0.5)
+		#expect(tempered.variance.allSatisfy { $0 > 0 })
+		#expect(tempered.likelihood(of: [0, 0, 0]).isFinite)
+		// And the mean is pulled towards the take's own, but only a little: one
+		// answered line is believed, if not quite outright.
+		#expect(tempered.mean[0] < 1)
+		#expect(tempered.mean[0] > 0.8)
+	}
+
+	/// The same answered lines give the same answer in every process.
+	///
+	/// Swift seeds its hashing per launch, so anything that sums a voice's
+	/// points in the order a dictionary holds them drifts between runs, and a
+	/// line near a boundary changes its mind overnight. Checked by asking with
+	/// the names in a different order, which is what a `Dictionary` would hand
+	/// over differently.
+	@Test func theTaughtAnswerDoesNotMoveBetweenRuns() {
+		let (points, _) = twoNamedVoices()
+		let once = SpeakerClustering.place(points, as: [0: "papa", 1: "mia", 2: "papa"])
+		let again = SpeakerClustering.place(points, as: [2: "papa", 1: "mia", 0: "papa"])
+		#expect(once == again)
+	}
+
+	/// The unanswered lines are evidence too.
+	///
+	/// One round of self-training: the lines that were sure of themselves join
+	/// their voice and everything is asked again, so a voice whose one answered
+	/// line was atypical is corrected by its crowd. Here the line answered
+	/// `papa` is well off to one side of where he actually sits and the one
+	/// answered `mia` is squarely in her crowd, which puts the boundary between
+	/// them too far towards him. The line at 6.5 is plainly one of his — it sits
+	/// nearer his eight lines than her nine — and taught by the two answers
+	/// alone it goes to her.
+	@Test func theUnansweredLinesPullTheVoicesOntoTheirCrowds() {
+		var points: [[Double]] = [[0, 0, 0], [12, 12, 12]]
+		let named = [0: "papa", 1: "mia"]
+		for index in 0 ..< 8 { points.append([4 + Double(index) * 0.05, 4, 4]) }
+		for index in 0 ..< 8 { points.append([12 + Double(index) * 0.05, 12, 12]) }
+		points.append([6.5, 6.5, 6.5])
+		let last = points.count - 1
+
+		let once = SpeakerClustering.place(points, as: named, rounds: 0)
+		#expect(once.names[once.chosen[last]] == "mia")
+		let again = SpeakerClustering.place(points, as: named, rounds: 1)
+		#expect(again.names[again.chosen[last]] == "papa")
+		// And it is surer of itself for having looked, rather than merely
+		// different.
+		#expect(again.margin[last] > once.margin[last])
+	}
 }
