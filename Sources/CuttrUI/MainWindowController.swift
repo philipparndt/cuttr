@@ -343,6 +343,12 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	var panesForTesting: PaneStack? { panes }
 	var transportForTesting: Transport { transport }
 	var clipListForTesting: ClipTable { clipTable }
+	var timelineForTesting: TimelineView { timeline }
+
+	/// The whole key path this window uses, so a test asks the same question the
+	/// keyboard does. Asking a view's own handler instead is how a key that
+	/// never arrived passed its test three times this week.
+	func handleKeyForTesting(_ event: NSEvent) -> Bool { handle(event) }
 
 	// MARK: - Wiring
 
