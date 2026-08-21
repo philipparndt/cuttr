@@ -337,3 +337,51 @@ import Testing
 		#expect(times[1] == (3, 6))
 	}
 }
+
+/// What a duplicate does to the prose in the file.
+///
+/// A comment is held against the *address* of the line it was written about,
+/// and a list item's address is what the item says — so two entries that read
+/// the same are a question the addressing has to answer. It does: the second
+/// one along is `#2`, counted in the order the file has them. Which means the
+/// original keeps its note, because a duplicate is written after it.
+@Suite struct DuplicatedCommentTests {
+
+	@Test func aNoteStaysOnTheEntryItWasWrittenAbout() throws {
+		var project = try ProjectReader.read("""
+		timeline:
+		  # the one everybody remembers
+		  - clip: one
+		  - clip: two
+
+		""")
+		// Held against what the item says, which is why two items that say the
+		// same thing are a question at all.
+		#expect(project.comments.above.keys.first?.contains("clip: one") == true)
+		project.duplicateEntry(at: [0])
+
+		let lines = ProjectWriter.write(project).components(separatedBy: "\n")
+		let note = try #require(lines.firstIndex { $0.contains("everybody remembers") })
+		#expect(lines[note - 1] == "timeline:")
+		#expect(lines[note + 1] == "  - clip: one")
+		#expect(lines[note + 2] == "  - clip: one")
+		// Once. Not on the copy as well, and not lost.
+		#expect(lines.filter { $0.contains("everybody remembers") }.count == 1)
+	}
+
+	/// And a duplicated *section* cannot collide at all: it is renamed, so its
+	/// first line reads differently from the original's.
+	@Test func aDuplicatedSectionIsNotEvenTheSameLine() throws {
+		var project = try ProjectReader.read("""
+		timeline:
+		  # what this section is for
+		  - group: build
+		    clips: [two]
+
+		""")
+		project.duplicateEntry(at: [0])
+		let written = ProjectWriter.write(project)
+		#expect(written.contains("  # what this section is for\n  - group: build\n"))
+		#expect(written.contains("- group: build-2\n"))
+	}
+}
