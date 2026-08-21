@@ -36,6 +36,10 @@ public final class ProgrammeStrip: NSView {
 	/// Where each overlay's bar is, so a drag can find it again.
 	private var bars: [(origin: Origin, appearance: Int, rect: NSRect,
 	                    start: Double, end: Double)] = []
+	/// Which overlay bar is selected, if any. There was no such thing: a bar
+	/// could be dragged but not *chosen*, so a key had nothing to act on.
+	private var selected: (origin: Origin, appearance: Int)?
+
 	private enum Grip { case body(Double), start, end }
 	private var dragging: (origin: Origin, appearance: Int, grip: Grip,
 	                       start: Double, end: Double)?
@@ -72,9 +76,112 @@ public final class ProgrammeStrip: NSView {
 	private let gutter: CGFloat = 62
 	private var track: CGFloat { max(bounds.width - gutter, 1) }
 
-	private func x(for time: Double) -> CGFloat { gutter + CGFloat(time / duration) * track }
+	/// Which stretch of the programme is on screen. The arithmetic is
+	/// ``TimeWindow``, shared with the properties column's strip, because two
+	/// strips zooming a clock the same way should not be two answers.
+	private var viewed = TimeWindow()
+
+	/// Somebody zoomed, so whoever rebuilds this can put it back. A fact about
+	/// the session, not about the project.
+	public var onZoom: (((start: Double, end: Double)?) -> Void)?
+
+	/// The bounds follow the programme's length, and a zoom that outlived a
+	/// re-cut slides inside the new length rather than pointing past it.
+	private func aimed() -> TimeWindow {
+		var out = viewed
+		out.limits = (0, duration)
+		return out
+	}
+
+	/// The refusal, over the top of everything, so it cannot be missed.
+	private func drawNotice() {
+		guard let notice else { return }
+		let attributes: [NSAttributedString.Key: Any] = [
+			.font: Theme.label, .foregroundColor: Theme.text,
+		]
+		let size = (notice as NSString).size(withAttributes: attributes)
+		let box = NSRect(x: gutter + 8, y: bounds.height - size.height - 10,
+		                 width: size.width + 16, height: size.height + 6)
+		Theme.card.withAlphaComponent(0.95).setFill()
+		NSBezierPath(roundedRect: box, xRadius: 4, yRadius: 4).fill()
+		(notice as NSString).draw(at: NSPoint(x: box.minX + 8, y: box.minY + 3),
+		                          withAttributes: attributes)
+	}
+
+	private func x(for time: Double) -> CGFloat {
+		gutter + aimed().fraction(of: time) * track
+	}
+
 	private func time(forX x: CGFloat) -> Double {
-		max(0, min(duration, Double((x - gutter) / track) * duration))
+		aimed().time(atFraction: (x - gutter) / track)
+	}
+
+	// MARK: - Zooming
+
+	/// ⌥ or ⌘ with the wheel, and a pinch, both about the pointer. The bare
+	/// wheel is left alone: this strip sits under a picture in a window that
+	/// scrolls, and a view that swallows the wheel is a trap.
+	public override func scrollWheel(with event: NSEvent) {
+		let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+		guard flags.contains(.option) || flags.contains(.command) else {
+			// Sideways is a pan, but only while there is somewhere to pan to,
+			// so the gesture falls through when the whole thing is shown.
+			if abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY), aimed().isZoomed {
+				pan(byPoints: event.scrollingDeltaX)
+				return
+			}
+			super.scrollWheel(with: event)
+			return
+		}
+		guard event.scrollingDeltaY != 0 else { return }
+		zoom(by: event.scrollingDeltaY > 0 ? 0.9 : 1.1, at: event.locationInWindow)
+	}
+
+	public override func magnify(with event: NSEvent) {
+		zoom(by: 1 / (1 + event.magnification), at: event.locationInWindow)
+	}
+
+	private func zoom(by factor: Double, at locationInWindow: NSPoint) {
+		let point = convert(locationInWindow, from: nil)
+		var window = aimed()
+		window.zoom(by: factor, aboutFraction: (point.x - gutter) / track)
+		viewed = window
+		onZoom?(viewed.zoomed)
+		needsDisplay = true
+	}
+
+	private func pan(byPoints points: CGFloat) {
+		var window = aimed()
+		window.pan(byPoints: points, trackWidth: track)
+		viewed = window
+		onZoom?(viewed.zoomed)
+		needsDisplay = true
+	}
+
+	/// Puts a zoom back after the window has rebuilt this strip.
+	public func restoreZoom(_ window: (start: Double, end: Double)?) {
+		guard viewed.zoomed?.start != window?.start
+			|| viewed.zoomed?.end != window?.end else { return }
+		viewed.zoomed = window
+		needsDisplay = true
+	}
+
+	/// The whole programme again.
+	public func fit() {
+		var window = aimed()
+		window.fit()
+		viewed = window
+		onZoom?(nil)
+		needsDisplay = true
+	}
+
+	/// Frames one stretch — used by `Z` on the selected overlay.
+	public func reveal(from start: Double, to end: Double) {
+		var window = aimed()
+		window.reveal(from: start, to: end)
+		viewed = window
+		onZoom?(viewed.zoomed)
+		needsDisplay = true
 	}
 
 	public override func draw(_ dirtyRect: NSRect) {
@@ -196,11 +303,21 @@ public final class ProgrammeStrip: NSView {
 			bars.append((overlay.origin, overlay.appearance, rect, overlay.start, overlay.end))
 			let dragged = dragging?.origin == overlay.origin
 				&& dragging?.appearance == overlay.appearance
+			let chosen = selected?.origin == overlay.origin
+				&& selected?.appearance == overlay.appearance
 			let colour: NSColor = overlay.path != nil ? Theme.externalWave : Theme.cameraWave
-			colour.withAlphaComponent(dragged ? 0.6 : 0.35).setFill()
+			colour.withAlphaComponent(dragged ? 0.6 : chosen ? 0.5 : 0.35).setFill()
 			rect.fill()
 			colour.setStroke()
 			NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5)).stroke()
+			// A selected bar says so, because `i` and `o` are about it and a key
+			// that acts on something invisible is a key nobody presses twice.
+			if chosen {
+				NSColor.white.withAlphaComponent(0.85).setStroke()
+				let ring = NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5))
+				ring.lineWidth = 1.5
+				ring.stroke()
+			}
 
 			// Handles at both ends, always. On the cutting timeline these are
 			// drawn on the selected clip only, because every clip there has
@@ -275,6 +392,8 @@ public final class ProgrammeStrip: NSView {
 		line.move(to: NSPoint(x: px, y: 0))
 		line.line(to: NSPoint(x: px, y: bounds.height))
 		line.stroke()
+
+		drawNotice()
 	}
 
 	/// For the tests: the time axis, which now starts after the lane names
@@ -356,6 +475,110 @@ public final class ProgrammeStrip: NSView {
 		}
 	}
 
+	/// The keys this strip answers.
+	///
+	/// `i` and `o` put the selected overlay's ends where the playhead is — the
+	/// same two letters that mean in and out in the cutting window and in the
+	/// trim dialog. Written through ``onMoveOverlay``, which is the door a drag
+	/// on the same bar already uses, so a range written `within:` a clip stays
+	/// written that way and a mark still snaps. There is no second path.
+	///
+	/// A refusal says why rather than doing nothing: a key that silently fails
+	/// is the same experience as a key that is not implemented.
+	public override func keyDown(with event: NSEvent) {
+		guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+		      let character = event.charactersIgnoringModifiers?.lowercased().first
+		else { return super.keyDown(with: event) }
+
+		switch character {
+		case "i", "o":
+			setEdge(start: character == "i")
+		case "z":
+			guard let bar = selectedBar() else { return say("nothing selected to frame") }
+			reveal(from: bar.start, to: bar.end)
+		case "f":
+			fit()
+		case "+", "=":
+			zoom(by: 1 / 1.6, at: middleOfTrack())
+		case "-", "_":
+			zoom(by: 1.6, at: middleOfTrack())
+		default:
+			super.keyDown(with: event)
+		}
+	}
+
+	/// The middle of what is shown, in window coordinates, for a zoom that came
+	/// from the keyboard rather than from a pointer.
+	private func middleOfTrack() -> NSPoint {
+		convert(NSPoint(x: gutter + track / 2, y: bounds.midY), to: nil)
+	}
+
+	private func selectedBar() -> (origin: Origin, appearance: Int,
+	                               start: Double, end: Double)? {
+		guard let selected,
+		      let bar = bars.first(where: {
+			      $0.origin == selected.origin && $0.appearance == selected.appearance
+		      })
+		else { return nil }
+		return (bar.origin, bar.appearance, bar.start, bar.end)
+	}
+
+	/// Puts one end of the selected overlay at the playhead.
+	private func setEdge(start wantsStart: Bool) {
+		guard let bar = selectedBar() else {
+			return say("click an overlay's bar first — i and o are about one of them")
+		}
+		let at = playhead
+		if wantsStart {
+			guard at < bar.end - 0.001 else { return say("that is at or past the out") }
+			onMoveOverlay?(bar.origin, bar.appearance, at, bar.end)
+		} else {
+			guard at > bar.start + 0.001 else { return say("that is at or before the in") }
+			onMoveOverlay?(bar.origin, bar.appearance, bar.start, at)
+		}
+	}
+
+	/// A sentence drawn over the strip until the next click. There is no status
+	/// bar within reach of this view, and a refusal nobody can read is a
+	/// refusal that reads as breakage.
+	private var notice: String?
+
+	private func say(_ text: String) {
+		notice = text
+		needsDisplay = true
+	}
+
+	// MARK: - For the tests
+
+	/// Drawing is what records where the bars are, so a test that is about a
+	/// bar has to have drawn once — into a scratch image, because `draw` wants
+	/// a graphics context and a view that is in no window has none.
+	func drawForTesting() {
+		let image = NSImage(size: NSSize(width: max(bounds.width, 1),
+		                                height: max(bounds.height, 1)))
+		image.lockFocus()
+		draw(bounds)
+		image.unlockFocus()
+	}
+
+	func selectFirstBarForTesting() {
+		guard let first = bars.first else { return }
+		selected = (first.origin, first.appearance)
+	}
+
+	var noticeForTesting: String? { notice }
+	var shownForTesting: (start: Double, end: Double) { aimed().shown }
+	func timeForTesting(atFraction fraction: CGFloat) -> Double {
+		aimed().time(atFraction: fraction)
+	}
+
+	func zoomForTesting(by factor: Double, atFraction fraction: CGFloat) {
+		var window = aimed()
+		window.zoom(by: factor, aboutFraction: fraction)
+		viewed = window
+		needsDisplay = true
+	}
+
 	public override func mouseDown(with event: NSEvent) {
 		let point = convert(event.locationInWindow, from: nil)
 		let t = time(forX: point.x)
@@ -372,10 +595,15 @@ public final class ProgrammeStrip: NSView {
 				grip = .body(t - bar.start)
 			}
 			dragging = (bar.origin, bar.appearance, grip, bar.start, bar.end)
+			selected = (bar.origin, bar.appearance)
+			notice = nil
+			window?.makeFirstResponder(self)
 			needsDisplay = true
 			return
 		}
 
+		selected = nil
+		notice = nil
 		onScrub?(t)
 		if let clip = resolved?.clips.last(where: { t >= $0.start && t < $0.end }) {
 			onSelect?(clip)

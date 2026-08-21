@@ -117,6 +117,8 @@ public final class ComposeWindowController: DocumentEditor,
 
 	private var playhead: Double = 0
 	private var keyMonitor: Any?
+	/// Which stretch of the programme the Play page's strip is showing.
+	private var stripZoom: (start: Double, end: Double)?
 
 	public init(document: ComposeDocument) {
 		self.composeDocument = document
@@ -564,6 +566,10 @@ public final class ComposeWindowController: DocumentEditor,
 			}
 		}
 		strip.onScrub = { [weak self] time in self?.seek(to: time) }
+		// A zoom outlives the strip's own redraws but not the window, which is
+		// right: it is a fact about what somebody is looking at, not about the
+		// project. Held here so a re-resolve does not throw it away.
+		strip.onZoom = { [weak self] window in self?.stripZoom = window }
 
 		// Double-click a clip on the programme to open the take it came from,
 		// at the moment under the pointer — the programme's clock turned back
@@ -789,6 +795,7 @@ public final class ComposeWindowController: DocumentEditor,
 		if mode == .project { reloadProjectPage() }
 		if mode == .text { source.show(sourceText) }
 		strip.resolved = composeDocument.resolved
+		strip.restoreZoom(stripZoom)
 		markers.markers = (composeDocument.resolved?.anchors ?? []).compactMap { entry in
 			entry.path.map { (entry.anchor.name, $0) }
 		}

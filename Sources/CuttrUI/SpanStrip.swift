@@ -103,7 +103,7 @@ public final class SpanStrip: NSView {
 	/// the pixel, which is finer than anything in this program is placed to.
 	/// Past that the two clocks at the ends stop differing and the strip has
 	/// stopped being a picture of anything.
-	private static let leastShown = 0.25
+	private static let leastShown = TimeWindow.leastShown
 
 	/// What the strip is showing, resolved: the zoom, held inside the bounds.
 	///
@@ -111,13 +111,15 @@ public final class SpanStrip: NSView {
 	/// outlived a rebuild — or a change of which clip the strip is about —
 	/// keeps its magnification and slides inside the new bounds rather than
 	/// being thrown away or pointing outside them.
-	private var shown: (start: Double, end: Double) {
-		let limits = limits
-		let whole = limits.end - limits.start
-		guard let zoomed, whole > 0 else { return limits }
-		let span = min(max(Self.leastShown, zoomed.end - zoomed.start), whole)
-		let start = min(max(limits.start, zoomed.start), limits.end - span)
-		return (start, start + span)
+	/// What the strip is showing, resolved — see ``TimeWindow/shown``, which is
+	/// where this arithmetic lives now that two strips do it.
+	private var shown: (start: Double, end: Double) { viewed.shown }
+
+	/// Not `window` — `NSView` has one of those, and the two have collided in
+	/// this class before.
+	private var viewed: TimeWindow {
+		get { TimeWindow(limits: limits, zoomed: zoomed) }
+		set { zoomed = newValue.zoomed }
 	}
 	public var blocks: [Block] = [] { didSet { needsDisplay = true } }
 	public var ranges: [Range] = [] { didSet { needsDisplay = true } }
@@ -208,17 +210,9 @@ public final class SpanStrip: NSView {
 	/// centre instead walks the thing being aimed at off the edge in two turns
 	/// of the wheel.
 	public func zoom(by factor: Double, aboutFraction fraction: CGFloat) {
-		let limits = limits
-		let whole = limits.end - limits.start
-		guard whole > 0 else { return }
-		let shown = shown
-		let span = shown.end - shown.start
-		let held = Double(min(max(0, fraction), 1))
-		let at = shown.start + held * span
-		let want = min(max(span * factor, Self.leastShown), whole)
-		guard want < whole else { return fit() }
-		let start = min(max(limits.start, at - held * want), limits.end - want)
-		zoomed = (start, start + want)
+		var viewed = viewed
+		viewed.zoom(by: factor, aboutFraction: fraction)
+		self.viewed = viewed
 		onZoom?(zoomed)
 	}
 
@@ -230,14 +224,9 @@ public final class SpanStrip: NSView {
 
 	/// Frames one stretch, with a margin — "show me this range".
 	public func reveal(from start: Double, to end: Double) {
-		let limits = limits
-		let whole = limits.end - limits.start
-		guard whole > 0 else { return }
-		let want = min(max((end - start) * 1.3, Self.leastShown), whole)
-		guard want < whole else { return fit() }
-		let middle = (start + end) / 2
-		let from = min(max(limits.start, middle - want / 2), limits.end - want)
-		zoomed = (from, from + want)
+		var viewed = viewed
+		viewed.reveal(from: start, to: end)
+		self.viewed = viewed
 		onZoom?(zoomed)
 	}
 
@@ -245,13 +234,9 @@ public final class SpanStrip: NSView {
 	/// the whole of it is on screen, so the gesture falls through to the form
 	/// rather than being eaten by a strip that has nowhere to go.
 	public func pan(byPoints points: CGFloat) {
-		guard zoomed != nil, track.width > 0 else { return }
-		let limits = limits
-		let shown = shown
-		let span = shown.end - shown.start
-		let by = Double(points / track.width) * span
-		let start = min(max(limits.start, shown.start + by), limits.end - span)
-		zoomed = (start, start + span)
+		var viewed = viewed
+		viewed.pan(byPoints: points, trackWidth: track.width)
+		self.viewed = viewed
 		onZoom?(zoomed)
 	}
 
