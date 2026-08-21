@@ -47,6 +47,22 @@ public struct Take: Sendable, Equatable {
 	/// four decibels under the others does not need it measured.
 	public var gain: Double
 
+	/// How much to turn this recording up or down *as it goes*, in decibels.
+	///
+	/// The fine one of the three levels — see ``GainCurve``, which is the
+	/// arithmetic, and ``gain`` one line up, which is the flat number this adds
+	/// to. Here rather than on a clip because a plosive is a fact about the
+	/// recording: it is at 4:31 whoever cuts the take, and a clip made over it
+	/// tomorrow gets the same repair without anybody redoing it.
+	///
+	/// Kept sorted by time. Two orderings of the same points are the same curve,
+	/// unlike two orderings of the clips, so a hand-written file whose points
+	/// are out of order reads as the curve it plainly means.
+	///
+	/// Empty for every take nobody has drawn one on, and left out of the file
+	/// entirely when it is.
+	public var levels: [LevelPoint]
+
 	/// Points followed through the picture — an eye, usually — for overlays that
 	/// have to sit on somebody. See ``Anchor`` for why they belong to the take
 	/// rather than to a programme that uses it.
@@ -118,7 +134,7 @@ public struct Take: Sendable, Equatable {
 		anchors: [Anchor] = [], words: Words? = nil, speakers: [Speaker] = [],
 		sounds: [SoundEvent] = [],
 		measured: Measured = Measured(), look: Look = .none,
-		source: TakeSource? = nil, gain: Double = 0,
+		source: TakeSource? = nil, gain: Double = 0, levels: [LevelPoint] = [],
 		unknownKeys: [String: Any] = [:]
 	) {
 		self.video = video
@@ -132,6 +148,7 @@ public struct Take: Sendable, Equatable {
 		self.measured = measured
 		self.look = look
 		self.gain = gain
+		self.levels = GainCurve.tidied(levels)
 		self.unknown = UnknownKeys(storage: unknownKeys)
 	}
 
@@ -140,7 +157,7 @@ public struct Take: Sendable, Equatable {
 			&& a.anchors == b.anchors && a.words == b.words
 			&& a.speakers == b.speakers && a.sounds == b.sounds
 			&& a.measured == b.measured && a.look == b.look
-			&& a.source == b.source && a.gain == b.gain
+			&& a.source == b.source && a.gain == b.gain && a.levels == b.levels
 	}
 
 	// MARK: - The cast
@@ -277,6 +294,60 @@ public struct Take: Sendable, Equatable {
 		clips[index].start = Swift.max(0, Swift.min(start, end))
 		clips[index].end = Swift.max(start, end)
 		return true
+	}
+
+	// MARK: - The level over time
+
+	/// This take's level at a moment: its own flat one, and whatever the curve
+	/// is doing there. In decibels, and a clip's own trim is still to be added.
+	public func level(at time: Double) -> Double {
+		gain + GainCurve.gain(at: time, in: levels)
+	}
+
+	/// Puts a point on the curve, or moves the one already at that moment.
+	///
+	/// Returns where it landed in ``levels``, because the click that makes a
+	/// point is the start of the drag that places it. `within` is how close
+	/// counts as the same point — at a wide zoom two clicks a pixel apart are
+	/// one decision, and a curve that grew a second point under the first would
+	/// have a step in it nobody asked for.
+	@discardableResult
+	public mutating func setLevel(_ gain: Double, at time: Double, within tolerance: Double = 0) -> Int {
+		let at = Swift.max(0, time)
+		if let existing = levels.firstIndex(where: { abs($0.at - at) <= tolerance }) {
+			levels[existing].gain = gain
+			return existing
+		}
+		levels.append(LevelPoint(at: at, gain: gain))
+		levels = GainCurve.tidied(levels)
+		return levels.firstIndex { $0.at == at && $0.gain == gain } ?? levels.count - 1
+	}
+
+	/// Moves a point, and does not let it change places with its neighbours.
+	///
+	/// Clamped rather than re-sorted, so that the thing being dragged stays the
+	/// thing being dragged: a point that crossed its neighbour would swap
+	/// identities half-way through a drag and the pointer would be holding
+	/// something else. To move a point past another, delete it and draw it
+	/// again — which is one gesture either way.
+	@discardableResult
+	public mutating func moveLevel(
+		_ index: Int, to time: Double, gain: Double, apart: Double = 0.001
+	) -> Int {
+		guard levels.indices.contains(index) else { return index }
+		var earliest = index > 0 ? levels[index - 1].at + apart : 0
+		var latest = index + 1 < levels.count ? levels[index + 1].at - apart : .infinity
+		// Neighbours closer together than two nudges leave no room at all, and
+		// a range whose ends have crossed would clamp to nonsense.
+		if earliest > latest { earliest = levels[index].at; latest = levels[index].at }
+		levels[index].at = Swift.max(Swift.max(0, earliest), Swift.min(time, latest))
+		levels[index].gain = gain
+		return index
+	}
+
+	public mutating func removeLevel(at index: Int) {
+		guard levels.indices.contains(index) else { return }
+		levels.remove(at: index)
 	}
 
 	/// Renames a clip's slug, keeping it unique and valid.
