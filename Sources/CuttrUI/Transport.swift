@@ -189,6 +189,34 @@ public final class Transport {
 		return (composition, item.videoComposition, item.audioMix, duration)
 	}
 
+	/// How much to turn the monitor up or down, in decibels: the take's own
+	/// level, so that what is heard in the cutting room is what a programme made
+	/// of these clips will play. See ``CuttrKit/Take/gain``.
+	///
+	/// A mix put on the item rather than a rebuild of the composition. The cuts
+	/// do not change when a level does, and rebuilding would seek and stutter on
+	/// every keystroke in the field — which is exactly the thing that makes a
+	/// number nobody can hear themselves setting.
+	public var gain: Double = 0 {
+		didSet { if gain != oldValue { applyGain() } }
+	}
+
+	private func applyGain() {
+		guard let item = player.currentItem else { return }
+		guard gain != 0, let composition = item.asset as? AVComposition else {
+			item.audioMix = nil
+			return
+		}
+		let volume = Float(Levelling.amplitude(gain))
+		let mix = AVMutableAudioMix()
+		mix.inputParameters = composition.tracks(withMediaType: .audio).map { track in
+			let parameters = AVMutableAudioMixInputParameters(track: track)
+			parameters.setVolume(volume, at: .zero)
+			return parameters
+		}
+		item.audioMix = mix
+	}
+
 	/// The grade the picture is shown through.
 	///
 	/// The cutting window's whole reason for having one: a look is decided by
@@ -276,6 +304,7 @@ public final class Transport {
 
 		let item = AVPlayerItem(asset: composition)
 		player.replaceCurrentItem(with: item)
+		applyGain()
 		showLook()
 		if resumeAt > 0 { seek(to: resumeAt) }
 		if wasPlaying { player.play() }

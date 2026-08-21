@@ -973,6 +973,7 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	func handleKeyForTesting(_ event: NSEvent) -> Bool { handle(event) }
 
 	var clipListForTesting: ClipTable { clipTable }
+	var transportForTesting: Transport { transport }
 	var clipLookIsOpenForTesting: Bool { clipLook != nil }
 
 	/// For the tests: the span a look would play, and the selection without a
@@ -1255,6 +1256,7 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		}
 		lookPanel.show(takeDocument.take.look)
 		transport.look = takeDocument.take.look
+		transport.gain = takeDocument.take.gain
 		anchorTable.reload(takeDocument.take.anchors,
 		                   paths: takeDocument.anchorPaths,
 		                   selected: selectedAnchor)

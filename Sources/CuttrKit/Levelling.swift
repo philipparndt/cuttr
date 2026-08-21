@@ -12,6 +12,16 @@ import Foundation
 /// because that is the one place they can be heard against each other.
 public enum Levelling {
 
+	/// A level in decibels, as the amplitude a mix multiplies by.
+	///
+	/// Decibels are what a person reads and what the file says; a mix and a
+	/// waveform both want the ratio. Said once because it was written out at
+	/// every place that needed it, and a formula copied is a formula that ends
+	/// up different somewhere.
+	public static func amplitude(_ decibels: Double) -> Double {
+		decibels == 0 ? 1 : pow(10, decibels / 20)
+	}
+
 	/// How far a trim is allowed to go.
 	///
 	/// A trim is a correction, not a rescue. Past about twelve decibels what

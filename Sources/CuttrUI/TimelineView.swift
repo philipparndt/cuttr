@@ -326,7 +326,16 @@ public final class TimelineView: NSView {
 		rect.fill()
 
 		let middle = rect.midY
-		let scale = (rect.height / 2 - 2) * CGFloat(waveformGain)
+		// The take's own level as well as the display zoom, which are two
+		// different things: the zoom is a magnifying glass and changes nothing,
+		// the level is what will be heard. Drawing only the zoom meant typing a
+		// level and watching the picture of it stay exactly as it was.
+		//
+		// Clipped by `limit` below, the same as any overdriven peak — so pushing
+		// a take up until it flattens against the top of its lane is the lane
+		// saying so, which is the useful thing for it to say.
+		let level = CGFloat(Levelling.amplitude(document?.take.gain ?? 0))
+		let scale = (rect.height / 2 - 2) * CGFloat(waveformGain) * level
 		let limit = rect.height / 2 - 1
 		let path = NSBezierPath()
 		path.lineWidth = 1
