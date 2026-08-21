@@ -91,7 +91,11 @@ is a comment, not a field: it is `end - start`, and a second place for it to be
 wrong is not worth having.
 
 Unknown keys are carried through unchanged, so a file written by a later version
-survives being opened and saved by this one.
+survives being opened and saved by this one. So are comments: write a paragraph
+at the top of a take or a project, a line above a clip, a word at the end of
+one, and saving in the app puts them back where you had them. A comment is kept
+against the thing it was written about rather than against a line number, so
+re-ordering the file moves it with its key; deleting the key drops it.
 
 Times can also be typed straight into the Start and End columns of the clip
 list, which is the precise way to trim; dragging a clip's edge on the timeline

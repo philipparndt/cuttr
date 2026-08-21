@@ -211,9 +211,22 @@ public enum ProjectReader {
 			sounds.append(sound)
 		}
 
-		return Project(takes: takes, output: output, timeline: timeline,
-		               overlays: overlays, sounds: sounds, styles: styles,
-		               profiles: profiles, scenes: scenes, unknownKeys: root)
+		var project = Project(takes: takes, output: output, timeline: timeline,
+		                      overlays: overlays, sounds: sounds, styles: styles,
+		                      profiles: profiles, scenes: scenes, unknownKeys: root)
+		// The two things the parse above cannot see: what somebody wrote in the
+		// margins, and the order they wrote their named blocks in. Both are
+		// facts about the text, so both are read from the text.
+		let scan = FileScan(text, ignoring: ProjectWriter.generatedComments)
+		project.comments = scan.comments
+		// Slugged where the reader slugs the names themselves, or the order
+		// would be a list of names the project no longer has.
+		project.declaredOrder = [
+			"styles": scan.order["styles"] ?? [],
+			"scenes": (scan.order["scenes"] ?? []).map { Slug.make(from: $0) },
+			"profiles": (scan.order["profiles"] ?? []).map { Slug.make(from: $0) },
+		]
+		return project
 	}
 
 	/// One rule for "what does this string mean", shared with the panel.

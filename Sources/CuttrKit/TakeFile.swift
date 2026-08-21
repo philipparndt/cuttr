@@ -234,10 +234,15 @@ public enum TakeReader {
 			}
 		}
 
-		return Take(video: video, audio: audio, clips: clips, anchors: anchors, words: words,
-		            speakers: speakers, sounds: sounds,
-		            measured: measured, look: look, source: source,
-		            unknownKeys: root)
+		var take = Take(video: video, audio: audio, clips: clips, anchors: anchors, words: words,
+		                speakers: speakers, sounds: sounds,
+		                measured: measured, look: look, source: source,
+		                unknownKeys: root)
+		// What somebody wrote in the file, addressed so it can be put back. Read
+		// from the text rather than from the parse, because the parse is exactly
+		// where it was being lost.
+		take.comments = FileScan(text, ignoring: TakeWriter.generatedComments).comments
+		return take
 	}
 
 	static func number(_ value: Any?) -> Double? {
@@ -283,7 +288,33 @@ public enum TakeReader {
 /// value would otherwise be read as something else.
 public enum TakeWriter {
 
+	/// The own-line comments this emitter writes itself.
+	///
+	/// They are generated, not written by anybody, so they are not stored as
+	/// somebody's prose when the file is read back — stored, they would be
+	/// written a second time underneath the emitter's own copy. The header is
+	/// not here: a file's header block replaces the generated one, so a file
+	/// that still has the generated header gets exactly it back.
+	static let generatedComments: Set<String> = [
+		"# none yet — cut some in the app, or add them here:",
+		"# - slug:  intro",
+		"#   name:  Intro",
+		"#   start: 00:00.000",
+		"#   end:   00:10.000",
+	]
+
+	/// The take as text, with whatever prose the file carried put back.
+	///
+	/// Two passes on purpose. The emitter below writes the same bytes for the
+	/// same take and knows nothing about comments; the comments are then put
+	/// back at the addresses they were read from. Keeping them apart is what
+	/// lets the emitter stay a hand-written run of `out +=` lines with fixed
+	/// key order and aligned columns.
 	public static func write(_ take: Take) -> String {
+		take.comments.written(into: body(take))
+	}
+
+	private static func body(_ take: Take) -> String {
 		var out = ""
 		out += "# cuttr take — a plain-text cut list. Edit it here or in the app.\n"
 		out += "cuttr: \(TakeReader.formatVersion)\n\n"

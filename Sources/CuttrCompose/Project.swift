@@ -39,6 +39,24 @@ public struct Project: Sendable, Equatable {
 
 	var unknown: UnknownProjectKeys
 
+	/// The prose the file carried: the block at the top saying what this
+	/// programme is, the line above a scene saying what it does. Not part of
+	/// the value, and lost on every save until it was carried — see
+	/// ``CuttrKit/FileComments``.
+	public var comments = FileComments()
+
+	/// The order the file declared its named blocks in, by block: the styles,
+	/// the scenes and the profiles as they were written down.
+	///
+	/// A dictionary has no order, so the writer sorted them, so a file whose
+	/// styles were arranged to be read top to bottom came back alphabetical.
+	/// Sorting was the right answer to the wrong question — it was there to
+	/// stop a dictionary's arbitrary order churning the file, and remembering
+	/// the order the file actually had is deterministic in the same way and
+	/// keeps somebody's arrangement as well. Anything the file did not declare
+	/// is still sorted, after the rest.
+	public var declaredOrder: [String: [String]] = [:]
+
 	public init(
 		takes: [String] = [],
 		output: Output = Output(),
