@@ -12,7 +12,7 @@ import Testing
 /// control nobody can use. A dip that takes the plosive off and a dip that takes
 /// the word off are the same four numbers, so the curve has to be visible over
 /// the waveform and audible in the cutting room or it cannot be judged at all.
-@MainActor @Suite struct LevelCurveTests {
+@MainActor @Suite(.serialized) struct LevelCurveTests {
 
 	/// A probe's answer, without a file: twenty seconds at 25 frames.
 	private func info(seconds: Double = 20) -> MediaInfo {
