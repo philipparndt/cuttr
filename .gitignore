@@ -15,6 +15,17 @@ DerivedData/
 # Intermediate for the .icns; the icns itself is committed.
 Resources/Icon/*.iconset/
 
+# Baked component frames.
+#
+# `component:` draws into `.cuttr/components/<name>/` beside the project, and
+# for a real project those frames are the artefact — kept, and exported, because
+# the picture depends on the WebKit that drew it. In *this* repository they are
+# not: `examples/components/` is a teaching document, the component is the thing
+# worth reading, and re-baking it in a few seconds is the demonstration. Two
+# megabytes of PNGs that churn on every macOS update is the wrong thing to keep
+# in a git history.
+.cuttr/
+
 # Scratch media. Recordings are large and are nobody's to commit; the small
 # generated fixtures under Tests/CuttrKitTests/Fixtures/ are.
 Media/

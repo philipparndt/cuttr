@@ -1101,7 +1101,8 @@ struct BubbleCanvas {
 	/// A bubble is laid over the finished frame, like a caption.
 	@Test func aBubbleIsALayer() {
 		#expect(OverlayLayers.isLayered(Overlay(kind: .bubble(Bubble(text: "hi")),
-		                                        span: .times(from: 0, to: 1))))
+		                                        span: .times(from: 0, to: 1)),
+		                                in: Project()))
 	}
 
 	/// The words travel with the paper in the exported tree, on the same moments

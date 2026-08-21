@@ -34,7 +34,10 @@ public extension Scene {
 	/// are, and text is whatever size the words come out.
 	static func hasSize(_ content: Part.Content) -> Bool {
 		switch content {
-		case .shape, .image, .bar: return true
+		// A sequence and a component are boxed for the same reason an image is:
+		// the pixels arrived at whatever size they arrived at, and the keys say
+		// how big they are on the picture.
+		case .shape, .image, .bar, .frames, .component: return true
 		// A roll is whatever size the column came to, like text and for the
 		// same reason: it is measured, not stated.
 		case .text, .background, .spinner, .roll: return false
@@ -49,7 +52,8 @@ public extension Scene {
 		// A roll takes exactly what text takes. `y` is the one that matters —
 		// a credit roll is that field moved from below the frame to above it.
 		case .text, .roll: return [.x, .y, .opacity, .scale, .rotation]
-		case .shape, .image: return [.x, .y, .opacity, .scale, .rotation, .width, .height]
+		case .shape, .image, .frames, .component:
+			return [.x, .y, .opacity, .scale, .rotation, .width, .height]
 		// Everything a shape has, and how full it is. Spelt out rather than
 		// ``allCases``, which would hand a bar the gradient's angle.
 		case .bar: return [.x, .y, .opacity, .scale, .rotation, .width, .height, .progress]

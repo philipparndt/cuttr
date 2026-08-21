@@ -75,6 +75,19 @@ public struct Scene: Sendable, Equatable {
 			case roll(Roll)
 			/// A file beside the project — a logo, a badge, a texture.
 			case image(String)
+			/// A folder of frames, one per frame of the picture. See
+			/// ``FrameSequence``: the one part kind with no drawing in it,
+			/// because whatever made the frames did the drawing.
+			case frames(FrameSequence)
+			/// A React component beside the project, baked to frames and then
+			/// drawn as one. See ``Component``.
+			///
+			/// It becomes a ``frames(_:)`` part the moment anything looks at
+			/// pixels — ``sequence(at:)`` is where that happens — so neither
+			/// render path knows a browser was involved and there is one
+			/// implementation of putting a sequence on the picture rather than
+			/// two.
+			case component(Component)
 			/// The whole frame, filled. What an intro screen stands on.
 			///
 			/// Not a shape at `width: 1, height: 1`: that is what somebody had

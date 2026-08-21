@@ -28,6 +28,15 @@ rendered first, because it is about pictures that come from somewhere else.
 | `frames/harmonograph.cuttrproj` | `frames:` — a folder of pictures drawn by something that is not cuttr, held and looped |
 | `frames/remotion.cuttrproj` | the same overlay fed by Remotion: an animated chart and a route that draws itself — **run `tools/remotion/render.sh chart` and `route` first** |
 
+| `components/chart.cuttrproj` | `component:` — a React chart, baked to frames in the browser macOS already has, with nothing installed |
+
+One of them bakes before it renders. `components/chart.cuttrproj` draws its
+component into `.cuttr/components/walks/` the first time — a few seconds — and
+reuses the frames after that. Nothing is installed and nothing is fetched; React
+is in the app bundle. Those frames are gitignored, because in a repository the
+component is the thing worth keeping and re-baking it is the demonstration. In a
+real project they are the opposite: the artefact, kept and exported, for the
+reason `docs/remotion.md` gives at length.
 Five things these are meant to teach, all of which cost a render to learn:
 
 **The ground belongs to the card, not to the scene.** Effects are drawn *into*
@@ -86,6 +95,18 @@ something to keep beside the project like a take, not something to regenerate on
 a whim. That is the whole reason cuttr consumes frames rather than running
 Remotion itself; `docs/remotion.md` has the argument and `tools/remotion/README.md`
 has the commands.
+
+**A component is for when the position is a fact about the data.** That is the
+whole test, and `components/chart.cuttrproj` argues it in its own header.
+`scenes:` puts a title where somebody decided it looks right, in text that
+diffs — which is exactly right for a title and exactly wrong for twelve bars
+whose heights, widths and gaps all fall out of the numbers. Written as parts and
+keys, a chart is a file holding the *result* of a layout: change one month and
+every bar after it has to be re-typed. Compare it with `scenes/typing.cuttrproj`,
+which makes the same complaint at nine parts. The price is that the scene editor
+cannot touch it, it takes seconds to bake rather than being instant, and its
+pixels came out of WebKit rather than out of this program — so a component is the
+answer for a chart, a table or a leaderboard, and the wrong answer for a title.
 
 **Watch the bubbles rather than looking at them.** `overlays/bubbles.cuttrproj`
 is the one example whose point is invisible in a still: every bubble in it is

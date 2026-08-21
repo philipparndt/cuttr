@@ -1265,7 +1265,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				?? { let made = OverlayRow(); made.identifier = .init("treeOverlay"); return made }()
 			row.overlay = overlay
 			row.stack = origin.projectIndex
-				.map { OverlayRow.standsOn($0, in: project.overlays) } ?? ""
+				.map { OverlayRow.standsOn($0, of: project) } ?? ""
 			// A mark on the ones that are on over what is selected, and only
 			// where it says something: an overlay nested under the entry it
 			// hangs on is obviously to do with it, but one filed at the end on
@@ -2205,10 +2205,16 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		/// pixels. So one of those is over every film mode and every effect in
 		/// the project however the list is arranged, and moving it only decides
 		/// which caption is over which.
-		static func standsOn(_ index: Int, in overlays: [Overlay]) -> String {
+		static func standsOn(_ index: Int, of project: Project) -> String {
+			let overlays = project.overlays
 			guard index < overlays.count else { return "" }
-			let layered = OverlayLayers.isLayered(overlays[index])
-			let below = overlays[..<index].lastIndex { OverlayLayers.isLayered($0) == layered }
+			// The project, because which pass a scene goes through depends on
+			// what is *in* the scene: one with a frame sequence in it is painted
+			// into the picture rather than laid over it.
+			let layered = OverlayLayers.isLayered(overlays[index], in: project)
+			let below = overlays[..<index].lastIndex {
+				OverlayLayers.isLayered($0, in: project) == layered
+			}
 			let over = below.map { "over \(name(overlays[$0]))" }
 			if layered { return over.map { "layer · \($0)" } ?? "layer · over all of it" }
 			return over ?? "on the picture"

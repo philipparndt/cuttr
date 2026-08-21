@@ -208,6 +208,21 @@ public final class ComposeDocument {
 		history.flushAndWait()
 	}
 
+	/// Draws every `component:` this project uses that needs it, and then works
+	/// the programme out again so the picture stops saying the bake is stale.
+	///
+	/// Deliberately *not* called from anywhere that happens by itself. Baking is
+	/// seconds to minutes and resolving happens on every keystroke, so a bake
+	/// hung off saving or off drawing would be a program nobody can type in —
+	/// see ``ComponentBaker/bake(_:from:force:progress:)``. This is what the
+	/// render command calls, and what a menu item calls, and that is all.
+	public func bakeComponents(force: Bool = false) async throws -> ComponentBaker.Report {
+		guard let base = baseURL else { return ComponentBaker.Report() }
+		let report = try await ComponentBaker.bake(project, from: base, force: force)
+		if !report.baked.isEmpty { resolve() }
+		return report
+	}
+
 	private func resolve() {
 		// An untitled project can still be a programme.
 		//

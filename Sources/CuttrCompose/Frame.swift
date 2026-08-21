@@ -86,13 +86,21 @@ enum Frame {
 			case .text, .spinner, .scene, .bubble, .frames:
 				// Layers, unless they go behind somebody — in which case they
 				// are painted here, because the mask that knows where she is
-				// lives in the pass that has the pixels.
-				guard shown.overlay.behind == .people else { continue }
+				// lives in the pass that has the pixels — or unless they hold a
+				// frame sequence, which is painted here for the reasons in
+				// ``OverlayLayers/isLayered(_:in:)``.
+				guard !OverlayLayers.isLayered(shown.overlay, in: work.project) else { continue }
 				guard let painted = OverlayPainter.image(
-					      for: shown, project: work.project, baseURL: work.baseURL,
-					      size: size, at: time),
-				      let mask = work.people?.mask(for: picture, at: time) else { continue }
-				image = behind(painted, mask: mask, over: image)
+					for: shown, project: work.project, baseURL: work.baseURL,
+					size: size, at: time) else { continue }
+				if shown.overlay.behind == .people {
+					guard let mask = work.people?.mask(for: picture, at: time) else { continue }
+					image = behind(painted, mask: mask, over: image)
+				} else {
+					// Over the picture, under everything the second pass lays
+					// on. The painter has already faded it.
+					image = painted.composited(over: image)
+				}
 			}
 		}
 		return image

@@ -48,8 +48,26 @@ public enum OverlayLayers {
 	/// Public because the panel has to say which of the two passes a row is
 	/// drawn in. The order of `overlays:` decides the frame pass; a layer is
 	/// over all of it whatever the list says.
-	public static func isLayered(_ overlay: Overlay) -> Bool {
+	public static func isLayered(_ overlay: Overlay, in project: Project) -> Bool {
 		if case .effect = overlay.kind { return false }
+		// A scene with a frame sequence in it is painted into the picture, and
+		// this is the one place that decides it.
+		//
+		// Not a preference: Core Animation has to be handed every picture a
+		// `contents` animation will ever show, and five hundred frames of
+		// 1920×1080 is four gigabytes of bitmap before it keeps its own copy —
+		// measured at eight, against forty-seven megabytes for the same card
+		// with a shape on it. A layer that fetched each frame as it was asked for
+		// was the other answer, and `AVVideoCompositionCoreAnimationTool` never
+		// asks a layer to redisplay, so it drew nothing at all.
+		//
+		// What it costs is z-order: a painted scene is under every layer, so a
+		// caption is always over a chart however `overlays:` is arranged. What it
+		// buys is that the sequence has *one* implementation — the painter's,
+		// which the preview and the export then share exactly — and a peak memory
+		// that does not depend on how long the component is.
+		if case .scene(let name, _) = overlay.kind,
+		   project.scenes[name]?.hasFrames == true { return false }
 		// Film mode, the aberration and the tape *are* the picture rather than
 		// something laid over it: they are applied in the frame pass with the
 		// effects, and a second pass that drew film mode as a layer would
@@ -72,7 +90,8 @@ public enum OverlayLayers {
 		// property change would sit underneath all of them.
 		root.isGeometryFlipped = false
 
-		for resolvedOverlay in resolved.overlays where isLayered(resolvedOverlay.overlay) {
+		for resolvedOverlay in resolved.overlays
+		where isLayered(resolvedOverlay.overlay, in: resolved.project) {
 			guard let layer = layer(for: resolvedOverlay, project: resolved.project,
 			                        baseURL: resolved.baseURL, size: size, host: host)
 			else { continue }
@@ -1367,6 +1386,15 @@ public enum OverlayLayers {
 					picture.contentsGravity = .resizeAspect
 				}
 				layer = picture
+			case .frames, .component:
+				// Unreachable, and left as nothing rather than as a picture.
+				//
+				// A scene with a sequence in it never gets here: `isLayered`
+				// sends the whole scene to the painter, for the reasons written
+				// there. An empty layer is what this should be if that ever
+				// changes — a still of frame nought would be a plausible-looking
+				// wrong answer, which is worse than a hole.
+				layer = CALayer()
 			case .background(let background):
 				natural = size
 				// The background as the first key has it. For one whose keys
@@ -1453,15 +1481,20 @@ public enum OverlayLayers {
 			})
 			animate("transform.scale", keys.map { $0.scale ?? 1 })
 			animate("transform.rotation.z", keys.map { ($0.rotation ?? 0) * .pi / 180 })
-			// An image is the one part left whose size is its bounds. A shape
-			// and a bar carry theirs in their paths — which is what lets a
-			// shape change size and kind at once — and a spinner's is its own.
-			if case .image = part.content {
+			// The parts whose size is their bounds: an image and the two that
+			// arrive as pixels. A shape and a bar carry theirs in their paths —
+			// which is what lets a shape change size and kind at once — and a
+			// spinner's is its own.
+			switch part.content {
+			case .image, .frames, .component:
 				animate("bounds.size", keys.map {
 					NSValue(size: NSSize(width: ($0.width ?? 0.2) * size.width,
 					                     height: ($0.height ?? 0.02) * size.height))
 				})
+			case .text, .shape, .bar, .spinner, .roll, .background:
+				break
 			}
+
 			if case .shape(_, let corner, let kind) = part.content, let shape = layer as? CAShapeLayer {
 				animate("path", keys.map {
 					shapePath(for: $0, kind: kind, corner: corner,

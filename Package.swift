@@ -54,9 +54,17 @@ let package = Package(
 		// what the cutting window uses; this is about a programme made of
 		// several, and nothing in the cutting window should have to link a
 		// video encoder to draw a waveform.
+		//
+		// `Runtime/` is React and the component runtime, as resources. They are
+		// in the bundle because the whole point of `component:` is that there is
+		// nothing to install and nothing to fetch: two files from React under
+		// MIT and one of ours, 155 kB in total, recorded in
+		// `Sources/CuttrCompose/Runtime/LICENCES.md`. A `package.json` here
+		// would be the dependency `docs/remotion.md` decided not to take.
 		.target(
 			name: "CuttrCompose",
 			dependencies: ["CuttrKit", .product(name: "Yams", package: "Yams")],
+			resources: [.copy("Runtime")],
 			swiftSettings: [.swiftLanguageMode(.v5)]
 		),
 		.executableTarget(

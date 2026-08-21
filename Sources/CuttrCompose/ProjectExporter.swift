@@ -39,10 +39,13 @@ public enum ProjectExporter {
 		public var missing: [String] = []
 		/// Names that had to change because something else already had them.
 		public var renamed: [(from: String, to: String)] = []
+		/// Components whose source and whose baked frames both came along.
+		public var components: [String] = []
 
 		public var summary: String {
 			var parts = ["\(takes.count) takes", "\(media.count) media"]
 			if !sidecars.isEmpty { parts.append("\(sidecars.count) tracking") }
+			if !components.isEmpty { parts.append("\(components.count) components") }
 			if !renamed.isEmpty { parts.append("\(renamed.count) renamed") }
 			if !missing.isEmpty { parts.append("\(missing.count) missing") }
 			return parts.joined(separator: ", ")
@@ -159,6 +162,40 @@ public enum ProjectExporter {
 			try TakeWriter.write(take).write(to: takeURL, atomically: true, encoding: .utf8)
 			report.takes.append(takeName + ".cuttr")
 			exportedTakePaths.append("takes/" + takeURL.lastPathComponent)
+		}
+
+		// A component and its bake, both, and neither renamed.
+		//
+		// The frames are material rather than a scene — `docs/remotion.md` makes
+		// that argument and it is the reason they are cached beside the project
+		// in the first place. The picture a component produces depends on the
+		// WebKit that drew it, so a folder exported without its bake would render
+		// *differently* on the machine it was opened on, which is precisely the
+		// failure exporting exists to prevent. They go across unchanged, at the
+		// paths the project already names, because those paths are what
+		// `component:` and `.cuttr/components/` mean and rewriting them would be
+		// rewriting the cache key.
+		for component in ComponentBaker.components(in: project) {
+			let source = URL(fileURLWithPath: component.file, relativeTo: baseURL)
+			let to = target.appendingPathComponent(component.file)
+			guard manager.fileExists(atPath: source.path) else {
+				report.missing.append(source.path)
+				continue
+			}
+			try? manager.createDirectory(at: to.deletingLastPathComponent(),
+			                             withIntermediateDirectories: true)
+			try? manager.copyItem(at: source, to: to)
+			// The bake may not be there, and that is not an error: the project
+			// still says what to draw and rendering it will draw it. Only a
+			// *stale* bake is a problem, and this is not the place that says so.
+			let bake = URL(fileURLWithPath: component.folder, relativeTo: baseURL)
+			if manager.fileExists(atPath: bake.path) {
+				let landing = target.appendingPathComponent(component.folder)
+				try? manager.createDirectory(at: landing.deletingLastPathComponent(),
+				                             withIntermediateDirectories: true)
+				try? manager.copyItem(at: bake, to: landing)
+			}
+			report.components.append(component.file)
 		}
 
 		var exported = project

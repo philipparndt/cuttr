@@ -124,13 +124,14 @@ import Testing
 		for kind in kinds {
 			let overlay = Overlay(kind: kind, span: span, arrival: .cut, departure: .cut)
 			#expect(kind.changesTheFrame, "\(kind) does not say it is the frame")
-			#expect(!OverlayLayers.isLayered(overlay), "\(kind) would be drawn twice")
+			#expect(!OverlayLayers.isLayered(overlay, in: Project()),
+			        "\(kind) would be drawn twice")
 			#expect(work([overlay]).busy(at: 5), "\(kind) would be skipped by the exact path")
 			#expect(!work([overlay]).busy(at: 20), "and it is not on outside its own span")
 		}
 		// A caption is the other way round on both counts.
 		let caption = Overlay(kind: .text("hello", style: nil), span: span)
 		#expect(!caption.kind.changesTheFrame)
-		#expect(OverlayLayers.isLayered(caption))
+		#expect(OverlayLayers.isLayered(caption, in: Project()))
 	}
 }
