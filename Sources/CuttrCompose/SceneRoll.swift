@@ -77,11 +77,33 @@ public extension Scene {
 		/// text part has, meaning the same thing, applied to every line.
 		public var tracking: Double
 
+		/// How much smaller the far end of the column is than the near end.
+		///
+		/// Nought — the default — is no perspective at all: a flat column, which
+		/// is what a credit roll wants. `0.35` lays the column on a plane tilted
+		/// away from the viewer so that its far end draws at about a third of the
+		/// size, and that is the opening crawl.
+		///
+		/// **Why this and not `scale`.** A key on `scale` shrinks the whole
+		/// column about its middle: every line gets smaller by the same factor
+		/// and the gaps between them close by the same factor, so the column
+		/// recedes without ever *converging*. What a crawl does is different —
+		/// the lines nearer the horizon are smaller **and closer together than
+		/// the ones below them** — and no amount of scaling one flat column
+		/// produces it, because it is not a scale, it is a projection.
+		///
+		/// Stated as a ratio rather than an angle because a ratio is the thing
+		/// somebody can see: turn it down until the top of the column is as
+		/// small as you want it. The near edge keeps its size and its leading,
+		/// so the newest line of a crawl reads at full size, which is what makes
+		/// the rest read as distance.
+		public var tilt: Double
+
 		public init(
 			entries: [Entry] = [], title: String? = nil,
 			style: String? = nil, roleStyle: String? = nil, titleStyle: String? = nil,
 			line: Double = 0.062, gap: Double = 0.6, column: Double = 0.028,
-			align: Align = .columns, tracking: Double = 0
+			align: Align = .columns, tracking: Double = 0, tilt: Double = 0
 		) {
 			self.entries = entries
 			self.title = title
@@ -93,6 +115,7 @@ public extension Scene {
 			self.column = column
 			self.align = align
 			self.tracking = tracking
+			self.tilt = tilt
 		}
 
 		/// One block of the roll.
@@ -342,7 +365,58 @@ public extension Scene.Roll {
 					y: tall / 2 - (placed[index].top + placed[index].height / 2)),
 				size: widths[index])
 		}
-		return Layout(lines: lines, size: CGSize(width: high - low, height: tall))
+		let flat = Layout(lines: lines, size: CGSize(width: high - low, height: tall))
+		return tilted(flat)
+	}
+
+	/// The same column, projected onto a plane tilted away from the viewer.
+	///
+	/// The arithmetic, once, because all three things that draw a roll — the
+	/// painter, the layer tree and the editor's hit-testing — ask ``laidOut``
+	/// for their lines, and a perspective applied in any one of them would be a
+	/// perspective the other two disagree with.
+	///
+	/// Measure `u` up from the near edge of the column. A plane seen in
+	/// perspective puts the point at `u` at scale `s = 1 / (1 + u/h)`, where `h`
+	/// is how far the horizon is in the plane's own units; `tilt` says what `s`
+	/// comes to at the far end, which fixes `h`. The projected distance from the
+	/// near edge is then `u · s` — the near edge keeps its spacing, and
+	/// everything above it closes up by exactly its own scale. Lines bunch and
+	/// shrink together, which is the whole effect.
+	///
+	/// The column's own height comes back projected too, and that matters: a
+	/// scroll is written from ``height(in:project:)``, so the keys that carry a
+	/// crawl past the frame are worked out against the height it will actually
+	/// be drawn at rather than the flat one it was measured at.
+	private func tilted(_ flat: Layout) -> Layout {
+		// One and above is no shrinking, nought and below is not a projection.
+		// Either way the flat column is the answer, and saying so here means
+		// nothing downstream has to ask whether a roll is tilted.
+		guard tilt > 0, tilt < 1, flat.size.height > 0 else { return flat }
+		let tall = flat.size.height
+		let horizon = tall * tilt / (1 - tilt)
+
+		var lines = flat.lines
+		var lowest = Double.greatestFiniteMagnitude
+		var highest = -Double.greatestFiniteMagnitude
+		for index in lines.indices {
+			let up = lines[index].offset.y + tall / 2
+			let scale = 1 / (1 + up / horizon)
+			lines[index].style.size *= scale
+			lines[index].offset.x *= scale
+			lines[index].size = CGSize(
+				width: lines[index].size.width * scale,
+				height: lines[index].size.height * scale)
+			lines[index].offset.y = up * scale
+			lowest = min(lowest, lines[index].offset.y)
+			highest = max(highest, lines[index].offset.y)
+		}
+		// Re-centred on the projected column, because everything that places a
+		// roll places it by its middle.
+		let projected = tall * tilt
+		for index in lines.indices { lines[index].offset.y -= projected / 2 }
+		let width = lines.map { abs($0.offset.x) + $0.size.width / 2 }.max() ?? 0
+		return Layout(lines: lines, size: CGSize(width: width * 2, height: projected))
 	}
 
 	/// How tall the column is, in fractions of the frame height.

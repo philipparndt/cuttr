@@ -123,7 +123,14 @@ scenes:
         column: 0.028
         align:  centre
         tracking: 0.01
+        # The crawl itself. `tilt` lays the column on a plane tilted away from
+        # the viewer: the far end draws at about a third of the size, and the
+        # lines close up towards it as well as shrinking. A key on `scale`
+        # cannot do that — it shrinks every line and every gap by the same
+        # factor, so the column recedes without ever converging, which is what
+        # this shot used to do and why it did not read as distance.
+        tilt:   0.3
         keys:
-          - {t: 0, x: 0.5, y: -0.45, opacity: 1, scale: 1, ease: linear}
-          - {t: 18, y: 0.788, scale: 0.438, ease: linear}
-          - {t: 24, y: 1.2, opacity: 0, scale: 0.25, ease: linear}
+          - {t: 0, x: 0.5, y: -0.5, opacity: 1, scale: 1, ease: linear}
+          - {t: 20, y: 1.15, opacity: 1, ease: linear}
+          - {t: 24, y: 1.5, opacity: 0, ease: linear}

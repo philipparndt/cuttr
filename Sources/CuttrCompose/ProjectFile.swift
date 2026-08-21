@@ -763,7 +763,8 @@ public enum ProjectReader {
 			gap: number(fields["gap"]) ?? plain.gap,
 			column: number(fields["column"]) ?? plain.column,
 			align: align,
-			tracking: number(fields["tracking"]) ?? 0)
+			tracking: number(fields["tracking"]) ?? 0,
+			tilt: number(fields["tilt"]) ?? 0)
 	}
 
 	/// A value from the file, as near to the way it was written as matters for

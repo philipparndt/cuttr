@@ -157,6 +157,9 @@ public enum ProjectWriter {
 		out += field("column", trim(roll.column))
 		out += field("align", roll.align.rawValue)
 		if roll.tracking != 0 { out += "        tracking: \(trim(roll.tracking))\n" }
+		// Nought is a flat column, which is what a credit roll is, so it is left
+		// out — see ``CuttrCompose/Scene/Roll/tilt``.
+		if roll.tilt != 0 { out += "        tilt:     \(trim(roll.tilt))\n" }
 		return out
 	}
 
