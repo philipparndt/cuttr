@@ -175,3 +175,90 @@ import Testing
 		#expect(Overlay.Span.inside(card, start: 1, end: 2, in: resolved) == nil)
 	}
 }
+
+/// The model gap this walked into: `within:` names *material*, not a placement.
+///
+/// A clip the programme uses twice has two placements and one slug, so
+/// `within: <slug>` puts an overlay on at **both** — which is a different wrong
+/// answer, not an improvement on drifting. `as:` is the file's own way of naming
+/// one use of a clip, and `within: @name` is the only spelling that means this
+/// placement and no other.
+@Suite struct PlacementNamingTests {
+
+	private func twice() throws -> (URL, Project, ResolvedProject) {
+		let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+			.appendingPathComponent("cuttr-twice-\(UUID().uuidString)")
+		try FileManager.default.createDirectory(
+			at: directory.appendingPathComponent("takes"), withIntermediateDirectories: true)
+		try Data().write(to: directory.appendingPathComponent("a.mov"))
+		try TakeWriter.write(Take(video: "../a.mov", clips: [
+			Clip(slug: "one", start: 0, end: 5),
+		])).write(to: directory.appendingPathComponent("takes/t.cuttr"),
+		          atomically: true, encoding: .utf8)
+		let project = try ProjectReader.read("""
+			takes: [takes/t.cuttr]
+			timeline: [one, one]
+			""")
+		return (directory, project, try Resolver.resolve(project, baseURL: directory))
+	}
+
+	/// Unnamed and used twice, there is nothing safe to write, and it says so
+	/// rather than writing the ambiguous thing.
+	@Test func aClipUsedTwiceCannotBeNamedByItsSlug() throws {
+		let (directory, project, resolved) = try twice()
+		defer { try? FileManager.default.removeItem(at: directory) }
+		#expect(Overlay.Span.needsAName(project.timeline[1], in: resolved))
+		#expect(Overlay.Span.inside(project.timeline[1], start: 6, end: 8, in: resolved) == nil)
+	}
+
+	/// Named, it is exact: the second use, one to three seconds in, on once.
+	@Test func anAsNameMeansThisPlacementAndNoOther() throws {
+		let (directory, read, resolved) = try twice()
+		defer { try? FileManager.default.removeItem(at: directory) }
+		var project = read
+		project.timeline[1].label = "again"
+		let named = try Resolver.resolve(project, baseURL: directory)
+		#expect(!Overlay.Span.needsAName(project.timeline[1], in: named))
+		guard let span = Overlay.Span.inside(
+			project.timeline[1], start: 6, end: 8, in: named) else {
+			Issue.record("nothing written")
+			return
+		}
+		#expect(span == .within(.group("again"), from: 1, to: 3))
+
+		project.timeline[1].overlays = [Overlay(
+			kind: .text("on it", style: nil), span: span)]
+		let after = try Resolver.resolve(project, baseURL: directory)
+		#expect(after.overlays.count == 1)
+		#expect(after.overlays.first?.start == 6)
+		#expect(after.warnings.isEmpty)
+	}
+
+	/// The thing the naming exists to prevent: the slug puts it on twice.
+	@Test func theSlugWouldPutItOnAtEveryUse() throws {
+		let (directory, read, resolved) = try twice()
+		defer { try? FileManager.default.removeItem(at: directory) }
+		var project = read
+		_ = resolved
+		project.timeline[1].overlays = [Overlay(
+			kind: .text("on it", style: nil),
+			span: .within(.clip(ClipReference("one")), from: 1, to: 3))]
+		let after = try Resolver.resolve(project, baseURL: directory)
+		#expect(after.overlays.count == 2)
+	}
+
+	/// A named placement round-trips through the file, or the name is no use.
+	@Test func theNameSurvivesTheFile() throws {
+		let (directory, read, _) = try twice()
+		defer { try? FileManager.default.removeItem(at: directory) }
+		var project = read
+		project.timeline[1].label = "again"
+		project.timeline[1].overlays = [Overlay(
+			kind: .text("on it", style: nil),
+			span: .within(.group("again"), from: 1, to: 3))]
+		let back = try ProjectReader.read(ProjectWriter.write(project))
+		#expect(back.timeline[1].label == "again")
+		#expect(back.timeline[1].overlays.first?.appearances.first?.span
+			== .within(.group("again"), from: 1, to: 3))
+	}
+}

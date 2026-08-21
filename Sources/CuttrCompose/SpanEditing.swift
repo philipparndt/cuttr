@@ -79,12 +79,36 @@ extension Overlay.Span {
 	public static func inside(
 		_ entry: TimelineEntry, start: Double, end: Double, in resolved: ResolvedProject
 	) -> Overlay.Span? {
-		guard case .clip(let reference) = entry.source,
-		      let place = Endpoint.clip(reference).place(in: resolved, nearest: start)
-		else { return nil }
+		// The entry's own name first. `within:` names *material*, not a
+		// placement — so `within: <clip>` on a clip that is in the programme
+		// twice puts the overlay on at **both** uses, which is a different
+		// wrong answer and not an improvement on drifting. `as:` is the file's
+		// own way of naming one use of a clip, and `within: @name` is the only
+		// spelling that means this placement and no other.
+		if let label = entry.label,
+		   let place = Endpoint.group(label).place(in: resolved, nearest: start) {
+			return Overlay.Span
+				.within(.group(label), from: start - place.start, to: end - place.start)
+				.clamped(in: resolved, nearest: start)
+		}
+		guard case .clip(let reference) = entry.source else { return nil }
+		// Unnamed and used once, the clip's own slug says it unambiguously.
+		let places = Endpoint.clip(reference).places(in: resolved)
+		guard places.count == 1, let place = places.first else { return nil }
 		return Overlay.Span
 			.within(.clip(reference), from: start - place.start, to: end - place.start)
 			.clamped(in: resolved, nearest: start)
+	}
+
+	/// Whether this entry has to be given a name before an overlay inside it can
+	/// be written relative to it.
+	///
+	/// True for a clip the programme uses more than once and that nobody has
+	/// named: there is no way to say "this use" without one. The caller gives it
+	/// an `as:` name and asks ``inside(_:start:end:in:)`` again.
+	public static func needsAName(_ entry: TimelineEntry, in resolved: ResolvedProject) -> Bool {
+		guard entry.label == nil, case .clip(let reference) = entry.source else { return false }
+		return Endpoint.clip(reference).places(in: resolved).count > 1
 	}
 }
 

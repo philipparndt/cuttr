@@ -651,11 +651,23 @@ public final class ComposeWindowController: DocumentEditor,
 			// overlay behind. See ``CuttrCompose/Overlay/Span/inside(_:start:end:in:)``
 			// for what it cost. Same drag, same two ends, written the way that
 			// survives a re-cut.
-			let relative: Overlay.Span?
+			var relative: Overlay.Span?
 			if case .entry(let path, _) = origin, let entry = next.entry(at: path) {
-				relative = Overlay.Span.inside(entry, start: start, end: end, in: resolved)
-			} else {
-				relative = nil
+				// A clip the programme uses more than once cannot be named by
+				// its slug — `within:` that slug would put the overlay on at
+				// every use of it. `as:` is the file's own way of naming one
+				// placement, so the entry is given one, once, and the range
+				// names that. Better a name in the file than an overlay that
+				// comes on twice or drifts.
+				if Overlay.Span.needsAName(entry, in: resolved) {
+					var named = entry
+					named.label = Slug.unique(entry.source.description,
+					                          taken: next.entryNames)
+					next.replaceEntry(at: path, with: named)
+				}
+				relative = next.entry(at: path).flatMap {
+					Overlay.Span.inside($0, start: start, end: end, in: resolved)
+				}
 			}
 			next.editOverlay(at: origin) { overlay in
 				guard appearance < overlay.appearances.count else {
