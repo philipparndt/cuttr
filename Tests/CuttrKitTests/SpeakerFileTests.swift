@@ -49,9 +49,10 @@ import Testing
 			 Word(start: Double(line) * 2 + 1, end: Double(line) * 2 + 1.9, text: "ende\(line).")]
 		})
 		#expect(said.lines.count == 12)
-		// Six turns over twelve lines: two lines each, alternating.
-		for (number, line) in said.lines.enumerated() where number % 2 == 0 {
-			said.assign(number % 4 == 0 ? "papa" : "mia", from: line.lowerBound)
+		// Six turns over twelve lines: two lines each, alternating. Every line
+		// answered, because an answer is about the line it is given on.
+		for (number, line) in said.lines.enumerated() {
+			said.assign((number / 2) % 2 == 0 ? "papa" : "mia", to: line)
 		}
 		let text = said.write(name: "t", recogniser: "speech-analyzer", locale: "de-DE")
 		let markers = text.components(separatedBy: .newlines).filter { $0.hasPrefix("# speaker:") }

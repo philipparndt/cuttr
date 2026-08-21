@@ -477,14 +477,12 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		// Who is speaking. One key per turn of an interview, and the pane walks
 		// the caret on by itself — so a take is labelled without the hand ever
 		// leaving the number row.
-		transcriptPane.onAssign = { [weak self] word, slug in
+		transcriptPane.onAssign = { [weak self] words, slug in
 			guard let self else { return }
-			let changed = self.takeDocument.assignSpeaker(slug, from: word)
+			let changed = self.takeDocument.assignSpeaker(slug, to: words)
 			guard changed > 0 else { return }
 			let who = slug.map { self.takeDocument.take.speakerTitle($0) } ?? "nobody"
-			self.say(changed == 1
-				? "this line is \(who)"
-				: "\(who), for \(changed) lines — until somebody else was already named")
+			self.say(changed == 1 ? "this line is \(who)" : "\(changed) lines are \(who)")
 			self.refresh()
 		}
 		transcriptPane.onAddSpeaker = { [weak self] name, word in
@@ -493,7 +491,7 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			// Adding somebody while a line is under the caret is nearly always
 			// the same act as naming that line — the first two speakers of a
 			// take are made exactly this way.
-			if let word { self.transcriptPane.assign(added.slug, from: word) }
+			if let word { self.transcriptPane.assign(added.slug, to: word ..< word + 1) }
 			self.say("\(added.title) is \(self.takeDocument.take.speakers.count)"
 				+ " — press that number in the words")
 		}

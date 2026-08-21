@@ -28,16 +28,17 @@ import Testing
 		let document = try document()
 		#expect(document.isDirty == false)
 		document.addSpeaker(named: "Mia")
-		document.assignSpeaker("mia", from: 0)
+		document.assignSpeaker("mia", to: 0 ..< 1)
 		#expect(document.isDirty)
 		#expect(document.transcript.speakers == ["mia"])
 	}
 
-	/// A carry-forward that painted forty lines the wrong colour has to be one
-	/// press of ⌘Z, or nobody will risk the keystroke that makes this fast.
-	@Test func theWholeCarryForwardIsOneUndo() throws {
+	/// A passage named in one act is taken back in one press of ⌘Z, however
+	/// many lines it was — or nobody will risk the keystroke that makes this
+	/// fast.
+	@Test func namingAPassageIsOneUndo() throws {
 		let document = try document()
-		document.assignSpeaker("papa", from: 0)
+		document.assignSpeaker("papa", to: 0 ..< 6)
 		#expect(document.transcript.words.allSatisfy { $0.speaker == "papa" })
 		document.undoManager.undo()
 		#expect(document.transcript.speakers.isEmpty)
@@ -63,13 +64,31 @@ import Testing
 
 	/// Answering a line by hand retires the guess about it: the pane must not
 	/// go on offering an answer to a question already settled.
-	@Test func confirmingALineRetiresTheGuessesItCovers() throws {
+	@Test func confirmingALineRetiresTheGuessAboutIt() throws {
 		let document = try document()
 		document.suggest([0: "papa", 2: "mia", 3: "papa", 5: "mia"])
-		document.assignSpeaker("oma", from: 2)
-		// From line 1 on, all four lines agreed (nobody), so the run reached
-		// the end and took every guess after it with it.
-		#expect(document.suggestedSpeakers == [0: "papa"])
+		document.assignSpeaker("oma", to: 2 ..< 3)
+		// That line and no other: the guesses about the lines somebody has not
+		// answered are still on offer.
+		#expect(document.suggestedSpeakers == [0: "papa", 3: "papa", 5: "mia"])
+	}
+
+	/// And a passage answered at once retires the guesses about all of it.
+	@Test func confirmingAPassageRetiresEveryGuessInIt() throws {
+		let document = try document()
+		document.suggest([0: "papa", 2: "mia", 3: "papa", 5: "mia"])
+		document.assignSpeaker("oma", to: 2 ..< 5)
+		#expect(document.suggestedSpeakers == [0: "papa", 5: "mia"])
+	}
+
+	/// A voice nobody can name is written down like any other answer — and it
+	/// does not join the cast, because nothing about the take says who it is.
+	@Test func unknownIsWrittenDownWithoutJoiningTheCast() throws {
+		let document = try document()
+		document.assignSpeaker(Speaker.unknown, to: 0 ..< 1)
+		#expect(document.transcript.speaker(ofLine: 0 ..< 2) == "unknown")
+		#expect(document.take.speakers.isEmpty)
+		#expect(document.isDirty)
 	}
 
 	/// Renaming touches the name and not the slug, which is why it is one line
@@ -77,7 +96,7 @@ import Testing
 	@Test func renamingLeavesTheReferenceAlone() throws {
 		let document = try document()
 		document.addSpeaker(named: "Mia")
-		document.assignSpeaker("mia", from: 0)
+		document.assignSpeaker("mia", to: 0 ..< 1)
 		document.renameSpeaker("mia", to: "Mia Walter")
 		#expect(document.take.speakerTitle("mia") == "Mia Walter")
 		#expect(document.transcript.speakers == ["mia"])
@@ -88,7 +107,7 @@ import Testing
 	@Test func removingSomebodyTakesThemOffTheWords() throws {
 		let document = try document()
 		document.addSpeaker(named: "Mia")
-		document.assignSpeaker("mia", from: 0)
+		document.assignSpeaker("mia", to: 0 ..< 1)
 		document.removeSpeaker("mia")
 		#expect(document.take.speakers.isEmpty)
 		#expect(document.transcript.speakers.isEmpty)

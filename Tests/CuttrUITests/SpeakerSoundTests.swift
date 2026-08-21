@@ -28,9 +28,9 @@ import Testing
 			Word(start: 1.8, end: 2.2, text: "Und"),
 			Word(start: 2.2, end: 2.6, text: "sonst?"),
 		])
-		said.assign("papa", from: 0)
-		said.assign("mia", from: 2)
-		said.assign("papa", from: 3)
+		said.assign("papa", to: 0 ..< 2)
+		said.assign("mia", to: 2 ..< 3)
+		said.assign("papa", to: 3 ..< 6)
 		return said
 	}
 
@@ -106,10 +106,10 @@ import Testing
 		pane.selectForTest(NSRange(location: at + 1, length: 0))
 		#expect(pane.caretWord == 2)
 
-		var asked: (Int, String?)?
+		var asked: (Range<Int>, String?)?
 		pane.onAssign = { asked = ($0, $1) }
 		pane.assignFromKey(1)
-		#expect(asked?.0 == 2)
+		#expect(asked?.0 == 2 ..< 3)
 		#expect(asked?.1 == "papa")
 	}
 

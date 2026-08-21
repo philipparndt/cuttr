@@ -37,6 +37,20 @@ public struct Speaker: Sendable, Equatable {
 	/// What to show. The name when there is one, and the slug otherwise.
 	public var title: String { name.isEmpty ? slug : name }
 
+	/// The slug for a voice nobody has put a name to.
+	///
+	/// Reserved, and not the same thing as a line nobody has answered. An
+	/// unanswered line is a question still open; `unknown` is an answer —
+	/// somebody off camera, a voice from the next room, a child who is not in
+	/// the cast and is not going to be. Keeping the two apart is what lets the
+	/// pane say what is left to label, and it is why this is a slug in the
+	/// words rather than a blank.
+	///
+	/// It is not in the take's cast and takes no colour from the palette: a
+	/// colour says "this person", and the whole point of this one is that
+	/// nobody knows who it is.
+	public static let unknown = "unknown"
+
 	// MARK: - Colour
 
 	/// The palette, in the order speakers take it.
@@ -66,7 +80,7 @@ public struct Speaker: Sendable, Equatable {
 	public static func colors(for cast: [String]) -> [String: ClipColor] {
 		var taken = Set<ClipColor>()
 		var out: [String: ClipColor] = [:]
-		for slug in cast where out[slug] == nil {
+		for slug in cast where out[slug] == nil && slug != unknown {
 			let first = Int(hash(slug) % UInt64(palette.count))
 			var chosen = palette[first]
 			for step in 0 ..< palette.count {

@@ -122,20 +122,18 @@ public final class TakeDocument {
 		applyTranscript(next, actionName: "Name the Speakers")
 	}
 
-	/// Says who is speaking from this line on. See
-	/// ``CuttrKit/Transcript/assign(_:from:)`` for what "from" means.
+	/// Says who is speaking on the lines these words touch. See
+	/// ``CuttrKit/Transcript/assign(_:to:)``.
 	@discardableResult
-	public func assignSpeaker(_ slug: String?, from wordIndex: Int) -> Int {
+	public func assignSpeaker(_ slug: String?, to words: Range<Int>) -> Int {
 		var next = transcript
-		let changed = next.assign(slug, from: wordIndex)
+		let changed = next.assign(slug, to: words)
 		guard changed > 0 else { return 0 }
-		// Confirming a line by hand retires the guesses it covers, so the pane
+		// Answering a line by hand retires the guess it covers, so the pane
 		// does not go on offering an answer to a question already settled.
-		let lines = next.lines
-		if let first = lines.firstIndex(where: { $0.contains(wordIndex) }) {
-			for line in lines[first ..< min(first + changed, lines.count)] {
-				suggestedSpeakers[line.lowerBound] = nil
-			}
+		let wanted = words.isEmpty ? words.lowerBound ..< words.lowerBound + 1 : words
+		for line in next.lines where line.overlaps(wanted) {
+			suggestedSpeakers[line.lowerBound] = nil
 		}
 		applyTranscript(next, actionName: "Name the Speaker")
 		return changed

@@ -69,8 +69,8 @@ import Testing
 	/// has answered yet, which is how you see what is left to do.
 	@Test func everyLineSaysWhoIsSpeaking() {
 		var said = said()
-		said.assign("papa", from: 0)
-		said.assign("mia", from: 2)
+		said.assign("papa", to: 0 ..< 2)
+		said.assign("mia", to: 2 ..< 6)
 		let shown = pane(said).shownText
 		#expect(shown.hasPrefix("Papa Wie geht's?\nMia  Gut.\n"))
 		// The column is as wide as the longest name and no wider.
@@ -81,8 +81,8 @@ import Testing
 	/// — but the hue has to be there too, and it has to be the speaker's.
 	@Test func theWordsAreDrawnInTheirSpeakersColour() {
 		var said = said()
-		said.assign("papa", from: 0)
-		said.assign("mia", from: 2)
+		said.assign("papa", to: 0 ..< 2)
+		said.assign("mia", to: 2 ..< 6)
 		let pane = pane(said)
 		let colours = Speaker.colors(for: ["papa", "mia"])
 		#expect(pane.colourOfWord(0) == Theme.speakerText(colours["papa"]!))
@@ -106,7 +106,7 @@ import Testing
 	/// gets a colour and a name rather than being quietly left blank.
 	@Test func aSpeakerTheCastDoesNotKnowIsStillDrawn() {
 		var said = said()
-		said.assign("onkel", from: 0)
+		said.assign("onkel", to: 0 ..< 2)
 		let pane = pane(said, cast: [])
 		#expect(pane.shownText.hasPrefix("onkel Wie geht's?"))
 		#expect(pane.colourOfWord(0) != Theme.text)
@@ -116,7 +116,7 @@ import Testing
 	/// words off a narrow pane.
 	@Test func aVeryLongNameIsCutToTheColumn() {
 		var said = said()
-		said.assign("die-grosse-schwester", from: 0)
+		said.assign("die-grosse-schwester", to: 0 ..< 2)
 		let pane = pane(said, cast: [Speaker(slug: "die-grosse-schwester",
 		                                     name: "Die grosse Schwester")])
 		#expect(pane.shownText.hasPrefix("Die grosse…  Wie"))
@@ -125,26 +125,66 @@ import Testing
 	// MARK: - The keystroke
 
 	/// The number on the chip is the key, and it names the line under the
-	/// caret and everything after it.
+	/// caret — that line, and no other.
 	@Test func aNumberNamesTheLineUnderTheCaret() {
 		let pane = pane()
-		var asked: (Int, String?)?
+		var asked: (Range<Int>, String?)?
 		pane.onAssign = { asked = ($0, $1) }
 		pane.selectForTest(word: 2)
 		pane.assignFromKey(2)
-		#expect(asked?.0 == 2)
+		#expect(asked?.0 == 2 ..< 3)
 		#expect(asked?.1 == "mia")
 	}
 
 	/// Zero is nobody, which is how a wrong answer is taken back.
 	@Test func zeroIsNobody() {
 		let pane = pane()
-		var asked: (Int, String?)?
+		var asked: (Range<Int>, String?)?
 		pane.onAssign = { asked = ($0, $1) }
 		pane.selectForTest(word: 0)
 		pane.assignFromKey(0)
-		#expect(asked?.0 == 0)
+		#expect(asked?.0 == 0 ..< 1)
 		#expect(asked?.1 == nil)
+	}
+
+	/// `U` is a voice nobody can name. Not the same key as `0`: that one takes
+	/// an answer back, this one gives one.
+	@Test func uIsAVoiceNobodyCanName() {
+		let pane = pane()
+		var asked: (Range<Int>, String?)?
+		pane.onAssign = { asked = ($0, $1) }
+		pane.selectForTest(word: 2)
+		pane.assignChosen(Speaker.unknown)
+		#expect(asked?.0 == 2 ..< 3)
+		#expect(asked?.1 == "unknown")
+	}
+
+	/// A selection names every line it touches, which is how a passage is
+	/// answered at once now that a keystroke answers one line.
+	@Test func aSelectionNamesEveryLineItTouches() {
+		let pane = pane()
+		var asked: (Range<Int>, String?)?
+		pane.onAssign = { asked = ($0, $1) }
+		// Across the second and third lines: `Gut. Und sonst?`.
+		pane.selectForTest(words: 2 ..< 5)
+		pane.assignFromKey(1)
+		#expect(asked?.0 == 2 ..< 5)
+		#expect(asked?.1 == "papa")
+	}
+
+	/// And a selection stays where it is: it was a deliberate act on a passage,
+	/// and somebody has to be able to see what they just did. Only a caret on
+	/// one line walks on.
+	@Test func aSelectionDoesNotWalkTheCaretOn() {
+		var said = said()
+		let pane = pane()
+		pane.onAssign = { words, slug in said.assign(slug, to: words) }
+		pane.selectForTest(words: 2 ..< 5)
+		pane.assignFromKey(1)
+		// Still on the passage: nothing has asked the caret to move past it.
+		#expect(pane.chosen?.selected == true)
+		pane.show(said, words: Words(path: "w.words", locale: "de-DE"), cast: cast)
+		#expect(said.lines.map { said.speaker(ofLine: $0) } == [nil, "papa", "papa", nil])
 	}
 
 	/// A digit with nobody behind it says so instead of quietly doing nothing
@@ -162,12 +202,13 @@ import Testing
 	}
 
 	/// The caret walks to the next line by itself, so labelling an interview
-	/// is a run of keystrokes and not a run of clicks.
+	/// is a run of keystrokes and not a run of clicks — one key per line, and
+	/// each key answering the line it was pressed on.
 	@Test func theCaretWalksToTheNextLine() {
 		var said = said()
 		let pane = pane()
-		pane.onAssign = { word, slug in
-			said.assign(slug, from: word)
+		pane.onAssign = { words, slug in
+			said.assign(slug, to: words)
 		}
 		pane.selectForTest(word: 0)
 		pane.assignFromKey(1)
@@ -177,7 +218,7 @@ import Testing
 
 		pane.assignFromKey(2)
 		pane.show(said, words: Words(path: "w.words", locale: "de-DE"), cast: cast)
-		#expect(said.lines.map { said.speaker(ofLine: $0) } == ["papa", "mia", "mia", "mia"])
+		#expect(said.lines.map { said.speaker(ofLine: $0) } == ["papa", "mia", nil, nil])
 		#expect(pane.caretWord == 3)
 	}
 
@@ -201,10 +242,12 @@ import Testing
 	/// One chip per speaker, numbered with the key that assigns it — and, once
 	/// there are two people to tell apart, the offer to work it out.
 	@Test func thereIsOneChipPerSpeakerAndOneToAddAnother() {
-		#expect(pane().chipTitles == ["1 Papa", "2 Mia", "Guess", "+"])
+		#expect(pane().chipTitles == ["1 Papa", "2 Mia", "U unknown", "Guess", "+"])
 		// One speaker is nobody to tell them apart from, so there is nothing to
-		// guess and nothing offered.
-		#expect(pane(cast: [Speaker(slug: "mia", name: "Mia")]).chipTitles == ["1 Mia", "+"])
+		// guess and nothing offered — but a voice that is not them is still an
+		// answer somebody may need.
+		#expect(pane(cast: [Speaker(slug: "mia", name: "Mia")]).chipTitles
+			== ["1 Mia", "U unknown", "+"])
 	}
 
 	/// An empty cast says what to press rather than showing a bare plus.
@@ -228,8 +271,8 @@ import Testing
 	/// a change that did not exist.
 	@Test func onlyChangesAreCounted() {
 		var said = said()
-		said.assign("papa", from: 0)
-		said.assign("mia", from: 2)
+		said.assign("papa", to: 0 ..< 2)
+		said.assign("mia", to: 2 ..< 6)
 		// Line one agrees, line two does not.
 		let one = pane(said, suggestions: [0: "papa", 2: "papa"])
 		#expect(one.changedLines == 1)
@@ -249,8 +292,8 @@ import Testing
 	/// read *before* pressing it.
 	@Test func aGuessOverANameShowsBothNames() {
 		var said = said()
-		said.assign("papa", from: 0)
-		said.assign("mia", from: 2)
+		said.assign("papa", to: 0 ..< 2)
+		said.assign("mia", to: 2 ..< 6)
 		let pane = pane(said, suggestions: [0: "mia", 2: "mia"])
 		let shown = pane.shownText
 		#expect(shown.hasPrefix("Papa → Mia Wie geht's?\n"))
@@ -262,7 +305,7 @@ import Testing
 	/// written down in its own colour, the one being offered in the offer's.
 	@Test func theTwoHalvesOfAChangeAreColouredApart() {
 		var said = said()
-		said.assign("papa", from: 0)
+		said.assign("papa", to: 0 ..< 2)
 		let pane = pane(said, suggestions: [0: "mia"])
 		let colours = Speaker.colors(for: ["papa", "mia"])
 		#expect(pane.colourOfMargin(0, at: 0) == Theme.speakerLabel(colours["papa"]!))

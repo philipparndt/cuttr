@@ -42,7 +42,7 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	/// Something worth saying in the window's status line.
 	public var onStatus: ((String) -> Void)?
 	/// Somebody said who is talking from this word's line on. `nil` is nobody.
-	public var onAssign: ((_ wordIndex: Int, _ slug: String?) -> Void)?
+	public var onAssign: ((_ words: Range<Int>, _ slug: String?) -> Void)?
 	/// A name that is not in the cast yet, typed into the pane.
 	public var onAddSpeaker: ((_ name: String, _ wordIndex: Int?) -> Void)?
 	/// A speaker's prose name changed. Their slug does not.
@@ -705,7 +705,13 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 				.font: Theme.transcript, .foregroundColor: colour,
 			]))
 		}
-		func laid(_ slug: String) -> NSColor { colours[slug].map(Theme.speakerLabel) ?? Theme.text }
+		// No colour in the palette for `unknown`, so it lands on the dim text
+		// every other "nothing decided" mark in this pane is drawn in — which
+		// is the right answer twice over: it is an answer, and it is not a
+		// person.
+		func laid(_ slug: String) -> NSColor {
+			colours[slug].map(Theme.speakerLabel) ?? (slug == Speaker.unknown ? Theme.dimText : Theme.text)
+		}
 		func guessed(_ slug: String) -> NSColor {
 			colours[slug].map(Theme.suggestedLabel) ?? Theme.dimText
 		}
@@ -769,6 +775,9 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		// `n` for a name nobody has typed yet, which is how the first two
 		// speakers of every take get made.
 		if character == "n" { askForNewSpeaker(); return true }
+		// `u` for a voice nobody can name. Not the same key as `0`: that one
+		// takes an answer back, this one gives one.
+		if character == "u" { assignChosen(Speaker.unknown); return true }
 		return false
 	}
 
@@ -780,25 +789,68 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 
 	/// What a digit means: the nth chip, and `0` for nobody.
 	func assignFromKey(_ digit: Int) {
-		guard let word = caretWord else { return }
-		if digit == 0 { assign(nil, from: word); return }
+		guard chosen != nil else { return }
+		if digit == 0 { assignChosen(nil); return }
 		guard digit <= cast.count else {
 			onStatus?(cast.isEmpty
 				? "nobody in this take yet — N adds a speaker"
 				: "there is no speaker \(digit) — N adds one")
 			return
 		}
-		assign(cast[digit - 1].slug, from: word)
+		assignChosen(cast[digit - 1].slug)
 	}
 
-	/// Names the line under the caret, and walks to the next one.
-	func assign(_ slug: String?, from word: Int) {
-		guard let line = laidOutLines.firstIndex(where: { $0.contains(word) }) else { return }
-		// Where the caret goes once the pane has been laid out again. Worked
-		// out here, from the lines as they are now, because assigning does not
-		// change how many there are.
-		if line + 1 < laidOutLines.count { wantedCaret = laidOutLines[line + 1].lowerBound }
-		onAssign?(word, slug)
+	/// Which words a name is about: everything a selection touches, or the line
+	/// under the caret when nothing is selected.
+	///
+	/// A speaker belongs to a line, so this only has to land *inside* the right
+	/// lines — ``CuttrKit/Transcript/assign(_:to:)`` widens it to whole ones
+	/// from there. Selecting five lines and pressing `2` is how a run of them
+	/// is answered at once, now that pressing `2` on one line answers one line.
+	var chosen: (words: Range<Int>, selected: Bool)? {
+		let range = text.selectedRange()
+		if range.length > 0 {
+			var lowest = Int.max
+			var highest = Int.min
+			for piece in hit(by: range) {
+				if let word = piece.wordIndex {
+					lowest = min(lowest, word)
+					highest = max(highest, word)
+				}
+				// A name in the margin stands for its whole line, so dragging
+				// across one means that line.
+				if let line = piece.lineIndex, laidOutLines.indices.contains(line) {
+					lowest = min(lowest, laidOutLines[line].lowerBound)
+					highest = max(highest, laidOutLines[line].upperBound - 1)
+				}
+			}
+			if lowest <= highest { return (lowest ..< highest + 1, true) }
+		}
+		guard let word = caretWord else { return nil }
+		return (word ..< word + 1, false)
+	}
+
+	/// Names whatever is chosen.
+	func assignChosen(_ slug: String?) {
+		guard let chosen else { return }
+		// A selection is a deliberate act on a passage and it stays put, so
+		// somebody can see what they just did. A caret on a single line walks
+		// on, which is what makes labelling a page one key per line.
+		assign(slug, to: chosen.words, walkingOn: !chosen.selected)
+	}
+
+	/// Names the lines these words touch.
+	///
+	/// `walkingOn` moves the caret to the line after the one named. Worked out
+	/// here, from the lines as they are now, because naming them does not
+	/// change how many there are.
+	func assign(_ slug: String?, to words: Range<Int>, walkingOn: Bool = true) {
+		if walkingOn,
+		   let line = laidOutLines.firstIndex(where: { $0.contains(words.lowerBound) }),
+		   line + 1 < laidOutLines.count {
+			wantedCaret = laidOutLines[line + 1].lowerBound
+		}
+		onAssign?(words, slug)
 	}
 
 	/// Puts the caret at the head of a word, and shows the line it is in.
@@ -871,6 +923,22 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			castRow.addArrangedSubview(chip)
 		}
 
+		// A voice nobody can name, once there is somebody to tell it apart
+		// from. It is a chip and not a number, because it is not a member of
+		// the cast: nothing about the take says who this is, and the file says
+		// so too.
+		if !cast.isEmpty {
+			let nobody = NSButton(title: "U \(Speaker.unknown)", target: self,
+			                      action: #selector(unknownPressed))
+			nobody.bezelStyle = .inline
+			nobody.controlSize = .small
+			nobody.font = Theme.label
+			nobody.contentTintColor = Theme.dimText
+			nobody.toolTip = "Says somebody is speaking and it is not anybody in this take."
+				+ "\nDifferent from 0, which takes an answer back."
+			castRow.addArrangedSubview(nobody)
+		}
+
 		if !suggestions.isEmpty || cast.count >= 2 {
 			let guess = NSButton(title: "Guess", target: self, action: #selector(guessPressed))
 			guess.bezelStyle = .inline
@@ -909,11 +977,19 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	}
 
 	@objc private func chipPressed(_ sender: NSButton) {
-		guard sender.tag < cast.count, let word = caretWord else {
+		guard sender.tag < cast.count, chosen != nil else {
 			onStatus?("click a line first — a speaker is assigned to a line")
 			return
 		}
-		assign(cast[sender.tag].slug, from: word)
+		assignChosen(cast[sender.tag].slug)
+	}
+
+	@objc private func unknownPressed() {
+		guard chosen != nil else {
+			onStatus?("click a line first — a speaker is assigned to a line")
+			return
+		}
+		assignChosen(Speaker.unknown)
 	}
 
 	@objc private func addPressed() { askForNewSpeaker() }
@@ -1316,6 +1392,18 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	}
 
 	func selectForTest(word index: Int) { putCaret(at: index) }
+
+	/// For the tests: a selection across a run of words, without a mouse.
+	func selectForTest(words range: Range<Int>) {
+		guard let first = wordPieces[safe: range.lowerBound].flatMap({ pieces[safe: $0] }),
+		      let last = wordPieces[safe: range.upperBound - 1].flatMap({ pieces[safe: $0] })
+		else { return }
+		quiet = true
+		text.setSelectedRange(NSRange(
+			location: first.range.location,
+			length: last.range.location + last.range.length - first.range.location))
+		quiet = false
+	}
 
 	/// For the tests: what the pane is showing.
 	var wordCount: Int { transcript.count }

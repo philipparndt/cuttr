@@ -41,7 +41,7 @@ import Testing
 		// The same words, now with somebody's name on the first line — which is
 		// what assigning does.
 		var named = transcript
-		_ = named.assign("mia", from: 0)
+		_ = named.assign("mia", to: 0 ..< 1)
 		pane.show(named, words: nil, cast: [Speaker(slug: "mia", name: "Mia")])
 		pane.layoutSubtreeIfNeeded()
 

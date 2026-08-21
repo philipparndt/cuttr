@@ -420,32 +420,29 @@ public struct Transcript: Sendable, Equatable {
 		return words[range.lowerBound].speaker
 	}
 
-	/// Says who is speaking from the line containing `wordIndex` onwards.
+	/// Says who is speaking on every line the given words touch.
 	///
-	/// **It carries forward**, and that is the point. An interview is sixty
-	/// lines and four hundred words; labelling it a word at a time is not work
-	/// anybody will do twice. Pressing a key on a line says "from here on, it
-	/// is her" — this line and every following one that agreed with it until
-	/// now. The first line somebody has already answered differently stops it,
-	/// so going back to correct one turn does not wipe out the rest of the
-	/// take.
+	/// **It does not carry forward.** It used to: pressing a key on a line
+	/// meant "from here on, it is her", and painted every following line that
+	/// still agreed with this one. That is one keystroke for a whole page,
+	/// which is quick — and it is also one keystroke for a mistake whose
+	/// extent nobody can see. One press could repaint forty lines, and beside
+	/// a standing guess the page stopped being readable at all.
 	///
-	/// On a transcript nobody has touched every line agrees, because they are
-	/// all unassigned, so the first press paints to the end and the next press
-	/// on the following line paints from there. Two people taking turns is one
-	/// key per turn; one person holding a page is one key.
+	/// So a line is answered when somebody answers it, and a *run* of lines is
+	/// answered by selecting them and saying who — which is the case the
+	/// carry-forward was really for, and which says exactly which lines it is
+	/// about. Whole lines either way: a speaker belongs to a line and not to
+	/// the three words somebody happened to drag across.
 	///
-	/// Returns how many lines changed hands, so the pane can say so.
+	/// Returns how many lines it set, so the pane can say so.
 	@discardableResult
-	public mutating func assign(_ speaker: String?, from wordIndex: Int) -> Int {
-		let lines = self.lines
-		guard let first = lines.firstIndex(where: { $0.contains(wordIndex) }) else { return 0 }
-		let previous = words[lines[first].lowerBound].speaker
+	public mutating func assign(_ speaker: String?, to range: Range<Int>) -> Int {
+		// A caret is a range of no length, and it means the line it is in.
+		let wanted = range.isEmpty ? range.lowerBound ..< range.lowerBound + 1 : range
 		var changed = 0
-		for number in first ..< lines.count {
-			let range = lines[number]
-			guard words[range.lowerBound].speaker == previous else { break }
-			for index in range { words[index].speaker = speaker }
+		for line in lines where line.overlaps(wanted) {
+			for index in line { words[index].speaker = speaker }
 			changed += 1
 		}
 		return changed

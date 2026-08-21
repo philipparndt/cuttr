@@ -2,11 +2,11 @@ import Foundation
 import Testing
 @testable import CuttrKit
 
-/// Labelling an interview without pressing four hundred keys.
+/// Labelling an interview: which lines an answer is about.
 @Suite struct SpeakerAssignmentTests {
 
 	/// Six lines, split by full stops rather than by silence — which is what a
-	/// real interview looks like, and the reason the carry-forward matters.
+	/// real interview looks like.
 	private func interview() -> Transcript {
 		Transcript(words: (0 ..< 6).flatMap { line in
 			[Word(start: Double(line) * 2, end: Double(line) * 2 + 1, text: "wort"),
@@ -22,63 +22,105 @@ import Testing
 		#expect(interview().lines.count == 6)
 	}
 
-	/// The first press on an untouched take paints to the end, because every
-	/// line agrees with the one under the cursor: they are all unassigned.
-	@Test func oneKeyOnAFreshTakeNamesTheWholeThing() {
+	/// One answer is about one line.
+	///
+	/// It used to carry forward — a press said "from here on, it is her" and
+	/// painted every following line that still agreed. One keystroke for a
+	/// page is quick, and it is also one keystroke for a mistake whose extent
+	/// nobody can see; beside a standing guess the page was unreadable.
+	@Test func oneAnswerNamesOneLine() {
 		var said = interview()
-		#expect(said.assign("papa", from: 0) == 6)
-		#expect(speakers(said) == Array(repeating: "papa", count: 6))
+		#expect(said.assign("papa", to: 0 ..< 1) == 1)
+		#expect(speakers(said) == ["papa", nil, nil, nil, nil, nil])
 	}
 
-	/// And the next press, on the next line, paints from there. Two people
-	/// taking turns is one key per turn — not one key per word.
-	@Test func eachTurnIsOneKey() {
+	/// Which means correcting a line reaches that line and nothing else — from
+	/// either direction, with nothing to reason about.
+	@Test func correctingALineTouchesNothingElse() {
 		var said = interview()
-		said.assign("papa", from: 0)
-		said.assign("mia", from: said.lines[1].lowerBound)
-		#expect(speakers(said) == ["papa", "mia", "mia", "mia", "mia", "mia"])
-		said.assign("papa", from: said.lines[2].lowerBound)
-		said.assign("mia", from: said.lines[3].lowerBound)
-		#expect(speakers(said) == ["papa", "mia", "papa", "mia", "mia", "mia"])
+		for line in said.lines { said.assign("papa", to: line) }
+		#expect(said.assign("oma", to: said.lines[1]) == 1)
+		#expect(speakers(said) == ["papa", "oma", "papa", "papa", "papa", "papa"])
 	}
 
-	/// Going back to correct one turn does not wipe out the rest of the take:
-	/// the run stops at the first line somebody already answered differently.
-	@Test func correctingOneTurnStopsAtTheNextOne() {
+	/// A run of lines is answered by selecting them and saying who, which is
+	/// the case the carry-forward was really for — and this one says exactly
+	/// which lines it is about.
+	@Test func aSelectionNamesEveryLineItTouches() {
 		var said = interview()
-		said.assign("papa", from: 0)
-		said.assign("mia", from: said.lines[2].lowerBound)
-		#expect(speakers(said) == ["papa", "papa", "mia", "mia", "mia", "mia"])
-		// Line 1 was papa and so was line 0 before it, so only line 1 changes:
-		// line 2 is mia and stops the run.
-		#expect(said.assign("oma", from: said.lines[1].lowerBound) == 1)
-		#expect(speakers(said) == ["papa", "oma", "mia", "mia", "mia", "mia"])
+		let from = said.lines[1].lowerBound
+		let to = said.lines[3].upperBound
+		#expect(said.assign("mia", to: from ..< to) == 3)
+		#expect(speakers(said) == [nil, "mia", "mia", "mia", nil, nil])
 	}
 
-	/// Taking a name back off is the same operation with nobody in it.
+	/// And a selection of part of a line names the whole line. A speaker
+	/// belongs to a line, not to the three words somebody happened to drag
+	/// across — half a line named and half not is not a state the file can
+	/// hold or the pane can draw.
+	@Test func partOfALineNamesTheWholeLine() {
+		var said = interview()
+		let middle = said.lines[2]
+		#expect(said.assign("mia", to: middle.upperBound - 1 ..< middle.upperBound) == 1)
+		#expect(said.words[middle.lowerBound].speaker == "mia")
+		#expect(speakers(said) == [nil, nil, "mia", nil, nil, nil])
+	}
+
+	/// A selection that spans two lines and reaches into a third by one word
+	/// still means three lines. Selecting *into* a line is selecting it.
+	@Test func reachingIntoALineNamesIt() {
+		var said = interview()
+		#expect(said.assign("mia", to: said.lines[0].lowerBound ..< said.lines[2].lowerBound + 1) == 3)
+		#expect(speakers(said) == ["mia", "mia", "mia", nil, nil, nil])
+	}
+
+	/// Taking a name back off is the same operation with nobody in it, and it
+	/// is not the same as saying nobody knows.
 	@Test func nobodyIsAnAnswerToo() {
 		var said = interview()
-		said.assign("papa", from: 0)
-		said.assign(nil, from: said.lines[4].lowerBound)
-		#expect(speakers(said) == ["papa", "papa", "papa", "papa", nil, nil])
+		for line in said.lines { said.assign("papa", to: line) }
+		said.assign(nil, to: said.lines[4])
+		#expect(speakers(said) == ["papa", "papa", "papa", "papa", nil, "papa"])
+	}
+
+	/// A voice nobody can name is an answer, written down like any other.
+	///
+	/// An unanswered line is a question still open; `unknown` is an answer —
+	/// somebody off camera, a voice from the next room. The distinction is what
+	/// lets the pane say what is left to label.
+	@Test func unknownIsAnAnswerAndNotABlank() {
+		var said = interview()
+		said.assign(Speaker.unknown, to: said.lines[0])
+		#expect(said.speaker(ofLine: said.lines[0]) == "unknown")
+		#expect(said.speaker(ofLine: said.lines[1]) == nil)
+		#expect(said.speakers == ["unknown"])
+	}
+
+	/// And it takes no colour from the palette: a colour says "this person",
+	/// and the point of this one is that nobody knows who it is.
+	@Test func unknownTakesNoColour() {
+		let colours = Speaker.colors(for: ["mia", Speaker.unknown, "papa"])
+		#expect(colours[Speaker.unknown] == nil)
+		#expect(colours["mia"] != nil)
+		#expect(colours["papa"] != nil)
 	}
 
 	/// A word index that is not in the take is answered rather than crashed —
 	/// a click lands where it lands.
 	@Test func anIndexOutsideTheTakeChangesNothing() {
 		var said = interview()
-		#expect(said.assign("papa", from: 99) == 0)
+		#expect(said.assign("papa", to: 99 ..< 100) == 0)
 		#expect(said.speakers.isEmpty)
 		var empty = Transcript()
-		#expect(empty.assign("papa", from: 0) == 0)
+		#expect(empty.assign("papa", to: 0 ..< 1) == 0)
 	}
 
 	/// Changing a slug reaches every word that named it, which is what makes
 	/// it safe to have written it four hundred times.
 	@Test func renamingReachesEveryWord() {
 		var said = interview()
-		said.assign("papa", from: 0)
-		said.assign("mia", from: said.lines[3].lowerBound)
+		for line in said.lines[0 ..< 3] { said.assign("papa", to: line) }
+		for line in said.lines[3 ..< 6] { said.assign("mia", to: line) }
 		#expect(said.rename("papa", to: "vater") == 6)
 		#expect(said.speakers == ["vater", "mia"])
 	}
@@ -87,9 +129,9 @@ import Testing
 	/// the pane offers when the take's own cast is empty.
 	@Test func theSidecarSaysWhoIsInIt() {
 		var said = interview()
-		said.assign("papa", from: 0)
-		said.assign("mia", from: said.lines[1].lowerBound)
-		said.assign("papa", from: said.lines[2].lowerBound)
+		said.assign("papa", to: said.lines[0])
+		said.assign("mia", to: said.lines[1])
+		said.assign("papa", to: said.lines[2])
 		#expect(said.speakers == ["papa", "mia"])
 	}
 }

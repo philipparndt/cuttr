@@ -144,9 +144,9 @@ import Testing
 		})
 		let lines = said.lines
 		#expect(lines.count == 4)
-		said.assign("papa", from: lines[0].lowerBound)
-		said.assign("mia", from: lines[1].lowerBound)
-		said.assign("papa", from: lines[2].lowerBound)
+		said.assign("papa", to: lines[0])
+		said.assign("mia", to: lines[1])
+		said.assign("papa", to: lines[2])
 
 		// Clusters 0 and 1, with lines 0 and 2 in the first and 1 and 3 in the
 		// second — which is what the audio would have said too.
