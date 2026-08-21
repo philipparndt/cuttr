@@ -326,6 +326,32 @@ public final class ComposeDocument {
 		/// and because the credits are the one place that needs it. See
 		/// ``CuttrCompose/Credits/cast(of:used:)``.
 		public var cast: [String] = []
+		/// What each take is made of, by take name.
+		///
+		/// Read here because reading the take files is this document's job — the
+		/// loop that fills in the clips is already reading them — and because
+		/// the library needs it to take a look at a clip. A clip in the library
+		/// may not be on the programme at all, so there is no stretch of
+		/// assembly to play: what plays is the take's own media, which is a
+		/// video, whatever the separate recorder caught, and the one number that
+		/// relates them.
+		public var media: [String: Media] = [:]
+
+		/// A take's media, as the take says it.
+		public struct Media: Sendable, Equatable {
+			public var video: URL?
+			public var audio: URL?
+			/// Positive means the recorder was started after the camera. One
+			/// clock, the video's — see the house rules.
+			public var offset: Double
+
+			public init(video: URL?, audio: URL?, offset: Double) {
+				self.video = video
+				self.audio = audio
+				self.offset = offset
+			}
+		}
+
 		/// Takes that were downloaded rather than recorded, by name.
 		///
 		/// Read from each take's own `source:` block — see ``TakeSource`` — and
@@ -393,6 +419,18 @@ public final class ComposeDocument {
 			for clip in take.clips { slugCounts[clip.slug, default: 0] += 1 }
 			for anchor in take.anchors { anchorTakes[anchor.name] = entry.name }
 			if take.source?.isMeme == true { found.memeTakes.insert(entry.name) }
+			// Relative to the take file, the way the resolver reads them: a
+			// take, its media and the project are one folder somebody copies to
+			// another disk.
+			let directory = entry.url.deletingLastPathComponent()
+			found.media[entry.name] = Vocabulary.Media(
+				video: take.video.map {
+					URL(fileURLWithPath: $0, relativeTo: directory).standardizedFileURL
+				},
+				audio: take.audio.map {
+					URL(fileURLWithPath: $0.file, relativeTo: directory).standardizedFileURL
+				},
+				offset: take.audio?.offset ?? 0)
 		}
 		for entry in takes {
 			guard let text = try? String(contentsOf: entry.url, encoding: .utf8),

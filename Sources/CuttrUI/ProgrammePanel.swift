@@ -1,3 +1,4 @@
+@preconcurrency import AVFoundation
 import AppKit
 import CuttrCompose
 import CuttrKit
@@ -83,7 +84,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// The programme as it resolved, for deciding which overlays are on over
 	/// what is selected. Set by the window; nothing here needs it to draw.
 	public var resolved: ResolvedProject? {
-		didSet { outline.reloadData() }
+		didSet {
+			outline.reloadData()
+			// The overlays a look draws are built from this, so a programme that
+			// has resolved again is a tree that has to be built again.
+			lookOverlays = nil
+		}
 	}
 	/// Which kinds of thing the tree shows besides the timeline itself.
 	///
@@ -1689,9 +1695,17 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// tree rather than to the window, because it is a way of looking at *this*
 	/// list — and a tree with a window nobody has opened should not have made one.
 	private var look: QuickLookPanel?
-	/// How to undo what is watched while a look is open. One list, because the
-	/// rule is single: anything that is not moving about the tree puts it away.
-	private var lookWatch: [() -> Void] = []
+	/// What keeps it open only while somebody is looking. One rule, in one
+	/// place, shared with the library — see ``LookWatch``.
+	private let lookWatch = LookWatch()
+	/// The overlay tree a look is drawn with, built once for each programme
+	/// that resolves.
+	///
+	/// Built here rather than by the panel because it belongs to the project the
+	/// tree is showing, and kept because building it is text laid out and images
+	/// read: cheap enough to do when somebody asks for a look, too dear to do on
+	/// every arrow key while one is open.
+	private var lookOverlays: CALayer?
 
 	/// Whether a look is open. For the window, and for the tests.
 	public var isLooking: Bool { look?.isShowing == true }
@@ -1761,57 +1775,47 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		else { closeLook(); return }
 		let panel = look ?? QuickLookPanel()
 		look = panel
-		let row = window.convertToScreen(outline.convert(outline.rect(ofRow: first), to: nil))
-		let column = window.convertToScreen(convert(bounds, to: nil))
+		let where_ = QuickLook.frames(of: outline.rect(ofRow: first), in: outline,
+		                              column: self, window: window)
 		panel.show(
 			span, titled: lookTitle(lookRows()),
 			saying: "\(Timecode.string(span.start)) → \(Timecode.string(span.end))"
 				+ "   \(TakeWriter.number(span.duration, places: 1))s",
-			playing: playable, over: window, beside: column, row: row,
-			output: project.output.size)
-		watchTheLook()
+			playing: playable, over: window, beside: where_.column, row: where_.row,
+			output: project.output.size, overlaid: overlayTree())
+		lookWatch.begin(in: self, look: panel) { [weak self] in self?.closeLook() }
+	}
+
+	/// The captions, spinners, scenes and bubbles that go over the picture.
+	///
+	/// Without these a look played the programme bare — the cut, the grade and
+	/// the effects, and nothing that is drawn over the finished frame — which is
+	/// a look at something nobody is going to render. One builder draws them
+	/// for the preview, for the export and for this; see
+	/// ``QuickLook/overlays(for:)`` for why it is a tree of its own and not the
+	/// window's.
+	private func overlayTree() -> CALayer? {
+		guard let resolved else { return nil }
+		if let lookOverlays { return lookOverlays }
+		let tree = QuickLook.overlays(for: resolved)
+		lookOverlays = tree
+		return tree
 	}
 
 	/// Puts it away, and takes the watch off with it.
 	public func closeLook() {
 		look?.hide()
-		for undo in lookWatch { undo() }
-		lookWatch = []
-	}
-
-	/// A look lasts as long as somebody is looking.
-	///
-	/// Which is to say: while the tree is being moved about in. A click anywhere
-	/// else — the properties beside it, the panel itself, another window — is
-	/// somebody finished, and so is the window being resized, moved, deactivated
-	/// or closed. A click *in* the tree is not: it selects a row, and the look
-	/// follows the selection.
-	private func watchTheLook() {
-		guard lookWatch.isEmpty, let window else { return }
-		let mouse = NSEvent.addLocalMonitorForEvents(
-			matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-		) { [weak self] event in
-			guard let self else { return event }
-			if event.window !== self.window
-				|| !self.bounds.contains(self.convert(event.locationInWindow, from: nil)) {
-				self.closeLook()
-			}
-			return event
-		}
-		lookWatch.append { if let mouse { NSEvent.removeMonitor(mouse) } }
-		for name in [NSWindow.didResizeNotification, NSWindow.didMoveNotification,
-		             NSWindow.didResignKeyNotification, NSWindow.willCloseNotification] {
-			let token = NotificationCenter.default.addObserver(
-				forName: name, object: window, queue: nil
-			) { [weak self] _ in
-				MainActor.assumeIsolated { self?.closeLook() }
-			}
-			lookWatch.append { NotificationCenter.default.removeObserver(token) }
-		}
+		lookWatch.end()
 	}
 
 	/// For the tests: where the look landed, and whether it is playing.
 	var lookFrameForTesting: NSRect? { look?.frame }
+	/// For the tests: the tree of overlays over the look's picture, and the item
+	/// it is synchronised to. Whether anything is drawn over a look at all is
+	/// the whole of what these are for.
+	var lookOverlayTreeForTesting: CALayer? { look?.overlayTreeForTesting }
+	var lookOverlayItemForTesting: AVPlayerItem? { look?.overlayItemForTesting }
+	var lookPanelForTesting: QuickLookPanel? { look }
 	var lookPlayingForTesting: Bool { look?.isPlayingForTesting == true }
 	var lookTimeForTesting: Double { look?.timeForTesting ?? 0 }
 

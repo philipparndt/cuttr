@@ -165,6 +165,9 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 	// MARK: - Contents
 
 	public func reload(_ vocabulary: ComposeDocument.Vocabulary) {
+		// A reload puts a look away: the rows are about to move under it, and
+		// the take it was playing may not be one of this project's any more.
+		closeLook()
 		self.vocabulary = vocabulary
 		rebuild()
 	}
@@ -238,6 +241,29 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 	/// something inside a section goes to its heading first, the way a source
 	/// list behaves everywhere else on the machine.
 	fileprivate func handle(_ event: NSEvent) -> Bool {
+		// Space is a look at the clip that is selected, and the same key again
+		// puts it away; escape does too, and only while one is open. Both
+		// questions are asked of ``QuickLook`` rather than answered here, for
+		// the same reason the programme tree asks them: space belongs to several
+		// things in this program — the preview, the transcript, a text field —
+		// and the only safe way to take it is to be able to say, without a
+		// keyboard, where it is *not* taken.
+		//
+		// It used to mean "put this on the programme", which `return` already
+		// means and still does. A second key for the same thing is worth less
+		// than a look at the material before you place it.
+		//
+		// Nothing is being typed when this is asked: the key arrives through the
+		// table's own `keyDown`, and a table with a field editor up is not the
+		// first responder.
+		if QuickLook.dismisses(event), isLooking {
+			closeLook()
+			return true
+		}
+		if QuickLook.claims(event, editing: false, hasSpan: lookSpan() != nil) {
+			if isLooking { closeLook() } else { showLook() }
+			return true
+		}
 		let row = table.selectedRow
 		guard row >= 0, row < rows.count else { return false }
 		switch event.keyCode {
@@ -254,13 +280,142 @@ public final class LibraryView: NSView, NSTableViewDataSource, NSTableViewDelega
 				return true
 			}
 			return false
-		case 36, 49:   // return, space
+		case 36:   // return
 			insertSelected()
 			return true
 		default:
 			return false
 		}
 	}
+
+	// MARK: - A look
+
+	/// The panel a look happens in, made when one is first asked for.
+	private var look: QuickLookPanel?
+	/// What keeps it open only while somebody is looking — the same rule the
+	/// programme tree's look lives under. See ``LookWatch``.
+	private let lookWatch = LookWatch()
+
+	/// Whether a look is open. For the window, and for the tests.
+	public var isLooking: Bool { look?.isShowing == true }
+
+	/// Which clip a look would be at, and which row it is on: the first one
+	/// selected.
+	///
+	/// The list selects in handfuls, because several clips dragged out at once
+	/// is how a section gets filled — but two clips are two takes' worth of
+	/// media and there is no single thing to play. A look is at one thing, so it
+	/// is at the first of them.
+	func lookClip() -> (row: Int, clip: ComposeDocument.Vocabulary.Item)? {
+		for row in table.selectedRowIndexes.sorted() where row < rows.count {
+			if case .clip(let item) = rows[row] { return (row, item) }
+		}
+		return nil
+	}
+
+	/// What a look would play, and therefore whether space means anything here
+	/// at all. `nil` is the list declining the key — which is what a tag, an
+	/// anchor, a scene or a heading is: a name, with no stretch of anything
+	/// behind it.
+	///
+	/// On the take's clock, which is the clock the take's own media is on and
+	/// the only clock a clip has. Nothing here is a time on the programme: the
+	/// clip may not be on the programme.
+	func lookSpan() -> QuickLook.Span? {
+		guard let item = lookClip()?.clip, item.length > 0 else { return nil }
+		// A clip shorter than a look is played for as long as a look, forwards —
+		// see ``QuickLook/shortest``. Forwards and not backwards because how
+		// long the take runs is not something this list knows; the player stops
+		// at the end of the media, which is the honest end of the answer.
+		return QuickLook.Span(start: item.start,
+		                      end: item.start + max(item.length, QuickLook.shortest))
+	}
+
+	/// The take's media, or `nil` if none of it is where the take says it is.
+	///
+	/// Asked of the disk rather than assumed, because a path that has moved is
+	/// the commonest thing to go wrong with a project — and a look that plays
+	/// black tells nobody which of the two it was.
+	private func lookMedia(_ item: ComposeDocument.Vocabulary.Item) -> QuickLookPanel.Media? {
+		guard let media = vocabulary.media[item.take] else { return nil }
+		func onDisk(_ url: URL?) -> URL? {
+			guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+			return url
+		}
+		let video = onDisk(media.video), audio = onDisk(media.audio)
+		guard video != nil || audio != nil else { return nil }
+		return QuickLookPanel.Media(video: video, audio: audio, offset: media.offset)
+	}
+
+	/// A look at the selected clip, beside the row it was chosen from.
+	///
+	/// Playing the take's own media rather than a stretch of the programme,
+	/// because a clip in the library may never have been placed on one. The
+	/// composition of a video and a separate recorder at its offset is
+	/// ``Transport``'s, which the panel plays through anyway — so this builds no
+	/// assembly of its own, and the alignment it plays is the take's.
+	///
+	/// Nothing is drawn over it. Overlays belong to a project, and this is a
+	/// look at what a take holds.
+	public func showLook() {
+		guard let window, let chosen = lookClip(), let span = lookSpan()
+		else { closeLook(); return }
+		let item = chosen.clip
+		let panel = look ?? QuickLookPanel()
+		look = panel
+		let media = lookMedia(item)
+		let where_ = QuickLook.frames(of: table.rect(ofRow: chosen.row), in: table,
+		                              column: self, window: window)
+		panel.show(
+			span, titled: item.name.isEmpty ? item.slug : item.name,
+			saying: media == nil
+				? item.take
+				: "\(item.take)   \(Timecode.string(span.start)) → \(Timecode.string(span.end))",
+			playing: media, over: window, beside: where_.column, row: where_.row,
+			// The shape of the footage is not something a project's vocabulary
+			// knows, and probing for it is a read this key press should not wait
+			// on. The picture is drawn aspect-fitted whatever the panel's shape,
+			// so a guess costs at worst a band of card either side of it.
+			output: NSSize(width: 16, height: 9))
+		lookWatch.begin(in: self, look: panel) { [weak self] in self?.closeLook() }
+	}
+
+	/// Puts it away, and takes the watch off with it.
+	public func closeLook() {
+		look?.hide()
+		lookWatch.end()
+	}
+
+	/// An open look follows the selection, so arrowing down the list is somebody
+	/// comparing two clips. A panel pinned beside a row that is showing
+	/// something else is a panel lying about what it is pointing at.
+	public func tableViewSelectionDidChange(_ notification: Notification) {
+		if isLooking { showLook() }
+	}
+
+	/// The list leaving the window takes the look with it: a panel hovering
+	/// beside a list that is no longer there outlives what it was about.
+	public override func viewDidMoveToWindow() {
+		super.viewDidMoveToWindow()
+		if window == nil { closeLook() }
+	}
+
+	/// For the tests: where the look landed, and what it is playing.
+	var lookFrameForTesting: NSRect? { look?.frame }
+	var lookPanelForTesting: QuickLookPanel? { look }
+	/// For the tests: the list itself, which is what has to have the keyboard
+	/// for the key to arrive here at all — the window's own key monitor hands
+	/// the press on when the first responder is a table, and eats it when it is
+	/// not.
+	var tableForTesting: KeyTable { table }
+
+	/// For the tests: a key press as the *table* hands it over.
+	///
+	/// Through `table.onKey`, which is the wiring rather than a copy of it, and
+	/// not by dispatching an event at the view: an unclaimed key event walks up
+	/// to `NSResponder`, which answers it with a beep on the machine the tests
+	/// are running on. What a test then asks is whether a look opened.
+	func keyForTesting(_ event: NSEvent) -> Bool { table.onKey?(event) ?? false }
 
 	// MARK: - Table
 
