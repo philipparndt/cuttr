@@ -132,7 +132,10 @@ global colour that looked like it would.
 
 **Space takes a look.** Pressing space in the timeline or the tree plays what is
 selected in a small hovering window over the top, rather than taking the
-playhead somewhere and leaving it there. It can be moved and resized.
+playhead somewhere and leaving it there. The tree keeps the keyboard while it is
+open, so space and the arrows go on working where you are looking, and there is
+nothing on the panel to click: every gesture that is not moving about the tree
+means *enough*, and `⎋` closes it.
 
 ## Every pause leaves a version
 
