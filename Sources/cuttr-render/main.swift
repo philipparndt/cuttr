@@ -800,6 +800,19 @@ if describe {
 				+ (bubble.tail == .zero ? ""
 					: " tail [\(bubble.tail.x), \(bubble.tail.y)]")
 				+ (bubble.follow ? "" : " pinned")
+		case .frames(let frames):
+			// The one overlay whose contents are outside the project file, so
+			// this is where somebody finds out that the folder is empty or that
+			// the render they ran stopped half way. A `.cuttrproj` cannot say how
+			// many pictures there ought to be; the folder is the only witness.
+			let found = frames.found(relativeTo: resolved.baseURL)
+			what = "frames \(frames.folder) at \(frames.framesPerSecond) fps"
+				+ " size \(frames.size) \(frames.ends.rawValue)"
+				+ (found.count == 0
+					? "  — NO PICTURES IN THAT FOLDER: nothing will be drawn"
+					: String(format: "  — %d frames, %d×%d, %.2fs", found.count,
+					         Int(found.pixels.width), Int(found.pixels.height),
+					         found.seconds))
 		}
 		/// Where a movement sits, said only when it is not where it usually
 		/// sits — the defaults differ between the two ends, and printing them

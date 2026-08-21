@@ -26,3 +26,12 @@ Media/
 
 # The harness's worktrees for parallel agents
 .claude/
+
+# The Remotion project beside the app: its dependencies, and the frames it
+# renders. Nothing in cuttr needs either — see tools/remotion/README.md. The
+# frames are twenty megabytes and are reproduced by `render.sh`; the ones under
+# examples/frames/harmonograph/ are committed, because they are kilobytes and
+# because one example has to render on a machine with nothing installed.
+tools/remotion/node_modules/
+examples/frames/chart/
+examples/frames/route/

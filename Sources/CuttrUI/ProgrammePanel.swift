@@ -586,6 +586,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			case .aberration: return "aberration"
 			case .tape: return "tape"
 			case .bubble: return "bubble"
+			case .frames: return "frames"
 			}
 		}
 		if !names.isEmpty { out += " · " + names.joined(separator: ", ") }
@@ -2224,6 +2225,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			case .text(let text, _): return "“\(text)”"
 			case .spinner: return "spinner"
 			case .bubble(let bubble): return "“\(bubble.text)”"
+			case .frames(let frames): return frames.folder
 			}
 		}
 
@@ -2266,6 +2268,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				title = bubble.text.isEmpty
 					? "\(bubble.shape.rawValue) bubble"
 					: "\(bubble.shape.rawValue) · “\(bubble.text)”"
+			case .frames(let frames):
+				kind = .frames
+				title = "\(frames.folder) · "
+					+ "\(TakeWriter.number(frames.framesPerSecond, places: 0)) fps"
 			}
 
 			if let image = Theme.symbol(kind, size: 13) {

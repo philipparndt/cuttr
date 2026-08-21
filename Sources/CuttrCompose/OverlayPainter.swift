@@ -62,6 +62,21 @@ public enum OverlayPainter {
 			// nothing to place: the tail already reaches where it reaches.
 			return faded(CIImage(cgImage: drawn), by: opacity)
 
+		case .frames(let frames):
+			// The one kind with no drawing of its own. The picture is already a
+			// picture; all that is left is which one and where it goes.
+			//
+			// `time - resolved.start` is the appearance's own clock, as a
+			// scene's keys are on the scene's, so `at: before` on an `in:` shows
+			// the sequence's first picture early rather than starting it early.
+			let listing = FrameFolder.listing(frames.folder, relativeTo: baseURL)
+			guard let index = frames.frame(at: time - resolved.start, of: listing.count),
+			      let picture = FrameFolder.image(index, in: listing) else { return nil }
+			let box = FrameFolder.box(frames, pixels: listing.pixels, frame: size)
+			return placed(picture, plate: box, anchor: CGPoint(x: 0.5, y: 0.5),
+			              home: home(resolved, style: .centred, size: size),
+			              resolved: resolved, size: size, opacity: opacity, at: time)
+
 		case .effect, .film, .aberration, .tape:
 			// All of them are the frame itself rather than something over it,
 			// and none of them is drawn here.
@@ -97,6 +112,22 @@ public enum OverlayPainter {
 		if let path = resolved.path, let point = path.point(at: resolved.start) {
 			return CGPoint(x: point.x * size.width + resolved.overlay.offset.x * size.height,
 			               y: point.y * size.height + resolved.overlay.offset.y * size.height)
+		}
+		// A sequence with nothing to follow sits in the middle of the frame, with
+		// the offset in fractions of the frame **height** on both axes — the
+		// unit ``Overlay/offset`` documents, and the same one the anchored branch
+		// above uses. So a chart nudged left is nudged by the same distance
+		// whether or not it is following a face, and by the same distance on a
+		// 16:9 render and a 4:3 one.
+		//
+		// The spinner below does not do that, and is deliberately left alone: it
+		// takes its `x` from the frame's width and predates the sentence on
+		// ``Overlay/offset``. Fixing it would move every unanchored spinner in
+		// every project already on disk, which is not a thing to do while adding
+		// a kind. The layer path takes the same two branches in the same order.
+		if case .frames = resolved.overlay.kind, resolved.path == nil {
+			return CGPoint(x: size.width / 2 + resolved.overlay.offset.x * size.height,
+			               y: size.height / 2 + resolved.overlay.offset.y * size.height)
 		}
 		if case .spinner = resolved.overlay.kind, resolved.path == nil {
 			return CGPoint(x: (0.5 + resolved.overlay.offset.x) * size.width,

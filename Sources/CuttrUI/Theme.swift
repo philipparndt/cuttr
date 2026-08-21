@@ -194,7 +194,7 @@ public enum Theme {
 	/// being told.
 	public enum Kind {
 		case clip, query, list, section, card, sound, text, spinner, effect, scene,
-		     film, aberration, tape, bubble,
+		     film, aberration, tape, bubble, frames,
 		     anchor, tag, take
 	}
 
@@ -213,7 +213,10 @@ public enum Theme {
 		// Paper, near enough: a bubble is the one overlay that is a drawn thing
 		// on the picture rather than a treatment of it.
 		case .bubble: return base(.amber)
-		case .scene: return base(.blue)
+		// The same blue a scene gets, because from the row's point of view they
+		// are the same thing: a picture laid over the cut. What differs is where
+		// the picture was drawn, and the symbol says that.
+		case .frames, .scene: return base(.blue)
 		case .anchor: return base(.teal)
 		// A card is the absence of footage, and neutral grey is what that
 		// looks like beside six hues that all mean "something was shot".
@@ -250,6 +253,9 @@ public enum Theme {
 		case .tape: name = "recordingtape"
 		case .bubble: name = "bubble.left"
 		case .scene: name = "rectangle.stack"
+		// Sprocket holes: a folder of numbered pictures, which is what a strip
+		// of film is.
+		case .frames: name = "film.stack"
 		case .anchor: name = "scope"
 		case .card: name = "rectangle.fill"
 		case .sound: name = "waveform"

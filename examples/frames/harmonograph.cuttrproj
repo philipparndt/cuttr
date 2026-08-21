@@ -1,0 +1,94 @@
+# cuttr project — `frames:`, a folder of pictures played over the cut.
+#
+# The frames in `harmonograph/` are committed, so this renders on any machine
+# with nothing installed. They were drawn by `tools/frames/harmonograph.py`,
+# which is a hundred lines of Python using nothing but the standard library, and
+# the whole point of this example is that **nothing in this file knows that**. A
+# `frames:` overlay reads numbered pictures out of a folder. What drew them —
+# Python, Blender, a browser, a scanner — is not a thing the format has a word
+# for, and that is deliberate: see `docs/remotion.md`.
+#
+# Why a harmonograph rather than something the scene vocabulary could say: it is
+# four decaying sines sampled nine hundred times a unit and splatted into a
+# coverage buffer. `shape:` parts draw rectangles, ellipses and stars; there is
+# no arrangement of them that is this curve, and a file holding forty thousand
+# line segments would be holding the output of a program rather than describing
+# one.
+#
+# **Three things worth watching for.**
+#
+# `fps:` is not optional and is not the output's rate. The sequence is thirty-six
+# pictures at twelve a second, so it takes three seconds to draw whatever the
+# programme is encoded at. Leave `fps:` out and the file will not open, with a
+# sentence saying why — a sequence carries no rate of its own, and a guessed one
+# shows as an animation running at some fraction of the speed it was drawn at.
+#
+# `ends:` is what happens when the sequence runs out before the overlay does.
+# The second card is the comparison: the same folder twice, side by side, one
+# holding its last picture and one starting again. There is no third option —
+# `ends: stretch` is refused by name, because fitting the sequence to the span
+# would re-time somebody else's animation from a fact about the cut, so trimming
+# two frames off a shot would quietly change the speed of the drawing.
+#
+# `size:` is the height, as a fraction of the frame, and the width follows the
+# pictures' own shape. These are square, so 0.86 of a 720-high frame is 619
+# pixels each way. Nothing here says a width, and nothing can be squashed.
+cuttr-project: 1
+
+output:
+  size: 1280x720
+  fps:  25
+  file: harmonograph.mov
+
+styles:
+  said:
+    font:     Helvetica Neue Light
+    size:     0.036
+    color:    "#8b97a8"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.5, 0.075]
+    align:    centre
+
+timeline:
+  # Three seconds of drawing, then two of the finished figure. `ends:` is left
+  # out, which is `hold` — a projector's answer, and the right default: a chart
+  # that has finished drawing itself should go on being a chart.
+  - card:  00:05.000
+    fill:  "#0b1220"
+    overlays:
+      - frames: harmonograph
+        fps:    12
+        size:   0.86
+        in:     {fade: true, over: 0.4}
+        out:    {fade: true, over: 0.5}
+      - text:  a harmonograph, drawn by something that is not cuttr
+        style: said
+        in:    {fade: true, over: 0.5}
+        out:   {fade: true, over: 0.5}
+
+  # The same folder, twice, at half the size. The left one holds; the right one
+  # comes round. Both are three seconds long and the card is five, so for the
+  # last two seconds one of them is a still picture and the other is drawing the
+  # first two thirds of itself again.
+  - card:  00:05.000
+    fill:  "#0b1220"
+    overlays:
+      - frames: harmonograph
+        fps:    12
+        size:   0.52
+        offset: [-0.42, 0.06]
+        in:     {fade: true, over: 0.4}
+        out:    {fade: true, over: 0.5}
+      - frames: harmonograph
+        fps:    12
+        size:   0.52
+        ends:   loop
+        offset: [0.42, 0.06]
+        in:     {fade: true, over: 0.4}
+        out:    {fade: true, over: 0.5}
+      - text:  the same folder — held on the left, looping on the right
+        style: said
+        in:    {fade: true, over: 0.5}
+        out:   {fade: true, over: 0.5}

@@ -1,0 +1,21 @@
+{
+	"name": "cuttr-remotion-frames",
+	"private": true,
+	"version": "0.0.0",
+	"description": "Remotion compositions rendered to the frame folders cuttr's frames: overlay reads.",
+	"license": "MIT",
+	"scripts": {
+		"studio": "remotion studio src/index.ts",
+		"frames": "./render.sh"
+	},
+	"dependencies": {
+		"@remotion/cli": "4.0.515",
+		"react": "19.0.0",
+		"react-dom": "19.0.0",
+		"remotion": "4.0.515"
+	},
+	"devDependencies": {
+		"@types/react": "19.0.0",
+		"typescript": "5.7.2"
+	}
+}

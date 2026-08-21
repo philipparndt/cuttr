@@ -29,6 +29,9 @@ public struct Overlay: Sendable, Equatable {
 		/// Somebody saying something, in a drawn bubble with a tail that
 		/// points at them.
 		case bubble(Bubble)
+		/// A folder of numbered pictures, played over the cut. The one kind that
+		/// arrives already drawn — see ``Frames``.
+		case frames(Frames)
 
 		/// Whether this kind *is* the frame rather than something laid over it.
 		///
@@ -42,7 +45,7 @@ public struct Overlay: Sendable, Equatable {
 		public var changesTheFrame: Bool {
 			switch self {
 			case .film, .aberration, .tape: return true
-			case .text, .spinner, .effect, .scene, .bubble: return false
+			case .text, .spinner, .effect, .scene, .bubble, .frames: return false
 			}
 		}
 	}
@@ -61,6 +64,7 @@ public struct Overlay: Sendable, Equatable {
 		case .tape: return "the tape"
 		case .bubble(let bubble):
 			return bubble.text.isEmpty ? "a bubble" : "the bubble \u{201C}\(bubble.text)\u{201D}"
+		case .frames(let frames): return "the frames in `\(frames.folder)`"
 		}
 	}
 
@@ -124,10 +128,11 @@ public struct Overlay: Sendable, Equatable {
 			// step by hand.
 			if let text = appearance.text { bubble.text = text }
 			out.kind = .bubble(bubble)
-		case .effect, .scene, .film, .aberration, .tape:
+		case .effect, .scene, .film, .aberration, .tape, .frames:
 			// None of them says anything of its own at an appearance: an effect
-			// is simply on twice, a scene says what its parameters say, and
-			// the three that are the frame itself say nothing at all.
+			// is simply on twice, a scene says what its parameters say, a
+			// sequence of pictures says whatever was drawn into it, and the
+			// three that are the frame itself say nothing at all.
 			break
 		}
 		return out

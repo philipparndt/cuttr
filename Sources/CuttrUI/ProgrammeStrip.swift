@@ -410,6 +410,7 @@ public final class ProgrammeStrip: NSView {
 			case .tape(let tape): label = "tape · \(tape.condition.rawValue)"
 			case .scene(let name, _): label = name
 			case .bubble(let bubble): label = bubble.text
+			case .frames(let frames): label = "frames \u{00B7} \(frames.folder)"
 			}
 			let attributes: [NSAttributedString.Key: Any] = [.font: Theme.monoSmall, .foregroundColor: Theme.text]
 			if (label as NSString).size(withAttributes: attributes).width < rect.width - 6 {

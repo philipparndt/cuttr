@@ -1,9 +1,33 @@
 # Remotion, and what it would cost
 
-An assessment, not a plan. Nothing in this document is built. It exists because
-"maybe Remotion would be a good fit, I plan to have much more custom content"
-is a reasonable thought and a decision that is not a side effect of a credits
-task — so here is what the decision actually involves.
+This began as an assessment rather than a plan, because "maybe Remotion would be
+a good fit, I plan to have much more custom content" is a reasonable thought and
+a decision that should not be a side effect of a credits task. Most of what
+follows is still that assessment, unchanged, because the reasoning is the useful
+part.
+
+**Two of its three steps are now built.** In short:
+
+- **Step 1 — a `frames:` overlay — is in the app.** A folder of numbered
+  pictures, a frame rate, and the usual `when`/`in`/`out`/`anchor`/`offset`
+  vocabulary. It knows nothing whatever about Remotion, or about Node, or about
+  browsers. See `README.md` under *Frame sequences*, and `Frames.swift`.
+- **Step 2 — a way of producing those folders from a Remotion composition — is
+  in `tools/remotion/`**, outside the app: a real project with two compositions
+  and a `render.sh` that writes the frames and a sidecar saying what made them.
+  Nothing in `make`, nothing in the test suite, nothing in the bundle. A machine
+  with no Node on it builds cuttr, passes the suite, and renders any project
+  whose frames are on disk.
+- **Step 3 — a `component:` part that invokes Remotion for itself — is not
+  built, and the last section of this document is why.**
+
+The examples are `examples/frames/harmonograph.cuttrproj`, which uses a hundred
+lines of Python and renders on any machine, and
+`examples/frames/remotion.cuttrproj`, which uses the two compositions and needs
+`render.sh` run once first. That pair is the whole claim in two files: the
+interface is pixels, and cuttr cannot tell which program drew them.
+
+*What follows was written before any of it existed. It is left as it was.*
 
 ## What Remotion is, in this program's terms
 
@@ -186,3 +210,57 @@ The order matters because step 1 is the part with the good ratio, and it is
 tempting to skip it and land on step 3 — where the dependency, the
 reproducibility hole and the honest-preview problem all arrive at once, for a
 feature whose real users may have been happy with a PNG sequence.
+
+## What was actually built, and where it differs
+
+Steps 1 and 2. Step 3 was not started; the paragraph above is the reason, and
+nothing found while building the first two changed it.
+
+Four places where the built thing differs from the sketch, each because writing
+it turned something up:
+
+**A folder, not a `%04d.png` pattern.** The sketch reads a numbering *claim* out
+of the project file, and then the file and the folder can disagree — which forces
+a rule about what to do at a hole, and every candidate rule (hold the frame
+before it, blank the frame, refuse the render) is a frame nobody can see. So the
+sequence is defined instead as "the numbered pictures in the folder, in numeric
+order", and there is no such thing as a missing frame. It costs no grammar,
+cannot be written down wrongly, and does not care that `remotion render
+--sequence` counts from nought and calls its output `element-0000.png` while
+`ffmpeg` counts from one and calls it `frame_0001.png`. What is worth saying out
+loud — how many pictures there actually are — `cuttr-render --describe` says.
+
+**Not `keys:`, but `size:` and the overlay vocabulary.** The sketch borrows a
+scene part's keyframes. What it got is a plain overlay kind: `size:` for how tall
+it is, the pictures' own shape for how wide, and `anchor:`/`offset:` for where,
+so a sequence can follow a face the way a spinner does. `keys:` are refused, by
+name, for the same reason a bubble's are: what a sequence does over time *is* the
+frames, and a second animation on top of somebody else's animation is two clocks.
+
+**`ends:`, and no `stretch`.** The sketch says nothing about the sequence being
+shorter or longer than the span it is on for. `ends: hold` (the default, and what
+a projector does) and `ends: loop` are both real wants. `stretch` is refused by
+name with its reason, because fitting the sequence to the span would re-time
+somebody else's animation from a fact about the *cut* — trim two frames off a
+shot and every chart on it changes speed, and the same project stops rendering
+the same frames.
+
+**The alpha needed measuring, and the layer path needed a bug fixing.** The claim
+in the section above — that both paths read the same PNGs and neither draws
+anything — turns out to hold exactly: ImageIO hands back straight, not
+premultiplied, alpha, and Core Image and Core Animation both premultiply it
+themselves and agree to the byte. Measured on a rendered file, an alpha ramp
+across a 640-pixel plate came back within three levels of the arithmetic
+everywhere, which is the HEVC encode. So nothing touches a pixel, and the same
+`CGImage` object goes to both paths — which is also what keeps a thousand-frame
+sequence affordable, since nothing is decoded until it is drawn.
+
+The layer path did have a fault the sketch could not have predicted. A discrete
+`CAKeyframeAnimation` wants **one more key time than it has values** — each time
+opens the interval its value is shown for, and the extra one closes the last —
+and written with one time per value the animation is ignored outright, in silence.
+A two-picture sequence showed its first picture for the whole of both cards it was
+on, and nothing in the render, the log or the preview said so. It was found by
+rendering a plate with a known alpha ramp on it and reading the pixels back, which
+is the only way it *could* have been found. `framesStepThroughTheirOwnKeyTimes`
+holds the count now.

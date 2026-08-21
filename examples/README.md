@@ -5,6 +5,9 @@ effects, no footage — so every one of them renders on any machine:
 
     cuttr-render examples/scenes/scenes.cuttrproj
 
+One exception, marked below: `frames/remotion.cuttrproj` needs its pictures
+rendered first, because it is about pictures that come from somewhere else.
+
 | | |
 |---|---|
 | `scenes/scenes.cuttrproj` | `{{title}}`: one scene used three times with different words in it |
@@ -22,8 +25,10 @@ effects, no footage — so every one of them renders on any machine:
 | `overlays/placements.cuttrproj` | captions written inside the entries they cover, and one on the programme's own clock |
 | `overlays/at-the-mark.cuttrproj` | `at:` — the same fade placed before, across and after the mark, at both ends of a span |
 | `overlays/bubbles.cuttrproj` | speech, thought and a box with an arrow — drawn by hand, redrawn eight times a second, aimed by two points, and the same hand on every render |
+| `frames/harmonograph.cuttrproj` | `frames:` — a folder of pictures drawn by something that is not cuttr, held and looped |
+| `frames/remotion.cuttrproj` | the same overlay fed by Remotion: an animated chart and a route that draws itself — **run `tools/remotion/render.sh chart` and `route` first** |
 
-Four things these are meant to teach, all of which cost a render to learn:
+Five things these are meant to teach, all of which cost a render to learn:
 
 **The ground belongs to the card, not to the scene.** Effects are drawn *into*
 the picture; a scene is drawn *over* it, as a Core Animation layer, in a second
@@ -58,6 +63,29 @@ where every line is a text part placed by hand: nine parts and twenty-eight keys
 to type seven letters, which is fine when the placement *is* the animation and
 becomes a file holding the result of a layout the moment there are thirty names
 in it.
+
+**A `frames:` overlay is the one that is not a description.** Everything else
+here says what it wants and lets cuttr draw it; a sequence is pixels that were
+drawn elsewhere. `frames/harmonograph.cuttrproj` makes the point by using the
+least impressive elsewhere available — a hundred lines of Python with nothing
+but the standard library, in `tools/frames/harmonograph.py` — and its frames are
+committed, so it renders on any machine. `frames/remotion.cuttrproj` uses
+Remotion for the two cases that earn it: a bar chart whose *layout* is arithmetic
+over the data (twelve bars, even gaps, all scaled against the largest, gridlines
+at round numbers worked out from the numbers themselves) and a route whose
+animation needs the browser to measure the length of a path it drew. Compare
+those with `scenes/shapes.cuttrproj`, which grows a bar with `bar:` and two keys:
+one bar is four lines of YAML, and twelve bars that rescale when one number
+changes is a file holding the output of a layout rather than describing one. That
+is `typing.cuttrproj`'s lesson one step further out — past the point where a part
+kind is the answer at all.
+
+The cost is written on the tin. A rendered sequence depends on a Chromium build
+and a lockfile, neither of which is in the project file, so it is **material** —
+something to keep beside the project like a take, not something to regenerate on
+a whim. That is the whole reason cuttr consumes frames rather than running
+Remotion itself; `docs/remotion.md` has the argument and `tools/remotion/README.md`
+has the commands.
 
 **Watch the bubbles rather than looking at them.** `overlays/bubbles.cuttrproj`
 is the one example whose point is invisible in a still: every bubble in it is

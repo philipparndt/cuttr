@@ -109,7 +109,13 @@ public extension Overlay.Kind {
 		// bubble's tail is moved by the face it points at rather than by
 		// anything anybody would write down. There is nothing here for a key to
 		// move that is not already said better somewhere else.
-		case .text, .spinner, .scene, .bubble: return []
+		//
+		// A frame sequence is the strongest case of that: what it does over
+		// time *is* the frames. Its `size:` is the one number a key might
+		// plausibly want, and a sequence that also grew and shrank would be a
+		// scene with a picture in it — which is a thing this format can already
+		// say, with `image:` parts and keys, once there is a reason to.
+		case .text, .spinner, .scene, .bubble, .frames: return []
 		}
 	}
 
@@ -122,7 +128,7 @@ public extension Overlay.Kind {
 		case .aberration: return .amount
 		case .tape: return .jitter
 		case .effect: return .density
-		case .text, .spinner, .scene, .bubble: return nil
+		case .text, .spinner, .scene, .bubble, .frames: return nil
 		}
 	}
 
@@ -140,22 +146,27 @@ public extension Overlay.Kind {
 		case .aberration: return "the aberration"
 		case .tape: return "the tape"
 		case .bubble: return "a bubble"
+		case .frames: return "a frame sequence"
 		}
 	}
 
 	/// How one of these comes on, and goes off, when the file does not say.
 	///
 	/// A slide for nearly everything, which is what an overlay has always done.
-	/// A bubble is the exception: one that slid in from the left would be a
+	/// Two exceptions, both because the thing is a *picture* rather than a
+	/// caption-shaped object: a bubble that slid in from the left would be a
 	/// bubble whose tail swung across the frame to find the face, and what a
-	/// drawn bubble does is appear.
+	/// drawn bubble does is appear; a frame sequence is very often the whole
+	/// frame, and a whole frame arriving from the left is nothing anybody meant.
 	var arrives: Overlay.Transition {
 		if case .bubble = self { return .fade(over: 0.2) }
+		if case .frames = self { return .fade(over: 0.4) }
 		return .slide(.left, over: 0.4)
 	}
 
 	var departs: Overlay.Transition {
 		if case .bubble = self { return .fade(over: 0.2) }
+		if case .frames = self { return .fade(over: 0.4) }
 		return .slide(.right, over: 0.4)
 	}
 
@@ -193,7 +204,7 @@ public extension Overlay.Kind {
 			case .wind: return effect.wind
 			default: return 0
 			}
-		case .text, .spinner, .scene, .bubble: return 0
+		case .text, .spinner, .scene, .bubble, .frames: return 0
 		}
 	}
 }
@@ -276,7 +287,7 @@ public extension Overlay {
 			if let scanlines = now(.scanlines) { tape.scanlines = scanlines }
 			if let dropouts = now(.dropouts) { tape.dropouts = dropouts }
 			return .tape(tape)
-		case .effect, .text, .spinner, .scene, .bubble:
+		case .effect, .text, .spinner, .scene, .bubble, .frames:
 			return kind
 		}
 	}

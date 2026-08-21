@@ -1,0 +1,101 @@
+# cuttr project — Remotion, kept outside the app.
+#
+# **This one does not render until you have rendered its frames.** Two commands,
+# once, and they need Node:
+#
+#     tools/remotion/render.sh chart
+#     tools/remotion/render.sh route
+#
+# Then `cuttr-render examples/frames/remotion.cuttrproj`. Without them the two
+# cards come out with their captions and no pictures, and
+# `cuttr-render --describe` says which folders are empty. The frames are not
+# committed because they are twenty megabytes; `harmonograph.cuttrproj` beside
+# this one is the self-contained example.
+#
+# **Why this is the one worth the extra machinery.** cuttr can draw a bar: `bar:`
+# is a part kind and `progress` is a key, so one bar growing is four lines of
+# YAML. What it cannot do is *lay out* a chart — put twelve bars in a row with
+# even gaps whatever twelve turns out to be, scale them all against whichever is
+# largest, print each value over its own bar, work gridlines out to round numbers
+# from the data, and colour the tallest differently. Every one of those is
+# arithmetic over the data. A `.cuttrproj` that held the results would be holding
+# a layout rather than describing one: change January and every other number in
+# the file is wrong. That is the same argument `scenes/typing.cuttrproj` makes
+# about hand-placing letters and `scenes/credits.cuttrproj` makes about `roll:`,
+# one step further out — past the point where a part kind is the answer.
+#
+# The route is the second kind of case, and a different one. There the geometry
+# *is* the data: a list of coordinates becomes an SVG path whose length the
+# browser measures, and a route that draws itself is `stroke-dasharray` set to
+# that length with the offset walked to nought. cuttr can stroke a shape and
+# cannot ask how long an arbitrary polyline is — nor should it. That is a
+# browser's job.
+#
+# **What it costs, said plainly.** A `.cuttrproj` is meant to be a file that
+# renders next year on a different computer. This one renders next year on a
+# different computer *because the frames are on disk beside it* — and the frames
+# depend on a Chromium build, a `node_modules` tree and a lockfile, none of which
+# is in this file. `render.sh` writes a `rendered.json` into each folder saying
+# which, which is the least a step outside the format can do. Treat a rendered
+# sequence as **material**, like a take: something to keep, not something to
+# regenerate on a whim.
+#
+# **And what is not here.** No `component:` key that would run Remotion for
+# itself. Bundling Node and a headless browser into a notarised app is half a
+# gigabyte and a set of JIT entitlements for something that draws titles, and
+# making "open and render" mean "install a JavaScript toolchain" is worse. The
+# frames are the interface. `docs/remotion.md` has the whole argument.
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: remotion.mov
+
+styles:
+  said:
+    font:     Helvetica Neue Light
+    size:     0.028
+    color:    "#7b8798"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.5, 0.06]
+    align:    centre
+
+timeline:
+  # The chart is rendered at 1200×680 and drawn at 0.62 of a 1080-high frame,
+  # which is 670 pixels — about the size it was drawn at, which is the rule.
+  # Rendering it at 4K would be forty times the disk for a picture that is then
+  # scaled down.
+  #
+  # 135 frames at 30 a second is four and a half seconds; the card is six, so it
+  # holds the finished chart for the last one and a half.
+  - card:  00:06.000
+    fill:  ["#141b26", "#080b11"]
+    overlays:
+      - frames: chart
+        fps:    30
+        size:   0.62
+        offset: [0, 0.02]
+        in:     {fade: true, over: 0.5}
+        out:    {fade: true, over: 0.6}
+      - text:  a layout, not a drawing — twelve bars scaled against the largest
+        style: said
+        in:    {fade: true, over: 0.5}
+        out:   {fade: true, over: 0.5}
+
+  # 165 frames at 30 is five and a half seconds, and the card is six.
+  - card:  00:06.000
+    fill:  ["#101a1a", "#06090a"]
+    overlays:
+      - frames: route
+        fps:    30
+        size:   0.62
+        offset: [0, 0.02]
+        in:     {fade: true, over: 0.5}
+        out:    {fade: true, over: 0.6}
+      - text:  the line's own length, measured by the browser that drew it
+        style: said
+        in:    {fade: true, over: 0.5}
+        out:   {fade: true, over: 0.5}

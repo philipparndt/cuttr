@@ -11,6 +11,11 @@ public enum ProjectError: LocalizedError {
 	/// honestly. Named rather than dropped: an animation that silently does
 	/// nothing is worse than one that will not open.
 	case cannotAnimate(parameter: String, reason: String)
+	/// The file asks for something this format understands perfectly well and
+	/// will not do. Its own case, rather than ``badValue``, because "not
+	/// something cuttr understands" is the wrong sentence for a word that was
+	/// considered and left out: the reason is the whole of what somebody needs.
+	case refused(key: String, value: String, reason: String)
 	case yaml(String)
 
 	public var errorDescription: String? {
@@ -23,6 +28,8 @@ public enum ProjectError: LocalizedError {
 			return "`\(key): \(value)` is not something cuttr understands."
 		case .cannotAnimate(let parameter, let reason):
 			return "`\(parameter)` cannot be animated: \(reason)"
+		case .refused(let key, let value, let reason):
+			return "`\(key): \(value)` is not something cuttr will do: \(reason)"
 		case .yaml(let message):
 			return "This file is not valid YAML: \(message)"
 		}
@@ -314,6 +321,41 @@ public enum ProjectReader {
 				for (name, value) in given { parameters[name] = "\(value)" }
 			}
 			kind = .scene(scene, with: parameters)
+		} else if let folder = (m["frames"] as? String).flatMap(nonEmpty) {
+			// `fps:` is not optional, and that is the one strong opinion in this
+			// branch. See ``Frames/framesPerSecond``.
+			guard let rate = number(m["fps"]), rate > 0 else {
+				throw ProjectError.refused(
+					key: "frames", value: folder,
+					reason: "a folder of pictures carries no frame rate of its own, so `fps:` "
+						+ "has to say what it is. Guessing would show as the animation running "
+						+ "at some fraction of the speed it was drawn at, which is the sort of "
+						+ "wrongness nobody thinks to look for.")
+			}
+			var frames = Frames(folder: folder, framesPerSecond: rate)
+			// Clamped rather than refused, like a bubble's `breath:`: a sequence
+			// of no height is a typo and not a question.
+			if let size = number(m["size"]) { frames.size = max(0.001, size) }
+			if let said = m["ends"] {
+				let text = ((said as? String).flatMap(nonEmpty) ?? describe(said)).lowercased()
+				guard let ends = Frames.Ends(rawValue: text) else {
+					// `stretch` by name, because it is the thing somebody will
+					// reach for and the reason it is absent is not obvious. See
+					// ``Frames/Ends``.
+					guard text == "stretch" || text == "fit" else {
+						throw ProjectError.badValue(key: "ends", value: text)
+					}
+					throw ProjectError.refused(
+						key: "ends", value: text,
+						reason: "fitting the sequence's own length to the span would re-time "
+							+ "somebody else's animation from a fact about the cut, so trimming "
+							+ "two frames off a shot would quietly change the speed of every "
+							+ "chart on it. `hold` keeps the last picture up; `loop` starts "
+							+ "again. If the length is wrong, render the frames again.")
+				}
+				frames.ends = ends
+			}
+			kind = .frames(frames)
 		} else if let stock = (m["film"] as? String).flatMap(nonEmpty) {
 			// `film: warm`, and the rest only if it is not the usual.
 			var film = Film()
@@ -562,8 +604,9 @@ public enum ProjectReader {
 				parameter: "keys",
 				reason: "\(kind.named) has nothing that moves. A caption, a spinner and "
 					+ "a bubble arrive and leave by `in:` and `out:`, a scene's parts "
-					+ "carry keys of their own, and a bubble's tail is moved by the face "
-					+ "it points at.")
+					+ "carry keys of their own, a bubble's tail is moved by the face "
+					+ "it points at, and what a frame sequence does over time is the "
+					+ "frames.")
 		}
 		var keys: [Overlay.Key] = []
 		for entry in entries {
