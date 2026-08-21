@@ -828,6 +828,13 @@ public enum Resolver {
 			project: project, baseURL: baseURL, clips: clips, cards: cards,
 			overlays: overlays, sounds: sounds, groups: resolvedGroups,
 			anchors: resolvedAnchors)
+		// What a component's frames are, and whether they are still what the
+		// project asks for. Said beside the picture rather than fixed here:
+		// baking is seconds to minutes and resolving happens on every keystroke,
+		// and a preview that quietly showed the last bake as though it were the
+		// render would be the one failure `docs/remotion.md` says is worse than
+		// an empty rectangle.
+		warnings += ComponentBaker.staleness(project, from: baseURL)
 		resolved.warnings = warnings
 		return resolved
 	}

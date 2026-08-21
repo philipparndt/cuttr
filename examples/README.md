@@ -22,8 +22,17 @@ effects, no footage — so every one of them renders on any machine:
 | `overlays/placements.cuttrproj` | captions written inside the entries they cover, and one on the programme's own clock |
 | `overlays/at-the-mark.cuttrproj` | `at:` — the same fade placed before, across and after the mark, at both ends of a span |
 | `overlays/bubbles.cuttrproj` | speech, thought and a box with an arrow — drawn by hand, redrawn eight times a second, aimed by two points, and the same hand on every render |
+| `components/chart.cuttrproj` | `component:` — a React chart, baked to frames in the browser macOS already has, with nothing installed |
 
-Four things these are meant to teach, all of which cost a render to learn:
+One of them bakes before it renders. `components/chart.cuttrproj` draws its
+component into `.cuttr/components/walks/` the first time — a few seconds — and
+reuses the frames after that. Nothing is installed and nothing is fetched; React
+is in the app bundle. Those frames are gitignored, because in a repository the
+component is the thing worth keeping and re-baking it is the demonstration. In a
+real project they are the opposite: the artefact, kept and exported, for the
+reason `docs/remotion.md` gives at length.
+
+Five things these are meant to teach, all of which cost a render to learn:
 
 **The ground belongs to the card, not to the scene.** Effects are drawn *into*
 the picture; a scene is drawn *over* it, as a Core Animation layer, in a second
@@ -58,6 +67,18 @@ where every line is a text part placed by hand: nine parts and twenty-eight keys
 to type seven letters, which is fine when the placement *is* the animation and
 becomes a file holding the result of a layout the moment there are thirty names
 in it.
+
+**A component is for when the position is a fact about the data.** That is the
+whole test, and `components/chart.cuttrproj` argues it in its own header.
+`scenes:` puts a title where somebody decided it looks right, in text that
+diffs — which is exactly right for a title and exactly wrong for twelve bars
+whose heights, widths and gaps all fall out of the numbers. Written as parts and
+keys, a chart is a file holding the *result* of a layout: change one month and
+every bar after it has to be re-typed. Compare it with `scenes/typing.cuttrproj`,
+which makes the same complaint at nine parts. The price is that the scene editor
+cannot touch it, it takes seconds to bake rather than being instant, and its
+pixels came out of WebKit rather than out of this program — so a component is the
+answer for a chart, a table or a leaderboard, and the wrong answer for a title.
 
 **Watch the bubbles rather than looking at them.** `overlays/bubbles.cuttrproj`
 is the one example whose point is invisible in a still: every bubble in it is

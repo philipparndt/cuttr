@@ -428,6 +428,26 @@ public enum OverlayPainter {
 						x: -drawn.width / 2, y: -drawn.height / 2,
 						width: drawn.width, height: drawn.height))
 				}
+			case .frames, .component:
+				// One implementation for both keys, because by here they are
+				// the same part: a folder of frames with a rate. Boxed and
+				// fitted exactly as an image is — the same `min` of the two
+				// scales — so a sequence and a still of the same picture land
+				// in the same rectangle.
+				guard let sequence = part.content.sequence(
+					at: project.output.framesPerSecond) else { break }
+				let count = sequence.count(relativeTo: baseURL)
+				guard let picture = sequence.image(
+					at: elapsed, relativeTo: baseURL, frames: count) else { break }
+				let box = CGSize(width: (key.width ?? 0.2) * size.width,
+				                 height: (key.height ?? 0.2) * size.height)
+				let fit = min(box.width / CGFloat(picture.width),
+				              box.height / CGFloat(picture.height))
+				let drawn = CGSize(width: CGFloat(picture.width) * fit,
+				                   height: CGFloat(picture.height) * fit)
+				context.draw(picture, in: CGRect(
+					x: -drawn.width / 2, y: -drawn.height / 2,
+					width: drawn.width, height: drawn.height))
 			case .background:
 				break   // dealt with above, before the transform
 			}

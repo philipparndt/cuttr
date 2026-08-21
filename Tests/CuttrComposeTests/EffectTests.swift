@@ -178,8 +178,8 @@ import Testing
 	}
 
 	@Test func onlyWhatStaysInFrontIsALayer() {
-		#expect(OverlayLayers.isLayered(caption(behind: .nothing).overlay))
-		#expect(!OverlayLayers.isLayered(caption(behind: .people).overlay))
+		#expect(OverlayLayers.isLayered(caption(behind: .nothing).overlay, in: Project()))
+		#expect(!OverlayLayers.isLayered(caption(behind: .people).overlay, in: Project()))
 	}
 
 	@Test func thePainterFadesTheSameWayTheLayerWould() {
@@ -246,7 +246,7 @@ import Testing
 		for kind in [Overlay.Kind.text("a", style: nil),
 		             .spinner(Spinner()),
 		             .scene("intro", with: [:])] {
-			#expect(!OverlayLayers.isLayered(shown(kind).overlay))
+			#expect(!OverlayLayers.isLayered(shown(kind).overlay, in: Project()))
 		}
 	}
 }

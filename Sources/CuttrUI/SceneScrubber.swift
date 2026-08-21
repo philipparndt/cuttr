@@ -134,7 +134,7 @@ public final class SceneScrubber: NSView {
 		switch part.content {
 		case .text, .roll: return Theme.color(.text)
 		case .shape: return Theme.base(.teal)
-		case .image: return Theme.base(.violet)
+		case .image, .frames, .component: return Theme.base(.violet)
 		case .bar: return Theme.base(.amber)
 		case .spinner: return Theme.base(.rose)
 		case .background: return Theme.base(.blue)

@@ -154,6 +154,8 @@ public final class SceneInspector: NSView {
 		case .text: return "text"
 		case .shape(_, _, let kind): return kind.rawValue
 		case .image: return "image"
+		case .frames: return "frames"
+		case .component: return "component"
 		case .roll: return "roll"
 		case .bar: return "bar"
 		case .spinner: return "spinner"
@@ -312,6 +314,37 @@ public final class SceneInspector: NSView {
 				},
 				small("Choose…") { [weak self] in self?.onChooseImage?() },
 			], note: "a file beside the project")
+
+		case .frames(let sequence):
+			field("frames", [text(sequence.pattern, width: 190,
+			                      placeholder: "charts/walks/%04d.png") { [weak self] value in
+				self?.onContent?(.frames(FrameSequence(pattern: value, fps: sequence.fps)))
+			}], note: "a `printf` pattern beside the project, numbered from nought")
+			field("fps", [number(sequence.fps, width: 66) { [weak self] value in
+				self?.onContent?(.frames(
+					FrameSequence(pattern: sequence.pattern, fps: max(value, 0.001))))
+			}], note: "the rate the frames were made at, not the rate the programme "
+				+ "comes out at")
+
+		case .component(let component):
+			// The file and how long it is on, and not the props: those are
+			// per-use strings and the file already shows them on one line. What
+			// this panel deliberately does not offer is a Bake button — see
+			// ``ComponentBaker/bake(_:from:force:progress:)`` for why nothing
+			// bakes from the editor.
+			field("component", [text(component.file, width: 190,
+			                         placeholder: "charts/walks.js") { [weak self] value in
+				var next = component
+				next.file = value
+				self?.onContent?(.component(next))
+			}], note: "plain JavaScript beside the project. It is a Remotion-shaped "
+				+ "subset and not Remotion — see `Component` for exactly which part.")
+			field("duration", [number(component.duration, width: 66) { [weak self] value in
+				var next = component
+				next.duration = max(value, 0.001)
+				self?.onContent?(.component(next))
+			}], note: "seconds it draws for. This times the output rate is how many "
+				+ "frames get baked, so changing it bakes again.")
 
 		case .background(let background):
 			field("from", [colour(background.from) { [weak self] value in

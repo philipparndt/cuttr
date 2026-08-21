@@ -29,6 +29,17 @@ func usage() -> Never {
 	            in the programme.
 	  --quiet   no progress
 
+	  --bake    draw every `component:` the project uses to its folder of frames
+	            and stop, rendering nothing. Rendering does this anyway, for the
+	            components that need it; this is for doing it on its own — on a
+	            build machine, or to see how long it takes, or to look at the
+	            PNGs. --rebake draws them all again whether they need it or not,
+	            which is the one way to ask for this machine's WebKit's opinion
+	            rather than the opinion already on disk. --no-bake renders
+	            whatever is cached and nothing else, which is what an archive
+	            machine wants: the frames are the artefact and it should not be
+	            making new ones.
+
 	  --analyse measure every take's loudness and colour, and write the numbers
 	            back into the take files. Do this once per recording; every
 	            project that uses it then levels and matches for free.
@@ -85,6 +96,9 @@ var outputPath: String?
 var solve = false
 var describe = false
 var quiet = false
+var bakeOnly = false
+var rebake = false
+var skipBake = false
 var facesOf: String?
 var facesAt = 0.0
 var analyse = false
@@ -181,6 +195,9 @@ while index < arguments.count {
 	case "--analyse", "--analyze": analyse = true
 	case "--solve": solve = true
 	case "--quiet": quiet = true
+	case "--bake": bakeOnly = true
+	case "--rebake": rebake = true
+	case "--no-bake": skipBake = true
 	case "-h", "--help": usage()
 	default:
 		guard projectPath == nil else { usage() }
@@ -716,6 +733,40 @@ func writtenIn(_ origin: Origin, of project: Project, covering: Bool) -> String?
 		+ (covering ? " — covering that placement" : "")
 }
 
+// A progress line that rewrites itself, and only when somebody is watching:
+// piped into a log, `\r` would produce one enormous line.
+let interactive = isatty(STDERR_FILENO) == 1 && !quiet
+
+// Components, before resolving — because the resolver's job here is to say
+// whether the frames on disk are what the project asks for, and it should be
+// asked after the answer has had its chance to become yes.
+//
+// Rendering bakes; nothing else does. Not saving, and never while drawing: a
+// browser in the preview's redraw is the mistake `docs/remotion.md` names first,
+// and a bake takes seconds where a redraw has milliseconds. `--describe` does
+// not bake either, because it is a question about the file and the resolver's
+// warnings already say what a component's frames are.
+if !describe, !skipBake {
+	do {
+		let report = try await ComponentBaker.bake(
+			project, from: baseURL, force: rebake,
+			progress: { file, done, total in
+				guard interactive else { return }
+				FileHandle.standardError.write(
+					"\r    baking \(file) \(done)/\(total)".data(using: .utf8)!)
+			})
+		if interactive, !report.baked.isEmpty {
+			FileHandle.standardError.write("\r\u{1B}[K".data(using: .utf8)!)
+		}
+		if !quiet, !report.baked.isEmpty || !report.reused.isEmpty {
+			print("==> components: \(report.summary)")
+		}
+	} catch {
+		fail(error.localizedDescription)
+	}
+}
+if bakeOnly { exit(0) }
+
 let resolved: ResolvedProject
 do {
 	resolved = try Resolver.resolve(project, baseURL: baseURL)
@@ -723,12 +774,26 @@ do {
 	fail(error.localizedDescription)
 }
 
-if describe {
-	// What was skipped, before what was kept: a warning after two hundred lines
-	// of programme is a warning nobody reads.
+/// What was skipped, and why.
+///
+/// On stderr and before anything else, because a warning printed after a render
+/// is a warning nobody reads — the same standard the window holds itself to when
+/// it puts these beside the picture rather than instead of it. There is no
+/// picture here, so beside it is the terminal.
+///
+/// This used to be printed only for `--describe`, and then `--no-bake` on a
+/// project whose component had never been baked rendered a hole and said
+/// nothing, which is exactly the failure the resolver collects warnings to
+/// avoid.
+func sayWarnings() {
+	guard !quiet else { return }
 	for warning in resolved.warnings {
 		FileHandle.standardError.write("warning: \(warning)\n".data(using: .utf8)!)
 	}
+}
+
+if describe {
+	sayWarnings()
 	print("clips")
 	for clip in resolved.clips {
 		print(String(format: "  %-28@ %7.3f → %7.3f  %@",
@@ -834,14 +899,13 @@ let outputURL: URL = {
 	return projectURL.deletingPathExtension().appendingPathExtension("mov")
 }()
 
+sayWarnings()
+
 if !quiet {
 	print("==> \(resolved.clips.count) clips, \(String(format: "%.1f", resolved.duration))s, "
 		+ "\(resolved.overlays.count) overlays → \(outputURL.lastPathComponent)")
 }
 
-// A progress line that rewrites itself, and only when somebody is watching:
-// piped into a log, `\r` would produce one enormous line.
-let interactive = isatty(STDERR_FILENO) == 1 && !quiet
 do {
 	try await Renderer.export(resolved, to: outputURL) { fraction in
 		guard interactive else { return }

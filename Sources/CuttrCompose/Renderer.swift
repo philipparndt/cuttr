@@ -854,7 +854,9 @@ public enum Renderer {
 		// Only *layers* need the second pass. An effect is drawn into the frame
 		// in the first one, so a programme with nothing but effects over it is
 		// encoded once.
-		let drawsOver = resolved.overlays.contains { OverlayLayers.isLayered($0.overlay) }
+		let drawsOver = resolved.overlays.contains {
+			OverlayLayers.isLayered($0.overlay, in: resolved.project)
+		}
 
 		guard FileManager.default.isWritableFile(atPath: url.deletingLastPathComponent().path)
 		else { throw RenderError.cannotWrite(url) }

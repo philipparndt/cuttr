@@ -51,6 +51,22 @@ public enum ProjectWriter {
 					out += credits(column)
 				case .image(let file):
 					out += "      - image: \(scalar(file))\n"
+				case .frames(let sequence):
+					out += "      - frames: \(scalar(sequence.pattern))\n"
+					out += "        fps:    \(trim(sequence.fps))\n"
+				case .component(let component):
+					out += "      - component: \(scalar(component.file))\n"
+					out += "        duration:  \(trim(component.duration))\n"
+					// The props on one line, in the same flow mapping and the
+					// same sorted order a scene's `with:` uses — and left out
+					// entirely when there are none, so a component that takes
+					// nothing is the two lines it was written as.
+					if !component.props.isEmpty {
+						let pairs = component.props.keys.sorted().map {
+							"\(flow($0)): \(flow(component.props[$0] ?? ""))"
+						}
+						out += "        props:     {" + pairs.joined(separator: ", ") + "}\n"
+					}
 				case .background(let background):
 					// A flat colour stays the one word it was written as; the
 					// ramp says all three things or none of them.

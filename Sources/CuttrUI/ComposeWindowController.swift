@@ -1407,12 +1407,23 @@ public final class ComposeWindowController: DocumentEditor,
 		say("rendering…")
 		Task { [weak self] in
 			do {
-				try await Renderer.export(resolved, to: url) { fraction in
+				// Components first. This is the one place in the window that
+				// bakes: a render must not use frames that are no longer what
+				// the project asks for, and nothing else may take seconds.
+				if let baking = try await self?.composeDocument.bakeComponents(),
+				   !baking.baked.isEmpty {
+					self?.say("components: \(baking.summary)")
+				}
+				// And the programme as it is now, which after a bake is not the
+				// one the render button was pressed against.
+				let programme = self?.composeDocument.resolved ?? resolved
+				try await Renderer.export(programme, to: url) { fraction in
 					Task { @MainActor in self?.showProgress(fraction) }
 				}
 				self?.say("wrote \(url.lastPathComponent)")
 			} catch {
 				self?.say(error.localizedDescription)
+				self?.report(error)
 			}
 			self?.showProgress(nil)
 			self?.renderButton.isEnabled = true

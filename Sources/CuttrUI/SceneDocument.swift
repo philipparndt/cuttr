@@ -203,6 +203,11 @@ public final class SceneDocument {
 			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1, width: 0.4, height: 0.01)
 		case .image:
 			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1, width: 0.2, height: 0.2)
+		case .frames, .component:
+			// The whole frame, because a component is nearly always the picture
+			// — a chart, a table, a map — and a sequence dropped in at a fifth
+			// of the frame is a sequence somebody then has to find.
+			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1, width: 1, height: 1)
 		case .bar:
 			// Empty at the start, because a bar that is added full has nothing
 			// to show and the next thing anybody does is give it a second key.

@@ -164,6 +164,13 @@ public final class ScenePartsList: NSView, NSTableViewDataSource, NSTableViewDel
 		case .image(let file):
 			kind = .clip
 			title = file.isEmpty ? "image  (none chosen)" : "image  \((file as NSString).lastPathComponent)"
+		case .frames(let sequence):
+			kind = .clip
+			title = "frames  \((sequence.pattern as NSString).lastPathComponent)"
+				+ "  ·  \(Int(sequence.fps)) fps"
+		case .component(let component):
+			kind = .scene
+			title = "component  \((component.file as NSString).lastPathComponent)"
 		case .background(let background):
 			kind = .scene
 			title = background.to == nil

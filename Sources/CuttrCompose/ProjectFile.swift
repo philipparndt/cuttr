@@ -685,6 +685,40 @@ public enum ProjectReader {
 				throw ProjectError.badValue(key: "image", value: describe(image))
 			}
 			content = .image(file)
+		} else if let value = fields["frames"] {
+			guard let pattern = (value as? String).flatMap(nonEmpty) else {
+				throw ProjectError.badValue(key: "frames", value: describe(value))
+			}
+			// The rate is required rather than taken from the output. A sequence
+			// somebody rendered at 25 and dropped into a 50 fps project would
+			// otherwise play at double speed and read as a mistake in the
+			// animation, which is a bad half hour.
+			guard let fps = number(fields["fps"]), fps > 0 else {
+				throw ProjectError.badValue(key: "fps", value: describe(fields["fps"] ?? "none"))
+			}
+			content = .frames(FrameSequence(pattern: pattern, fps: fps))
+		} else if let value = fields["component"] {
+			guard let file = (value as? String).flatMap(nonEmpty) else {
+				throw ProjectError.badValue(key: "component", value: describe(value))
+			}
+			// Likewise required: how long a component draws for is the one thing
+			// it is not allowed to decide for itself, and a default would be a
+			// number nobody chose deciding how many frames get baked.
+			guard let duration = number(fields["duration"]), duration > 0 else {
+				throw ProjectError.badValue(key: "duration",
+				                            value: describe(fields["duration"] ?? "none"))
+			}
+			var props: [String: String] = [:]
+			if let given = fields["props"] {
+				guard let mapped = mapping(given) else {
+					throw ProjectError.badValue(key: "props", value: describe(given))
+				}
+				// Strings, however they were written, the same way a scene's
+				// `with:` reads its parameters — so `year: 2025` and
+				// `year: "2025"` are one prop and one bake, not two.
+				for (name, value) in mapped { props[name] = "\(value)" }
+			}
+			content = .component(Component(file: file, duration: duration, props: props))
 		} else if let background = fields["background"] {
 			guard let read = readBackground(background) else {
 				throw ProjectError.badValue(key: "background", value: describe(background))

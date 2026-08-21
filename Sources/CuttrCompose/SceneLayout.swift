@@ -99,7 +99,7 @@ public enum SceneLayout {
 				// measures it — so the handle on a credit roll is on the credit
 				// roll, including the part of it currently off the top.
 				box = roll.laidOut(in: size, project: project).size
-			case .shape, .image, .bar:
+			case .shape, .image, .bar, .frames, .component:
 				box = CGSize(width: (key.width ?? 0.2) * size.width,
 				             height: (key.height ?? 0.02) * size.height)
 			case .spinner(let spinner):

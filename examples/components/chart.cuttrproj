@@ -1,0 +1,84 @@
+# A chart, drawn by a React component and baked to frames.
+#
+# `component:` is a part that is not drawn by this program at all. The file
+# beside this one is plain JavaScript; cuttr renders it in the WebKit that is
+# already on the machine, one frame at a time, into
+# `.cuttr/components/walks/` — and from there it is a folder of PNGs like any
+# other, composited by the same code that composites a logo.
+#
+#   cuttr-render examples/components/chart.cuttrproj
+#
+# The first render bakes and takes a few seconds longer; every render after it
+# reuses the frames. Nothing is installed, nothing is fetched, and there is no
+# `node_modules`: React is in the app bundle, at 143 kB.
+#
+# ## Why this earns the machinery
+#
+# Count what is on the frame: twelve bars, twelve values, twelve month names,
+# five gridlines with a number on each, a total counting up, and a sentence
+# naming the best month. Every position is arithmetic on the data — the bar
+# width falls out of how many months there are, the gridlines out of the
+# ceiling, each bar's height out of its own value against that ceiling.
+#
+# As a `scenes:` block that is about forty parts and a hundred and twenty keys,
+# and it is a file holding *the result of a layout* rather than the layout —
+# which is the thing `examples/scenes/typing.cuttrproj` warns about at nine
+# parts. Change one month's number and every bar after it has to be re-typed by
+# hand. Here, one number in an array changes and the chart re-lays itself.
+#
+# That is the whole test for whether a component is the right answer: **is the
+# position of the thing a fact about the data?** For a title it is not — a title
+# goes where somebody decided it looks right, and `scenes:` says that in text
+# that diffs. For a chart it is, and no amount of keyframes will make it so.
+#
+# ## What this costs, said plainly
+#
+# The frames are the artefact and they are not small — 200 PNGs, a few megabytes.
+# They live beside the project so that they travel with it, because the picture
+# depends on the WebKit that drew it and a machine with a different macOS would
+# otherwise render a different chart. `--rebake` is how you ask for this
+# machine's opinion instead.
+#
+# The scene editor cannot edit it. It is one rectangle of pixels with nothing
+# inside it, so it can be moved, sized and faded and nothing else — which is
+# fine for something that is the whole frame, and is why the keys below say
+# `width: 1, height: 1` and then leave it alone.
+#
+# And a scene with a sequence in it is painted *into* the picture rather than
+# laid over it, which means it sits under every caption and every other scene
+# however this list is arranged. That is deliberate — `docs/remotion.md` gives
+# the measurement — and for a chart it is what anybody would have wanted.
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: chart.mov
+
+timeline:
+  # Eight seconds, which is the component's `duration:` — and they have to
+  # agree. A part on for longer than its bake holds the last frame, the way a
+  # keyframe holds its last value; a part on for less is cut off where it is.
+  - card:  00:08.000
+    as:    chart
+    fill:  ["#141b2b", "#070a12"]
+
+overlays:
+  - scene: year
+    from:  "@chart"
+    in:    {fade: true, over: 0.4}
+    out:   {fade: true, over: 0.5}
+
+scenes:
+  # One part, the whole frame. The ground is on the card rather than in here for
+  # the reason `examples/effects/celebrate.cuttrproj` gives at length: a scene is
+  # drawn over the picture, so a full-frame background in it would hide the
+  # picture. The component's own frames are transparent everywhere it did not
+  # draw, which is what lets the card's gradient show through.
+  year:
+    parts:
+      - component: walks.js
+        duration:  8
+        props:     {accent: "#7fd4ff", unit: km}
+        keys:
+          - {t: 0, x: 0.5, y: 0.5, width: 1, height: 1, opacity: 1}
