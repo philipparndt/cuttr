@@ -174,21 +174,6 @@ public final class Transport {
 		if wasPlaying { player.play() }
 	}
 
-	/// What is on the player now, for a second view that wants to show the same
-	/// thing — a look at one clip, beside the list it was chosen from.
-	///
-	/// Read off the player rather than kept beside it. The composition is built
-	/// again whenever the alignment moves, and a copy held here would be the old
-	/// one the first time somebody nudged the offset — which is exactly the
-	/// second source of truth ``present(_:videoComposition:audioMix:duration:)``
-	/// exists to avoid.
-	public var playing: (composition: AVComposition, videoComposition: AVVideoComposition?,
-	                     audioMix: AVAudioMix?, duration: Double)? {
-		guard let item = player.currentItem,
-		      let composition = item.asset as? AVComposition else { return nil }
-		return (composition, item.videoComposition, item.audioMix, duration)
-	}
-
 	/// How much to turn the monitor up or down, in decibels: the take's own
 	/// level, so that what is heard in the cutting room is what a programme made
 	/// of these clips will play. See ``CuttrKit/Take/gain``.

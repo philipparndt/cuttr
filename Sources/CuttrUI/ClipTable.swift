@@ -22,12 +22,6 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 	/// How much to turn one clip up or down, in decibels, as somebody typed it.
 	/// Empty means nought — see ``CuttrKit/Clip/gain``.
 	public var onGainChange: ((Clip.ID, String) -> Void)?
-	/// Where the selected row is, in this view's own coordinates, for a look
-	/// that has to sit beside it. Empty when nothing is selected.
-	public func rectOfSelectedRow() -> NSRect {
-		guard table.selectedRow >= 0 else { return .zero }
-		return convert(table.rect(ofRow: table.selectedRow), from: table)
-	}
 	/// A start or an end, typed in. The value is text because it is a timecode
 	/// and may be nonsense; the controller parses it and ignores what it cannot
 	/// read, which is what leaves the old value on screen.

@@ -486,26 +486,58 @@ public final class ProgrammeStrip: NSView {
 	/// A refusal says why rather than doing nothing: a key that silently fails
 	/// is the same experience as a key that is not implemented.
 	public override func keyDown(with event: NSEvent) {
+		if handleKey(event, explaining: true) { return }
+		super.keyDown(with: event)
+	}
+
+	/// Answers a key, and says whether it did.
+	///
+	/// Public because the window's key monitor catches every press before any
+	/// view sees one, so a strip that only answered its own `keyDown` was only
+	/// asked while it happened to hold the focus — and when it did not, the key
+	/// fell through the responder chain and *beeped*. That is the second time
+	/// this exact trap has shipped, so the window asks this directly and the
+	/// focus stops mattering.
+	/// `explaining` is true when the strip itself was asked — it has the focus,
+	/// so somebody pressing `i` with nothing selected meant this strip and is
+	/// owed a sentence. Asked from the window instead, a key with nothing to act
+	/// on is declined and carries on to wherever it was going, because the
+	/// window asks about every press and a notice on each one would be noise.
+	@discardableResult
+	public func handleKey(_ event: NSEvent, explaining: Bool = false) -> Bool {
 		guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
 		      let character = event.charactersIgnoringModifiers?.lowercased().first
-		else { return super.keyDown(with: event) }
+		else { return false }
 
 		switch character {
 		case "i", "o":
+			guard hasSelectedOverlay || explaining else { return false }
 			setEdge(start: character == "i")
+			return true
 		case "z":
-			guard let bar = selectedBar() else { return say("nothing selected to frame") }
+			guard let bar = selectedBar() else {
+				guard explaining else { return false }
+				say("nothing selected to frame")
+				return true
+			}
 			reveal(from: bar.start, to: bar.end)
+			return true
 		case "f":
 			fit()
+			return true
 		case "+", "=":
 			zoom(by: 1 / 1.6, at: middleOfTrack())
+			return true
 		case "-", "_":
 			zoom(by: 1.6, at: middleOfTrack())
+			return true
 		default:
-			super.keyDown(with: event)
+			return false
 		}
 	}
+
+	/// Whether there is an overlay chosen for `i` and `o` to be about.
+	public var hasSelectedOverlay: Bool { selectedBar() != nil }
 
 	/// The middle of what is shown, in window coordinates, for a zoom that came
 	/// from the keyboard rather than from a pointer.

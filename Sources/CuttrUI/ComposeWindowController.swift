@@ -734,6 +734,13 @@ public final class ComposeWindowController: DocumentEditor,
 		keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
 			guard let self, event.window === self.window else { return event }
 			if self.window?.firstResponder is NSTextView { return event }
+			// The Play page's timeline, asked before anything else takes its
+			// keys. It used to answer only its own `keyDown`, which meant it was
+			// asked only while it held the focus — and when it did not, `i` fell
+			// through the responder chain and beeped. Nothing is claimed here
+			// that the strip does not answer, so every other key carries on to
+			// wherever it was going.
+			if !self.strip.isHidden, self.strip.handleKey(event) { return nil }
 			// A list has its own use for the arrows and the space bar: moving
 			// the selection, folding a section, acting on a row. The window's
 			// own shortcuts are for when nothing is being navigated — otherwise

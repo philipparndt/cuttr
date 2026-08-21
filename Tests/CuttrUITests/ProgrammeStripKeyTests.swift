@@ -90,6 +90,41 @@ import Testing
 		#expect(strip.noticeForTesting?.contains("at or before the in") == true)
 	}
 
+	/// The contract the window's key monitor relies on, and the reason the keys
+	/// beeped: the strip only ever answered its own `keyDown`, so it was only
+	/// asked while it held the focus. Asked from the window it must answer when
+	/// there is something to act on, and decline when there is not, so every
+	/// other key carries on to wherever it was going.
+	@Test func theWindowCanAskWithoutTheStripHavingTheFocus() throws {
+		let (strip, _) = try programme()
+		var written: (Origin, Int, Double, Double)?
+		strip.onMoveOverlay = { written = ($0, $1, $2, $3) }
+		strip.playhead = 4
+
+		// Nothing selected: declined, and no notice, because the window asks
+		// about every press and a sentence on each one would be noise.
+		#expect(strip.handleKey(key("o")) == false)
+		#expect(strip.noticeForTesting == nil)
+		#expect(written == nil)
+
+		strip.selectFirstBarForTesting()
+		#expect(strip.hasSelectedOverlay)
+		#expect(strip.handleKey(key("o")))
+		#expect(written?.3 == 4)
+
+		// A key it does not answer is declined either way, so the window does
+		// not swallow it.
+		#expect(strip.handleKey(key("q")) == false)
+	}
+
+	/// Asked by the strip itself — it has the focus, so somebody who pressed `i`
+	/// meant this and is owed a sentence rather than a beep.
+	@Test func askedDirectlyItExplainsItself() throws {
+		let (strip, _) = try programme()
+		#expect(strip.handleKey(key("o"), explaining: true))
+		#expect(strip.noticeForTesting?.contains("click an overlay") == true)
+	}
+
 	// MARK: - The zoom
 
 	@Test func theWholeProgrammeIsShownToBeginWith() throws {

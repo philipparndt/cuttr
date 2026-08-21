@@ -335,6 +335,8 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	/// For the tests: the rail and the pane it opens.
 	var railForTesting: Rail { rail }
 	var panesForTesting: PaneStack? { panes }
+	var transportForTesting: Transport { transport }
+	var clipListForTesting: ClipTable { clipTable }
 
 	// MARK: - Wiring
 
@@ -933,88 +935,6 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			}
 			self.refresh()
 		}
-	}
-
-	// MARK: - A look at one clip
-
-	private var clipLook: QuickLookPanel?
-
-	/// The selected clip's span on the take's clock, which is the clock the
-	/// transport's composition is on.
-	private var selectedClipSpan: QuickLook.Span? {
-		guard let id = selectedClip,
-		      let clip = takeDocument.take.clips.first(where: { $0.id == id }),
-		      clip.end > clip.start else { return nil }
-		return QuickLook.Span(start: clip.start, end: clip.end)
-	}
-
-	/// Space, while the clip list has the keyboard, is a look at the clip that
-	/// is selected — and the same key puts it away, as does escape while it is
-	/// open. Everywhere else in this window space is still the tape.
-	///
-	/// Asked of ``QuickLook`` rather than answered here, because space belongs
-	/// to several things in this program and the only safe way to take it is to
-	/// be able to say where it is *not* taken.
-	private func clipListKey(_ event: NSEvent) -> Bool {
-		guard clipTable.hasKeyboard else { return false }
-		if QuickLook.dismisses(event), clipLook != nil {
-			closeClipLook()
-			return true
-		}
-		guard QuickLook.claims(event, editing: false, hasSpan: selectedClipSpan != nil)
-		else { return false }
-		if clipLook != nil { closeClipLook() } else { showClipLook() }
-		return true
-	}
-
-	/// For the tests: the whole key path this window uses, so a test asks the
-	/// same question the keyboard does. Asking a view's own handler instead is
-	/// how a look that never opened passed its test.
-	func handleKeyForTesting(_ event: NSEvent) -> Bool { handle(event) }
-
-	var clipListForTesting: ClipTable { clipTable }
-	var transportForTesting: Transport { transport }
-	var clipLookIsOpenForTesting: Bool { clipLook != nil }
-
-	/// For the tests: the span a look would play, and the selection without a
-	/// mouse.
-	var clipLookSpanForTesting: QuickLook.Span? { selectedClipSpan }
-
-	func selectForTesting(clip id: Clip.ID) { selectedClip = id }
-
-	/// A look at the selected clip, beside the row it was chosen from.
-	///
-	/// Playing the transport's own composition rather than one built here: it is
-	/// the take with its recorder track already at the offset, kept in step by
-	/// whatever moves the alignment, and a second assembly of the same media
-	/// would be a second thing to get wrong.
-	private func showClipLook() {
-		guard let window, let span = selectedClipSpan,
-		      let id = selectedClip,
-		      let clip = takeDocument.take.clips.first(where: { $0.id == id }) else {
-			closeClipLook()
-			return
-		}
-		let panel = clipLook ?? QuickLookPanel()
-		clipLook = panel
-		let row = window.convertToScreen(clipTable.convert(clipTable.rectOfSelectedRow(), to: nil))
-		let column = window.convertToScreen(clipTable.convert(clipTable.bounds, to: nil))
-		panel.show(
-			span, titled: clip.name.isEmpty ? clip.slug : clip.name,
-			saying: "\(Timecode.string(span.start)) → \(Timecode.string(span.end))"
-				+ "   \(TakeWriter.number(span.duration, places: 1))s",
-			playing: { [weak self] in
-				guard let played = self?.transport.playing else { return nil }
-				return (played.composition, played.videoComposition,
-				        played.audioMix, played.duration)
-			},
-			over: window, beside: column, row: row,
-			output: takeDocument.videoInfo?.naturalSize ?? CGSize(width: 1920, height: 1080))
-	}
-
-	private func closeClipLook() {
-		clipLook?.hide()
-		clipLook = nil
 	}
 
 	/// Brings the clips of this take level with each other.
@@ -2231,11 +2151,6 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		// second. Nothing here is claimed under a modifier, so the menu keeps
 		// every ⌘ it had.
 		if transcriptPane.handleKey(event) { return true }
-		// And the clip list on the same terms. Every key in this window comes
-		// through here — the monitor above catches them before any view sees
-		// one — so a table that answered space for itself would never be asked:
-		// the tape would already have started rolling. Which is what happened.
-		if clipListKey(event) { return true }
 
 		let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 		let shift = flags.contains(.shift)
