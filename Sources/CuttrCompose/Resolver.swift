@@ -560,6 +560,17 @@ public enum Resolver {
 				clips[index].gain = Loudness(integrated: loudness, peak: peak)
 					.gain(toward: audio.target, ceiling: audio.ceiling)
 			}
+			// And then the clip's own trim, which is a different question. The
+			// take's figure brings the *recording* to a target; a trim is a
+			// correction between clips of the same recording, which no take-wide
+			// measurement can make — two children at one microphone are ten
+			// decibels apart and stay that way however the take is matched.
+			//
+			// Added rather than replacing, so a project matching to a target
+			// still does and a take nobody has levelled is unchanged. The
+			// ceiling above guards the automatic match; it does not overrule a
+			// number somebody typed, because that number is the decision.
+			clips[index].gain += clips[index].clip.gain
 
 			// The take's own look over the profile it names, and then the match.
 			// The match is a `gain` the take may already carry from an analysis

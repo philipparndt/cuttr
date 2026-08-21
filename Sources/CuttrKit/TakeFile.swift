@@ -123,7 +123,8 @@ public enum TakeReader {
 					// written without brackets is what somebody types.
 					tags: (m["tags"] as? [Any])?.compactMap { $0 as? String }
 						?? (m["tags"] as? String).map { [$0] } ?? [],
-					order: (m["order"] as? Int) ?? Int((m["order"] as? String) ?? "") ?? Clip.defaultOrder
+					order: (m["order"] as? Int) ?? Int((m["order"] as? String) ?? "") ?? Clip.defaultOrder,
+					gain: number(m["gain"]) ?? 0
 				))
 			}
 		}
@@ -465,6 +466,12 @@ public enum TakeWriter {
 			// change a character.
 			let length = Timecode.milliseconds(clip.end) - Timecode.milliseconds(clip.start)
 			out += "   # \(Timecode.string(Double(length) / 1000))\n"
+			// Beside the times rather than down with the labels: how loud a clip
+			// is belongs with what part of the recording it is, not with what it
+			// is called. Left out at nought — see ``CuttrKit/Clip/gain``.
+			if clip.gain != 0 {
+				out += "    gain:  \(number(clip.gain, places: 2))\n"
+			}
 			if clip.color != .default {
 				out += "    color: \(clip.color.rawValue)\n"
 			}

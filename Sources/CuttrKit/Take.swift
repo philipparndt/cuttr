@@ -330,6 +330,22 @@ public struct Clip: Identifiable, Sendable, Equatable {
 	/// has to be maintained alongside it.
 	public var tags: [String]
 
+	/// How much to turn this clip up or down, in decibels.
+	///
+	/// **A decision, not a measurement.** Loudness is measured per *recording*
+	/// — see ``Measured/loudness`` — and for a take somebody speaks through at
+	/// one level, that is the right grain: one pass serves every programme that
+	/// uses it. Within one recording it is not. Two children at the same
+	/// microphone are ten decibels apart, and a single figure for the whole
+	/// take brings all of it to target while leaving them exactly as far apart
+	/// as they were. That is the thing this fixes, and the cutting window is
+	/// where it belongs: it is the one place the clips can be heard against
+	/// each other.
+	///
+	/// Nought is left out of the file, so a take nobody has levelled does not
+	/// carry `gain: 0` on every clip looking like a decision.
+	public var gain: Double
+
 	/// Where this clip sorts among others selected together.
 	///
 	/// A thousand by default, and the number is deliberately not 0 or 1: the
@@ -349,7 +365,8 @@ public struct Clip: Identifiable, Sendable, Equatable {
 		note: String? = nil,
 		color: ClipColor = .default,
 		tags: [String] = [],
-		order: Int = Clip.defaultOrder
+		order: Int = Clip.defaultOrder,
+		gain: Double = 0
 	) {
 		self.id = id
 		self.slug = slug
@@ -364,9 +381,14 @@ public struct Clip: Identifiable, Sendable, Equatable {
 		// hand, so `B-Roll` and `b-roll` must not be two different tags.
 		self.tags = tags.map { Slug.make(from: $0) }.filter { !$0.isEmpty }
 		self.order = order
+		self.gain = gain
 	}
 
 	public var duration: Double { end - start }
+
+	/// The clip's span as a closed range on the take's clock, which is what a
+	/// measuring pass wants.
+	public var span: ClosedRange<Double> { start ... max(start, end) }
 
 	public func contains(_ time: Double) -> Bool { time >= start && time < end }
 

@@ -490,6 +490,33 @@ public final class TakeDocument {
 		apply(next, actionName: "Change Order")
 	}
 
+	/// How much to turn one clip up or down. See ``CuttrKit/Clip/gain``.
+	public func setGain(_ gain: Double, for id: Clip.ID) {
+		var next = take
+		guard let index = next.clips.firstIndex(where: { $0.id == id }),
+		      next.clips[index].gain != gain else { return }
+		next.clips[index].gain = gain
+		apply(next, actionName: "Change Level")
+	}
+
+	/// Every clip's trim at once, from what each one measured.
+	///
+	/// One edit and one undo, because levelling a take is one act: correcting
+	/// twelve clips and having to press ⌘Z twelve times is not a feature
+	/// anybody uses twice.
+	public func setGains(_ gains: [Clip.ID: Double]) {
+		var next = take
+		var changed = false
+		for index in next.clips.indices {
+			guard let gain = gains[next.clips[index].id], next.clips[index].gain != gain
+			else { continue }
+			next.clips[index].gain = gain
+			changed = true
+		}
+		guard changed else { return }
+		apply(next, actionName: "Match Levels")
+	}
+
 	public func setOffset(_ offset: Double) {
 		guard var audio = take.audio else { return }
 		audio.offset = offset

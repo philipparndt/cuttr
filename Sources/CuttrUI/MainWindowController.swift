@@ -56,6 +56,7 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	private var wordsTask: Task<Void, Never>?
 	private var speakerTask: Task<Void, Never>?
 	private var soundsTask: Task<Void, Never>?
+	private var levelsTask: Task<Void, Never>?
 
 	private var playhead: Double = 0
 	private var pending: (start: Double, end: Double)?
@@ -411,6 +412,22 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 				return
 			}
 			self?.takeDocument.setOrder(value, for: id)
+		}
+		clipTable.onGainChange = { [weak self] id, text in
+			guard let self else { return }
+			let typed = text.trimmingCharacters(in: .whitespaces)
+			// Empty is nought, which is how a trim is taken back off. Anything
+			// that is not a number is refused by putting the old value back,
+			// rather than being read as nought — "-3 dB" typed with the unit is
+			// a slip, and silently flattening the clip would be a strange
+			// answer to it.
+			if typed.isEmpty { self.takeDocument.setGain(0, for: id); return }
+			guard let value = Double(typed) else {
+				self.say("a level is a number of decibels — try -3 or 2.5")
+				self.refresh()
+				return
+			}
+			self.takeDocument.setGain((value * 100).rounded() / 100, for: id)
 		}
 		clipTable.onActivate = { [weak self] id in self?.reveal(id) }
 		clipTable.onTimeChange = { [weak self] id, isStart, text in
@@ -906,6 +923,58 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 						+ " (separation %.2f)",
 					changed, offer.byLine.count - changed, offer.skipped, offer.separation))
 			}
+			self.refresh()
+		}
+	}
+
+	/// Brings the clips of this take level with each other.
+	///
+	/// Measured per clip, which is the whole point of it being here. The take's
+	/// own loudness is one number for the recording — right for a take somebody
+	/// speaks through at one level, useless for one where two children take
+	/// turns — and no amount of matching the take to a target closes a gap
+	/// *inside* it. See ``CuttrKit/Levelling/match(_:existing:limit:)`` for why
+	/// it matches to the middle of what it heard rather than to the loudest.
+	private func matchLevels() {
+		guard levelsTask == nil else { return }
+		let clips = takeDocument.take.clips
+		guard clips.count >= 2 else {
+			say("levelling is a comparison — this take has one clip")
+			return
+		}
+		// The audio somebody will actually hear: the separate recorder when
+		// there is one, because that is the reason it was recorded.
+		guard let url = takeDocument.audioURL ?? takeDocument.videoURL else {
+			say("nothing to listen to — give this take a video or an audio file first")
+			return
+		}
+		// One clock. Clip times are on the video's, a separate recorder has its
+		// own, and the take's offset is the only thing that relates them.
+		let offset = takeDocument.take.audio == nil ? 0 : (takeDocument.take.audio?.offset ?? 0)
+		let spans = clips.map { clip in
+			(clip.start - offset) ... max(clip.start - offset, clip.end - offset)
+		}
+		say("listening to \(clips.count) clips to level them…")
+		levelsTask = Task { [weak self] in
+			var measured: [Double?] = []
+			for span in spans {
+				let heard = try? await LoudnessMeter.measure(url: url, ranges: [span])
+				measured.append(heard?.integrated)
+			}
+			guard let self, !Task.isCancelled else { return }
+			self.levelsTask = nil
+			let wanted = Levelling.match(measured, existing: clips.map(\.gain))
+			var gains: [Clip.ID: Double] = [:]
+			for (index, clip) in clips.enumerated() { gains[clip.id] = wanted[index] }
+			self.takeDocument.setGains(gains)
+
+			let silent = measured.filter { $0 == nil }.count
+			let moved = wanted.enumerated().filter { abs($0.element - clips[$0.offset].gain) >= 0.1 }
+			let widest = zip(wanted, measured).filter { $0.1 != nil }.map { abs($0.0) }.max() ?? 0
+			var note = "levelled \(clips.count - silent) clips, \(moved.count) moved"
+			if widest > 0 { note += String(format: ", the furthest by %.1f dB", widest) }
+			if silent > 0 { note += " — \(silent) had nothing to measure and were left alone" }
+			self.say(note)
 			self.refresh()
 		}
 	}
@@ -1483,11 +1552,18 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			add(to: menu, "Split at Playhead", #selector(splitAction))
 			add(to: menu, "Zoom to Clip", #selector(zoomToClipAction))
 			menu.addItem(.separator())
+			// About the whole take rather than the clip the menu was opened on,
+			// because levelling is a comparison: one clip has nothing to be
+			// level with. Offered here all the same, because this is the list
+			// somebody is looking at when they notice the problem.
+			add(to: menu, "Match Levels Across the Take", #selector(matchLevelsAction))
+			menu.addItem(.separator())
 			add(to: menu, "Delete", #selector(deleteAction))
 		} else {
 			add(to: menu, "New Clip from In/Out", #selector(commitPendingAction))
 			add(to: menu, "Split at Playhead", #selector(splitAction))
 			menu.addItem(.separator())
+			add(to: menu, "Match Levels Across the Take", #selector(matchLevelsAction))
 			add(to: menu, "Zoom to Fit", #selector(zoomFit))
 		}
 		return menu
@@ -1551,6 +1627,8 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		}
 		return menu
 	}
+
+	@objc private func matchLevelsAction() { matchLevels() }
 
 	private func add(to menu: NSMenu, _ title: String, _ action: Selector) {
 		let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
