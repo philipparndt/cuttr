@@ -60,6 +60,7 @@ public final class ScenePartsList: NSView, NSTableViewDataSource, NSTableViewDel
 			("Text", Scene.Part.Content.text("{{title}}", style: "title", tracking: 0)),
 			("Shape", .shape(fill: .white, corner: 0, kind: .rectangle)),
 			("Progress Bar", .bar(Scene.Bar(corner: 0.006))),
+			("Credit Roll", .roll(Credits.emptyRoll)),
 			("Spinner", .spinner(Spinner())),
 			("Image…", .image("")),
 			("Background", .background(Scene.Background(from: RGBA(hex: "#101418")!))),
@@ -156,6 +157,10 @@ public final class ScenePartsList: NSView, NSTableViewDataSource, NSTableViewDel
 		case .spinner(let spinner):
 			kind = .spinner
 			title = "spinner  \(spinner.style.rawValue)"
+		case .roll(let roll):
+			kind = .text
+			let names = roll.entries.reduce(0) { $0 + $1.names.count }
+			title = "roll  \(roll.entries.count) blocks  ·  \(names) names"
 		case .image(let file):
 			kind = .clip
 			title = file.isEmpty ? "image  (none chosen)" : "image  \((file as NSString).lastPathComponent)"

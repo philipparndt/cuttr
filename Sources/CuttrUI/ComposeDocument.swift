@@ -318,6 +318,14 @@ public final class ComposeDocument {
 		/// Which anchors came from which take, so the library can say where a
 		/// tracked face lives.
 		public var anchorTakes: [String: String] = [:]
+		/// Who is in the film: the speakers of the takes the timeline actually
+		/// plays, each of them once, in the order the programme introduces them.
+		///
+		/// Here with the rest of the vocabulary because it is the same kind of
+		/// thing — a list the takes gave us, which the project can refer to —
+		/// and because the credits are the one place that needs it. See
+		/// ``CuttrCompose/Credits/cast(of:used:)``.
+		public var cast: [String] = []
 		/// Takes that were downloaded rather than recorded, by name.
 		///
 		/// Read from each take's own `source:` block — see ``TakeSource`` — and
@@ -398,6 +406,18 @@ public final class ComposeDocument {
 					color: clip.color))
 			}
 		}
+		// The cast, from the takes the programme actually plays. Read here
+		// rather than in the panel that shows it, because reading the take files
+		// is this document's job and doing it in a menu handler would read them
+		// again every time somebody opened the menu.
+		var speakers: [(name: String, speakers: [Speaker])] = []
+		for entry in takes {
+			guard let text = try? String(contentsOf: entry.url, encoding: .utf8),
+			      let take = try? TakeReader.read(text) else { continue }
+			speakers.append((entry.name, take.speakers))
+		}
+		found.cast = Credits.cast(of: speakers,
+		                          used: Set(resolved?.clips.map(\.takeName) ?? []))
 		found.items = items
 		found.takeNames = takeNames
 		found.anchorTakes = anchorTakes

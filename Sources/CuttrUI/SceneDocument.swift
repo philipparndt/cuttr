@@ -210,8 +210,19 @@ public final class SceneDocument {
 			                width: 0.5, height: 0.012, progress: 0)
 		case .spinner:
 			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1)
+		case .roll:
+			// Below the bottom of the frame, because that is where a roll starts
+			// from — and see below for why it does not stay there.
+			key = Scene.Key(t: 0, x: 0.5, y: -0.6, opacity: 1, scale: 1, ease: .linear)
 		}
-		next.parts.append(Scene.Part(content: content, keys: [key]))
+		var made = [key]
+		// The one part that is useless with a single key: a roll standing still
+		// off the bottom of the frame looks exactly like nothing at all. So it
+		// arrives scrolling, and the second key is the one somebody drags.
+		if case .roll = content {
+			made.append(Scene.Key(t: 6, y: 1.6, ease: .linear))
+		}
+		next.parts.append(Scene.Part(content: content, keys: made))
 		// A background goes underneath everything, whatever order it was added
 		// in: it is the ground, and a ground over the top is a blank frame.
 		if case .background = content, next.parts.count > 1 {

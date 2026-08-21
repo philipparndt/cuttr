@@ -1,0 +1,151 @@
+# cuttr project — a word typed, and then moved in.
+#
+# One text part per prefix: `d`, `di`, `din`, … `dingsda`. Each one comes on at
+# its own moment and stays, because every prefix contains the one before it and
+# draws the same glyphs in the same places — so nothing has to be hidden, and
+# the letters accumulate.
+#
+# Two keys do that: opacity nought a frame before, one on the frame itself. A
+# forty-millisecond ramp at 25 fps is a cut, and it is a cut written in the only
+# vocabulary a key has.
+#
+# **Why the numbers line up.** A text part is placed by its *middle*, so a
+# growing word placed at one `x` would grow in both directions from the centre.
+# To pin its left edge instead, each prefix sits half its own width to the right
+# of that edge — and the whole reason this is bearable is that the face is
+# monospaced. Every letter is 58.5 pixels wide at this size, so each prefix's
+# middle is 29.25 pixels right of the one before: the same step seven times,
+# 0.015 of the frame. That is why typewriter effects are set in monospace.
+#
+# **And why `roll:` exists.** Nine parts and twenty-eight keys to type seven
+# letters is the honest cost of hand-placing text, and it is fine here, because
+# the shape of the thing *is* the animation. Do the same arithmetic for thirty
+# names in two columns and the file stops holding a layout and starts holding
+# the result of one — see `credits.cuttrproj`, which is one part and two keys.
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: typing.mov
+
+styles:
+  typewriter:
+    font:     Menlo-Bold
+    size:     0.09
+    color:    "#eaf2ff"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.5, 0.5]
+    align:    left
+  said:
+    font:     Helvetica Neue Light
+    size:     0.032
+    color:    "#8b97a8"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.5, 0.5]
+    align:    centre
+
+timeline:
+  - card:  00:04.400
+    fill:  "#0b1220"
+    as:    typing
+
+overlays:
+  - scene:  typing
+    from:   "@typing"
+    in:     cut
+    out:    cut
+
+scenes:
+  typing:
+    parts:
+      # The caret, first, so the letters are drawn over it. It glides one cell
+      # to the right as each letter lands — a jump would be two keys a letter
+      # instead of one — then blinks twice on the spot and goes out as the word
+      # leaves.
+      - shape: "#4bd5ee"
+        keys:
+          - {t: 0, x: 0.203, y: 0.52, opacity: 1, width: 0.005, height: 0.075}
+          - {t: 0.2, x: 0.233, ease: linear}
+          - {t: 0.4, x: 0.263, ease: linear}
+          - {t: 0.6, x: 0.294, ease: linear}
+          - {t: 0.8, x: 0.324, ease: linear}
+          - {t: 1, x: 0.355, ease: linear}
+          - {t: 1.2, x: 0.385, ease: linear}
+          - {t: 1.4, x: 0.416, ease: linear}
+          - {t: 1.65, opacity: 1, ease: linear}
+          - {t: 1.7, opacity: 0, ease: linear}
+          - {t: 1.95, opacity: 0, ease: linear}
+          - {t: 2, opacity: 1, ease: linear}
+          - {t: 2.35, opacity: 1, ease: linear}
+          - {t: 2.4, opacity: 0, ease: linear}
+
+      - text:  d
+        style: typewriter
+        keys:
+          - {t: 0.16, x: 0.215, y: 0.52, opacity: 0, scale: 1}
+          - {t: 0.2, opacity: 1, ease: linear}
+          - {t: 2.4, opacity: 1, ease: linear}
+          - {t: 2.44, opacity: 0, ease: linear}
+
+      - text:  di
+        style: typewriter
+        keys:
+          - {t: 0.36, x: 0.23, y: 0.52, opacity: 0, scale: 1}
+          - {t: 0.4, opacity: 1, ease: linear}
+          - {t: 2.4, opacity: 1, ease: linear}
+          - {t: 2.44, opacity: 0, ease: linear}
+
+      - text:  din
+        style: typewriter
+        keys:
+          - {t: 0.56, x: 0.245, y: 0.52, opacity: 0, scale: 1}
+          - {t: 0.6, opacity: 1, ease: linear}
+          - {t: 2.4, opacity: 1, ease: linear}
+          - {t: 2.44, opacity: 0, ease: linear}
+
+      - text:  ding
+        style: typewriter
+        keys:
+          - {t: 0.76, x: 0.26, y: 0.52, opacity: 0, scale: 1}
+          - {t: 0.8, opacity: 1, ease: linear}
+          - {t: 2.4, opacity: 1, ease: linear}
+          - {t: 2.44, opacity: 0, ease: linear}
+
+      - text:  dings
+        style: typewriter
+        keys:
+          - {t: 0.96, x: 0.275, y: 0.52, opacity: 0, scale: 1}
+          - {t: 1, opacity: 1, ease: linear}
+          - {t: 2.4, opacity: 1, ease: linear}
+          - {t: 2.44, opacity: 0, ease: linear}
+
+      - text:  dingsd
+        style: typewriter
+        keys:
+          - {t: 1.16, x: 0.29, y: 0.52, opacity: 0, scale: 1}
+          - {t: 1.2, opacity: 1, ease: linear}
+          - {t: 2.4, opacity: 1, ease: linear}
+          - {t: 2.44, opacity: 0, ease: linear}
+
+      # The finished word is the one that travels. The six prefixes under it go
+      # out on the frame it starts moving, which is what those last two keys on
+      # each of them are for: six parts holding still while a seventh moves is
+      # the word coming apart.
+      - text:  dingsda
+        style: typewriter
+        keys:
+          - {t: 1.36, x: 0.305, y: 0.52, opacity: 0, scale: 1}
+          - {t: 1.4, opacity: 1, ease: linear}
+          - {t: 2.4, x: 0.305, y: 0.52, scale: 1, ease: linear}
+          - {t: 3.4, x: 0.5, y: 0.6, scale: 1.45, ease: out}
+
+      - text:  the thingamajig, in seven letters
+        style: said
+        keys:
+          - {t: 2.9, x: 0.5, y: 0.45, opacity: 0}
+          - {t: 3.6, y: 0.47, opacity: 1, ease: out}

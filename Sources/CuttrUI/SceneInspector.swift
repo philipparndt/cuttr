@@ -154,6 +154,7 @@ public final class SceneInspector: NSView {
 		case .text: return "text"
 		case .shape(_, _, let kind): return kind.rawValue
 		case .image: return "image"
+		case .roll: return "roll"
 		case .bar: return "bar"
 		case .spinner: return "spinner"
 		case .background: return "background"
@@ -175,6 +176,61 @@ public final class SceneInspector: NSView {
 			}])
 			field("tracking", [number(tracking, width: 66) { [weak self] value in
 				self?.onContent?(.text(words, style: style, tracking: value))
+			}], note: "space between the letters, as a fraction of the type size")
+
+		case .roll(let roll):
+			// The typography, and not the names. A block is a role and a list of
+			// people, which is prose in a column — an inspector row per line
+			// would be forty text fields nobody could read, and the file already
+			// shows them in the shape they will be drawn in. What belongs here
+			// is the handful of numbers somebody nudges while watching the roll
+			// go past.
+			remark("The blocks are in the file, under `roll:`. Blocks marked "
+				+ "`from: cast` are filled in from who is in the film, and "
+				+ "re-filled when the takes change; anything else is yours and is "
+				+ "left alone.")
+			field("style", [combo(roll.style ?? "", values: styleNames, width: 150) { [weak self] value in
+				var next = roll
+				next.style = value.trimmingCharacters(in: .whitespaces).isEmpty
+					? nil : value.trimmingCharacters(in: .whitespaces)
+				self?.onContent?(.roll(next))
+			}], note: "the names")
+			field("roles", [combo(roll.roleStyle ?? "", values: styleNames, width: 150) { [weak self] value in
+				var next = roll
+				next.roleStyle = value.trimmingCharacters(in: .whitespaces).isEmpty
+					? nil : value.trimmingCharacters(in: .whitespaces)
+				self?.onContent?(.roll(next))
+			}], note: "empty for the same style as the names")
+			let aligns = Scene.Roll.Align.allCases
+			field("align", [choice(aligns.map(\.rawValue),
+			                       selected: aligns.firstIndex(of: roll.align) ?? 0,
+			                       width: 118) { [weak self] picked in
+				var next = roll
+				next.align = aligns[picked]
+				self?.onContent?(.roll(next))
+			}], note: "how the lines sit against each other. `columns` sets each role "
+				+ "against its names, which is what a broadcast roll is.")
+			field("line", [number(roll.line, width: 66) { [weak self] value in
+				var next = roll
+				next.line = value
+				self?.onContent?(.roll(next))
+			}], note: "one line of names, as a fraction of the frame height. Bigger type "
+				+ "takes proportionally more.")
+			field("gap", [number(roll.gap, width: 66) { [weak self] value in
+				var next = roll
+				next.gap = value
+				self?.onContent?(.roll(next))
+			}], note: "blank space between blocks, in lines")
+			field("column", [number(roll.column, width: 66) { [weak self] value in
+				var next = roll
+				next.column = value
+				self?.onContent?(.roll(next))
+			}], note: "space between the roles and the names, as a fraction of the frame "
+				+ "height. Only `columns` uses it.")
+			field("tracking", [number(roll.tracking, width: 66) { [weak self] value in
+				var next = roll
+				next.tracking = value
+				self?.onContent?(.roll(next))
 			}], note: "space between the letters, as a fraction of the type size")
 
 		case .shape(let fill, let corner, let kind):

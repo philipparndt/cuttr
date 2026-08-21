@@ -665,6 +665,8 @@ public enum ProjectReader {
 				size: number(fields["size"]) ?? 0.09,
 				speed: number(fields["speed"]) ?? 1,
 				color: (fields["color"] as? String).flatMap(RGBA.init(hex:)) ?? .white))
+		} else if let entries = fields["roll"] {
+			content = .roll(try readRoll(entries, fields))
 		} else if let image = fields["image"] {
 			guard let file = (image as? String).flatMap(nonEmpty) else {
 				throw ProjectError.badValue(key: "image", value: describe(image))
@@ -703,6 +705,65 @@ public enum ProjectReader {
 			throw ProjectError.badValue(key: "keys", value: "none")
 		}
 		return Scene.Part(content: content, keys: keys)
+	}
+
+	/// A credit roll: the blocks, and how the column is set.
+	///
+	/// `roll:` is the list of blocks, because the blocks are the thing; the
+	/// typography sits beside it under the part, exactly as a text part's
+	/// `style:` and `tracking:` do.
+	///
+	/// A block that names no role is read, and so is one that names no names —
+	/// a heading with nothing under it yet is a roll being written. A block that
+	/// is neither is not a block, and it is dropped rather than refused: `roll:`
+	/// with a stray blank list item in it is a file somebody is in the middle of
+	/// typing, not a file that is wrong.
+	private static func readRoll(_ entries: Any, _ fields: [String: Any]) throws -> Scene.Roll {
+		var read: [Scene.Roll.Entry] = []
+		for entry in list(entries) {
+			// One name and nothing else is the commonest block there is, and
+			// `- Camera: Wren Halloway` is not it — a mapping of one pair would
+			// have to guess which half is which. `{role: …, names: …}` always.
+			guard let m = mapping(entry) else {
+				throw ProjectError.badValue(key: "roll", value: describe(entry))
+			}
+			let role = (m["role"] as? String).flatMap(nonEmpty) ?? ""
+			// A list, or one name written bare — which is what somebody types
+			// for `{role: Music, names: Otto Kestrel}`.
+			let names = stringList(m["names"]).compactMap(nonEmpty)
+			guard !role.isEmpty || !names.isEmpty else { continue }
+			var source: Scene.Roll.Source?
+			if let said = m["from"] {
+				guard let known = (said as? String).flatMap(Scene.Roll.Source.init(rawValue:)) else {
+					throw ProjectError.badValue(key: "from", value: describe(said))
+				}
+				source = known
+			}
+			read.append(Scene.Roll.Entry(role: role, names: names, source: source))
+		}
+		var align = Scene.Roll.Align.columns
+		if let named = fields["align"] {
+			// `center` too, because the styles read both spellings and a format
+			// that accepts one word here and two there is a format that catches
+			// somebody out.
+			let text = (named as? String).map { $0 == "center" ? "centre" : $0 }
+			guard let read = text.flatMap(Scene.Roll.Align.init(rawValue:)) else {
+				throw ProjectError.badValue(key: "align", value: describe(named))
+			}
+			align = read
+		}
+		let plain = Scene.Roll()
+		return Scene.Roll(
+			entries: read,
+			title: (fields["title"] as? String).flatMap(nonEmpty),
+			style: (fields["style"] as? String).flatMap(nonEmpty),
+			roleStyle: (fields["role-style"] as? String).flatMap(nonEmpty),
+			titleStyle: (fields["title-style"] as? String).flatMap(nonEmpty),
+			line: number(fields["line"]) ?? plain.line,
+			gap: number(fields["gap"]) ?? plain.gap,
+			column: number(fields["column"]) ?? plain.column,
+			align: align,
+			tracking: number(fields["tracking"]) ?? 0)
 	}
 
 	/// A value from the file, as near to the way it was written as matters for

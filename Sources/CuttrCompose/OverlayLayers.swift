@@ -436,10 +436,18 @@ public enum OverlayLayers {
 	/// `ink` overrides the style's colour for the moment being drawn. Both are
 	/// what a scene's parts ask for and no caption ever does, so both default
 	/// to "as the style says".
-	static func textLayer(
-		_ text: String, style: TextStyle, size: CGSize,
-		tracking: Double = 0, ink: RGBA? = nil
-	) -> (CALayer, CGSize) {
+	/// One line of type, set: the line itself and the plate it needs.
+	///
+	/// Its own function because there are two callers that must agree to the
+	/// pixel — the layer that draws the words, and ``Scene/Roll`` laying a
+	/// column of them out — and a second measurement written beside the first
+	/// is a measurement that eventually disagrees. A credit roll whose lines
+	/// were measured a little differently from the way they are drawn is a roll
+	/// whose right-hand column does not line up, and nobody would guess why.
+	static func typeset(
+		_ text: String, style: TextStyle, size: CGSize, tracking: Double = 0,
+		ink: RGBA? = nil
+	) -> (line: CTLine, plate: CGSize, descent: CGFloat, scale: CGFloat) {
 		// Twice the output resolution. Type is the thing people notice, and a
 		// caption drawn at 1× and scaled is soft in a way a plate is not.
 		let scale: CGFloat = 2
@@ -464,7 +472,28 @@ public enum OverlayLayers {
 		let padding = style.padding * size.height * scale
 		let pixelSize = CGSize(width: (textWidth + padding * 2).rounded(.up),
 		                       height: (ascent + descent + padding * 2).rounded(.up))
-		let plateSize = CGSize(width: pixelSize.width / scale, height: pixelSize.height / scale)
+		return (line, CGSize(width: pixelSize.width / scale, height: pixelSize.height / scale),
+		        descent, scale)
+	}
+
+	/// The plate one line of type comes to, without drawing it.
+	static func measured(
+		_ text: String, style: TextStyle, size: CGSize, tracking: Double = 0
+	) -> CGSize {
+		typeset(text, style: style, size: size, tracking: tracking).plate
+	}
+
+	static func textLayer(
+		_ text: String, style: TextStyle, size: CGSize,
+		tracking: Double = 0, ink: RGBA? = nil
+	) -> (CALayer, CGSize) {
+		let (line, plateSize, descent, scale) = typeset(
+			text, style: style, size: size, tracking: tracking, ink: ink ?? style.color)
+		let padding = style.padding * size.height * scale
+		// Back up from the plate, which is the rounded pixels divided by the
+		// scale: multiplying by two what was divided by two is exact.
+		let pixelSize = CGSize(width: plateSize.width * scale,
+		                       height: plateSize.height * scale)
 
 		let layer = CALayer()
 		layer.frame = CGRect(origin: .zero, size: plateSize)
@@ -1073,6 +1102,11 @@ public enum OverlayLayers {
 			var bars: (track: CAShapeLayer, fill: CAShapeLayer, bar: Scene.Bar, radius: Double)?
 			/// A determinate spinner's arc, whose `strokeEnd` is the progress.
 			var sweep: CAShapeLayer?
+			/// A roll's lines, each with its own tint to animate and its own
+			/// colour to fall back to. The one part whose ink lives in more
+			/// than one layer, because its lines are set in more than one
+			/// style.
+			var rollInks: [(layer: CALayer, fallback: RGBA)] = []
 			/// Whether any key names a different shape from another — which is
 			/// what decides between an exact outline and a sampled one, because
 			/// the two cannot be interpolated between.
@@ -1097,6 +1131,41 @@ public enum OverlayLayers {
 					layer = built.0
 					natural = built.1
 				}
+			case .roll(let column):
+				// One layer per line inside a holder the size of the whole
+				// column, each placed at the offset the layout gives it. The
+				// holder is what the keys move, so a roll scrolls by being
+				// carried — every line keeps its place in the column, which is
+				// the whole reason the column is a value and not forty parts.
+				let laid = column.laidOut(in: size, project: project, with: parameters)
+				let holder = CALayer()
+				holder.frame = CGRect(origin: .zero, size: laid.size)
+				var tints: [(layer: CALayer, fallback: RGBA)] = []
+				for line in laid.lines {
+					let built: (layer: CALayer, size: CGSize)
+					if coloured {
+						let tinted = tintable(line.text, style: line.style, size: size,
+						                      tracking: line.tracking,
+						                      ink: first.color ?? line.style.color)
+						built = (tinted.layer, tinted.size)
+						tints.append((tinted.ink, line.style.color))
+					} else {
+						let plain = textLayer(line.text, style: line.style, size: size,
+						                      tracking: line.tracking)
+						built = (plain.0, plain.1)
+					}
+					built.layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+					built.layer.frame = CGRect(origin: .zero, size: built.size)
+					built.layer.position = CGPoint(x: laid.size.width / 2 + line.offset.x,
+					                               y: laid.size.height / 2 + line.offset.y)
+					holder.addSublayer(built.layer)
+				}
+				layer = holder
+				natural = laid.size
+				// Every line's ink, animated together: a roll is one thing that
+				// happens to be many lines, so it changes colour all at once or
+				// not at all.
+				rollInks = tints
 			case .shape(let fill, let corner, let kind):
 				// A real path rather than a rounded rectangle standing in for
 				// one. It costs nothing for the shape that was always here and
@@ -1306,6 +1375,9 @@ public enum OverlayLayers {
 			}
 			if let sweep {
 				animate("strokeEnd", keys.map { max(0, min(1, $0.progress ?? 0)) }, on: sweep)
+			}
+			for (tint, fallback) in rollInks {
+				animate("backgroundColor", keys.map { cgColor($0.color ?? fallback) }, on: tint)
 			}
 			if coloured, let ink {
 				let fallback: RGBA

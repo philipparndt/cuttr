@@ -132,7 +132,7 @@ public final class SceneScrubber: NSView {
 
 	private func colour(of part: Scene.Part) -> NSColor {
 		switch part.content {
-		case .text: return Theme.color(.text)
+		case .text, .roll: return Theme.color(.text)
 		case .shape: return Theme.base(.teal)
 		case .image: return Theme.base(.violet)
 		case .bar: return Theme.base(.amber)

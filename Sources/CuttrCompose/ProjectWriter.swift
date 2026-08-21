@@ -47,6 +47,8 @@ public enum ProjectWriter {
 					out += "        size:  \(trim(spinner.size))\n"
 					if spinner.speed != 1 { out += "        speed: \(trim(spinner.speed))\n" }
 					out += "        color: \(scalar(spinner.color.hex))\n"
+				case .roll(let column):
+					out += credits(column)
 				case .image(let file):
 					out += "      - image: \(scalar(file))\n"
 				case .background(let background):
@@ -82,6 +84,79 @@ public enum ProjectWriter {
 				}
 			}
 		}
+		return out
+	}
+
+	/// A credit roll: the blocks, then how the column is set.
+	///
+	/// A block on one line while one line reads as a line — which is nearly
+	/// always, because nearly every block is a role and a name. Eight names in
+	/// a flow list is not a line anybody wants to edit, so that one goes to the
+	/// block form, which is what a person would have written for it too. The
+	/// choice is made from the value and nothing else, so a roll written twice
+	/// is written the same way twice.
+	///
+	/// `line`, `gap`, `column` and `align` are always written, even at their
+	/// defaults. They are the four numbers somebody tunes when a roll is nearly
+	/// right, and a default nobody can see is a default nobody can nudge.
+	private static func credits(_ roll: Scene.Roll) -> String {
+		// An empty list said out loud, because a roll with no blocks is a real
+		// thing — a card that carries only its title — and `roll:` with nothing
+		// after it reads as a key somebody forgot to finish.
+		guard roll.entries.contains(where: { !$0.role.isEmpty || !$0.names.isEmpty }) else {
+			return "      - roll:   []\n" + settings(roll)
+		}
+		var out = "      - roll:\n"
+		for entry in roll.entries {
+			// The same blocks the reader keeps. A block with neither a role nor
+			// a name is not one, and writing it would produce a file that reads
+			// back as a different value.
+			guard !entry.role.isEmpty || !entry.names.isEmpty else { continue }
+			var fields: [String] = []
+			if !entry.role.isEmpty { fields.append("role: \(flow(entry.role))") }
+			// Beside the role, because that is what it qualifies: where the
+			// names under this one came from.
+			if let source = entry.source { fields.append("from: \(source.rawValue)") }
+			if !entry.names.isEmpty {
+				fields.append("names: [" + entry.names.map(flow).joined(separator: ", ") + "]")
+			}
+			let inline = "          - {" + fields.joined(separator: ", ") + "}\n"
+			if inline.count <= 90 {
+				out += inline
+				continue
+			}
+			var first = true
+			func key(_ name: String) -> String {
+				defer { first = false }
+				return (first ? "          - " : "            ")
+					+ (name + ":").padding(toLength: 7, withPad: " ", startingAt: 0)
+			}
+			if !entry.role.isEmpty { out += "\(key("role"))\(scalar(entry.role))\n" }
+			if let source = entry.source { out += "\(key("from"))\(source.rawValue)\n" }
+			if !entry.names.isEmpty {
+				out += (first ? "          - names:\n" : "            names:\n")
+				first = false
+				for name in entry.names { out += "              - \(scalar(name))\n" }
+			}
+		}
+		return out + settings(roll)
+	}
+
+	/// How the column is set, under the blocks it applies to.
+	private static func settings(_ roll: Scene.Roll) -> String {
+		func field(_ name: String, _ value: String) -> String {
+			"        " + (name + ":").padding(toLength: 8, withPad: " ", startingAt: 0) + value + "\n"
+		}
+		var out = ""
+		if let title = roll.title { out += field("title", scalar(title)) }
+		if let style = roll.style { out += field("style", scalar(style)) }
+		if let style = roll.roleStyle { out += "        role-style: \(scalar(style))\n" }
+		if let style = roll.titleStyle { out += "        title-style: \(scalar(style))\n" }
+		out += field("line", trim(roll.line))
+		out += field("gap", trim(roll.gap))
+		out += field("column", trim(roll.column))
+		out += field("align", roll.align.rawValue)
+		if roll.tracking != 0 { out += "        tracking: \(trim(roll.tracking))\n" }
 		return out
 	}
 

@@ -94,6 +94,11 @@ public enum SceneLayout {
 				let style = project.style(named: styleName)
 				box = OverlayLayers.textLayer(Scene.fill(text, with: parameters),
 				                              style: style, size: size, tracking: tracking).1
+			case .roll(let roll):
+				// The column the roll came to, measured the same way the render
+				// measures it — so the handle on a credit roll is on the credit
+				// roll, including the part of it currently off the top.
+				box = roll.laidOut(in: size, project: project).size
 			case .shape, .image, .bar:
 				box = CGSize(width: (key.width ?? 0.2) * size.width,
 				             height: (key.height ?? 0.02) * size.height)

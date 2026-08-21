@@ -12,6 +12,9 @@ effects, no footage — so every one of them renders on any machine:
 | `scenes/kinetic.cuttrproj` | one word at a time, each under a block that wipes off it |
 | `scenes/morph.cuttrproj` | a square becoming a circle, a triangle becoming a star, and parts that fill themselves |
 | `scenes/gradient.cuttrproj` | a ground ramping out of one gradient and into another, and an angle turning a whole circle |
+| `scenes/credits.cuttrproj` | `roll:` — end credits three ways: a roll up the frame, one block at a time, and a warm centred one |
+| `scenes/crawl.cuttrproj` | the same `roll:` part as an opening crawl, receding and fading as it goes |
+| `scenes/typing.cuttrproj` | a word typed one letter at a time and then moved in — and what hand-placing text costs |
 | `effects/celebrate.cuttrproj` | metallic confetti over a title card, then snow |
 | `effects/weather.cuttrproj` | rain, snow and sparks — the same machinery with different numbers |
 | `effects/looks.cuttrproj` | film mode, the tape and chromatic aberration, working on confetti and rain |
@@ -20,7 +23,7 @@ effects, no footage — so every one of them renders on any machine:
 | `overlays/at-the-mark.cuttrproj` | `at:` — the same fade placed before, across and after the mark, at both ends of a span |
 | `overlays/bubbles.cuttrproj` | speech, thought and a box with an arrow — drawn by hand, redrawn eight times a second, aimed by two points, and the same hand on every render |
 
-Three things these are meant to teach, all of which cost a render to learn:
+Four things these are meant to teach, all of which cost a render to learn:
 
 **The ground belongs to the card, not to the scene.** Effects are drawn *into*
 the picture; a scene is drawn *over* it, as a Core Animation layer, in a second
@@ -43,6 +46,18 @@ condition or a finish cannot, because there is nothing half way between two
 names. Ask for one of those on a key and the file will not open, with a sentence
 saying which and why — an animation that silently does nothing looks exactly
 like an animation nobody wrote.
+
+**A `roll:` is a column, not a scroll.** It knows how a credit column is set —
+roles against names, gaps between blocks, a title over the top, every line
+spaced in proportion to its own type size — and it knows nothing at all about
+moving. What makes `credits.cuttrproj` scroll is two keys on `y`; what makes the
+middle of that same file a sequence of cards is keys that hold `y` still and
+move `opacity` instead; what makes `crawl.cuttrproj` an opening crawl is the
+same two keys with `scale` beside them. Compare it with `typing.cuttrproj`,
+where every line is a text part placed by hand: nine parts and twenty-eight keys
+to type seven letters, which is fine when the placement *is* the animation and
+becomes a file holding the result of a layout the moment there are thirty names
+in it.
 
 **Watch the bubbles rather than looking at them.** `overlays/bubbles.cuttrproj`
 is the one example whose point is invisible in a still: every bubble in it is

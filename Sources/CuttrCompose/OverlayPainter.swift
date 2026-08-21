@@ -349,6 +349,20 @@ public enum OverlayPainter {
 						x: -plate.size.width / 2, y: -plate.size.height / 2,
 						width: plate.size.width, height: plate.size.height))
 				}
+			case .roll(let roll):
+				// One plate per line, each at the offset the layout gives it —
+				// the same layout the export lays out, and the same `plate` a
+				// text part is drawn with. A roll is not a second kind of type.
+				for line in roll.laidOut(in: size, project: project).lines {
+					guard let plate = plate(Scene.fill(line.text, with: parameters),
+					                        style: line.style, size: size,
+					                        tracking: line.tracking, ink: key.color)
+					else { continue }
+					context.draw(plate.image, in: CGRect(
+						x: line.offset.x - plate.size.width / 2,
+						y: line.offset.y - plate.size.height / 2,
+						width: plate.size.width, height: plate.size.height))
+				}
 			case .shape(let fill, let corner, let kind):
 				let box = CGSize(width: (key.width ?? 0.2) * size.width,
 				                 height: (key.height ?? 0.02) * size.height)

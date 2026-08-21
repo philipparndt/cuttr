@@ -66,6 +66,13 @@ public struct Scene: Sendable, Equatable {
 			/// going, and a spinner that knows how far it has got has something
 			/// better to say.
 			case spinner(Spinner)
+			/// A column of credits: blocks of a role and the names under it.
+			///
+			/// The one part whose *layout* is the thing, rather than its
+			/// position — the position is `x` and `y` on a key, as for every
+			/// other part, and a roll scrolls because those keys move it. See
+			/// ``Scene/Roll`` for why this could not be said with text parts.
+			case roll(Roll)
 			/// A file beside the project — a logo, a badge, a texture.
 			case image(String)
 			/// The whole frame, filled. What an intro screen stands on.

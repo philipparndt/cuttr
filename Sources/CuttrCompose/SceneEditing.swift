@@ -35,7 +35,9 @@ public extension Scene {
 	static func hasSize(_ content: Part.Content) -> Bool {
 		switch content {
 		case .shape, .image, .bar: return true
-		case .text, .background, .spinner: return false
+		// A roll is whatever size the column came to, like text and for the
+		// same reason: it is measured, not stated.
+		case .text, .background, .spinner, .roll: return false
 		}
 	}
 
@@ -44,7 +46,9 @@ public extension Scene {
 	static func fields(for content: Part.Content) -> [Field] {
 		switch content {
 		case .background: return [.opacity, .angle]
-		case .text: return [.x, .y, .opacity, .scale, .rotation]
+		// A roll takes exactly what text takes. `y` is the one that matters —
+		// a credit roll is that field moved from below the frame to above it.
+		case .text, .roll: return [.x, .y, .opacity, .scale, .rotation]
 		case .shape, .image: return [.x, .y, .opacity, .scale, .rotation, .width, .height]
 		// Everything a shape has, and how full it is. Spelt out rather than
 		// ``allCases``, which would hand a bar the gradient's angle.

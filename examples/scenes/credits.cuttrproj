@@ -1,0 +1,212 @@
+# cuttr project — end credits, three ways.
+#
+# Written by `＋ ▸ End credits` in the project window and then left alone, so
+# this is exactly what that command produces: a card on the end of the
+# timeline, a scene drawn on it, and the overlay that joins them. Nothing here
+# is a mode — every line of it is ordinary parts, keys and styles, and the
+# whole point of generating it is that you can then edit it.
+#
+# A `roll:` part is a *column*: blocks of a role and the names under it, laid
+# out. It does not know that it scrolls. What makes the first one scroll is two
+# keys on `y`, and what makes the middle one a sequence of cards is keys that
+# hold `y` still and move `opacity` instead. Same part, different keys.
+#
+# `from: cast` is the one word that matters if you ever run the command twice.
+# It marks a block whose *names* were derived from who is in the film — the
+# takes' `speakers:` — so `＋ ▸ End credits ▸ Update the names from the cast`
+# refills it when three more takes get cut in. The role above it is prose and
+# stays whatever you make it; a block without `from:` is yours and is never
+# touched. There are no takes in this example, so the four names below were
+# handed in; in a real project they come from the recordings.
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: credits.mov
+
+# The two presets that are not the plain one bring styles of their own, under
+# names of their own — `credit-card…`, `credit-warm…` — so that making a second
+# outro in this project cannot quietly restyle the first. The plain roll names
+# `credit`, `credit-role` and `credit-title`, which are built in and need no
+# `styles:` block at all: everything below is the other two.
+styles:
+  credit-card:
+    font:     Helvetica Neue Medium
+    size:     0.058
+    color:    "#ffffff"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.07, 0.13]
+    align:    centre
+  credit-card-role:
+    font:     Helvetica Neue
+    size:     0.034
+    color:    "#8b97a8"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.07, 0.13]
+    align:    centre
+  credit-card-title:
+    font:     Helvetica Neue Bold
+    size:     0.084
+    color:    "#ffffff"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.07, 0.13]
+    align:    centre
+  credit-warm:
+    font:     Avenir Next Medium
+    size:     0.05
+    color:    "#fff3e2"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.07, 0.13]
+    align:    centre
+  credit-warm-role:
+    font:     Avenir Next Italic
+    size:     0.034
+    color:    "#e8a33d"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.07, 0.13]
+    align:    centre
+  credit-warm-title:
+    font:     Avenir Next Demi Bold
+    size:     0.078
+    color:    "#fff3e2"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.07, 0.13]
+    align:    centre
+
+# The ground is on the card and not in the scene — see the note in
+# ../README.md. It is also how the warm one gets its gradient for nothing.
+timeline:
+  - card:  00:20.500
+    fill:  "#08090b"
+    as:    credits-broadcast
+  - card:  00:05.600
+    fill:  "#08090b"
+    as:    credits-cards
+  - card:  00:23.000
+    fill:  ["#2b1b12", "#0d0908"]
+    as:    credits-family
+
+# Cut in and cut out: the roll arrives from below the frame and leaves above
+# it, so it fades itself, and the card sequence does it with its own keys. A
+# fade here would be a second fade on top of one that is already there.
+overlays:
+  - scene:   credits-broadcast
+    from:   "@credits-broadcast"
+    in:     cut
+    out:    cut
+
+  - scene:   credits-cards
+    from:   "@credits-cards"
+    in:     cut
+    out:    cut
+
+  - scene:   credits-family
+    from:   "@credits-family"
+    in:     cut
+    out:    cut
+
+scenes:
+  # A roll up the frame, roles set against names. `y` runs from half a column
+  # below the bottom edge to half a column past the top one, which is what
+  # carries every line on from below and off above; `line` is one line of
+  # names as a fraction of the frame height, and everything else is spaced in
+  # proportion to its own type size.
+  credits-broadcast:
+    parts:
+      - roll:
+          - role:  Featuring
+            from:  cast
+            names:
+              - Wren Halloway
+              - Mira Vance
+              - Otto Kestrel
+              - Bo Fairweather
+        title:  The Long Way Round
+        style:  credit
+        role-style: credit-role
+        title-style: credit-title
+        line:   0.062
+        gap:    0.7
+        column: 0.028
+        align:  columns
+        keys:
+          - {t: 0, x: 0.5, y: -0.2, opacity: 1, scale: 1, ease: linear}
+          - {t: 20.5, y: 1.2, ease: linear}
+
+  # The same part, held still: one block at a time, fading through. A card is
+  # a column of one, so this needs no second mechanism — and `roll: []` is a
+  # column with nothing in it but its title, which is the opening plate.
+  credits-cards:
+    parts:
+      - roll:   []
+        title:  The Long Way Round
+        style:  credit-card
+        role-style: credit-card-role
+        title-style: credit-card-title
+        line:   0.082
+        gap:    0.8
+        column: 0.028
+        align:  centre
+        keys:
+          - {t: 0, x: 0.5, y: 0.5, opacity: 0, scale: 1}
+          - {t: 0.5, opacity: 1, ease: out}
+          - {t: 2.3, opacity: 1, ease: linear}
+          - {t: 2.8, opacity: 0, ease: in}
+      - roll:
+          - role:  Featuring
+            from:  cast
+            names:
+              - Wren Halloway
+              - Mira Vance
+              - Otto Kestrel
+              - Bo Fairweather
+        style:  credit-card
+        role-style: credit-card-role
+        title-style: credit-card-title
+        line:   0.082
+        gap:    0.8
+        column: 0.028
+        align:  centre
+        keys:
+          - {t: 2.8, x: 0.5, y: 0.5, opacity: 0, scale: 1}
+          - {t: 3.3, opacity: 1, ease: out}
+          - {t: 5.1, opacity: 1, ease: linear}
+          - {t: 5.6, opacity: 0, ease: in}
+
+  # Warm, centred, and pushing in four percent over the whole run: two more
+  # numbers on keys that were there anyway.
+  credits-family:
+    parts:
+      - roll:
+          - role:  Featuring
+            from:  cast
+            names:
+              - Wren Halloway
+              - Mira Vance
+              - Otto Kestrel
+              - Bo Fairweather
+        title:  The Long Way Round
+        style:  credit-warm
+        role-style: credit-warm-role
+        title-style: credit-warm-title
+        line:   0.078
+        gap:    1
+        column: 0.028
+        align:  centre
+        tracking: 0.02
+        keys:
+          - {t: 0, x: 0.5, y: -0.282, opacity: 1, scale: 1, ease: linear}
+          - {t: 23, y: 1.282, scale: 1.04, ease: linear}

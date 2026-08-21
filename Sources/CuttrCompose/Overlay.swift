@@ -546,6 +546,34 @@ public struct TextStyle: Sendable, Equatable {
 		background: RGBA(r: 0, g: 0, b: 0, a: 0),
 		position: CGPoint(x: 0.5, y: 0.52), alignment: .centre)
 
+	// MARK: - Credits
+	//
+	// Three faces for an end plate, built in for the same reason the others are:
+	// so that a project which wants a plain credit roll writes a `roll:` part
+	// and nothing else at all. No plate and no padding behind any of them —
+	// unlike a caption, whose plate is what makes it readable over a picture. A
+	// roll lines its columns up on the plate's edges, so padding on the lines
+	// would show as a gap the file never asked for.
+
+	/// The names in a credit roll.
+	public static let credit = TextStyle(
+		font: "Helvetica Neue Medium", size: 0.040, color: .white,
+		background: RGBA(r: 0, g: 0, b: 0, a: 0), padding: 0, cornerRadius: 0,
+		alignment: .left)
+
+	/// The roles beside them: smaller and quieter, because the name is the
+	/// thing being said and the role is what it answers.
+	public static let creditRole = TextStyle(
+		font: "Helvetica Neue", size: 0.040, color: RGBA(r: 0.55, g: 0.60, b: 0.66),
+		background: RGBA(r: 0, g: 0, b: 0, a: 0), padding: 0, cornerRadius: 0,
+		alignment: .right)
+
+	/// A line over the top of the column.
+	public static let creditTitle = TextStyle(
+		font: "Helvetica Neue Bold", size: 0.070, color: .white,
+		background: RGBA(r: 0, g: 0, b: 0, a: 0), padding: 0, cornerRadius: 0,
+		position: CGPoint(x: 0.5, y: 0.5), alignment: .centre)
+
 	/// The names worth offering, in the spelling this program uses.
 	///
 	/// `builtIn` also answers to the American spellings, because a file that
@@ -553,7 +581,7 @@ public struct TextStyle: Sendable, Equatable {
 	/// two spellings is a menu that makes somebody wonder what the difference
 	/// is. They are read, not offered.
 	public static let offered = ["lower-third", "lower-third-centre", "centre", "title", "caption",
-	                             "bubble"]
+	                             "bubble", "credit", "credit-role", "credit-title"]
 
 	/// Available without being written down, and overridable by writing one
 	/// down: a project that redefines `lower-third` still gets the others.
@@ -568,6 +596,9 @@ public struct TextStyle: Sendable, Equatable {
 		// Dark ink on nothing, because what is behind a bubble's words is the
 		// bubble. A caption's white would be invisible on paper.
 		"bubble": Bubble.textStyle,
+		"credit": .credit,
+		"credit-role": .creditRole,
+		"credit-title": .creditTitle,
 	]
 }
 

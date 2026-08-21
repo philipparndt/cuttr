@@ -363,7 +363,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	}
 
 	private func additionItems(includingEntries: Bool) -> [NSMenuItem] {
-		additions(includingEntries: includingEntries).map { entry in
+		var out: [NSMenuItem] = additions(includingEntries: includingEntries).map { entry in
 			guard let (title, symbol, kind, action) = entry else { return .separator() }
 			let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
 			item.target = self
@@ -371,6 +371,34 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				?? NSImage(systemSymbolName: symbol, accessibilityDescription: title)
 			return item
 		}
+		guard includingEntries else { return out }
+		// End credits are three things at once — a card, the scene drawn on it
+		// and the overlay that joins them — so they are not one more kind of
+		// entry and do not belong in the list above. A submenu because the
+		// presets are the choice worth offering here: they differ in what a
+		// person would spend an afternoon on, and every one of them writes
+		// ordinary parts and keys that can be edited afterwards.
+		out.append(.separator())
+		let credits = NSMenuItem(title: "End credits", action: nil, keyEquivalent: "")
+		credits.image = Theme.symbol(.scene, size: 12)
+			?? NSImage(systemSymbolName: "list.bullet", accessibilityDescription: "credits")
+		let presets = NSMenu()
+		for preset in Credits.Preset.allCases {
+			let item = NSMenuItem(title: preset.described,
+			                      action: #selector(addCredits(_:)), keyEquivalent: "")
+			item.target = self
+			item.representedObject = preset.rawValue
+			presets.addItem(item)
+		}
+		presets.addItem(.separator())
+		let update = NSMenuItem(title: "Update the names from the cast",
+		                        action: #selector(updateCredits(_:)), keyEquivalent: "")
+		update.target = self
+		update.isEnabled = Credits.derives(from: project)
+		presets.addItem(update)
+		credits.submenu = presets
+		out.append(credits)
+		return out
 	}
 
 	private func addMenu(includingEntries: Bool) -> NSPopUpButton {
@@ -651,6 +679,27 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// have something drawn on it, and `@intro` is how the title finds it.
 	@objc private func addCard() {
 		insert(TimelineEntry(card: Card(duration: 4), label: "card"))
+	}
+
+	/// End credits: a card on the end of the programme, a roll drawn on it, and
+	/// the names filled in from who is actually in the film.
+	///
+	/// On the end rather than after whatever is selected, which is the one place
+	/// in this panel that ignores the selection. Credits go last — that is what
+	/// the word means — and putting them in the middle of the programme because
+	/// a row happened to be highlighted would be a surprise nobody wants twice.
+	@objc private func addCredits(_ sender: NSMenuItem) {
+		let preset = (sender.representedObject as? String)
+			.flatMap(Credits.Preset.init(rawValue:)) ?? .broadcast
+		onChange?(Credits.outro(of: project, preset: preset, cast: vocabulary.cast).project)
+	}
+
+	/// The names again, for a project that has since gained a take.
+	///
+	/// Only the blocks that say where they came from; everything anybody typed
+	/// is left exactly as it is. See ``CuttrCompose/Scene/Roll/Source``.
+	@objc private func updateCredits(_ sender: Any?) {
+		onChange?(Credits.regenerated(project, cast: vocabulary.cast))
 	}
 
 	private func insert(_ entry: TimelineEntry) {

@@ -1,0 +1,129 @@
+# cuttr project — an opening crawl, out of one `roll:` part.
+#
+# A roll is a column of lines with a layout: a title over the top, blocks with
+# a role set against their names, gaps between them, everything spaced in
+# proportion to its own type size. It was added for end credits, and a crawl is
+# the same column doing something else — which is the test of whether a part
+# kind was worth adding.
+#
+# Three faces, all of them the project's own `styles:`. The paragraphs are
+# `names:`, the film's own name is the first block's `role:` — a role is a line
+# in a style of its own, and in a centred roll it gets a row to itself — and
+# `title:` is the line above them.
+#
+# **What this cannot do.** The famous version of this shot is a perspective
+# transform: the lines are laid on a plane tilted away from the camera, so the
+# ones at the top are both smaller *and* closer together. A scene has `scale`,
+# which shrinks the whole column about its middle, and no perspective. So this
+# recedes and fades but it does not converge, and the difference shows if you
+# look for it. It is written down here rather than left to be discovered.
+cuttr-project: 1
+
+output:
+  size: 1920x1080
+  fps:  25
+  file: crawl.mov
+
+styles:
+  # The blue line before it. Big, thin, and the one cool colour in the file.
+  far-away:
+    font:     Helvetica Neue Light
+    size:     0.042
+    color:    "#4bd5ee"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.5, 0.5]
+    align:    centre
+
+  # The crawl itself. Bold and warm, because it is read at a distance and then
+  # at a greater distance.
+  crawl:
+    font:     Helvetica Neue Bold
+    size:     0.05
+    color:    "#ffd54a"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.5, 0.5]
+    align:    centre
+  crawl-name:
+    font:     Helvetica Neue Bold
+    size:     0.062
+    color:    "#ffd54a"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.5, 0.5]
+    align:    centre
+  crawl-episode:
+    font:     Helvetica Neue Medium
+    size:     0.05
+    color:    "#ffd54a"
+    background: none
+    padding:  0
+    radius:   0
+    position: [0.5, 0.5]
+    align:    centre
+
+timeline:
+  - card:  00:04.000
+    as:    far-away
+  - card:  00:24.000
+    as:    crawl
+
+overlays:
+  - scene:  far-away
+    from:   "@far-away"
+    in:     {fade: true, over: 1}
+    out:    {fade: true, over: 1}
+
+  # Cut, not faded: the column arrives from below the frame and leaves above
+  # it, so it fades itself.
+  - scene:  crawl
+    from:   "@crawl"
+    in:     cut
+    out:    cut
+
+scenes:
+  far-away:
+    parts:
+      - text:  Somewhere in a workshop, not very long ago…
+        style: far-away
+        keys:
+          - {t: 0, x: 0.5, y: 0.5, opacity: 1}
+
+  # One part. The three keys are the whole shot: `y` runs from half a column
+  # below the bottom edge to past the top one at a constant speed, `scale`
+  # shrinks it to a quarter over the same interval, and the opacity is left
+  # alone until the last six seconds so that it goes out at the far end rather
+  # than all the way up.
+  crawl:
+    parts:
+      - roll:
+          - {role: A PROJECT IN PLAIN TEXT}
+          - names:
+              - "It is a period of quiet revision. A cutting room has"
+              - "fallen to plain text, and the takes have begun to"
+              - "describe themselves."
+          - names:
+              - "Every cut is a line somebody can read. Every title is"
+              - "a list of parts and the keys that move them, in a file"
+              - "that diffs."
+          - names:
+              - "Pursued by the render, a small program flees across"
+              - "the timeline, carrying the one thing that cannot be"
+              - "lost: the file itself."
+        title:  EPISODE ONE
+        style:  crawl
+        role-style: crawl-name
+        title-style: crawl-episode
+        line:   0.062
+        gap:    0.8
+        column: 0.028
+        align:  centre
+        tracking: 0.01
+        keys:
+          - {t: 0, x: 0.5, y: -0.45, opacity: 1, scale: 1, ease: linear}
+          - {t: 18, y: 0.788, scale: 0.438, ease: linear}
+          - {t: 24, y: 1.2, opacity: 0, scale: 0.25, ease: linear}
