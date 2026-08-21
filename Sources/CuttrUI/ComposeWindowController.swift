@@ -56,7 +56,14 @@ public final class ComposeWindowController: DocumentEditor,
 	public var onOpenTakeAt: ((URL, Double) -> Void)?
 	/// Whether a take is open. Renaming one that is would leave a document
 	/// writing to a file that no longer exists.
-	public var isTakeOpen: ((URL) -> Bool)?
+	/// A take was renamed, and where it went — so whoever has it open follows.
+	///
+	/// This replaced asking whether it was open at all. Knowing that a take is
+	/// open is only useful if the answer is going to be "then you cannot rename
+	/// it", and every document in this application now lives in the same
+	/// window, so that answer had stopped being an explanation and become an
+	/// obstacle.
+	public var onTakeRenamed: ((_ from: URL, _ to: URL) -> Void)?
 	/// Open a scene of this project in the scene editor. A scene is a window's
 	/// worth of editing — parts, keyframes, a stage — and putting that inside
 	/// one field of the properties panel is what this callback exists to avoid.
@@ -648,16 +655,22 @@ public final class ComposeWindowController: DocumentEditor,
 		takesTable.onAdd = { [weak self] in self?.addTake(nil) }
 		takesTable.onRename = { [weak self] path, name in
 			guard let self else { return }
-			let url = URL(fileURLWithPath: path, relativeTo: self.composeDocument.baseURL)
-			// Refused rather than half-done: the open tab holds the old URL and
-			// would recreate the old file on its next save.
-			if self.isTakeOpen?(url.standardizedFileURL) == true {
-				self.say("close that take before renaming it")
+			let from = URL(fileURLWithPath: path, relativeTo: self.composeDocument.baseURL)
+				.standardizedFileURL
+			switch self.composeDocument.renameTake(path, to: name) {
+			case .unchanged:
 				self.rebuild()
-				return
-			}
-			if let problem = self.composeDocument.renameTake(path, to: name) {
-				self.say(problem)
+			case .refused(let why):
+				self.say(why)
+				self.rebuild()
+			case .renamed(let to):
+				// Whoever has this take open is told its new name. It used to be
+				// refused instead — the open document held the old URL and its
+				// next save would have written the old file back, undoing the
+				// rename — and that was a fair reason to refuse when a take was
+				// a window somebody had to go and close. It is not one now.
+				self.onTakeRenamed?(from, to.standardizedFileURL)
+				self.say("renamed to \(to.lastPathComponent)")
 				self.rebuild()
 			}
 		}

@@ -490,6 +490,33 @@ public final class TakeDocument {
 		apply(next, actionName: "Change Order")
 	}
 
+	/// How much to turn one clip up or down. See ``CuttrKit/Clip/gain``.
+	public func setGain(_ gain: Double, for id: Clip.ID) {
+		var next = take
+		guard let index = next.clips.firstIndex(where: { $0.id == id }),
+		      next.clips[index].gain != gain else { return }
+		next.clips[index].gain = gain
+		apply(next, actionName: "Change Level")
+	}
+
+	/// Every clip's trim at once, from what each one measured.
+	///
+	/// One edit and one undo, because levelling a take is one act: correcting
+	/// twelve clips and having to press ⌘Z twelve times is not a feature
+	/// anybody uses twice.
+	public func setGains(_ gains: [Clip.ID: Double]) {
+		var next = take
+		var changed = false
+		for index in next.clips.indices {
+			guard let gain = gains[next.clips[index].id], next.clips[index].gain != gain
+			else { continue }
+			next.clips[index].gain = gain
+			changed = true
+		}
+		guard changed else { return }
+		apply(next, actionName: "Match Levels")
+	}
+
 	public func setOffset(_ offset: Double) {
 		guard var audio = take.audio else { return }
 		audio.offset = offset
@@ -682,6 +709,28 @@ public final class TakeDocument {
 	}
 
 	// MARK: - File
+
+	/// The same take, under a new name.
+	///
+	/// Renaming a take from the project window renames its file, and a window
+	/// with that take open has to follow — otherwise its next save writes the
+	/// old name back and quietly undoes the rename, which is why renaming an
+	/// open take used to be refused outright. Being told is the same amount of
+	/// truth and none of the ceremony.
+	///
+	/// Only the last component may change. ``baseURL`` is this file's folder and
+	/// everything the take points at is relative to it, so a document told it
+	/// had moved to another folder would go on resolving against the old one.
+	/// Moving is ``write(to:)``, which re-relativises; this is a rename.
+	public func renamed(to fileURL: URL) {
+		guard let url,
+		      fileURL.deletingLastPathComponent().standardizedFileURL
+		      	== url.deletingLastPathComponent().standardizedFileURL,
+		      fileURL.standardizedFileURL != url.standardizedFileURL
+		else { return }
+		self.url = fileURL
+		onChange?()
+	}
 
 	public func read(from fileURL: URL) throws {
 		let text = try String(contentsOf: fileURL, encoding: .utf8)

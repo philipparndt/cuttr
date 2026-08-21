@@ -301,8 +301,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		// it, when that is what was asked for.
 		controller.onOpenTake = { [weak self] url, aside in self?.open(url, aside: aside) }
 		controller.onOpenTakeAt = { [weak self] url, time in self?.open(url, at: time) }
-		controller.isTakeOpen = { [weak self] url in
-			self?.controllers.contains { $0.takeDocument.url?.standardizedFileURL == url } ?? false
+		controller.onTakeRenamed = { [weak self] from, to in
+			guard let self else { return }
+			for open in self.controllers
+			where open.takeDocument.url?.standardizedFileURL == from {
+				open.takeRenamed(to: to)
+			}
 		}
 		controller.onEditScene = { [weak self] document, name in
 			self?.showScene(for: document, named: name)

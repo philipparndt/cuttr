@@ -19,6 +19,9 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 	/// noun and a worse verb.
 	public var onTagsChange: ((Clip.ID, String) -> Void)?
 	public var onOrderChange: ((Clip.ID, String) -> Void)?
+	/// How much to turn one clip up or down, in decibels, as somebody typed it.
+	/// Empty means nought — see ``CuttrKit/Clip/gain``.
+	public var onGainChange: ((Clip.ID, String) -> Void)?
 	/// A start or an end, typed in. The value is text because it is a timecode
 	/// and may be nonsense; the controller parses it and ignores what it cannot
 	/// read, which is what leaves the old value on screen.
@@ -47,7 +50,7 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 		// Tags sit next to the name on purpose: they are the thing a project
 		// selects on, and a column somebody has to scroll to find is a feature
 		// they do not know exists.
-		case slug, name, tags, start, end, duration, order, note
+		case slug, name, tags, start, end, duration, gain, order, note
 		var title: String {
 			switch self {
 			case .slug: return "Slug"
@@ -55,6 +58,7 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 			case .start: return "Start"
 			case .end: return "End"
 			case .duration: return "Length"
+			case .gain: return "Level"
 			case .tags: return "Tags"
 			case .order: return "Order"
 			case .note: return "Note"
@@ -67,6 +71,7 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 			case .start: return 78
 			case .end: return 78
 			case .duration: return 66
+			case .gain: return 60
 			case .tags: return 150
 			case .order: return 56
 			case .note: return 150
@@ -235,6 +240,13 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 		case .duration:
 			field.stringValue = Timecode.string(clip.duration)
 			field.textColor = Theme.dimText
+		case .gain:
+			// Blank at nought rather than a column of zeroes. A take nobody has
+			// levelled should look like one, and the cells that are not blank
+			// are then the ones worth reading.
+			field.stringValue = clip.gain == 0 ? "" : TakeWriter.number(clip.gain, places: 2)
+			field.placeholderString = "dB"
+			field.textColor = clip.gain == 0 ? Theme.dimText : Theme.text
 		case .tags:
 			field.stringValue = clip.tags.joined(separator: ", ")
 			// Placeholder rather than an empty cell, because "how do I tag
@@ -266,6 +278,7 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 		case .end: onTimeChange?(id, false, sender.stringValue)
 		case .tags: onTagsChange?(id, sender.stringValue)
 		case .order: onOrderChange?(id, sender.stringValue)
+		case .gain: onGainChange?(id, sender.stringValue)
 		case .duration: break
 		}
 	}
