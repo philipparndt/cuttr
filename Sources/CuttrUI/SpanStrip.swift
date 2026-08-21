@@ -15,6 +15,18 @@ import CuttrKit
 /// times, it moves in seconds, because that is what it asked for. A range hung
 /// on a whole section is not dragged at all: the section is on the programme,
 /// and that is where its length is decided.
+///
+/// It **zooms**, because on an hour of programme a pixel is worth seconds and
+/// nothing can be placed in one. ⌥- or ⌘-scroll and a pinch zoom about the
+/// pointer, `+` and `−` about the selected range, `z` frames it and `f` puts
+/// the whole thing back — the same gestures and the same letters as the
+/// timeline in the cutting window, so neither has to be learnt twice. A plain
+/// scroll is passed on untouched: this strip lives in a form that scrolls, and
+/// a view that swallows the wheel is a trap.
+///
+/// Zooming changes what is shown and nothing that is written. Every number in
+/// the file is the same afterwards; ``showing`` stays the bounds, and no zoom
+/// can point at a second the overlay could not have been on anyway.
 @MainActor
 public final class SpanStrip: NSView {
 
@@ -46,6 +58,10 @@ public final class SpanStrip: NSView {
 		}
 	}
 
+	/// Which end of a range a key is about. `i` and `o` mean in and out
+	/// everywhere else in this program, and they mean it here.
+	public enum Edge: Sendable { case start, end }
+
 	public var duration: Double = 0 { didSet { needsDisplay = true } }
 	/// The stretch of the programme this strip is about, which is not always all
 	/// of it.
@@ -59,15 +75,62 @@ public final class SpanStrip: NSView {
 		didSet { needsDisplay = true }
 	}
 
-	/// What the strip is showing, resolved: the window if there is one, and the
+	/// The bounds a zoom cannot escape: the window if there is one, and the
 	/// whole programme if there is not.
-	private var shown: (start: Double, end: Double) {
+	private var limits: (start: Double, end: Double) {
 		guard let showing, showing.end > showing.start else { return (0, duration) }
 		return (max(0, showing.start), min(duration, showing.end))
+	}
+
+	/// Which part of ``limits`` is being looked at, or `nil` for all of it.
+	///
+	/// Public because the form this strip sits in is thrown away and built
+	/// again after every edit, so a zoom held only here would last until the
+	/// next letter typed into a field. It is a fact about the session and not
+	/// about the take — like which range is selected, and unlike either of the
+	/// two numbers a range is made of.
+	public var zoomed: (start: Double, end: Double)? {
+		didSet { needsDisplay = true }
+	}
+
+	/// Somebody zoomed or panned, so whoever rebuilds this strip can put it
+	/// back where they left it.
+	public var onZoom: (((start: Double, end: Double)?) -> Void)?
+
+	/// The least the strip will show.
+	///
+	/// A quarter of a second across a panel's width is a millisecond or two to
+	/// the pixel, which is finer than anything in this program is placed to.
+	/// Past that the two clocks at the ends stop differing and the strip has
+	/// stopped being a picture of anything.
+	private static let leastShown = 0.25
+
+	/// What the strip is showing, resolved: the zoom, held inside the bounds.
+	///
+	/// Clamped on the way out rather than on the way in, so a zoom that
+	/// outlived a rebuild — or a change of which clip the strip is about —
+	/// keeps its magnification and slides inside the new bounds rather than
+	/// being thrown away or pointing outside them.
+	private var shown: (start: Double, end: Double) {
+		let limits = limits
+		let whole = limits.end - limits.start
+		guard let zoomed, whole > 0 else { return limits }
+		let span = min(max(Self.leastShown, zoomed.end - zoomed.start), whole)
+		let start = min(max(limits.start, zoomed.start), limits.end - span)
+		return (start, start + span)
 	}
 	public var blocks: [Block] = [] { didSet { needsDisplay = true } }
 	public var ranges: [Range] = [] { didSet { needsDisplay = true } }
 	public var selected = 0 { didSet { needsDisplay = true } }
+
+	/// Why the last key press did nothing, while it is still worth saying.
+	///
+	/// A key that quietly does nothing is indistinguishable from a key that was
+	/// never wired up, and the two things `i` and `o` cannot do here — a range
+	/// hung on a section, an in on top of its own out — are both worth a
+	/// sentence. Said on the strip because the strip is what has the keyboard;
+	/// cleared by the next thing anybody does.
+	private var notice: String? { didSet { needsDisplay = true } }
 
 	public var onSelect: ((Int) -> Void)?
 	/// The selected range, deleted — the key everybody reaches for.
@@ -79,6 +142,13 @@ public final class SpanStrip: NSView {
 	/// Where a range was let go, in seconds. Written once, at the end of the
 	/// drag.
 	public var onDrag: ((Int, Double, Double) -> Void)?
+	/// `i` and `o`: one end of the selected range, set from the playhead.
+	///
+	/// The strip has no clock of its own and no business writing to the file,
+	/// so it says which range and which end and lets the panel — which has the
+	/// playhead, and the one door every written range goes through — do it.
+	/// Answers with why not, when it cannot be done.
+	public var onSetEdge: ((Int, Edge) -> String?)?
 
 	private enum Grip { case body(Double), start, end }
 	private var dragging: (index: Int, grip: Grip)?
@@ -88,6 +158,8 @@ public final class SpanStrip: NSView {
 		wantsLayer = true
 		layer?.backgroundColor = Theme.background.cgColor
 		layer?.cornerRadius = 4
+		addGestureRecognizer(
+			NSMagnificationGestureRecognizer(target: self, action: #selector(pinched)))
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
@@ -118,6 +190,115 @@ public final class SpanStrip: NSView {
 	/// For the tests: what time a fraction of the way along the track means.
 	func timeForTesting(atFraction fraction: CGFloat) -> Double {
 		time(track.minX + fraction * track.width)
+	}
+
+	/// For the tests: the stretch on screen, which is what the clocks at the
+	/// ends are drawn from.
+	var shownForTesting: (start: Double, end: Double) { shown }
+
+	/// For the tests: what the strip last refused to do, and why.
+	var noticeForTesting: String? { notice }
+
+	// MARK: - Zoom
+
+	/// Zooms about a point, keeping the moment under it where it is.
+	///
+	/// A factor below one shows less. The moment under the pointer staying put
+	/// is the whole of the interaction: zooming in on a strip that keeps its
+	/// centre instead walks the thing being aimed at off the edge in two turns
+	/// of the wheel.
+	public func zoom(by factor: Double, aboutFraction fraction: CGFloat) {
+		let limits = limits
+		let whole = limits.end - limits.start
+		guard whole > 0 else { return }
+		let shown = shown
+		let span = shown.end - shown.start
+		let held = Double(min(max(0, fraction), 1))
+		let at = shown.start + held * span
+		let want = min(max(span * factor, Self.leastShown), whole)
+		guard want < whole else { return fit() }
+		let start = min(max(limits.start, at - held * want), limits.end - want)
+		zoomed = (start, start + want)
+		onZoom?(zoomed)
+	}
+
+	/// The whole of what this strip is about, again.
+	public func fit() {
+		zoomed = nil
+		onZoom?(nil)
+	}
+
+	/// Frames one stretch, with a margin — "show me this range".
+	public func reveal(from start: Double, to end: Double) {
+		let limits = limits
+		let whole = limits.end - limits.start
+		guard whole > 0 else { return }
+		let want = min(max((end - start) * 1.3, Self.leastShown), whole)
+		guard want < whole else { return fit() }
+		let middle = (start + end) / 2
+		let from = min(max(limits.start, middle - want / 2), limits.end - want)
+		zoomed = (from, from + want)
+		onZoom?(zoomed)
+	}
+
+	/// Slides what is shown along, in points of the track. Does nothing while
+	/// the whole of it is on screen, so the gesture falls through to the form
+	/// rather than being eaten by a strip that has nowhere to go.
+	public func pan(byPoints points: CGFloat) {
+		guard zoomed != nil, track.width > 0 else { return }
+		let limits = limits
+		let shown = shown
+		let span = shown.end - shown.start
+		let by = Double(points / track.width) * span
+		let start = min(max(limits.start, shown.start + by), limits.end - span)
+		zoomed = (start, start + span)
+		onZoom?(zoomed)
+	}
+
+	/// Where the selected range is on the track, for a zoom that came from the
+	/// keyboard.
+	///
+	/// The middle of the view is the wrong anchor for a key press: the range
+	/// being worked on is what somebody is zooming *at*, and it is the
+	/// keyboard's pointer. Falls back to the middle when that range is not on
+	/// screen, since anchoring on something invisible jumps the strip somewhere
+	/// nobody asked to be.
+	private var fractionOfSelection: CGFloat {
+		guard ranges.indices.contains(selected) else { return 0.5 }
+		let shown = shown
+		let span = shown.end - shown.start
+		guard span > 0 else { return 0.5 }
+		let middle = (ranges[selected].start + ranges[selected].end) / 2
+		let fraction = CGFloat((middle - shown.start) / span)
+		return (fraction >= 0 && fraction <= 1) ? fraction : 0.5
+	}
+
+	public override func scrollWheel(with event: NSEvent) {
+		// ⌘ and ⌥ both zoom, as they both do on the cutting window's timeline:
+		// editors disagree about which one it is and neither has anything else
+		// to do here.
+		if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) {
+			let place = convert(event.locationInWindow, from: nil)
+			let fraction = track.width > 0 ? (place.x - track.minX) / track.width : 0.5
+			zoom(by: event.scrollingDeltaY > 0 ? 0.9 : 1.1, aboutFraction: fraction)
+			return
+		}
+		// A sideways swipe pans, because there is one axis here and nothing
+		// else wants that delta. Everything else — a wheel, two fingers up the
+		// panel — is somebody scrolling the form this strip is in, and goes on
+		// to it untouched.
+		guard zoomed != nil, abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) else {
+			super.scrollWheel(with: event)
+			return
+		}
+		pan(byPoints: -event.scrollingDeltaX)
+	}
+
+	@objc private func pinched(_ gesture: NSMagnificationGestureRecognizer) {
+		let place = gesture.location(in: self)
+		let fraction = track.width > 0 ? (place.x - track.minX) / track.width : 0.5
+		zoom(by: 1 - gesture.magnification, aboutFraction: fraction)
+		gesture.magnification = 0
 	}
 
 	// MARK: - Drawing
@@ -173,6 +354,20 @@ public final class SpanStrip: NSView {
 				withAttributes: [.font: Theme.monoSmall, .foregroundColor: NSColor.black])
 		}
 
+		// What a key would not do, over the clips, where it cannot be missed.
+		if let notice {
+			let attributes: [NSAttributedString.Key: Any] = [
+				.font: Theme.monoSmall, .foregroundColor: Theme.text,
+			]
+			let line = notice as NSString
+			let size = line.size(withAttributes: attributes)
+			let box = NSRect(x: max(track.minX, track.midX - size.width / 2 - 5), y: 15,
+			                 width: min(track.width, size.width + 10), height: 20)
+			Theme.card.withAlphaComponent(0.94).setFill()
+			NSBezierPath(roundedRect: box, xRadius: 3, yRadius: 3).fill()
+			line.draw(at: NSPoint(x: box.minX + 5, y: box.minY + 4), withAttributes: attributes)
+		}
+
 		// The clock, at both ends, so the strip says how long it is.
 		let attributes: [NSAttributedString.Key: Any] = [
 			.font: Theme.monoSmall, .foregroundColor: Theme.faintText,
@@ -201,17 +396,60 @@ public final class SpanStrip: NSView {
 	public override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
 
 	public override func keyDown(with event: NSEvent) {
+		// ⌘ belongs to the menu, which has had its chance at this key already.
+		guard !event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command)
+		else { return super.keyDown(with: event) }
+
 		// 51 is delete, 117 is forward delete.
-		guard event.keyCode == 51 || event.keyCode == 117,
-		      ranges.indices.contains(selected) else {
-			super.keyDown(with: event)
+		if event.keyCode == 51 || event.keyCode == 117 {
+			guard ranges.indices.contains(selected) else { return super.keyDown(with: event) }
+			onDelete?(selected)
 			return
 		}
-		onDelete?(selected)
+
+		// The zoom keys by physical position first and by character second, the
+		// way the cutting window does it: `charactersIgnoringModifiers` returns
+		// what the layout produces, and on a German keyboard `=` is Shift+0 and
+		// came back as "0". A key code is a place on a keyboard and is the same
+		// place on every one.
+		switch event.keyCode {
+		case 24: zoom(by: 1 / 1.6, aboutFraction: fractionOfSelection); return   // = / +
+		case 27: zoom(by: 1.6, aboutFraction: fractionOfSelection); return       // -
+		default: break
+		}
+
+		switch event.charactersIgnoringModifiers?.lowercased() {
+		case "i": setEdge(.start)
+		case "o": setEdge(.end)
+		case "f": fit()
+		case "z":
+			guard ranges.indices.contains(selected) else { return fit() }
+			reveal(from: ranges[selected].start, to: ranges[selected].end)
+		case "=", "+": zoom(by: 1 / 1.6, aboutFraction: fractionOfSelection)
+		case "-", "_": zoom(by: 1.6, aboutFraction: fractionOfSelection)
+		default: super.keyDown(with: event)
+		}
+	}
+
+	/// `i` and `o`. What the strip can answer itself it answers itself: that
+	/// there is no range, or that the range is hung on a section — and one hung
+	/// on a section is no more typed into than it is dragged, because the
+	/// section's length is decided on the programme.
+	private func setEdge(_ edge: Edge) {
+		guard ranges.indices.contains(selected) else {
+			notice = "no range to put an in or an out on"
+			return
+		}
+		guard ranges[selected].movable else {
+			notice = "hung on a section — the programme decides when that is"
+			return
+		}
+		notice = onSetEdge?(selected, edge)
 	}
 
 	public override func mouseDown(with event: NSEvent) {
 		window?.makeFirstResponder(self)
+		notice = nil
 		let place = convert(event.locationInWindow, from: nil)
 		onScrub?(time(place.x))
 		guard let index = ranges.indices.reversed().first(where: { index in

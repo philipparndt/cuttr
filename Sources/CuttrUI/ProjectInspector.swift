@@ -55,6 +55,11 @@ public final class ProjectInspector: NSView, NSSplitViewDelegate {
 	public var onScrub: ((Double) -> Void)? {
 		didSet { properties.onScrub = onScrub }
 	}
+	/// And the same clock, read the other way: where the playhead is now, for
+	/// the keys that set a range's in and out from it. The window owns it.
+	public var playhead: (() -> Double)? {
+		didSet { properties.playhead = playhead }
+	}
 	/// Somebody right-clicked a placement and asked to see where it came from.
 	public var onOpenInTake: (([Int]) -> Void)? {
 		didSet {
