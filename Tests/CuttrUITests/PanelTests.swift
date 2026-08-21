@@ -1368,7 +1368,7 @@ import Testing
 	/// It is the first thing in the rail, and going there shows it.
 	@Test func theProjectIsTheFirstPlaceInTheRail() {
 		let (controller, window) = opened()
-		#expect(controller.railForTesting.countForTesting == 4)
+		#expect(controller.railForTesting.countForTesting == 5)
 		#expect(ComposeWindowController.Mode.project.rawValue == 0)
 
 		controller.show(.project)

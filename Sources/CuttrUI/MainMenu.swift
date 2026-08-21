@@ -203,6 +203,7 @@ enum MainMenu {
 		view.addItem(command("Editor", #selector(ComposeWindowController.showEditor(_:)), "2"))
 		view.addItem(command("Project File", #selector(ComposeWindowController.showText(_:)), "3"))
 		view.addItem(command("Preview", #selector(ComposeWindowController.showPreview(_:)), "4"))
+		view.addItem(command("Levels", #selector(ComposeWindowController.showLevels(_:)), "5"))
 		view.addItem(command("Full-Screen Preview",
 		                     #selector(ComposeWindowController.toggleFullScreenPreview(_:)),
 		                     "f", [.command, .control]))

@@ -34,8 +34,8 @@ public final class ComposeWindowController: DocumentEditor,
 	/// window a required `width == 0` before anything has been laid out.
 	private let modes = NSTabView(frame: .roomToLayOutIn)
 
-	/// Which of the three is showing.
-	public enum Mode: Int { case project, edit, text, preview }
+	/// Which of the five is showing.
+	public enum Mode: Int { case project, edit, text, preview, levels }
 	private var mode: Mode = .edit
 	/// Whether the window is showing the picture and nothing else.
 	private var presenting = false
@@ -78,6 +78,8 @@ public final class ComposeWindowController: DocumentEditor,
 		          "The programme, and everything about it (\u{2318}2)"),
 		Rail.Item("Text", "curlybraces", "The project file as it stands (\u{2318}3)"),
 		Rail.Item("Play", "play.rectangle", "What it comes to, played (\u{2318}4)"),
+		Rail.Item("Levels", "slider.horizontal.3",
+		          "Every take's level, seen and heard against the others (\u{2318}5)"),
 	])
 	/// The project itself: what it renders to, and what it is called.
 	///
@@ -87,6 +89,10 @@ public final class ComposeWindowController: DocumentEditor,
 	/// size and rate of the thing being made are not an afterthought of the
 	/// timeline.
 	private let projectPanel = PropertiesPanel()
+	/// Every take's level, together. Its own page rather than a panel beside the
+	/// programme, because the whole of it is a comparison across takes and a
+	/// comparison needs the width of a window — see ``LevelsPage``.
+	private let levels = LevelsPage(frame: .roomToLayOutIn)
 	private let renderButton = NSButton()
 	/// The two controls that belong to the picture, over the picture: the anchor
 	/// markers, and the way to give the picture the screen. Neither is true of
@@ -284,7 +290,8 @@ public final class ComposeWindowController: DocumentEditor,
 		modes.tabViewType = .noTabsNoBorder
 		modes.drawsBackground = false
 		for (identifier, view) in [("project", projectPage()), ("edit", editing),
-		                          ("text", source), ("preview", split)] as [(String, NSView)] {
+		                          ("text", source), ("preview", split),
+		                          ("levels", levels)] as [(String, NSView)] {
 			let item = NSTabViewItem(identifier: identifier)
 			item.view = view
 			modes.addTabViewItem(item)
@@ -404,6 +411,9 @@ public final class ComposeWindowController: DocumentEditor,
 	/// For the tests: the takes list, so the double-click that opens a take can
 	/// be driven where it actually starts.
 	var takesForTesting: TakesTable { takesTable }
+	/// For the tests: the levels page, so a slider can be driven at its seam
+	/// rather than by an event nobody handles.
+	var levelsForTesting: LevelsPage { levels }
 
 	/// The bar: the project's name, the clock, what just happened — and two
 	/// things that are true whatever mode is showing.
@@ -413,6 +423,14 @@ public final class ComposeWindowController: DocumentEditor,
 	/// rail takes it; `⌘1`/`⌘2`/`⌘3` already do the same thing.
 	private func buildBar() {
 		rail.onSelect = { [weak self] index in self?.show(Mode(rawValue: index) ?? .edit) }
+
+		// The levels page says what it is doing in the window's own status line
+		// and shows how far along it is on the window's own bar. Decoding a
+		// folder of footage and measuring it are the two things on that page
+		// that take long enough to need saying, and a page does not get
+		// furniture of its own for what the window already has.
+		levels.onSay = { [weak self] text in self?.say(text) }
+		levels.onProgress = { [weak self] fraction in self?.showProgress(fraction) }
 
 		// A picture rather than the word. It sits beside a clock and a play
 		// button, which are both shapes, and one word among them reads as the
@@ -500,6 +518,7 @@ public final class ComposeWindowController: DocumentEditor,
 	override func documentHidden() {
 		if presenting { toggleFullScreenPreview(nil) }
 		transport.pause()
+		levels.stop()
 	}
 
 	/// The controls that belong to the picture, in the corner of the picture.
@@ -1036,9 +1055,13 @@ public final class ComposeWindowController: DocumentEditor,
 		}
 		if mode == .text { source.show(sourceText) }
 		if mode == .project { reloadProjectPage() }
+		if mode == .levels { levels.reload(from: composeDocument) }
 		// Nothing plays behind a view that is not the picture: a project window
 		// left on the editor should not keep decoding.
 		if mode != .preview { transport.pause() }
+		// The levels page has a player of its own, for one take at a time.
+		// Leaving the page stops it and writes whatever level was half-set.
+		if mode != .levels { levels.stop() }
 	}
 
 	/// Play, from wherever somebody happens to be.
@@ -1056,6 +1079,7 @@ public final class ComposeWindowController: DocumentEditor,
 	@objc public func showEditor(_ sender: Any?) { show(.edit) }
 	@objc public func showText(_ sender: Any?) { show(.text) }
 	@objc public func showPreview(_ sender: Any?) { show(.preview) }
+	@objc public func showLevels(_ sender: Any?) { show(.levels) }
 
 	/// The picture, and nothing else.
 	///
@@ -1497,6 +1521,9 @@ public final class ComposeWindowController: DocumentEditor,
 		keyMonitor = nil
 		buildTask?.cancel()
 		transport.pause()
+		// A level dragged and not let go of is still a level somebody set, and
+		// this is the last moment there is to write it.
+		levels.stop()
 		// The last edit of the session is the one somebody most wants back, and
 		// the quiet after it is the quiet in which the window was closed. On
 		// this thread rather than off it: there is no later moment to finish in.
