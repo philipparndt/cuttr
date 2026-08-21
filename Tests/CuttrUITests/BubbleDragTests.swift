@@ -99,7 +99,16 @@ import Testing
 	/// the part a conversion written against one window silently gets wrong.
 	private var sizes: [NSSize] {
 		[NSSize(width: 240, height: 206), NSSize(width: 420, height: 206),
-		 NSSize(width: 300, height: 340), NSSize(width: 620, height: 480)]
+		 NSSize(width: 300, height: 340), NSSize(width: 620, height: 480), enlarged]
+	}
+
+	/// And the size the picture opens at when somebody asks for a bigger one to
+	/// place in. In the list above because that is where the precise placing
+	/// happens: a conversion that held in a pane and drifted in the big picture
+	/// would be wrong in exactly the place somebody went for accuracy.
+	private var enlarged: NSSize {
+		Placing.size(for: NSSize(width: 1920, height: 1080),
+		             in: NSRect(x: 0, y: 0, width: 1440, height: 900))
 	}
 
 	// MARK: - The conversion
@@ -255,6 +264,253 @@ import Testing
 		view.drag(to: NSPoint(x: at.x + 0.1, y: at.y))
 		view.end()
 		#expect(result().offset == nil, "a tenth of a point was written as an edit")
+	}
+
+	// MARK: - What the picture shows after the mouse is let go
+
+	/// **The placed position holds.** A drag that has been let go leaves the
+	/// picture showing where the bubble was put, not where it came from.
+	///
+	/// It used to show where it came from. `end()` handed the numbers to the
+	/// document and forgot them in the same breath, so from the instant the
+	/// mouse came up the picture was drawn from whatever the panel had been
+	/// given *before* the drag — and the bubble sat back at its old place until
+	/// a reload arrived carrying the new one. Which is a flicker on a good day
+	/// and, for any reload that is deferred or built from the project the panel
+	/// already had, a bubble that visibly refuses to be moved.
+	@Test func theBubbleStaysWhereItWasPutDown() throws {
+		for size in sizes {
+			let (view, result) = try preview(size, tail: CGPoint(x: 0, y: -0.2))
+			let target = CGPoint(x: 0.7, y: 0.62)
+			drag(view, from: place(view, paper()), to: place(view, target))
+			let written = try #require(result().offset)
+			let shown = try #require(view.numbersForTesting)
+			#expect(shown.offset == written,
+			        "at \(size) the picture went back to \(shown.offset)")
+			// And the handle that was not touched is where it was.
+			#expect(shown.tail == CGPoint(x: 0, y: -0.2))
+
+			// The tip, likewise, and the paper it was dragged past stays put.
+			let tip = CGPoint(x: spot.x, y: spot.y - 0.2)
+			drag(view, from: place(view, tip), to: place(view, CGPoint(x: 0.22, y: 0.14)))
+			let aimed = try #require(result().tail)
+			let now = try #require(view.numbersForTesting)
+			#expect(now.tail == aimed, "at \(size) the tip went back to \(now.tail)")
+			#expect(now.offset == written, "at \(size) aiming the tail moved the paper")
+		}
+	}
+
+	/// **And it holds against the reload that carries the old numbers.**
+	///
+	/// The panel is rebuilt after every edit and hands the picture the overlay
+	/// again — sometimes the one from before the drag, because the project has
+	/// to be written, resolved and passed along before the new value comes back
+	/// round. Handed that, the picture must not go backwards.
+	@Test func aReloadWithTheOldNumbersDoesNotPutItBack() throws {
+		let (view, result) = try preview(NSSize(width: 420, height: 206))
+		let (project, stale) = try bubble()
+		drag(view, from: place(view, paper()), to: place(view, CGPoint(x: 0.72, y: 0.3)))
+		let written = try #require(result().offset)
+
+		// The overlay exactly as it was before the drag, arriving late.
+		view.content = .bubble(stale, of: project)
+		#expect(view.numbersForTesting?.offset == written,
+		        "a stale reload put the bubble back at \(String(describing: view.numbersForTesting))")
+
+		// And the one that has caught up is followed, so the picture is the
+		// file's again rather than a memory of a gesture.
+		let (_, caught) = try bubble(offset: written)
+		view.content = .bubble(caught, of: project)
+		#expect(view.numbersForTesting?.offset == written)
+
+		// A number typed into the field beside the picture wins outright: it is
+		// newer than the drag, and a picture that ignored it would be a field
+		// that does nothing.
+		let typed = CGPoint(x: -0.2, y: 0.05)
+		let (_, edited) = try bubble(offset: typed)
+		view.content = .bubble(edited, of: project)
+		#expect(view.numbersForTesting?.offset == typed,
+		        "the picture ignored a typed number")
+	}
+
+	/// A second drag measures from where the first one left it.
+	///
+	/// The picture is the only thing that knows the bubble has moved until the
+	/// file comes back, so "did this drag change anything" has to be asked
+	/// against what it is showing. Asked against the stale model, a drag back to
+	/// the bubble's old place would write nothing and leave the picture
+	/// disagreeing with the file.
+	@Test func aSecondDragIsMeasuredFromWhereTheFirstLeftIt() throws {
+		let (view, result) = try preview(NSSize(width: 420, height: 206))
+		let start = place(view, paper())
+		drag(view, from: start, to: place(view, CGPoint(x: 0.72, y: 0.3)))
+		let first = try #require(result().offset)
+		// Straight back to where it began, with the panel none the wiser: that
+		// is a change from what the picture shows, so it is written.
+		drag(view, from: place(view, CGPoint(x: 0.72, y: 0.3)), to: start)
+		let second = try #require(result().offset)
+		#expect(second != first, "the second drag wrote the first drag's number")
+		#expect(view.numbersForTesting?.offset == second)
+	}
+
+	// MARK: - Through the panel
+
+	/// The panel that owns the picture, wired the way the window wires it: every
+	/// edit is applied, resolved and handed back, which is what makes a drag
+	/// come round to the place it was made.
+	private func panel() throws -> (PropertiesPanel, () -> Project) {
+		_ = NSApplication.shared
+		final class Box { var project = Project(); var reloads = 0 }
+		let box = Box()
+		box.project = try bubble().0
+		let panel = PropertiesPanel()
+		panel.frame = NSRect(x: 0, y: 0, width: 340, height: 900)
+		let selection = ProjectSelection.overlay(.project(0))
+		func push() {
+			box.reloads += 1
+			panel.resolved = try? Resolver.resolve(box.project,
+			                                       baseURL: URL(fileURLWithPath: "/"))
+			panel.reload(box.project, vocabulary: ComposeDocument.Vocabulary(),
+			             selection: selection)
+			panel.layoutSubtreeIfNeeded()
+		}
+		panel.onChange = { next in
+			box.project = next
+			push()
+		}
+		push()
+		return (panel, { box.project })
+	}
+
+	/// **A drag through the panel puts the number in the project and leaves the
+	/// picture showing it.**
+	///
+	/// The form is rebuilt on every edit, so a drag is a gesture that destroys
+	/// the thing it was made in. The picture is kept across that rebuild — for
+	/// the same reason the selected range and the selected key are — and the
+	/// bubble is where it was put down both before the file comes back and
+	/// after.
+	@Test func aDragThroughThePanelLeavesTheBubbleWhereItWasPut() throws {
+		let (panel, project) = try self.panel()
+		let picture = try #require(panel.previewForTesting, "the panel drew no picture")
+		let target = CGPoint(x: 0.68, y: 0.64)
+		drag(picture, from: place(picture, paper()), to: place(picture, target))
+
+		let written = project().overlays[0].offset
+		#expect(written != Bubble.standoff, "the drag wrote nothing into the project")
+		#expect(panel.previewForTesting === picture,
+		        "the rebuild threw the picture away, and with it what the drag placed")
+		#expect(picture.numbersForTesting?.offset == written,
+		        "the picture shows \(String(describing: picture.numbersForTesting))")
+
+		// And the reuse does not leave a constraint behind on every rebuild. The
+		// form pins the picture's width to its own, and a picture that is added
+		// again is a second pin unless the first one went with the removal.
+		for _ in 0 ..< 3 {
+			panel.reload(project(), vocabulary: ComposeDocument.Vocabulary(),
+			             selection: .overlay(.project(0)))
+		}
+		#expect(panel.previewForTesting === picture)
+		let pinned = picture.superview?.constraints.filter {
+			($0.firstItem === picture || $0.secondItem === picture)
+				&& $0.firstAttribute == .width && $0.secondAttribute == .width
+		}
+		#expect(pinned?.count == 1, "\(pinned?.count ?? 0) width pins after four rebuilds")
+	}
+
+	// MARK: - A bigger picture to place in
+
+	/// **The bigger picture places the same numbers as the little one.**
+	///
+	/// Dragged to the same fraction of the frame in a picture three times the
+	/// size, through a panel that is a window of its own, the number that lands
+	/// in the file is the same. It is the same view class doing the arithmetic
+	/// on purpose — a panel that placed by its own would be a second answer to
+	/// a question the renderer has already answered.
+	@Test func theBiggerPictureWritesWhatTheLittleOneWould() throws {
+		let aimed = CGPoint(x: 0, y: -0.2)
+		let (little, result) = try preview(NSSize(width: 240, height: 206), tail: aimed)
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
+		                      styleMask: [.titled], backing: .buffered, defer: true)
+		let panel = PlacingPanel()
+		defer { panel.close() }
+		panel.show(like: little, titled: "glitter dust", over: window,
+		           output: NSSize(width: 1920, height: 1080))
+		let big = panel.previewForTesting
+		panel.contentView?.layoutSubtreeIfNeeded()
+		#expect(big.picture.width > little.picture.width * 2,
+		        "the bigger picture is \(big.picture.width) wide against \(little.picture.width)")
+
+		// The paper, dropped at the same fraction of the frame in each.
+		let target = CGPoint(x: 0.72, y: 0.62)
+		drag(big, from: place(big, paper()), to: place(big, target))
+		let fromBig = try #require(result().offset, "the paper was not draggable in the panel")
+
+		let (small, smallResult) = try preview(NSSize(width: 240, height: 206), tail: aimed)
+		drag(small, from: place(small, paper()), to: place(small, target))
+		let fromLittle = try #require(smallResult().offset)
+		// A step or two apart at most: one point of the little picture is worth
+		// several of the frame, and that coarseness is the reason the big one
+		// exists — but the two must be the same number, not two numbers.
+		#expect(abs(fromBig.x - fromLittle.x) < 0.006, "\(fromBig) against \(fromLittle)")
+		#expect(abs(fromBig.y - fromLittle.y) < 0.006, "\(fromBig) against \(fromLittle)")
+
+		// And the tail is a handle there too: both points, or the big picture is
+		// only half a place to work.
+		let tip = CGPoint(x: spot.x, y: spot.y - 0.2)
+		drag(big, from: place(big, tip), to: place(big, CGPoint(x: 0.2, y: 0.12)))
+		let tail = try #require(result().tail, "the tip was not draggable in the panel")
+		#expect(abs(tail.x - (0.2 - spot.x) * 1920 / 1080) < 0.006, "\(tail)")
+		#expect(abs(tail.y - (0.12 - spot.y)) < 0.006, "\(tail)")
+		// What was placed in the big picture stays placed in the big picture.
+		#expect(big.numbersForTesting?.offset == fromBig)
+		#expect(big.numbersForTesting?.tail == tail)
+	}
+
+	/// The bigger picture is the programme's shape, fills what it is given, and
+	/// fits the window it hovers over.
+	///
+	/// Pure arithmetic, at three window sizes and two frame shapes, because the
+	/// case that would go unnoticed is the small window: a picture sized to a
+	/// fraction of a big screen and then shown over a laptop window would hang
+	/// off the edge of it, and the part hanging off is the part somebody is
+	/// dragging to.
+	@Test func theBiggerPictureIsTheProgrammesShapeAndFitsTheWindow() {
+		_ = NSApplication.shared
+		let windows = [NSRect(x: 0, y: 0, width: 1440, height: 900),
+		               NSRect(x: 0, y: 0, width: 700, height: 480),
+		               NSRect(x: 200, y: 120, width: 2560, height: 1440)]
+		for window in windows {
+			for output in [NSSize(width: 1920, height: 1080), NSSize(width: 1080, height: 1920)] {
+				let size = Placing.size(for: output, in: window)
+				let view = FramePreview(frame: NSRect(origin: .zero, size: size))
+				view.aspect = output
+
+				// Nothing letterboxed: the panel is the shape of the picture
+				// plus the strip that says what a drag writes, so the frame
+				// fills it rather than sitting in the middle of it.
+				#expect(abs(view.picture.width
+					- (size.width - FramePreview.frameInset.width)) < 1.5,
+				        "\(output) in \(window) left a margin: \(view.picture) in \(size)")
+				#expect(abs(view.picture.height
+					- (size.height - FramePreview.frameInset.height)) < 1.5,
+				        "\(output) in \(window) left a margin: \(view.picture) in \(size)")
+
+				// Inside the window, wherever the window is on the screen.
+				let frame = Placing.place(size, inside: window)
+				#expect(window.insetBy(dx: -0.5, dy: -0.5).contains(frame),
+				        "\(frame) is not inside \(window)")
+
+				// And bigger than the one in the properties panel, which is the
+				// whole reason for asking.
+				let panel = FramePreview(frame: NSRect(x: 0, y: 0, width: 240, height: 206))
+				panel.aspect = output
+				#expect(view.picture.width > panel.picture.width,
+				        "\(output) in \(window): \(view.picture) is no bigger than \(panel.picture)")
+				#expect(view.picture.height > panel.picture.height,
+				        "\(output) in \(window): \(view.picture) is no bigger than \(panel.picture)")
+			}
+		}
 	}
 
 	// MARK: - Still a picture of the other overlays

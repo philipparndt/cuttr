@@ -48,7 +48,10 @@ public final class FramePreview: NSView {
 	}
 
 	public var content: Content = .caption("", TextStyle.lowerThird) {
-		didSet { needsDisplay = true }
+		didSet {
+			settle()
+			needsDisplay = true
+		}
 	}
 	/// Said under the picture: what a drag will change. A bubble says its own,
 	/// because only this view knows which of its two handles is live at this
@@ -66,6 +69,14 @@ public final class FramePreview: NSView {
 	/// written on every mouse-moved event would be a file rewritten sixty times
 	/// a second.
 	public var onMove: ((CGPoint) -> Void)?
+
+	/// Somebody asked for a bigger picture to place in.
+	///
+	/// Nothing is offered unless this is set, so the big picture does not offer
+	/// to enlarge itself.
+	public var onEnlarge: (() -> Void)? {
+		didSet { bigger.isHidden = onEnlarge == nil }
+	}
 
 	/// A bubble's paper was let go: the `offset:` that puts it there.
 	public var onOffset: ((CGPoint) -> Void)?
@@ -97,6 +108,24 @@ public final class FramePreview: NSView {
 	/// from something else is the class of bug this whole view exists to end.
 	private var liveOffset: CGPoint?
 	private var liveTail: CGPoint?
+	/// What the last finished drag put down, kept until the file agrees.
+	///
+	/// The mouse coming up used to be the end of this view's interest in the
+	/// number: it handed the value over and drew itself from the content again
+	/// in the same breath. But the content is the overlay as the panel last
+	/// handed it over, which at that instant is the overlay from *before* the
+	/// drag — the project has to be written, resolved and passed back round
+	/// before the new value returns, and not every reload on that road carries
+	/// it. So the picture went back to where the bubble came from and stayed
+	/// there until one did, which is a bubble that visibly refuses to be moved.
+	///
+	/// A number this view wrote is a number it knows before anybody else does.
+	/// It keeps it, and gives it up in ``settle()``.
+	private var placedOffset: CGPoint?
+	private var placedTail: CGPoint?
+	/// What the content said before that drag, so the reload that still says it
+	/// can be recognised as the one that has not caught up.
+	private var placedBefore: (offset: CGPoint, tail: CGPoint)?
 	/// What the numbers were when the drag began, and whether the mouse has
 	/// actually gone anywhere. A drag that lands where it started writes
 	/// nothing at all: no key, no diff, no version kept.
@@ -112,21 +141,68 @@ public final class FramePreview: NSView {
 	/// coordinates: where `offset:` put the paper before the edge of the frame
 	/// pushed it back in, and the two points the numbers hang off.
 	private var grabbed: (home: CGPoint, origins: BubblePlacing.Origins)?
+	/// The button that asks for a bigger picture. In the strip under the frame
+	/// rather than over it: this picture is small enough already without a
+	/// control sitting on the corner somebody is trying to place a bubble in.
+	private let bigger = NSButton()
+
+	/// For the tests: the two numbers the picture is drawn from at this moment.
+	///
+	/// Not the pointer, and not what was handed to the panel — what somebody
+	/// looking at the view would see it draw. A drag is only finished when this
+	/// says what was placed.
+	var numbersForTesting: (offset: CGPoint, tail: CGPoint)? {
+		guard case .bubble(let resolved, _) = content else { return nil }
+		let live = self.live(resolved)
+		guard case .bubble(let bubble) = live.overlay.kind else { return nil }
+		return (live.overlay.offset, bubble.tail)
+	}
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
 		wantsLayer = true
 		layer?.backgroundColor = Theme.background.cgColor
 		layer?.cornerRadius = 4
+
+		bigger.isBordered = false
+		bigger.bezelStyle = .inline
+		bigger.image = NSImage(systemSymbolName: "arrow.up.left.and.arrow.down.right",
+		                       accessibilityDescription: "a bigger picture")?
+			.withSymbolConfiguration(.init(pointSize: 10, weight: .medium)
+				.applying(.init(paletteColors: [Theme.faintText])))
+		bigger.imagePosition = .imageOnly
+		bigger.toolTip = "A bigger picture to place in — one point of this "
+			+ "one is worth several of the frame"
+		bigger.target = self
+		bigger.action = #selector(enlarge)
+		bigger.isHidden = true
+		bigger.translatesAutoresizingMaskIntoConstraints = false
+		addSubview(bigger)
+		NSLayoutConstraint.activate([
+			bigger.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+			bigger.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 2),
+			bigger.widthAnchor.constraint(equalToConstant: 16),
+			bigger.heightAnchor.constraint(equalToConstant: 16),
+		])
 	}
 
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
+
+	@objc private func enlarge() { onEnlarge?() }
 
 	public override var intrinsicContentSize: NSSize {
 		NSSize(width: NSView.noIntrinsicMetric, height: 206)
 	}
 
 	// MARK: - Geometry
+
+	/// What the view keeps for itself round the picture: a margin either side,
+	/// and the strip underneath that says what a drag writes.
+	///
+	/// Not private, because anything sizing a view to hold a picture of a given
+	/// shape has to add it on — see ``Placing/size(for:in:)``. A panel sized to
+	/// the frame's own ratio would letterbox the frame inside itself.
+	nonisolated static let frameInset = NSSize(width: 16, height: 30)
 
 	/// The frame's rectangle inside this view, letterboxed like the render.
 	///
@@ -136,8 +212,9 @@ public final class FramePreview: NSView {
 	/// without knowing where the picture ended up.
 	var picture: NSRect {
 		// The line underneath gets its own strip; the picture keeps off it.
-		let box = NSRect(x: 8, y: 20, width: max(0, bounds.width - 16),
-		                 height: max(0, bounds.height - 30))
+		let box = NSRect(x: 8, y: 20,
+		                 width: max(0, bounds.width - Self.frameInset.width),
+		                 height: max(0, bounds.height - Self.frameInset.height))
 		guard aspect.width > 0, aspect.height > 0, box.width > 0, box.height > 0 else { return box }
 		let scale = min(box.width / aspect.width, box.height / aspect.height)
 		let size = NSSize(width: aspect.width * scale, height: aspect.height * scale)
@@ -301,10 +378,46 @@ public final class FramePreview: NSView {
 	private func live(_ resolved: ResolvedOverlay) -> ResolvedOverlay {
 		guard case .bubble(var bubble) = resolved.overlay.kind else { return resolved }
 		var overlay = resolved.overlay
-		if let liveOffset { overlay.offset = liveOffset }
-		if let liveTail { bubble.tail = liveTail }
+		// What is on the mouse first, then what the mouse put down and the file
+		// has yet to say back.
+		if let offset = liveOffset ?? placedOffset { overlay.offset = offset }
+		if let tail = liveTail ?? placedTail { bubble.tail = tail }
 		overlay.kind = .bubble(bubble)
 		return resolved.showing(overlay)
+	}
+
+	/// Keeps what a drag put down, and what the content said before it.
+	///
+	/// Both, because the second is how the first is ever given up: the reload
+	/// that has not caught up is exactly the one that says what the content said
+	/// before the drag, and anything else is newer than the drag.
+	private func hold(offset: CGPoint?, tail: CGPoint?) {
+		if placedBefore == nil, case .bubble(let resolved, _) = content,
+		   case .bubble(let bubble) = resolved.overlay.kind {
+			placedBefore = (resolved.overlay.offset, bubble.tail)
+		}
+		if let offset { placedOffset = offset }
+		if let tail { placedTail = tail }
+	}
+
+	/// Gives up what a drag put down, as soon as there is something newer.
+	///
+	/// Newer is anything the content says other than what it said before the
+	/// drag: the placed value itself, which is the ordinary case and leaves the
+	/// picture drawn from the file again; a number somebody typed into the field
+	/// beside the picture, which must win because it came after the gesture; or
+	/// an overlay that is not this bubble at all, because the selection moved.
+	private func settle() {
+		guard let before = placedBefore else { return }
+		if case .bubble(let resolved, _) = content,
+		   case .bubble(let bubble) = resolved.overlay.kind,
+		   resolved.overlay.offset == before.offset, bubble.tail == before.tail {
+			// The one that has not caught up. Go on drawing what was placed.
+			return
+		}
+		placedOffset = nil
+		placedTail = nil
+		placedBefore = nil
 	}
 
 	/// Where the bubble's handles are, worked out and remembered.
@@ -626,8 +739,13 @@ public final class FramePreview: NSView {
 		went = false
 		if case .bubble(let resolved, _) = content {
 			if grabbed == nil { measureBubble() }
-			guard case .bubble(let bubble) = resolved.overlay.kind, let grabbed else { return }
-			began = (resolved.overlay.offset, bubble.tail)
+			// Measured against what the picture is showing rather than against
+			// what the panel last handed over: after a drag whose value has not
+			// come back round yet those are two different numbers, and "did this
+			// drag change anything" is a question about what somebody can see.
+			let shown = live(resolved)
+			guard case .bubble(let bubble) = shown.overlay.kind, let grabbed else { return }
+			began = (shown.overlay.offset, bubble.tail)
 			let from = framePoint(place)
 			// The tip is asked first, and given room, because it is the one that
 			// can end up under the paper — a tail aimed at a mouth beside a
@@ -715,9 +833,15 @@ public final class FramePreview: NSView {
 			switch grip {
 			case .paper:
 				guard let offset, offset != started?.offset else { return }
+				// Kept before it is handed over, because handing it over comes
+				// straight back through here: the panel rebuilds inside this
+				// call and hands the picture an overlay, and whether that one
+				// has the drag in it yet is the question ``settle()`` answers.
+				hold(offset: offset, tail: nil)
 				onOffset?(offset)
 			case .tip:
 				guard let tail, tail != started?.tail else { return }
+				hold(offset: nil, tail: tail)
 				onTail?(tail)
 			}
 			return

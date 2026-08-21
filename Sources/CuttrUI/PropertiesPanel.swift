@@ -87,6 +87,19 @@ public final class PropertiesPanel: NSView {
 	private var generation = 0
 	/// The picture the range strip scrubs, and when it last asked for a frame.
 	private weak var currentPreview: FramePreview?
+	/// And the same picture, held on to across a rebuild of the same selection.
+	///
+	/// For the same reason `selectedSpan` and `selectedKey` are held: the form is
+	/// rebuilt after every edit, and a fact about the session has to survive
+	/// that. The picture carries two — the frame it has already fetched, which
+	/// otherwise goes black and comes back on every drag, and the position a
+	/// drag has just put down and the file has not yet said back. Thrown away
+	/// and built again, both are lost precisely when a drag has just happened,
+	/// which is the one moment they matter.
+	private var keptPicture: FramePreview?
+	/// The bigger picture, while one is open. Kept because it is a window and a
+	/// window that is let go of takes what is in it with it.
+	private var placing: PlacingPanel?
 	private weak var currentStrip: SpanStrip?
 	private var lastScrub: CFTimeInterval = 0
 	/// Which range is being worked on, and whether the strip had the keyboard.
@@ -213,6 +226,9 @@ public final class PropertiesPanel: NSView {
 		helps.filter { $0.button?.isHidden == false }.map(\.section)
 	}
 
+	/// For the tests: the picture the selected overlay is dragged around in.
+	var previewForTesting: FramePreview? { currentPreview }
+
 	/// For the tests: the head, without going through the view tree looking for
 	/// a font.
 	var subjectForTesting: SubjectLine { subject }
@@ -228,8 +244,15 @@ public final class PropertiesPanel: NSView {
 	}
 
 	private func rebuild() {
-		// A different thing selected is a different set of ranges.
-		if built != selection { selectedSpan = 0; stripHadFocus = false; selectedKey = 0 }
+		// A different thing selected is a different set of ranges, and a
+		// different picture: nothing about the old one is true of the new one.
+		if built != selection {
+			selectedSpan = 0
+			stripHadFocus = false
+			selectedKey = 0
+			keptPicture = nil
+			placing?.close()
+		}
 		mine = false
 		sinks.removeAll()
 		helps.removeAll()
@@ -917,7 +940,12 @@ public final class PropertiesPanel: NSView {
 		// An effect and a scene have no position of their own, so there is
 		// nothing to drag them to: their parts carry their own.
 		switch overlay.kind {
-		case .effect, .scene, .film, .aberration, .tape: break
+		case .effect, .scene, .film, .aberration, .tape:
+			// Nothing to place, so nothing to place it in. A big picture left
+			// open over an overlay that has stopped having a position would be
+			// offering to drag something that is not there.
+			keptPicture = nil
+			placing?.close()
 		default: full(placement(origin, overlay))
 		}
 
@@ -2108,9 +2136,19 @@ public final class PropertiesPanel: NSView {
 
 	/// The frame the overlay appears on, with the overlay on it, draggable.
 	private func placement(_ origin: Origin, _ overlay: Overlay) -> NSView {
-		let preview = FramePreview()
+		// The same picture as last time where the selection has not changed —
+		// see `keptPicture`. Everything about it is set again below, so what it
+		// carries over is only what nothing here says: the frame it fetched and
+		// the position a drag has just put down.
+		let preview = keptPicture ?? FramePreview()
+		keptPicture = preview
 		currentPreview = preview
 		preview.aspect = project.output.size
+		// A picture handed a different overlay must not answer the last one's
+		// callbacks. Only some of the three are set below.
+		preview.onOffset = nil
+		preview.onTail = nil
+		preview.onMove = nil
 
 		let found = resolved?.overlays.first { $0.origin == origin }
 		let anchor = found?.path?.point(at: found?.start ?? 0)
@@ -2162,16 +2200,45 @@ public final class PropertiesPanel: NSView {
 			self?.place(origin, overlay, at: spot, anchor: anchor)
 		}
 
+		// A bigger one to place in, for when a couple of hundred points across
+		// is not enough to hit anything with.
+		let name = ProgrammePanel.OverlayRow.name(overlay)
+		preview.onEnlarge = { [weak self, weak preview] in
+			guard let self, let preview else { return }
+			self.enlarge(preview, titled: name)
+		}
+		// One already open is the same picture, re-aimed: an edit made in either
+		// of them shows in both.
+		if let placing, placing.isShowing { enlarge(preview, titled: name) }
+
 		// The frame at the moment it appears — asked for now, drawn whenever it
 		// arrives, and dropped if the selection has moved on by then.
 		if let poster, let start = found?.start {
 			let generation = self.generation
 			poster(start) { [weak self, weak preview] image in
-				guard let self, self.generation == generation else { return }
-				preview?.poster = image
+				guard let self, self.generation == generation, let preview else { return }
+				preview.poster = image
+				// The big picture is showing the same frame, and while it is
+				// open it is the one somebody is looking at.
+				if let placing = self.placing, placing.isShowing {
+					self.enlarge(preview, titled: name)
+				}
 			}
 		}
 		return preview
+	}
+
+	/// The placement picture again, big enough to place in.
+	///
+	/// One point of the little picture is worth six or seven of the frame, which
+	/// is fine for putting a bubble beside a face and hopeless for putting its
+	/// tail on a mouth. See ``Placing``.
+	private func enlarge(_ preview: FramePreview, titled name: String) {
+		guard let window else { return }
+		let panel = placing ?? PlacingPanel()
+		placing = panel
+		panel.show(like: preview, titled: name, over: window,
+		           output: project.output.size)
 	}
 
 	/// Where the overlay sits, in unit coordinates of the frame.
