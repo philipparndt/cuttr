@@ -128,12 +128,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// it — opening them separately makes two windows, each half a take, and
 	/// the second one covers the first so it looks like the video was ignored.
 	func application(_ application: NSApplication, open urls: [URL]) {
-		let projects = urls.filter { $0.pathExtension.lowercased() == "cuttrproj" }
-		let takes = urls.filter { $0.pathExtension.lowercased() == "cuttr" }
-		let media = urls.filter { !["cuttr", "cuttrproj"].contains($0.pathExtension.lowercased()) }
+		let projects = urls.filter { Door.of($0) == .project }
+		let takes = urls.filter { Door.of($0) == .take }
+		let media = urls.filter { Door.of($0) == .media }
 		for url in projects { openProject(url) }
 		for url in takes { open(url) }
 		if !media.isEmpty { openMedia(media) }
+	}
+
+	/// Which door a document goes through.
+	///
+	/// Said once. There are three openers and the rule for choosing between
+	/// them was written out at each place that needed it — which is how the
+	/// palette came to send a project through the take door. That one treats
+	/// anything which is not a `.cuttr` as footage to make a take out of, so a
+	/// `.cuttrproj` was searched for a video, found not to have one, and
+	/// dropped without a word.
+	enum Door: Equatable {
+		case project, take, media
+
+		static func of(_ url: URL) -> Door {
+			switch url.pathExtension.lowercased() {
+			case "cuttrproj": return .project
+			case "cuttr": return .take
+			default: return .media
+			}
+		}
+	}
+
+	/// Opens a document of any kind, by its own door.
+	func openDocument(_ url: URL, aside: Bool = false) {
+		switch Door.of(url) {
+		case .project: openProject(url, aside: aside)
+		case .take, .media: open(url, aside: aside)
+		}
 	}
 
 	func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -532,13 +560,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		// remembered file can have moved since, and a row offering a path that
 		// opens nothing is worse than a row that says so.
 		//
-		// Takes as well as projects, and eight of them. A take is a document
-		// somebody opens directly — double-clicking a `.cuttr` is the ordinary
-		// way into one — so leaving them out would make the list answer a
-		// narrower question than it is asked. Eight because the list is
-		// most-recent-first and this is a switcher rather than an archive: past
-		// the first handful, somebody is looking for a file rather than for the
-		// thing they had open on Tuesday, and `⌘O` is the better door.
+		// Projects, because that is what `remember(_:)` files and deliberately
+		// so — a take is opened *from* the project that lists it, and filing
+		// takes here would bury the thing somebody wants to reopen under the
+		// material. Whatever is in the list opens by its own door all the same:
+		// this row used to call the take opener on a project, which did nothing
+		// at all.
+		//
+		// Eight of them, because the list is most-recent-first and this is a
+		// switcher rather than an archive: past the first handful somebody is
+		// looking for a file rather than for the thing they had open on
+		// Tuesday, and `⌘O` is the better door.
 		let recent = NSDocumentController.shared.recentDocumentURLs
 			.filter { !alreadyOpen.contains($0.standardizedFileURL.path) }
 			.prefix(8)
@@ -547,10 +579,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				return DocumentSwitcher.Entry(
 					name: url.deletingPathExtension().lastPathComponent,
 					path: shortPath(url),
-					kind: url.pathExtension == "cuttr" ? .take : .scene,
+					kind: Door.of(url) == .take ? .take : .scene,
 					missing: !there,
-					open: there ? { [weak self] in self?.open(url) } : nil,
-					openAside: there ? { [weak self] in self?.open(url, aside: true) } : nil)
+					open: there ? { [weak self] in self?.openDocument(url) } : nil,
+					openAside: there ? { [weak self] in self?.openDocument(url, aside: true) } : nil)
 			}
 		if !recent.isEmpty { groups.append(.init("Recent Documents", Array(recent))) }
 		return groups
