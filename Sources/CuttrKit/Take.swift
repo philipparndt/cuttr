@@ -105,6 +105,14 @@ public struct Take: Sendable, Equatable {
 	}
 	var unknown: UnknownKeys
 
+	/// The prose the file carried: a note above a clip, a paragraph at the top.
+	///
+	/// The same argument as ``unknownKeys`` one line up, for the other half of
+	/// what a decode throws away. A take is a file somebody reads and writes in,
+	/// and a save that deletes what they wrote in it makes the app the enemy of
+	/// its own format. See ``FileComments``.
+	public var comments = FileComments()
+
 	public init(
 		video: String? = nil, audio: AudioTrack? = nil, clips: [Clip] = [],
 		anchors: [Anchor] = [], words: Words? = nil, speakers: [Speaker] = [],

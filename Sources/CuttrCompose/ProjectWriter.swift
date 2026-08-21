@@ -15,10 +15,10 @@ public enum ProjectWriter {
 	///
 	/// Written in the order the parts are in, and each key on one line, because
 	/// a keyframe is a row of numbers and a row of numbers belongs on a line.
-	private static func scenes(_ scenes: [String: Scene]) -> String {
+	private static func scenes(_ scenes: [String: Scene], order: [String]?) -> String {
 		guard !scenes.isEmpty else { return "" }
 		var out = "\nscenes:\n"
-		for name in scenes.keys.sorted() {
+		for name in ordered(scenes.keys, order) {
 			guard let scene = scenes[name] else { continue }
 			out += "  \(name):\n"
 			out += "    parts:\n"
@@ -163,7 +163,39 @@ public enum ProjectWriter {
 		return out
 	}
 
+	/// The own-line comments this emitter writes itself — see
+	/// ``CuttrKit/TakeWriter/generatedComments`` for why they are named.
+	static let generatedComments: Set<String> = [
+		"# nothing yet — add clips by slug:",
+		"# - take-01/intro",
+	]
+
+	/// Names in the order the file had them, with anything the file did not
+	/// have after them, sorted.
+	///
+	/// Sorting was never the point; determinism was. This is deterministic for
+	/// the same project and keeps the arrangement somebody chose, which sorting
+	/// threw away — a file whose styles read far, near, nearer came back
+	/// alphabetical and every save was a diff.
+	private static func ordered(_ names: some Sequence<String>, _ declared: [String]?) -> [String] {
+		let all = Set(names)
+		var out: [String] = []
+		for name in declared ?? [] where all.contains(name) && !out.contains(name) {
+			out.append(name)
+		}
+		return out + all.subtracting(out).sorted()
+	}
+
+	/// The project as text, with whatever prose the file carried put back.
+	///
+	/// The emitter is the function below and knows nothing about comments; this
+	/// puts them back at the addresses they were read from. See
+	/// ``CuttrKit/FileComments``.
 	public static func write(_ project: Project) -> String {
+		project.comments.written(into: body(project))
+	}
+
+	private static func body(_ project: Project) -> String {
 		var out = "# cuttr project — the assembly. Clips are referenced by slug.\n"
 		out += "cuttr-project: \(ProjectReader.formatVersion)\n\n"
 
@@ -188,7 +220,7 @@ public enum ProjectWriter {
 
 		if !project.profiles.isEmpty {
 			out += "profiles:\n"
-			for name in project.profiles.keys.sorted() {
+			for name in ordered(project.profiles.keys, project.declaredOrder["profiles"]) {
 				let look = project.profiles[name]!
 				out += "  \(scalar(name)):\n"
 				if look.exposure != 0 { out += "    exposure:    \(trim(look.exposure))\n" }
@@ -202,7 +234,7 @@ public enum ProjectWriter {
 
 		if !project.styles.isEmpty {
 			out += "styles:\n"
-			for name in project.styles.keys.sorted() {
+			for name in ordered(project.styles.keys, project.declaredOrder["styles"]) {
 				let style = project.styles[name]!
 				out += "  \(scalar(name)):\n"
 				out += "    font:     \(scalar(style.font))\n"
@@ -234,7 +266,7 @@ public enum ProjectWriter {
 			out += sounds(project.sounds)
 		}
 
-		out += scenes(project.scenes)
+		out += scenes(project.scenes, order: project.declaredOrder["scenes"])
 
 		if !project.unknownKeys.isEmpty {
 			out += "\n"
