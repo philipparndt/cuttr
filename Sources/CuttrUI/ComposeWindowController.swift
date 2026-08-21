@@ -35,7 +35,11 @@ public final class ComposeWindowController: DocumentEditor,
 	private let modes = NSTabView(frame: .roomToLayOutIn)
 
 	/// Which of the five is showing.
-	public enum Mode: Int { case project, edit, text, preview, levels }
+	/// The rail's order, which is also the tab index and the ⌘ number: the page
+	/// somebody works *in* comes before the page they watch. Preview is last
+	/// because it is the end of the process, and a new page inserted above it
+	/// would otherwise push the number somebody has in their fingers.
+	public enum Mode: Int { case project, edit, text, levels, preview }
 	private var mode: Mode = .edit
 	/// Whether the window is showing the picture and nothing else.
 	private var presenting = false
@@ -77,9 +81,9 @@ public final class ComposeWindowController: DocumentEditor,
 		Rail.Item("Edit", "list.bullet.indent",
 		          "The programme, and everything about it (\u{2318}2)"),
 		Rail.Item("Text", "curlybraces", "The project file as it stands (\u{2318}3)"),
-		Rail.Item("Play", "play.rectangle", "What it comes to, played (\u{2318}4)"),
 		Rail.Item("Levels", "slider.horizontal.3",
-		          "Every take's level, seen and heard against the others (\u{2318}5)"),
+		          "Every take's level, seen and heard against the others (\u{2318}4)"),
+		Rail.Item("Play", "play.rectangle", "What it comes to, played (\u{2318}5)"),
 	])
 	/// The project itself: what it renders to, and what it is called.
 	///
@@ -289,9 +293,10 @@ public final class ComposeWindowController: DocumentEditor,
 		// do rather than starting a second row of furniture.
 		modes.tabViewType = .noTabsNoBorder
 		modes.drawsBackground = false
+		// In the rail's order, because `Mode`'s raw value is the index of both.
 		for (identifier, view) in [("project", projectPage()), ("edit", editing),
-		                          ("text", source), ("preview", split),
-		                          ("levels", levels)] as [(String, NSView)] {
+		                          ("text", source), ("levels", levels),
+		                          ("preview", split)] as [(String, NSView)] {
 			let item = NSTabViewItem(identifier: identifier)
 			item.view = view
 			modes.addTabViewItem(item)

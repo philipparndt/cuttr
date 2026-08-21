@@ -202,8 +202,10 @@ enum MainMenu {
 		view.addItem(command("Project", #selector(ComposeWindowController.showProject(_:)), "1"))
 		view.addItem(command("Editor", #selector(ComposeWindowController.showEditor(_:)), "2"))
 		view.addItem(command("Project File", #selector(ComposeWindowController.showText(_:)), "3"))
-		view.addItem(command("Preview", #selector(ComposeWindowController.showPreview(_:)), "4"))
-		view.addItem(command("Levels", #selector(ComposeWindowController.showLevels(_:)), "5"))
+		// In the rail's order, so the number is the position. Preview is last
+		// because it is the end of the process.
+		view.addItem(command("Levels", #selector(ComposeWindowController.showLevels(_:)), "4"))
+		view.addItem(command("Preview", #selector(ComposeWindowController.showPreview(_:)), "5"))
 		view.addItem(command("Full-Screen Preview",
 		                     #selector(ComposeWindowController.toggleFullScreenPreview(_:)),
 		                     "f", [.command, .control]))

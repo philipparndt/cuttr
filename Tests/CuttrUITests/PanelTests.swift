@@ -1390,10 +1390,12 @@ import Testing
 		window.close()
 	}
 
-	/// The rail's order and its numbers agree.
+	/// The rail's order and its numbers agree, and Preview is last: it is the
+	/// end of the process, and a page inserted above it would otherwise take
+	/// the number somebody has in their fingers.
 	@Test func theRailIsNumberedInItsOwnOrder() {
-		for (index, mode) in [ComposeWindowController.Mode.project, .edit, .text, .preview]
-			.enumerated() {
+		for (index, mode) in [ComposeWindowController.Mode.project, .edit, .text,
+		                      .levels, .preview].enumerated() {
 			#expect(mode.rawValue == index, "\(mode) is not \(index)")
 		}
 	}
