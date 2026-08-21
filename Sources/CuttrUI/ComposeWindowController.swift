@@ -1239,6 +1239,30 @@ public final class ComposeWindowController: DocumentEditor,
 		}
 	}
 
+	/// ⌘S over everything, arriving at this project.
+	///
+	/// Usually nothing to do, and that is the point: this window writes the
+	/// project as it is edited, so by the time somebody saves there is normally
+	/// no difference to write. Rewriting it anyway would be a version in
+	/// `refs/cuttr/saves` that records no decision.
+	func saveQuietly() -> DocumentSave {
+		guard composeDocument.isDirty else { return .unchanged }
+		guard composeDocument.url != nil else { return .untitled(composeDocument.displayName) }
+		do {
+			try composeDocument.write()
+			say("saved \(composeDocument.displayName)")
+			return .saved(composeDocument.displayName)
+		} catch {
+			say("could not save \(composeDocument.displayName)")
+			return .failed(name: composeDocument.displayName,
+			               reason: error.localizedDescription)
+		}
+	}
+
+	/// What the application has to say, in the bar this document shares with the
+	/// others in its window.
+	func announce(_ text: String) { say(text) }
+
 	/// ⇧⌘S. Somewhere else, with every path in the project rewritten to find
 	/// the same media from there.
 	@objc public func saveAs(_ sender: Any?) {

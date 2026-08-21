@@ -483,6 +483,16 @@ public final class SceneWindowController: DocumentEditor, NSMenuItemValidation {
 		bar.setPlaying(playing != nil)
 	}
 
+	/// What the application has to say, in the bar this window shares with the
+	/// other two.
+	///
+	/// A scene has no file of its own — every change goes straight into the
+	/// project that holds it — so a save says nothing about this document. It is
+	/// said here anyway because this is where the keystroke was pressed, and a
+	/// key that answers in a window somebody is not looking at is a key that
+	/// does nothing.
+	func announce(_ text: String) { bar?.setStatus(text) }
+
 	override func documentAppeared() { reload() }
 
 	/// A scene plays on a timer of its own rather than through the transport, so

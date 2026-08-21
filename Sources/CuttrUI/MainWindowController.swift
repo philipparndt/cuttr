@@ -2041,6 +2041,40 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		write(to: url)
 	}
 
+	/// ⌘S over everything, arriving at this take.
+	///
+	/// No panel and no sheet: this is one of several documents being written in
+	/// a row, so what happened is *returned* and the delegate says it once. A
+	/// clean take is not rewritten — the emitter exists to keep diffs still, and
+	/// re-saving what has not changed is a commit of nothing in the repository
+	/// the project lives in.
+	///
+	/// A dirty take is two files, not one: the words sidecar goes down with it,
+	/// because a take that names a transcript and a transcript that says
+	/// something else are a pair somebody has to be able to trust.
+	func saveQuietly() -> DocumentSave {
+		guard takeDocument.isDirty else { return .unchanged }
+		guard let url = takeDocument.url else { return .untitled(takeDocument.displayName) }
+		let name = takeDocument.displayName
+		do {
+			try takeDocument.write(to: url)
+			AppDelegate.remember(url)
+			say("saved \(url.lastPathComponent)")
+			refresh()
+			return .saved(name)
+		} catch {
+			// Said here as well as in the tally: the window whose take failed is
+			// the window somebody will look at next.
+			say("could not save \(url.lastPathComponent)")
+			return .failed(name: name, reason: error.localizedDescription)
+		}
+	}
+
+	/// What the application has to say, in the bar this document shares with the
+	/// others in its window. Kept as this document's message, so switching away
+	/// and back does not lose it.
+	func announce(_ text: String) { say(text) }
+
 	private func write(to url: URL) {
 		do {
 			try takeDocument.write(to: url)
