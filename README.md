@@ -811,6 +811,63 @@ bubble that slid in from the left would be one whose tail swung across the frame
 looking for the face — and what it says at each of several appearances goes
 under `when:`, the same as a caption's.
 
+### Frame sequences — pictures drawn somewhere else
+
+Everything else on this page is a *description* of something that cuttr then
+draws. A `frames:` overlay is the other direction: a folder of numbered pictures
+that arrive already drawn, put on the frame like any other overlay.
+
+```yaml
+overlays:
+  - frames: overlays/chart
+    fps:    30
+    size:   0.62
+    from:   "@results"
+    in:     {fade: true, over: 0.5}
+    out:    {fade: true, over: 0.5}
+```
+
+**The sequence is the numbered pictures in the folder, in numeric order.** Not a
+`%04d.png` pattern: whatever wrote them — `element-0000.png`, `0001.png`,
+`render_v2_0042.png` — the last run of digits in each name is its frame number,
+and everything else in the folder (a sidecar, a note) is ignored. So there is no
+such thing as a frame missing from the middle, and a render that stopped after
+six hundred of a thousand is simply a six-hundred-frame sequence.
+`cuttr-render --describe` prints how many pictures each one has and how long
+they run for, which is where you find out that you have not rendered them.
+
+**`fps:` is not optional.** A folder of pictures carries no frame rate of its
+own, and neither of the numbers it could be defaulted to is right — the output's
+rate is a fact about the encode, and twenty-five is a fact about nothing. A
+sequence with no `fps:` will not open, with a sentence saying why.
+
+**`size:` is the height, as a fraction of the frame; the width follows the
+pictures' own shape.** One by default, which for a sequence rendered at the
+output's size is exactly over the frame. Nothing can be squashed. `anchor:` and
+`offset:` place it exactly as they place a spinner, so a sequence can follow a
+face.
+
+**`ends:` says what happens when the sequence runs out** before the overlay
+does: `hold` keeps the last picture up, which is the default and what a
+projector does; `loop` starts again. There is no third answer — `ends: stretch`
+is refused by name, because fitting the sequence to the span would re-time
+somebody else's animation from a fact about the cut, so trimming two frames off
+a shot would quietly change the speed of every chart on it.
+
+`keys:` are refused, like a bubble's: what a sequence does over time *is* the
+frames.
+
+**What this is for.** Anything information-dense and layout-heavy that no sane
+part kind would cover — a chart of the year's walks, a map with a route on it, a
+leaderboard, a physics simulation. The interface is pixels, so it makes no
+difference what drew them: `examples/frames/harmonograph.cuttrproj` uses a
+hundred lines of Python and `examples/frames/remotion.cuttrproj` uses Remotion,
+and this
+program cannot tell. Nothing about either is bundled: `tools/remotion/` is a
+project you run by hand, and a machine with no Node on it still renders any
+project whose frames are on disk. `docs/remotion.md` is the whole argument for
+why it is that way round.
+
 ### Levelling and grading
 
 Measured once per recording, applied by every programme.

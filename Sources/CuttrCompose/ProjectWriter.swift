@@ -582,6 +582,16 @@ public enum ProjectWriter {
 					if bubble.tail != plain.tail {
 						out += "\(indent)  tail:   [\(trim(bubble.tail.x)), \(trim(bubble.tail.y))]\n"
 					}
+				case .frames(let frames):
+					// The folder is the thing, so it is the key. `fps:` is always
+					// written because the reader always requires it — a sequence
+					// with no rate is a sequence whose timing nobody stated — and
+					// the other two only where they are not what a sequence is
+					// without them.
+					out += "\(indent)- frames: \(scalar(frames.folder))\n"
+					out += "\(indent)  fps:    \(trim(frames.framesPerSecond))\n"
+					if frames.size != 1 { out += "\(indent)  size:   \(trim(frames.size))\n" }
+					if frames.ends != .hold { out += "\(indent)  ends:   \(frames.ends.rawValue)\n" }
 				case .spinner(let spinner):
 					out += "\(indent)- spinner: \(spinner.style.rawValue)\n"
 					if spinner.size != Spinner().size { out += "\(indent)  size:    \(trim(spinner.size))\n" }
@@ -642,7 +652,14 @@ public enum ProjectWriter {
 				// at a tracked face: the reader gives a bubble that says nothing
 				// a standoff from the thing it is about, and a default nobody can
 				// see is a default nobody can nudge.
-				var placed = overlay.anchor != nil
+				//
+				// And anything with an offset writes it, anchor or no anchor. An
+				// offset without an anchor is measured from the middle of the
+				// frame, which is how a spinner and a frame sequence are placed
+				// when they follow nothing — so the old rule dropped a nudge on
+				// the way back to disk. No file on disk changes: an offset that
+				// was not written was not read either.
+				var placed = overlay.anchor != nil || overlay.offset != .zero
 				if case .bubble = overlay.kind { placed = true }
 				if placed {
 					out += "\(indent)  offset: [\(trim(overlay.offset.x)), \(trim(overlay.offset.y))]\n"

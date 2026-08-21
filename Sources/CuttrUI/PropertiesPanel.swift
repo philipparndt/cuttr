@@ -378,6 +378,7 @@ public final class PropertiesPanel: NSView {
 		case .aberration: return .aberration
 		case .tape: return .tape
 		case .bubble: return .bubble
+		case .frames: return .frames
 		}
 	}
 
@@ -959,11 +960,23 @@ public final class PropertiesPanel: NSView {
 			// offering to drag something that is not there.
 			keptPicture = nil
 			placing?.close()
+		case .frames:
+			// A frame sequence *has* a position, and this panel still does not
+			// offer to drag it, because the picture it would drag is a PNG this
+			// panel has no business decoding — and a stand-in rectangle with the
+			// folder's name in it is not the thing being placed. The two numbers
+			// are typed in the block below instead, which is the honest version
+			// of what `docs/remotion.md` says about an editor and a component:
+			// one rectangle of pixels with nothing inside it that the editor can
+			// reach.
+			keptPicture = nil
+			placing?.close()
 		default: full(placement(origin, overlay))
 		}
 
 		section("what it is")
-		let kinds = ["text", "spinner", "bubble", "effect", "scene", "film", "aberration", "tape"]
+		let kinds = ["text", "spinner", "bubble", "effect", "scene", "film", "aberration", "tape",
+		             "frames"]
 		let current: Int
 		switch overlay.kind {
 		case .text: current = 0
@@ -974,6 +987,7 @@ public final class PropertiesPanel: NSView {
 		case .film: current = 5
 		case .aberration: current = 6
 		case .tape: current = 7
+		case .frames: current = 8
 		}
 		let firstScene = project.scenes.keys.sorted().first ?? "intro"
 		// The shape a new film overlay closes to.
@@ -1043,6 +1057,16 @@ public final class PropertiesPanel: NSView {
 					overlay.kind = .tape(Tape())
 					overlay.arrival = .fade(over: 0.5)
 					overlay.departure = .fade(over: 0.5)
+				case (8, _):
+					// A folder that may well not exist yet, at the output's own
+					// rate — the same shape of guess `case (4, _)` makes when it
+					// names a scene the project has not written. `--describe`
+					// says how many pictures are in it, which is where somebody
+					// finds out they have not rendered them.
+					overlay.kind = .frames(Frames(
+						folder: "frames", framesPerSecond: self?.project.output.framesPerSecond ?? 25))
+					overlay.arrival = .fade(over: 0.4)
+					overlay.departure = .fade(over: 0.4)
 				default: break
 				}
 			}
@@ -1173,6 +1197,45 @@ public final class PropertiesPanel: NSView {
 				}
 			}], note: "a parameter the scene asks for: `{{name}}` in one of its parts")
 			_ = newName
+
+		case .frames(let frames):
+			func change(_ edit: @escaping (inout Frames) -> Void) {
+				self.editOverlay(origin) { overlay in
+					guard case .frames(var frames) = overlay.kind else { return }
+					edit(&frames)
+					overlay.kind = .frames(frames)
+				}
+			}
+			let found = frames.found(
+				relativeTo: resolved?.baseURL ?? URL(fileURLWithPath: "."))
+			field("frames", [text(frames.folder, width: 210, placeholder: "overlays/chart") { value in
+				let folder = value.trimmingCharacters(in: .whitespaces)
+				guard !folder.isEmpty else { return }
+				change { $0.folder = folder }
+			}], note: found.count == 0
+				? "no pictures in that folder yet — nothing will be drawn"
+				: "\(found.count) frames, \(Int(found.pixels.width))×\(Int(found.pixels.height))")
+			field("fps", [number(frames.framesPerSecond, width: 72) { value in
+				change { $0.framesPerSecond = max(0.1, value) }
+			}], note: found.count == 0 ? "how fast the folder runs"
+				: "the folder runs \(TakeWriter.number(found.seconds, places: 2))s at this rate")
+			field("size", [number(frames.size, width: 72) { value in
+				change { $0.size = max(0.01, value) }
+			}], note: "how tall, as a fraction of the frame — the width follows the pictures")
+			field("ends", [pop(Frames.Ends.allCases.map(\.rawValue),
+			                   selected: Frames.Ends.allCases.firstIndex(of: frames.ends) ?? 0) { pick in
+				change { $0.ends = Frames.Ends.allCases[pick] }
+			}], note: "hold keeps the last picture up; loop starts again")
+			field("anchor", [text(overlay.anchor ?? "", width: 150, placeholder: "none") {
+				[weak self] value in
+				let name = value.trimmingCharacters(in: .whitespaces)
+				self?.editOverlay(origin) { $0.anchor = name.isEmpty ? nil : name }
+			}], note: "an anchor to follow; without one it sits in the middle of the frame")
+			field("offset", [number(overlay.offset.x, width: 66) { [weak self] value in
+				self?.editOverlay(origin) { $0.offset.x = value }
+			}, number(overlay.offset.y, width: 66) { [weak self] value in
+				self?.editOverlay(origin) { $0.offset.y = value }
+			}], note: "from there, in fractions of the frame height — both axes")
 
 		case .effect(let effect):
 			field("effect", [pop(Effect.Style.allCases.map(\.rawValue),
@@ -1462,6 +1525,8 @@ public final class PropertiesPanel: NSView {
 				saysControls.append(label("an aberration says nothing"))
 			case .tape:
 				saysControls.append(label("a tape says nothing"))
+			case .frames:
+				saysControls.append(label("a frame sequence says what was drawn into it"))
 			case .scene:
 				saysControls.append(label("a scene says what its parameters say"))
 			case .text(let content, _):
@@ -1826,7 +1891,7 @@ public final class PropertiesPanel: NSView {
 		case .aberration:
 			message = "Which kind it is is not here: `radial` and `linear` are two "
 				+ "different things rather than two ends of one."
-		case .text, .spinner, .scene, .bubble:
+		case .text, .spinner, .scene, .bubble, .frames:
 			return
 		}
 		remark(message)
@@ -2236,7 +2301,7 @@ public final class PropertiesPanel: NSView {
 		preview.moment = found?.start ?? 0
 
 		switch overlay.kind {
-		case .effect, .scene, .film, .aberration, .tape:
+		case .effect, .scene, .film, .aberration, .tape, .frames:
 			// Never reached: none of them has a placement picture at all.
 			preview.content = .caption("", TextStyle.caption)
 		case .text(let content, let style):

@@ -144,6 +144,12 @@ public enum OverlayLayers {
 			                      resolved: resolved, host: host)
 			contentSize = size
 			contentAnchor = CGPoint(x: 0.5, y: 0.5)
+		case .frames(let frames):
+			let built = framesLayer(frames, baseURL: baseURL, size: size,
+			                        resolved: resolved, host: host)
+			content = built.layer
+			contentSize = built.size
+			contentAnchor = CGPoint(x: 0.5, y: 0.5)
 		}
 
 		mover.frame = CGRect(origin: .zero, size: contentSize)
@@ -178,6 +184,16 @@ public enum OverlayLayers {
 			let style = project.style(named: styleName)
 			anchorPoint = CGPoint(x: style.alignment == .left ? 0 : style.alignment == .right ? 1 : 0.5, y: 0.5)
 			home = CGPoint(x: style.position.x * size.width, y: style.position.y * size.height)
+		} else if case .frames = overlay.kind {
+			// The middle of the frame, offset in fractions of its **height** on
+			// both axes — the unit ``Overlay/offset`` documents, and the one the
+			// anchored branch above uses, so a sequence is nudged by the same
+			// distance whether or not it follows anything. The `else` below is
+			// the older arithmetic, kept for the spinner: see the same pair of
+			// branches in ``OverlayPainter``.
+			anchorPoint = CGPoint(x: 0.5, y: 0.5)
+			home = CGPoint(x: size.width / 2 + overlay.offset.x * size.height,
+			               y: size.height / 2 + overlay.offset.y * size.height)
 		} else {
 			anchorPoint = contentAnchor ?? CGPoint(x: 0.5, y: 0.5)
 			home = CGPoint(x: (0.5 + overlay.offset.x) * size.width,
@@ -525,6 +541,93 @@ public enum OverlayLayers {
 		layer.contents = context.makeImage()
 		layer.contentsGravity = .resize
 		return (layer, plateSize)
+	}
+
+	// MARK: - A frame sequence
+
+	/// A folder of pictures, as one layer whose `contents` steps through them.
+	///
+	/// **This is the whole argument for the frames-on-disk shape, in ten lines.**
+	/// Nothing here draws anything. The painter reads the same pictures out of
+	/// the same ``FrameFolder`` and puts them in the same box, so the two paths
+	/// cannot drift: there is no second implementation of anything to drift.
+	/// Compare the spinner above, which is a hundred lines of arcs here and a
+	/// hundred lines of arcs in the painter, kept in step by `SpinnerLook` and a
+	/// test.
+	///
+	/// One keyframe per frame of the sequence that will be seen, `.discrete`, so
+	/// each picture is held until the next rather than cross-faded into it. A
+	/// step at the frame rate the file states — which is why `fps:` has to be
+	/// stated.
+	///
+	/// **On the span's clock, not the drawn window's**, for the same reason a
+	/// scene's parts are: what `ends: hold` holds is measured from the mark
+	/// somebody wrote, and `fillMode: .both` puts the first picture on the frames
+	/// before it. Adding `at: before` to an `in:` must not re-time an animation.
+	///
+	/// The values are the lazily-decoded images ``FrameFolder`` hands out, so a
+	/// long sequence is a list of mapped files rather than a list of bitmaps —
+	/// see that type for the measurement.
+	private static func framesLayer(
+		_ frames: Frames, baseURL: URL, size: CGSize,
+		resolved: ResolvedOverlay, host: Host
+	) -> (layer: CALayer, size: CGSize) {
+		let listing = FrameFolder.listing(frames.folder, relativeTo: baseURL)
+		let box = FrameFolder.box(frames, pixels: listing.pixels, frame: size)
+		let picture = CALayer()
+		picture.frame = CGRect(origin: .zero, size: box)
+		// Already fitted to the pictures' own shape by ``FrameFolder/box``, so
+		// filling the layer *is* preserving the aspect ratio — and saying
+		// `.resize` rather than `.resizeAspect` means the two paths are doing the
+		// same arithmetic rather than each doing its own fit.
+		picture.contentsGravity = .resize
+		guard listing.count > 0 else { return (picture, box) }
+
+		let span = max(resolved.duration, 0.0001)
+		// Only as many steps as the sequence will actually reach: a two-hundred
+		// frame sequence held over a minute is two hundred keyframes and then
+		// nothing, not eighteen hundred.
+		let steps = max(1, Int((span * frames.framesPerSecond).rounded(.up)))
+		var values: [CGImage] = []
+		var starts: [Double] = []
+		var last = -1
+		for step in 0...steps {
+			let at = Double(step) / frames.framesPerSecond
+			// A picture whose turn begins at or after the end of the span is a
+			// picture nobody sees. Left in, it becomes a keyframe at time one
+			// that the two below have to make room for.
+			if at >= span, !values.isEmpty { break }
+			guard let index = frames.frame(at: at, of: listing.count) else { continue }
+			// A held sequence stops producing new pictures once it is on its
+			// last; there is nothing to say about the frames after that.
+			if index == last, frames.ends == .hold, index == listing.count - 1 { break }
+			guard let image = FrameFolder.image(index, in: listing) else { continue }
+			values.append(image)
+			starts.append(min(at, span))
+			last = index
+		}
+		guard let first = values.first else { return (picture, box) }
+		picture.contents = first
+		guard values.count > 1 else { return (picture, box) }
+
+		let animation = CAKeyframeAnimation(keyPath: "contents")
+		animation.values = values
+		// **One more key time than values, and this is not a detail.** A
+		// discrete keyframe animation is a list of *intervals*: each key time
+		// opens the interval its value is shown for, and the extra one at the end
+		// closes the last. Written with one time per value the whole animation is
+		// ignored, silently — measured on a rendered file, a two-picture sequence
+		// showed its first picture for the whole of both cards it was on, and
+		// nothing anywhere said why. `framesStepThroughTheirOwnKeyTimes` holds
+		// the count so that it cannot come back.
+		animation.keyTimes = starts.map { NSNumber(value: min(1, $0 / span)) } + [1]
+		animation.calculationMode = .discrete
+		animation.beginTime = host.beginTime(resolved.start)
+		animation.duration = span
+		animation.fillMode = .both
+		animation.isRemovedOnCompletion = false
+		picture.add(animation, forKey: "contents")
+		return (picture, box)
 	}
 
 	// MARK: - A bubble

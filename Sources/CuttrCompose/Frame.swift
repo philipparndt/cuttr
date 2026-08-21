@@ -83,7 +83,7 @@ enum Frame {
 				               under: picture, at: time, opacity: intensity, size: size,
 				               work: work)
 
-			case .text, .spinner, .scene, .bubble:
+			case .text, .spinner, .scene, .bubble, .frames:
 				// Layers, unless they go behind somebody — in which case they
 				// are painted here, because the mask that knows where she is
 				// lives in the pass that has the pixels.
