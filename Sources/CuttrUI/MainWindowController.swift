@@ -83,6 +83,12 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	/// Set while a clip drag is in flight, so sixty mouse-moved events collapse
 	/// into one undo step instead of sixty.
 	private var dragUndoOpen = false
+	private var levelDragOpen = false
+
+	/// A gain curve somebody has been offered and has not answered — see
+	/// ``tamePeaksAction(_:)``. Held here rather than on the timeline because it
+	/// is what ⏎ and ⎋ are about while it is up, and those are the window's.
+	private var proposedLevels: [LevelPoint]?
 
 	public init(document: TakeDocument) {
 		self.takeDocument = document
@@ -400,6 +406,19 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		timeline.onOffsetChange = { [weak self] offset, commit in
 			self?.setOffset(offset, commit: commit)
 		}
+		timeline.onAddLevel = { [weak self] at, gain in
+			guard let self else { return }
+			// Within a couple of points of an existing one is that one: at a
+			// wide zoom two clicks a pixel apart are one decision, and a step
+			// nobody asked for is what a second point in the same place is.
+			self.takeDocument.addLevel(
+				at: at, gain: gain, within: self.timeline.secondsPerPoint * 2)
+			self.say(String(format: "level %+.1f dB at %@", gain, Timecode.string(at)))
+		}
+		timeline.onEditLevel = { [weak self] index, at, gain, commit in
+			self?.moveLevel(index, to: at, gain: gain, commit: commit)
+		}
+		timeline.levelMenu = { [weak self] index in self?.levelMenu(for: index) }
 
 		clipTable.onSelect = { [weak self] id in
 			self?.selectedClip = id
@@ -1008,6 +1027,121 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		}
 	}
 
+	// MARK: - The level over time
+
+	/// A point of the gain curve being dragged.
+	///
+	/// One undo step for the whole drag, the same way a trim is — see
+	/// ``resize(_:start:end:commit:)``. Pulling a dip down is one decision and
+	/// forty mouse-moved events.
+	private func moveLevel(_ index: Int, to time: Double, gain: Double, commit: Bool) {
+		var next = takeDocument.take
+		next.moveLevel(index, to: time, gain: gain)
+		if !levelDragOpen {
+			levelDragOpen = true
+			takeDocument.apply(next, actionName: "Move a Level Point")
+		} else {
+			takeDocument.undoManager.disableUndoRegistration()
+			takeDocument.apply(next, actionName: "Move a Level Point")
+			takeDocument.undoManager.enableUndoRegistration()
+		}
+		if commit {
+			levelDragOpen = false
+			if let point = takeDocument.take.levels.indices.contains(index)
+				? takeDocument.take.levels[index] : nil {
+				say(String(format: "level %+.1f dB at %@", point.gain, Timecode.string(point.at)))
+			}
+		}
+	}
+
+	/// ⌫ on a point of the curve, which is why it answers before the clips do.
+	@discardableResult
+	private func removeSelectedLevel() -> Bool {
+		guard let index = timeline.selectedLevel,
+		      takeDocument.take.levels.indices.contains(index) else { return false }
+		takeDocument.removeLevel(at: index)
+		timeline.selectedLevel = nil
+		say("level point removed")
+		return true
+	}
+
+	private func levelMenu(for index: Int) -> NSMenu? {
+		guard takeDocument.take.levels.indices.contains(index) else { return nil }
+		let point = takeDocument.take.levels[index]
+		let menu = NSMenu()
+		let title = String(format: "%+.1f dB at %@", point.gain, Timecode.string(point.at))
+		let heading = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+		heading.isEnabled = false
+		menu.addItem(heading)
+		menu.addItem(.separator())
+		add(to: menu, "Remove This Point", #selector(removeLevelPointAction))
+		add(to: menu, "Remove the Whole Curve", #selector(clearLevelsAction))
+		return menu
+	}
+
+	@objc private func removeLevelPointAction() { removeSelectedLevel() }
+
+	@objc private func clearLevelsAction() {
+		guard !takeDocument.take.levels.isEmpty else { return }
+		let count = takeDocument.take.levels.count
+		takeDocument.setLevels([], actionName: "Remove the Level Curve")
+		timeline.selectedLevel = nil
+		say("\(count) level points removed")
+	}
+
+	/// The loud bits, found and offered.
+	///
+	/// A proposal rather than an edit, and drawn on the lane rather than
+	/// described in a dialogue: a dip that takes the plosive off and a dip that
+	/// takes the word off are the same four numbers, and the only way to tell
+	/// them apart is to see them over the waveform and hear the result. So it is
+	/// dashed on the timeline until ⏎, and ⎋ throws it away — the same pair of
+	/// keys an in/out span is answered with.
+	///
+	/// Off the envelope the timeline is already drawing, so it costs nothing and
+	/// needs no decode: whichever recording the take will be heard through is
+	/// the one it looks at.
+	@objc public func tamePeaksAction(_ sender: Any? = nil) {
+		let external = takeDocument.audioWaveform
+		guard let wave = external ?? takeDocument.videoWaveform else {
+			say(takeDocument.isLoadingMedia
+				? "still decoding — the peaks can be found once the waveform is in"
+				: "nothing to listen to — give this take a video or an audio file first")
+			return
+		}
+		// One clock: the envelope is on the recorder's, a curve is on the
+		// video's, and the take's offset is the only thing relating them.
+		let shift = external != nil ? (takeDocument.take.audio?.offset ?? 0) : 0
+		let proposed = PeakTaming.propose(
+			over: wave, shift: shift, existing: takeDocument.take.levels)
+		let added = (proposed.count - takeDocument.take.levels.count) / 4
+		guard added > 0 else {
+			say("nothing sticks out of this take — no peaks worth taming")
+			return
+		}
+		proposedLevels = proposed
+		timeline.proposedLevels = proposed
+		let deepest = proposed.map(\.gain).min() ?? 0
+		say(String(format: "%d peak%@ to tame, the deepest by %.1f dB — ⏎ to keep, ⎋ to drop",
+		           added, added == 1 ? "" : "s", abs(deepest)))
+	}
+
+	/// Taking the offer. One edit and one undo, because taming a take's peaks is
+	/// one act however many points it drew.
+	private func acceptProposedLevels() {
+		guard let proposed = proposedLevels else { return }
+		let added = (proposed.count - takeDocument.take.levels.count) / 4
+		takeDocument.setLevels(proposed, actionName: "Tame the Peaks")
+		dropProposedLevels()
+		say("\(added) peak\(added == 1 ? "" : "s") tamed — ⌘Z puts them back")
+	}
+
+	private func dropProposedLevels() {
+		guard proposedLevels != nil else { return }
+		proposedLevels = nil
+		timeline.proposedLevels = nil
+	}
+
 	/// Listens for what is not a word: a laugh, applause, a cough.
 	///
 	/// Separate from transcribing as well as part of it, because a take that
@@ -1177,6 +1311,7 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		lookPanel.show(takeDocument.take.look)
 		transport.look = takeDocument.take.look
 		transport.gain = takeDocument.take.gain
+		transport.levels = takeDocument.take.levels
 		anchorTable.reload(takeDocument.take.anchors,
 		                   paths: takeDocument.anchorPaths,
 		                   selected: selectedAnchor)
@@ -1346,6 +1481,12 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	/// that is the only sensible reading, and the table is where a Return is
 	/// most likely to be pressed.
 	private func commitReturn() {
+		// A curve on offer is the question in front of you, so it answers first
+		// — the same rule an in/out span goes by one line down.
+		if proposedLevels != nil {
+			acceptProposedLevels()
+			return
+		}
 		if pending != nil, let span = pending, abs(span.end - span.start) > 0.01 {
 			commitPending()
 			return
@@ -1587,6 +1728,7 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			// level with. Offered here all the same, because this is the list
 			// somebody is looking at when they notice the problem.
 			add(to: menu, "Match Levels Across the Take", #selector(matchLevelsAction))
+			add(to: menu, "Tame the Peaks…", #selector(tamePeaksAction))
 			menu.addItem(.separator())
 			add(to: menu, "Delete", #selector(deleteAction))
 		} else {
@@ -1594,6 +1736,7 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			add(to: menu, "Split at Playhead", #selector(splitAction))
 			menu.addItem(.separator())
 			add(to: menu, "Match Levels Across the Take", #selector(matchLevelsAction))
+			add(to: menu, "Tame the Peaks…", #selector(tamePeaksAction))
 			add(to: menu, "Zoom to Fit", #selector(zoomFit))
 		}
 		return menu
@@ -2180,12 +2323,18 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		case 115: move(to: 0); return true                        // home
 		case 119: move(to: takeDocument.duration); return true        // end
 		case 51, 117:                                             // ⌫ / ⌦
+			// A point of the gain curve first, when one is in hand: it is the
+			// smaller thing and the one somebody was just holding. The window's
+			// monitor sees every key before any view does, so a lane that
+			// answered this for itself would never be asked.
+			if removeSelectedLevel() { return true }
 			deleteSelected()
 			return true
 		case 36, 76:                                              // return / enter
 			commitReturn()
 			return true
 		case 53:                                                  // esc
+			dropProposedLevels()
 			pending = nil
 			timeline.pending = nil
 			return true

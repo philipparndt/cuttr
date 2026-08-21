@@ -526,6 +526,35 @@ public final class TakeDocument {
 		apply(next, actionName: "Match Levels")
 	}
 
+	/// The whole curve at once: a proposal somebody has accepted, or a curve
+	/// cleared away. One edit and one undo, because drawing a curve over a take
+	/// is one act — see ``setGains(_:)``, which is the same argument for the
+	/// same reason.
+	public func setLevels(_ levels: [LevelPoint], actionName: String = "Change Level") {
+		guard levels != take.levels else { return }
+		var next = take
+		next.levels = GainCurve.tidied(levels)
+		apply(next, actionName: actionName)
+	}
+
+	/// A point put on the curve, or the one already at that moment moved to a
+	/// new level. Returns where it landed, since the click that makes a point is
+	/// the start of the drag that places it.
+	@discardableResult
+	public func addLevel(at time: Double, gain: Double, within tolerance: Double = 0) -> Int {
+		var next = take
+		let index = next.setLevel(gain, at: time, within: tolerance)
+		apply(next, actionName: "Add a Level Point")
+		return index
+	}
+
+	public func removeLevel(at index: Int) {
+		guard take.levels.indices.contains(index) else { return }
+		var next = take
+		next.removeLevel(at: index)
+		apply(next, actionName: "Remove a Level Point")
+	}
+
 	public func setOffset(_ offset: Double) {
 		guard var audio = take.audio else { return }
 		audio.offset = offset
@@ -615,6 +644,22 @@ public final class TakeDocument {
 		let room = transcript.neighbours(of: asked)
 		return speechMap.cut(from: asked.lowerBound, to: asked.upperBound,
 		                     after: room.before, before: room.after, handle: handle)
+	}
+
+	/// For the tests: what a probe and a decode would have found, without a file
+	/// to read.
+	///
+	/// The lanes of the timeline exist only where something has finished
+	/// decoding, and nothing is drawn on one until the take has a length, so
+	/// anything about drawing on a lane or pointing at one needs both. A test
+	/// that had to write a WAV and wait for `AVAssetReader` to read it back
+	/// would be a test about `AVAssetReader`.
+	func setMediaForTesting(video: MediaInfo? = nil, audio: MediaInfo? = nil,
+	                        videoWave: Waveform? = nil, audioWave: Waveform? = nil) {
+		videoInfo = video
+		audioInfo = audio
+		videoWaveform = videoWave
+		audioWaveform = audioWave
 	}
 
 	/// Probes both files and decodes their waveforms.

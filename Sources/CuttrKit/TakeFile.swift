@@ -234,13 +234,25 @@ public enum TakeReader {
 			}
 		}
 
+		// The level over time. Read leniently and in the file's own spelling: a
+		// point with no `at:` is not a point, and a point with no `gain:` is a
+		// moment somebody has marked and not yet decided about, which is nought
+		// and reads perfectly well.
+		var levels: [LevelPoint] = []
+		for entry in (root.removeValue(forKey: "levels") as? [Any]) ?? [] {
+			guard let m = mapping(entry),
+			      let at = try m["at"].map({ try time($0, key: "at") })
+			else { continue }
+			levels.append(LevelPoint(at: at, gain: number(m["gain"]) ?? 0))
+		}
+
 		// Taken out before the rest is carried through, so the recording's own
 		// level does not also arrive as an unknown key and get written twice.
 		let level = number(root.removeValue(forKey: "gain")) ?? 0
 		var take = Take(video: video, audio: audio, clips: clips, anchors: anchors, words: words,
 		                speakers: speakers, sounds: sounds,
 		                measured: measured, look: look, source: source, gain: level,
-		                unknownKeys: root)
+		                levels: levels, unknownKeys: root)
 		// What somebody wrote in the file, addressed so it can be put back. Read
 		// from the text rather than from the parse, because the parse is exactly
 		// where it was being lost.
@@ -344,6 +356,23 @@ public enum TakeWriter {
 		// see ``CuttrKit/Take/gain``.
 		if take.gain != 0 {
 			out += "gain:  \(number(take.gain, places: 2))   # dB, this whole recording\n"
+		}
+
+		// And the same level as it goes, directly under the flat one it adds to.
+		// Reading the two together is the only way the sum makes sense, and a
+		// curve is about the recording in exactly the way `gain:` is.
+		//
+		// One point a line, in the flow form the project file writes a scene's
+		// keys in and for the same reason: a point is two short things and reads
+		// as one line, and eight of them read as a column somebody can scan
+		// down. Left out entirely when there is no curve, so a take nobody has
+		// drawn one on does not grow a block saying so.
+		if !take.levels.isEmpty {
+			out += "\nlevels:   # dB against the clock, on top of the take's level\n"
+			for point in take.levels {
+				out += "  - {at: \(Timecode.string(point.at))"
+				out += ", gain: \(number(point.gain, places: 2))}\n"
+			}
 		}
 
 		// Where it came from. Directly under the media, because it is a fact

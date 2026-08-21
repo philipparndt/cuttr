@@ -83,6 +83,11 @@ public enum Renderer {
 		var grades: [(start: Double, end: Double, look: Look)] = []
 		/// Volume steps for the audio mix, one per clip and track.
 		var levels: [(track: Int, at: CMTime, volume: Float)] = []
+		/// And where a clip's level *moves*, for the clips whose take carries a
+		/// gain curve. A step and a ramp are two different instructions to the
+		/// mix, so they are two lists rather than one with a flag: a clip with
+		/// no curve writes exactly the step it always wrote.
+		var ramps: [(track: Int, start: Double, end: Double, from: Float, to: Float)] = []
 		/// One stretch of programme: which track it plays from, and what it
 		/// looks like. A card plays from no track at all, and says what colour
 		/// to paint instead.
@@ -118,7 +123,20 @@ public enum Renderer {
 			grades.append((clip.start, clip.end, clip.look))
 			// Linear amplitude, because that is what a mix takes. Decibels are
 			// what a person reads and what the file says.
-			levels.append((lane, at, Float(pow(10, clip.gain / 20))))
+			//
+			// A curve is the same arithmetic once per interval instead of once
+			// per clip, and it covers the clip end to end: the mix is told to
+			// move rather than to hold, so there is no step left over to argue
+			// with the ramps.
+			if clip.levels.isEmpty {
+				levels.append((lane, at, Float(Levelling.amplitude(clip.gain))))
+			} else {
+				for move in GainCurve.ramps(clip.levels, from: clip.start, to: clip.end) {
+					ramps.append((lane, move.start, move.end,
+					              Float(Levelling.amplitude(clip.gain + move.from)),
+					              Float(Levelling.amplitude(clip.gain + move.to))))
+				}
+			}
 
 			if let videoURL = clip.videoURL {
 				let asset = AVURLAsset(url: videoURL)
@@ -366,7 +384,7 @@ public enum Renderer {
 
 			return Built(composition: composition, videoComposition: plainComposition,
 			             overlays: overlays,
-			             audioMix: audioMix(liveAudio, levels: levels, clips: resolved.clips,
+			             audioMix: audioMix(liveAudio, levels: levels, ramps: ramps, clips: resolved.clips,
 			                              lanes: clipLanes, duration: resolved.duration,
 			                              silences: gaps,
 			                              sounds: liveSounds))
@@ -404,7 +422,7 @@ public enum Renderer {
 				value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
 			return Built(composition: composition, videoComposition: filtered,
 			             overlays: overlays,
-			             audioMix: audioMix(liveAudio, levels: levels, clips: resolved.clips,
+			             audioMix: audioMix(liveAudio, levels: levels, ramps: ramps, clips: resolved.clips,
 			                              lanes: clipLanes, duration: resolved.duration,
 			                              silences: gaps,
 			                              sounds: liveSounds))
@@ -454,7 +472,7 @@ public enum Renderer {
 
 		return Built(composition: composition, videoComposition: videoComposition,
 		             session: session, overlays: overlays,
-		             audioMix: audioMix(liveAudio, levels: levels, clips: resolved.clips,
+		             audioMix: audioMix(liveAudio, levels: levels, ramps: ramps, clips: resolved.clips,
 			                              lanes: clipLanes, duration: resolved.duration,
 			                              silences: gaps,
 			                              sounds: liveSounds))
@@ -623,6 +641,7 @@ public enum Renderer {
 	private static func audioMix(
 		_ tracks: [(lane: Int, track: AVMutableCompositionTrack)],
 		levels: [(track: Int, at: CMTime, volume: Float)],
+		ramps: [(track: Int, start: Double, end: Double, from: Float, to: Float)] = [],
 		clips: [ResolvedClip],
 		lanes: [Int],
 		duration: Double,
@@ -673,8 +692,19 @@ public enum Renderer {
 		}
 
 		/// What a lane is set to at a moment, before anything ducks it.
+		///
+		/// A curved clip has no step to read, so its ramps answer instead — at
+		/// the point along the ramp the question is about, since the whole of
+		/// what a curve says is that the answer is different a second later.
 		func level(_ lane: Int, at when: Double) -> Float {
-			levels.last { $0.track == lane && $0.at.seconds <= when + 1e-6 }?.volume ?? 0
+			if let move = ramps.last(where: {
+				$0.track == lane && $0.start <= when + 1e-6 && $0.end >= when - 1e-6
+			}) {
+				let span = move.end - move.start
+				guard span > 0 else { return move.to }
+				return move.from + (move.to - move.from) * Float((when - move.start) / span)
+			}
+			return levels.last { $0.track == lane && $0.at.seconds <= when + 1e-6 }?.volume ?? 0
 		}
 
 		/// Everything pulling the programme under at a moment, multiplied
@@ -691,7 +721,8 @@ public enum Renderer {
 
 		for (lane, track) in tracks {
 			let mine = levels.filter { $0.track == lane }
-			guard !mine.isEmpty else { continue }
+			let curved = ramps.filter { $0.track == lane }
+			guard !mine.isEmpty || !curved.isEmpty else { continue }
 			var built = Lane()
 
 			for step in mine {
@@ -699,13 +730,27 @@ public enum Renderer {
 				built.steps.append((step.at.seconds, step.volume * duck(at: step.at.seconds)))
 			}
 
+			// The gain curves, which arrive as moves already: a clip whose take
+			// carries one asked for a level that changes, and this is the only
+			// place in the programme where a level changes *within* a shot.
+			for move in curved {
+				wanted = true
+				built.moves.append((move.start, move.end,
+				                    move.from * duck(at: move.start),
+				                    move.to * duck(at: move.end)))
+			}
+
 			// The dissolves: the outgoing lane down, the incoming lane up, over
 			// exactly the overlap.
 			for (index, clip) in clips.enumerated() where clip.transition > 0 && index > 0 {
 				wanted = true
 				let under = duck(at: clip.start)
-				let up = Float(pow(10, clip.gain / 20)) * under
-				let down = Float(pow(10, clips[index - 1].gain / 20)) * under
+				// Each clip's level *at the dissolve*, not its flat figure: a
+				// take with a curve on it is a different level a second later,
+				// and the two ends of a crossfade are the two levels there.
+				let up = Float(Levelling.amplitude(clip.level(at: clip.start))) * under
+				let down = Float(Levelling.amplitude(
+					clips[index - 1].level(at: clip.start))) * under
 				// The lanes the two clips were actually laid on, rather than the
 				// parity of their position. A lane only changes where a dissolve
 				// asks for it, so in a programme that mixes cuts and dissolves

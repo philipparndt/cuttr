@@ -23,6 +23,24 @@ public final class TimelineView: NSView {
 
 	public var selectedClip: Clip.ID? { didSet { needsDisplay = true } }
 
+	/// Which point of the gain curve is in hand, as an index into
+	/// ``CuttrKit/Take/levels``.
+	///
+	/// An index rather than an identity, and it is honest here: a point is two
+	/// numbers with nothing else to call it, and the curve is kept sorted, so
+	/// "the third point" is a complete description of one. Dragging cannot
+	/// re-order them — see ``CuttrKit/Take/moveLevel(_:to:gain:apart:)`` — which
+	/// is what keeps the index true for the length of a drag.
+	public var selectedLevel: Int? { didSet { needsDisplay = true } }
+
+	/// A curve somebody has been offered and has not accepted.
+	///
+	/// Drawn dashed, beside the one that is really there, and nothing about the
+	/// take changes until it is taken. The same shape as ``pending`` — a
+	/// question drawn on the timeline — because a machine's opinion about
+	/// somebody's audio is exactly that.
+	public var proposedLevels: [LevelPoint]? { didSet { needsDisplay = true } }
+
 	/// Vertical zoom on the waveform — amplitude, not time.
 	///
 	/// A separate control from the timeline's zoom because it answers a
@@ -59,6 +77,13 @@ public final class TimelineView: NSView {
 	/// undo step rather than sixty.
 	public var onEditClip: ((Clip.ID, _ start: Double, _ end: Double, _ commit: Bool) -> Void)?
 	public var onOffsetChange: ((Double, _ commit: Bool) -> Void)?
+	/// A point put on the gain curve, at a time and a level in decibels.
+	public var onAddLevel: ((_ at: Double, _ gain: Double) -> Void)?
+	/// One being dragged: live all the way, once more on the way up. The
+	/// `commit` flag coalesces the drag into one undo step, the same as a trim.
+	public var onEditLevel: ((_ index: Int, _ at: Double, _ gain: Double, _ commit: Bool) -> Void)?
+	/// Right-click on a point: the menu for it, if there is one.
+	public var levelMenu: ((Int) -> NSMenu?)?
 	public var onPendingChange: (((start: Double, end: Double)?) -> Void)?
 	/// Right-click: the clip under the pointer, if any, and the time there.
 	public var contextMenu: ((Clip.ID?, Double) -> NSMenu?)?
@@ -141,6 +166,85 @@ public final class TimelineView: NSView {
 		case (false, true): return (nil, rect)
 		case (false, false): return (nil, nil)
 		}
+	}
+
+	// MARK: - The level over time
+
+	/// Where the gain curve is drawn and edited: the lane whose recording the
+	/// take will actually be heard through.
+	///
+	/// The separate recorder when there is one, because that is the reason it
+	/// was recorded and it is the track a render takes its sound from; the
+	/// camera's lane otherwise. Not both — two copies of one curve would be two
+	/// things to point at for one effect, and the external lane already has ⌥
+	/// spoken for.
+	private var curveRect: NSRect? { laneRects.external ?? laneRects.camera }
+
+	/// The lane read as a level scale, in decibels.
+	///
+	/// Nought sits a fifth of the way down rather than in the middle, because
+	/// the room below it is where the work is: this is a tool for taking a door
+	/// off the top of a sentence, and a couple of decibels is all a quiet
+	/// stretch ever needs lifting by. The range is
+	/// ``CuttrKit/GainCurve/editable``, so what can be dragged and what can be
+	/// seen are the same interval.
+	private func y(forLevel gain: Double, in rect: NSRect) -> CGFloat {
+		let range = GainCurve.editable
+		let held = min(max(gain, range.lowerBound), range.upperBound)
+		let fraction = (range.upperBound - held) / (range.upperBound - range.lowerBound)
+		return rect.minY + 2 + (rect.height - 4) * CGFloat(fraction)
+	}
+
+	/// The reverse, rounded to a tenth of a decibel — finer than anybody can
+	/// hear, and what the file writes without pretending to precision a drag
+	/// does not have.
+	private func level(forY y: CGFloat, in rect: NSRect) -> Double {
+		let range = GainCurve.editable
+		let fraction = Double((y - rect.minY - 2) / max(1, rect.height - 4))
+		let gain = range.upperBound - fraction * (range.upperBound - range.lowerBound)
+		return min(max((gain * 10).rounded() / 10, range.lowerBound), range.upperBound)
+	}
+
+	/// The point of the curve under the pointer, if the pointer is on one.
+	private func levelPoint(at point: NSPoint) -> Int? {
+		guard let rect = curveRect, rect.contains(point),
+		      let levels = document?.take.levels else { return nil }
+		for (index, held) in levels.enumerated() {
+			let px = x(for: held.at)
+			let py = y(forLevel: held.gain, in: rect)
+			if abs(px - point.x) <= grabSlop && abs(py - point.y) <= grabSlop { return index }
+		}
+		return nil
+	}
+
+	/// For the tests: the lane the curve is on, and where a level sits in it.
+	/// Both are what a mouse event has to be aimed at, and neither can be worked
+	/// out from outside — the lane depends on which waveforms have decoded.
+	var curveRectForTesting: NSRect? { curveRect }
+
+	func yForLevelForTesting(_ gain: Double, in rect: NSRect) -> CGFloat {
+		y(forLevel: gain, in: rect)
+	}
+
+	/// The point of the curve nearest a moment, for picking up whatever a click
+	/// has just made or moved.
+	private func nearestLevel(to time: Double) -> Int? {
+		guard let levels = document?.take.levels, !levels.isEmpty else { return nil }
+		return levels.indices.min { abs(levels[$0].at - time) < abs(levels[$1].at - time) }
+	}
+
+	/// Whether the pointer is on the curve itself — the line, rather than a
+	/// point on it.
+	///
+	/// Four points of slop, which is how an automation lane has always worked:
+	/// clicking the line is how a point is made, and everywhere else in the lane
+	/// still scrubs. The nought line counts even when the curve is empty,
+	/// because a curve nobody can start is a curve nobody will draw.
+	private func isOnCurve(_ point: NSPoint) -> Bool {
+		guard let rect = curveRect, rect.contains(point) else { return false }
+		let curve = document?.take.levels ?? []
+		let here = GainCurve.gain(at: time(forX: point.x), in: curve)
+		return abs(y(forLevel: here, in: rect) - point.y) <= 4
 	}
 
 	// MARK: - Zoom and scroll
@@ -284,6 +388,7 @@ public final class TimelineView: NSView {
 
 		drawClipRegions()
 		drawLanes()
+		drawCurve()
 		drawRuler()
 		drawClipBand()
 		drawSpeechEdges()
@@ -337,6 +442,12 @@ public final class TimelineView: NSView {
 		let level = CGFloat(Levelling.amplitude(document?.take.gain ?? 0))
 		let scale = (rect.height / 2 - 2) * CGFloat(waveformGain) * level
 		let limit = rect.height / 2 - 1
+		// And the curve, column by column, for exactly the same reason: a dip
+		// pulled over a plosive has to be visible *in the plosive*, or the
+		// picture and the sound disagree about the one thing the dip was drawn
+		// to do. It is also the only way to tell a dip that takes the plop off
+		// from a dip that takes the word off.
+		let curve = document?.take.levels ?? []
 		let path = NSBezierPath()
 		path.lineWidth = 1
 
@@ -347,9 +458,14 @@ public final class TimelineView: NSView {
 			// its sample points is a waveform that lies about where a word is.
 			let t0 = time(forX: x) - timeShift
 			let t1 = time(forX: x + 1) - timeShift
+			// The curve is asked at the *unshifted* time: it is on the video's
+			// clock whichever recording this lane is of, which is the one clock
+			// rule and the reason a re-alignment does not move it.
+			let here = curve.isEmpty ? scale
+				: scale * CGFloat(GainCurve.amplitude(at: time(forX: x), in: curve))
 			if let extremes = wave.extremes(from: t0, to: t1) {
-				let top = middle - min(CGFloat(extremes.max) * scale, limit)
-				let bottom = middle - max(CGFloat(extremes.min) * scale, -limit)
+				let top = middle - min(CGFloat(extremes.max) * here, limit)
+				let bottom = middle - max(CGFloat(extremes.min) * here, -limit)
 				// Half a point, so a silent passage is a line rather than
 				// nothing: "there is audio here and it is quiet" and "there is
 				// no audio here" have to look different.
@@ -379,6 +495,78 @@ public final class TimelineView: NSView {
 			drawText(label, at: NSPoint(x: rect.maxX - width - 6, y: rect.minY + 3),
 			         font: Theme.monoSmall, color: color.withAlphaComponent(0.8))
 		}
+	}
+
+	/// The gain curve, over the waveform it is about.
+	///
+	/// Near-white rather than a hue of its own, and not from the palette: the
+	/// palette's colours are *labels* somebody assigns, and this is one fixed
+	/// thing. White over a coloured envelope is what every editor draws an
+	/// automation line in, and there is nothing else on this lane it could be
+	/// mistaken for — the playhead is red and one pixel wide.
+	private func drawCurve() {
+		guard let rect = curveRect, rect.height > 16 else { return }
+		let curve = document?.take.levels ?? []
+
+		// Nought, always, dashed and dim. It is the reference the curve is read
+		// against and it is the line a first click lands on to make a point, so
+		// it is drawn on a lane with no curve at all.
+		let zero = y(forLevel: 0, in: rect)
+		let guide = NSBezierPath()
+		guide.move(to: NSPoint(x: rect.minX, y: zero.rounded() + 0.5))
+		guide.line(to: NSPoint(x: rect.maxX, y: zero.rounded() + 0.5))
+		guide.lineWidth = 0.5
+		guide.setLineDash([2, 3], count: 2, phase: 0)
+		Theme.rule.setStroke()
+		guide.stroke()
+		drawText("0 dB", at: NSPoint(x: rect.minX + 6, y: zero - 13),
+		         font: Theme.monoSmall, color: Theme.rule)
+
+		if let proposed = proposedLevels, !proposed.isEmpty {
+			stroke(proposed, in: rect, color: Theme.pendingStroke, dashed: true)
+		}
+		guard !curve.isEmpty else { return }
+		stroke(curve, in: rect, color: Theme.text.withAlphaComponent(0.9), dashed: false)
+
+		// The points, and the one in hand said out loud. A number beside the
+		// point somebody is holding, because the whole of what a drag is doing
+		// is choosing that number and a curve alone does not say what it is.
+		for (index, point) in curve.enumerated() {
+			let px = x(for: point.at)
+			guard px > rect.minX - 8, px < rect.maxX + 8 else { continue }
+			let py = y(forLevel: point.gain, in: rect)
+			let held = index == selectedLevel
+			let box = NSRect(x: px - 2.5, y: py - 2.5, width: 5, height: 5)
+			(held ? Theme.accent : Theme.text).setFill()
+			NSBezierPath(ovalIn: box).fill()
+			if held {
+				Theme.accent.setStroke()
+				NSBezierPath(ovalIn: box.insetBy(dx: -2.5, dy: -2.5)).stroke()
+				drawText(String(format: "%+.1f dB", point.gain),
+				         at: NSPoint(x: px + 7, y: py - 6),
+				         font: Theme.monoSmall, color: Theme.accent)
+			}
+		}
+	}
+
+	/// One curve as a line, a column at a time.
+	///
+	/// Per column rather than point to point, because the interpolation is
+	/// linear in *amplitude* and this axis is decibels — so the run between two
+	/// points is a curve, and joining them with a straight line would draw a
+	/// level the mix is not going to play. See ``CuttrKit/GainCurve``.
+	private func stroke(_ points: [LevelPoint], in rect: NSRect, color: NSColor, dashed: Bool) {
+		let path = NSBezierPath()
+		var x = rect.minX
+		while x <= rect.maxX {
+			let at = NSPoint(x: x, y: y(forLevel: GainCurve.gain(at: time(forX: x), in: points), in: rect))
+			if x == rect.minX { path.move(to: at) } else { path.line(to: at) }
+			x += 1
+		}
+		path.lineWidth = dashed ? 1 : 1.5
+		if dashed { path.setLineDash([4, 3], count: 2, phase: 0) }
+		color.setStroke()
+		path.stroke()
 	}
 
 	private func drawCaption(_ text: String, in rect: NSRect) {
@@ -642,6 +830,7 @@ public final class TimelineView: NSView {
 		case trim(id: Clip.ID, edge: Edge, other: Double)
 		case move(id: Clip.ID, grabOffset: Double, length: Double)
 		case offset(startOffset: Double, startTime: Double)
+		case level(index: Int)
 		case overview
 		enum Edge { case start, end }
 	}
@@ -680,10 +869,45 @@ public final class TimelineView: NSView {
 			return
 		}
 
+		// The gain curve, on a click with nothing held down. Every modifier on
+		// this view already means something — ⌥ the alignment, ⇧ an in/out span —
+		// and a four-point band where one of them stopped working would be a
+		// gesture that fails for no visible reason.
+		let bare = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+			.isDisjoint(with: [.shift, .option, .command, .control])
+
+		// A point of the curve is a five-point target somebody aimed at, so it
+		// wins over a clip edge — which is a grab bar the height of the whole
+		// lane and can be reached anywhere else along it.
+		if bare, let index = levelPoint(at: point) {
+			selectedLevel = index
+			drag = .level(index: index)
+			return
+		}
+		selectedLevel = nil
+
 		if let hit = clipEdge(at: point) {
 			drag = .trim(id: hit.id, edge: hit.edge, other: hit.other)
 			selectedClip = hit.id
 			onSelectClip?(hit.id)
+			return
+		}
+
+		// The line itself: a click on it makes a point and hands it straight to
+		// the drag, so drawing a dip is one gesture — press on the curve, pull
+		// down, let go. Everywhere else on the lane still scrubs, which is why
+		// the tolerance is four points and not the height of the lane.
+		if bare, let rect = curveRect, isOnCurve(point) {
+			let at = max(0, time(forX: point.x))
+			let gain = level(forY: point.y, in: rect)
+			onAddLevel?(at, gain)
+			// Whatever the document made of it: a click a pixel from an
+			// existing point moves that one rather than growing a second, so the
+			// drag carries on with the point that is actually there.
+			if let index = nearestLevel(to: at) {
+				selectedLevel = index
+				drag = .level(index: index)
+			}
 			return
 		}
 
@@ -748,6 +972,14 @@ public final class TimelineView: NSView {
 			// whole reason this control exists.
 			let delta = time(forX: point.x) - startTime
 			onOffsetChange?(startOffset + delta, false)
+		case .level(let index):
+			// Not snapped either, and for the same reason: a plosive is eighty
+			// milliseconds long and the frame it happens to be in is not where
+			// the level has to come down.
+			if let rect = curveRect {
+				onEditLevel?(index, max(0, time(forX: point.x)),
+				             level(forY: point.y, in: rect), false)
+			}
 		case .overview:
 			jumpFromOverview(point.x)
 		case nil:
@@ -767,6 +999,11 @@ public final class TimelineView: NSView {
 			onEditClip?(id, start, start + length, true)
 		case .offset(let startOffset, let startTime):
 			onOffsetChange?(startOffset + (time(forX: point.x) - startTime), true)
+		case .level(let index):
+			if let rect = curveRect {
+				onEditLevel?(index, max(0, time(forX: point.x)),
+				             level(forY: point.y, in: rect), true)
+			}
 		default:
 			break
 		}
@@ -960,6 +1197,12 @@ public final class TimelineView: NSView {
 		let point = convert(event.locationInWindow, from: nil)
 		let t = time(forX: point.x)
 		guard point.y > rulerHeight, point.y < bounds.height - overviewHeight else { return nil }
+		// A point of the curve first: right-clicking one is how it goes away,
+		// and the clip menu has nothing to say about it.
+		if let index = levelPoint(at: point) {
+			selectedLevel = index
+			return levelMenu?(index)
+		}
 		let hit = clipBar(at: point) ?? clip(at: t) ?? clipEdge(at: point).flatMap { edge in
 			document?.take.clips.first { $0.id == edge.id }
 		}

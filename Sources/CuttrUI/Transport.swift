@@ -186,17 +186,48 @@ public final class Transport {
 		didSet { if gain != oldValue { applyGain() } }
 	}
 
+	/// And the take's gain curve, on the same terms: what is heard in the
+	/// cutting room is what the render will do, or the curve is a picture
+	/// somebody draws and cannot check.
+	///
+	/// The whole point of a curve is that it is checked by ear — a dip that
+	/// takes the plosive off and a dip that takes the word off look identical on
+	/// a waveform. See ``CuttrKit/GainCurve``.
+	public var levels: [LevelPoint] = [] {
+		didSet { if levels != oldValue { applyGain() } }
+	}
+
 	private func applyGain() {
 		guard let item = player.currentItem else { return }
-		guard gain != 0, let composition = item.asset as? AVComposition else {
+		guard gain != 0 || !levels.isEmpty,
+		      let composition = item.asset as? AVComposition else {
 			item.audioMix = nil
 			return
 		}
-		let volume = Float(Levelling.amplitude(gain))
 		let mix = AVMutableAudioMix()
 		mix.inputParameters = composition.tracks(withMediaType: .audio).map { track in
 			let parameters = AVMutableAudioMixInputParameters(track: track)
-			parameters.setVolume(volume, at: .zero)
+			guard !levels.isEmpty else {
+				parameters.setVolume(Float(Levelling.amplitude(gain)), at: .zero)
+				return parameters
+			}
+			// The curve as ramps, over the whole of what is loaded — and past
+			// the last point of it, which `clipped` writes down as a flat run
+			// rather than leaving to the mix. A mix left unset after its last
+			// ramp plays at whatever that ramp ended on, and relying on that
+			// would be relying on a default. A second past the last point, so
+			// there is always a range to write even before a duration is known.
+			let end = max(duration, (levels.last?.at ?? 0) + 1)
+			for move in GainCurve.ramps(
+				GainCurve.clipped(levels, from: 0, to: end), from: 0, to: end
+			) {
+				parameters.setVolumeRamp(
+					fromStartVolume: Float(Levelling.amplitude(gain + move.from)),
+					toEndVolume: Float(Levelling.amplitude(gain + move.to)),
+					timeRange: CMTimeRange(
+						start: CMTime(seconds: move.start, preferredTimescale: 600),
+						duration: CMTime(seconds: move.end - move.start, preferredTimescale: 600)))
+			}
 			return parameters
 		}
 		item.audioMix = mix

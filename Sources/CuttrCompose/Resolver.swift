@@ -57,6 +57,19 @@ public struct ResolvedClip: Sendable {
 	/// Zero when nothing has been measured, which is the honest default: an
 	/// unmeasured clip is left exactly as it was recorded.
 	public var gain: Double = 0
+	/// The take's gain curve over this clip, on the **programme's** clock.
+	///
+	/// Decibels, and added to ``gain`` rather than replacing it — see
+	/// ``CuttrKit/GainCurve``. Put on the programme's clock here because that is
+	/// the clock the mix is written on, and the mapping is a fact this function
+	/// knows and the renderer does not: the same clip used twice contributes the
+	/// same repair at two different moments of the finished programme.
+	///
+	/// Cut to the clip's own span with a point at each edge, so the whole of the
+	/// clip is covered and a dip that starts before the cut still arrives
+	/// part-way down. Empty for a take with no curve, which is what keeps every
+	/// programme that has never seen one rendering exactly as it did.
+	public var levels: [LevelPoint] = []
 	/// The grade to apply: the take's own look, over its profile, with whatever
 	/// the automatic match worked out.
 	public var look: Look = .none
@@ -98,6 +111,15 @@ public struct ResolvedClip: Sendable {
 	/// The reverse.
 	public func programmeTime(forTake time: Double) -> Double {
 		start + (time - clip.start)
+	}
+
+	/// This clip's level at a moment of the programme, in decibels: the flat
+	/// figure and whatever the curve is doing there, added.
+	///
+	/// The one place the sum is written down, so the mix, a dissolve's two ends
+	/// and anything that asks later cannot disagree about it.
+	public func level(at time: Double) -> Double {
+		gain + GainCurve.gain(at: time, in: levels)
 	}
 }
 
@@ -571,6 +593,17 @@ public enum Resolver {
 			// ceiling above guards the automatic match; it does not overrule a
 			// number somebody typed, because that number is the decision.
 			clips[index].gain += take.gain + clips[index].clip.gain
+
+			// And the curve, which is the same decision at a finer grain: three
+			// levels, all in decibels, all added. Carried as points rather than
+			// folded into the figure above because it is not one figure — the
+			// whole of what it says is that the level is different at 4:31 than
+			// it is at 4:32.
+			clips[index].levels = GainCurve.clipped(
+				take.levels, from: clips[index].clip.start, to: clips[index].clip.end
+			).map { point in
+				LevelPoint(at: clips[index].programmeTime(forTake: point.at), gain: point.gain)
+			}
 
 			// The take's own look over the profile it names, and then the match.
 			// The match is a `gain` the take may already carry from an analysis
