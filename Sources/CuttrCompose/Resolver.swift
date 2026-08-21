@@ -626,23 +626,17 @@ public enum Resolver {
 		/// a clip twice was awkward: an overlay hung on it swallowed whatever
 		/// came between the two uses.
 		func places(_ endpoint: Overlay.Span.Endpoint) throws -> [(start: Double, end: Double)] {
-			switch endpoint {
-			case .clip(let reference):
-				let matching = clips.filter {
-					$0.reference.slug == reference.slug
-						&& (reference.take == nil || $0.takeName == reference.take)
-				}
-				guard !matching.isEmpty else { throw ResolveError.unknownClip(reference) }
-				return matching.map { ($0.start, $0.end) }
-			case .group(let name):
-				// A section that is not there — never made, renamed, or made
-				// and not yet filled — takes this overlay off the programme and
-				// says so. It used to take the whole programme off instead,
-				// which is a hard way to be told that a section you are still
-				// building is still empty.
-				guard let range = groups[name] else { return [] }
-				return [range]
+			let found = endpoint.places(in: clips) { groups[$0] }
+			// A clip that is not in the programme is a mistake in the file and
+			// is said so. A *section* that is not there — never made, renamed,
+			// or made and not yet filled — takes this overlay off the programme
+			// instead: it used to take the whole programme off, which is a hard
+			// way to be told that a section you are still building is still
+			// empty.
+			if case .clip(let reference) = endpoint, found.isEmpty {
+				throw ResolveError.unknownClip(reference)
 			}
+			return found
 		}
 
 		/// A written range, on the programme's clock — once for each time the

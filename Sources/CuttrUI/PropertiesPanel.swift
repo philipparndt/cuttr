@@ -1488,6 +1488,8 @@ public final class PropertiesPanel: NSView {
 			var buttons: [NSView] = [small("+ range") { [weak self] in
 				guard let self else { return }
 				self.selectedSpan = count
+				let resolved = self.resolved
+				let home = self.home
 				self.editOverlay(origin) { overlay in
 					// The last range repeated, moved along by its own length
 					// when it is a time, ready to be pointed somewhere else when
@@ -1498,8 +1500,12 @@ public final class PropertiesPanel: NSView {
 					case .times(let from, let to):
 						overlay.appearances.append(.init(.times(from: to, to: to + (to - from))))
 					case .within(let mark, let from, let to):
+						// Inside the same shot, and still inside it: a second
+						// range that runs past the clip's end is one nothing can
+						// play, and the strip has nowhere to draw it.
+						let next = Overlay.Span.within(mark, from: to, to: to + (to - from))
 						overlay.appearances.append(
-							.init(.within(mark, from: to, to: to + (to - from))))
+							.init(resolved.map { next.clamped(in: $0, nearest: home) } ?? next))
 					case .marks:
 						overlay.appearances.append(.init(last.span))
 					}
@@ -1965,10 +1971,15 @@ public final class PropertiesPanel: NSView {
 			})
 	}
 
+	/// The one door every written range goes through — typed, dragged, trimmed
+	/// or copied — which is where it is held inside the clip it is written
+	/// inside. A `within:` past the end of its own shot is not a long overlay,
+	/// it is a number the programme has nowhere to put.
 	private func setSpan(_ origin: Origin, _ position: Int, _ span: Overlay.Span) {
+		let held = resolved.map { span.clamped(in: $0, nearest: home) } ?? span
 		editOverlay(origin) { overlay in
 			guard position < overlay.appearances.count else { return }
-			overlay.appearances[position].span = span
+			overlay.appearances[position].span = held
 		}
 	}
 
@@ -2080,21 +2091,25 @@ public final class PropertiesPanel: NSView {
 			guard let where_ = self.extent(of: .marks(from: mark, to: mark)) else { return nil }
 			return (where_.0 + from, where_.0 + to)
 		case .marks(let from, let to):
-			func edges(_ endpoint: Overlay.Span.Endpoint) -> (Double, Double)? {
-				switch endpoint {
-				case .clip(let reference):
-					let matching = (resolved?.clips ?? []).filter { $0.reference.slug == reference.slug }
-					guard let first = matching.first, let last = matching.last else { return nil }
-					return (first.start, last.end)
-				case .group(let name):
-					guard let group = resolved?.groups.first(where: { $0.name == name }) else { return nil }
-					return (group.start, group.end)
-				}
-			}
-			guard let a = edges(from), let b = edges(to) else { return nil }
-			return (a.0, max(b.1, a.1))
+			// One use of each mark, and the use this overlay is at — see
+			// ``CuttrCompose/Overlay/Span/Endpoint/places(in:)``. Answering with
+			// the first start and the last end put a clip used twice across most
+			// of the film.
+			guard let resolved,
+			      let a = from.place(in: resolved, nearest: home),
+			      let b = to.place(in: resolved, nearest: home) else { return nil }
+			return (a.start, max(b.end, a.end))
 		}
 	}
+
+	/// Where on the programme's clock the thing being edited is.
+	///
+	/// Which use of a clip a range is about is decided by where the selection
+	/// is, not by which use came first — so an overlay on the second placement
+	/// of a shot is about that placement. ``ProjectSelection/moment(in:)`` is
+	/// already the one answer to this question, and the head of this panel
+	/// heads itself with the same one.
+	private var home: Double? { selection.moment(in: resolved) }
 
 	/// A section decides its own length on the programme, so a range hung on
 	/// one is shown and not dragged.
@@ -2112,24 +2127,18 @@ public final class PropertiesPanel: NSView {
 	///
 	/// Times move in seconds. Clips **snap**: the range takes the name of the
 	/// clip under each end, because a caption that belonged to `intro` should
-	/// still belong to a clip afterwards rather than to 4.28 seconds.
+	/// still belong to a clip afterwards rather than to 4.28 seconds. All of
+	/// which is ``CuttrCompose/Overlay/Span/moved(start:end:in:)``, because a
+	/// drag in this panel and a drag anywhere else have to write the same line.
 	private func span(from existing: Overlay.Span, start: Double, end: Double) -> Overlay.Span {
-		switch existing {
-		case .times:
-			return .times(from: start, to: end)
-		case .within(let mark, _, _):
-			// Dragged on the programme, written down against the clip: the
-			// numbers that go in the file are still "so many seconds into that
-			// shot".
-			guard let where_ = self.extent(of: .marks(from: mark, to: mark)) else { return existing }
-			return .within(mark, from: max(0, start - where_.0), to: max(0, end - where_.0))
-		case .marks:
-			let clips = resolved?.clips ?? []
-			let first = clips.last { $0.start <= start + 0.001 } ?? clips.first
-			let last = clips.last { $0.start < end - 0.001 } ?? first
-			guard let first, let last else { return existing }
-			return .marks(from: .clip(first.reference), to: .clip(last.reference))
+		guard let resolved else {
+			// Programme times mean what they say and need nothing else to be
+			// known. Everything else is written against the programme, so
+			// without one there is nothing true to write.
+			if case .times = existing { return .times(from: start, to: end) }
+			return existing
 		}
+		return existing.moved(start: start, end: end, in: resolved)
 	}
 
 	// MARK: - Placing it on the picture

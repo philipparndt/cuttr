@@ -113,8 +113,14 @@ extension Project {
 
 		if let name {
 			guard let resolved, let extent else { return .marks(from: name, to: name) }
-			let where_ = Overlay.Span.extent(of: name, in: resolved)
-			if let where_, abs(where_.start - extent.start) < 1e-6,
+			// Naming it has to mean *exactly* this stretch and nothing else.
+			// A clip used twice fails that however the arithmetic is done:
+			// `from: one` finds both uses, so the caption would come on twice
+			// where it used to come on once — which is why the count is asked
+			// as well as the extent.
+			let all = name.places(in: resolved)
+			if all.count == 1, let where_ = all.first,
+			   abs(where_.start - extent.start) < 1e-6,
 			   abs(where_.end - extent.end) < 1e-6 {
 				return .marks(from: name, to: name)
 			}
