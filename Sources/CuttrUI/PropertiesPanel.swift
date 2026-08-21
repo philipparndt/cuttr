@@ -41,6 +41,13 @@ public final class PropertiesPanel: NSView {
 	/// Somebody is placing a range at this moment on the programme. The window
 	/// takes the preview there, so the picture and the panel agree.
 	public var onScrub: ((Double) -> Void)?
+	/// Where the programme's playhead is, asked for rather than pushed.
+	///
+	/// `i` and `o` set a range's ends from it. Asked for, because this panel has
+	/// no business holding a copy of a number that changes sixty times a second:
+	/// it wants it at the moment a key is pressed and never in between. The
+	/// window owns that clock — it is the same one ``onScrub`` sends it to.
+	public var playhead: (() -> Double)?
 	/// Somebody clicked one of the things in the subject line: select it.
 	///
 	/// The head of this panel says what the selection depends on, and every one
@@ -110,6 +117,11 @@ public final class PropertiesPanel: NSView {
 	/// what that looks like from the outside.
 	private var selectedSpan = 0
 	private var stripHadFocus = false
+	/// And what the strip is zoomed to, for the same reason: a rebuilt strip
+	/// that showed the whole programme again would undo the zoom on every key
+	/// press, which is the one moment somebody is zoomed in on purpose. Not in
+	/// the file, because it is a fact about the session and not about the take.
+	private var stripZoom: (start: Double, end: Double)?
 	/// Which key of the selected overlay is being worked on. Held for the same
 	/// reason `selectedSpan` is: the form is rebuilt after every edit, and a
 	/// rebuilt key list would otherwise go back to the first one every time
@@ -249,6 +261,7 @@ public final class PropertiesPanel: NSView {
 		if built != selection {
 			selectedSpan = 0
 			stripHadFocus = false
+			stripZoom = nil
 			selectedKey = 0
 			keptPicture = nil
 			placing?.close()
@@ -1342,6 +1355,9 @@ public final class PropertiesPanel: NSView {
 
 		section("when it is on")
 		full(strip(origin, overlay))
+		remark("Drag the ranges. ⌥-scroll or pinch zooms about the pointer, "
+			+ "− and + about the selected range, Z frames it and F puts the whole "
+			+ "stretch back. I and O set its in and out from the playhead.")
 
 		// One range at a time: the strip above is the list, and what is under it
 		// is whichever range is selected there. Every range laid out at once was
@@ -1991,6 +2007,9 @@ public final class PropertiesPanel: NSView {
 		currentStrip = strip
 		strip.duration = resolved?.duration ?? 0
 		strip.showing = bounds(origin, overlay)
+		// After `showing`, which is the bounds it is held inside.
+		strip.zoomed = stripZoom
+		strip.onZoom = { [weak self] window in self?.stripZoom = window }
 		strip.blocks = (resolved?.clips ?? []).map {
 			SpanStrip.Block(start: $0.start, end: $0.end, name: $0.clip.slug)
 		}
@@ -2023,7 +2042,56 @@ public final class PropertiesPanel: NSView {
 			self.setSpan(origin, position,
 			             self.span(from: overlay.appearances[position].span, start: start, end: end))
 		}
+		strip.onSetEdge = { [weak self] position, edge in
+			self?.setEdge(origin, overlay, position, edge)
+		}
 		return strip
+	}
+
+	/// `i` and `o`: one end of the selected range, put where the playhead is.
+	///
+	/// A one-ended drag, and written like one — through
+	/// ``span(from:start:end:)`` and then ``setSpan(_:_:_:)``, so a `within:`
+	/// stays a `within:`, a range on marks still snaps to the clip under the
+	/// playhead, and nothing lands outside the shot it is written inside. Two
+	/// paths for the same edit is how the panel comes to write a range one way
+	/// with the mouse and another with the keyboard.
+	///
+	/// Answers with a sentence when it will not do it, which the strip says.
+	/// The refusals are the honest ones: there is no clock yet, the playhead is
+	/// not on what this range can be on at all, or the end being moved would
+	/// cross the one that is staying.
+	private func setEdge(_ origin: Origin, _ overlay: Overlay, _ position: Int,
+	                     _ edge: SpanStrip.Edge) -> String? {
+		guard position < overlay.appearances.count else { return nil }
+		let span = overlay.appearances[position].span
+		guard let playhead = playhead?() else { return "nothing is playing this yet" }
+		guard let now = extent(of: span) else { return "this range is not on the programme yet" }
+		// Only inside what this range is allowed to be on. Outside it,
+		// `setSpan` would clamp to the shot's own edge and write a number
+		// nobody asked for.
+		if let limits = bounds(origin, overlay),
+		   playhead < limits.start - 0.001 || playhead > limits.end + 0.001 {
+			return "the playhead is not on what this range is over"
+		}
+		// The same floor a drag keeps: an in on top of its own out is not a
+		// range, it is a moment.
+		let least = 0.05
+		let start: Double, end: Double
+		switch edge {
+		case .start:
+			guard playhead < now.1 - least else { return "that is at or past the out" }
+			(start, end) = (playhead, now.1)
+		case .end:
+			guard playhead > now.0 + least else { return "that is at or before the in" }
+			(start, end) = (now.0, playhead)
+		}
+		selectedSpan = position
+		// The form comes back after this and would otherwise take the keyboard
+		// away from the strip, so the second of the two keys did nothing.
+		stripHadFocus = true
+		setSpan(origin, position, self.span(from: span, start: start, end: end))
+		return nil
 	}
 
 	/// Show the frame at this moment while a range is being placed, and take the

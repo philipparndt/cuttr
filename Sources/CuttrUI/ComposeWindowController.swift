@@ -694,6 +694,8 @@ public final class ComposeWindowController: DocumentEditor,
 		// same composition the preview plays, so what is dragged over is what
 		// will be rendered under.
 		inspector.onScrub = { [weak self] time in self?.seek(to: time) }
+		// The same clock read back, for `I` and `O` in the properties panel.
+		inspector.playhead = { [weak self] in self?.playhead ?? 0 }
 
 		// The dialogs that set a moment against the programme play the same
 		// thing the preview plays, rather than building a second one.
