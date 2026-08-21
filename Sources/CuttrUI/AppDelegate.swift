@@ -884,16 +884,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		return composers.first { ObjectIdentifier($0.composeDocument) == owner }
 	}
 
-	/// ⌘S in a project window used to save *a take* — whichever cutting window
-	/// happened to be open — or nothing at all when none was. Save As opened a
-	/// panel offering to write a `.cuttr` file from a window showing a
-	/// `.cuttrproj`. Both now ask the key window what it is.
+	/// ⌥⌘S: this one document, and nothing else.
+	///
+	/// What ⌘S was until ⌘S became all of them. It stays because the two are
+	/// different questions — "put my work away" and "write *this* file now" —
+	/// and because it is the only one of the two that can ask where an untitled
+	/// document should go. It also has the older fault fixed in it: ⌘S in a
+	/// project window used to save *a take*, whichever cutting window happened
+	/// to be open, or nothing at all when none was.
 	@objc func save(_ sender: Any?) {
 		if let composer = currentComposer { composer.save(sender) } else { currentTake?.save(sender) }
 	}
 
 	@objc func saveAs(_ sender: Any?) {
 		if let composer = currentComposer { composer.saveAs(sender) } else { currentTake?.saveAs(sender) }
+	}
+
+	/// ⌘S: everything open that has changed, in one keystroke.
+	///
+	/// Working on a cut is several takes and the project that assembles them,
+	/// and putting that away one window at a time is a chore somebody will get
+	/// wrong — the take they forgot is the take the render does not have. So the
+	/// keystroke their hands already do means all of it.
+	///
+	/// The panel is the exception this makes for itself. A document that has
+	/// never been saved has nowhere to go, and asking is a sheet — so twenty of
+	/// them are never asked about, but *one* is, because a brand-new take and
+	/// ⌘S is the oldest gesture there is and answering it with a status line
+	/// would be a program that ignored the key.
+	@objc func saveAll(_ sender: Any?) {
+		let report = saveEverything()
+		if report.written.isEmpty, report.failed.isEmpty, report.untitled.count == 1 {
+			save(sender)
+			return
+		}
+		announce(report.line)
+	}
+
+	/// The save itself, apart from the window it is said in.
+	///
+	/// Separate from ``saveAll(_:)`` so that a test can run the command and read
+	/// what it did, and so that nothing in here can open a panel: one untitled
+	/// document is worth a question, and this is not the place that asks it.
+	///
+	/// What "everything" is: every document that is *open*, and only the ones
+	/// that differ from their file. Not every take the project lists — a take
+	/// nobody opened holds nothing that is not already on disk, so writing it
+	/// would mean reading a file and emitting it again, which at best changes
+	/// nothing and at worst rewrites a file this version does not fully
+	/// understand. Clean documents are left alone for the same reason the
+	/// emitters are hand-written: a save that touches twenty untouched takes
+	/// fills `refs/cuttr/saves` with commits of nothing.
+	///
+	/// The takes go first. A project window listens for a take being written and
+	/// re-resolves itself, so writing them in this order means the project is
+	/// written by a window that has already seen what its takes now say.
+	@discardableResult
+	func saveEverything() -> SaveReport {
+		var report = SaveReport()
+		for controller in controllers { report.add(controller.saveQuietly()) }
+		for composer in composers { report.add(composer.saveQuietly()) }
+		return report
+	}
+
+	/// Says one line in the bar of whatever document is on screen.
+	///
+	/// The bar belongs to the window and the message belongs to the document in
+	/// it, so this goes through the document rather than at the bar directly —
+	/// otherwise the tally of a save lands on the next document to come through
+	/// that window.
+	private func announce(_ text: String) {
+		switch showing {
+		case let take as MainWindowController: take.announce(text)
+		case let composer as ComposeWindowController: composer.announce(text)
+		case let scene as SceneWindowController: scene.announce(text)
+		default: break
+		}
 	}
 
 	/// The versions kept of a project. Only a project window has them: a take is
@@ -908,5 +974,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		alert.informativeText = MainMenu.shortcutSheet
 		alert.addButton(withTitle: "OK")
 		alert.runModal()
+	}
+}
+
+// MARK: - Saving everything
+
+/// What one document did when the save reached it.
+///
+/// Returned rather than reported, which is the whole design of the command: a
+/// take on a volume that has gone away must not stop the nineteen behind it,
+/// and must not put up a sheet over them either. The delegate collects these and
+/// says the tally once.
+enum DocumentSave {
+	/// Written, under this name.
+	case saved(String)
+	/// Already what is on disk. Deliberately not written — see
+	/// ``AppDelegate/saveEverything()``.
+	case unchanged
+	/// Changed, but never saved, so there is nowhere to put it without asking.
+	case untitled(String)
+	/// Tried and could not: a read-only volume, a folder that has gone.
+	case failed(name: String, reason: String)
+}
+
+/// What one ⌘S did, in the words it will be said in.
+///
+/// A save that silently half-works is worse than one that refuses, and the only
+/// place this program has to say so is the line in the bar — so the count of
+/// what went down, and the name of what did not, are both in it.
+struct SaveReport {
+	private(set) var written: [String] = []
+	private(set) var untitled: [String] = []
+	private(set) var failed: [(name: String, reason: String)] = []
+
+	mutating func add(_ outcome: DocumentSave) {
+		switch outcome {
+		case .saved(let name): written.append(name)
+		case .unchanged: break
+		case .untitled(let name): untitled.append(name)
+		case .failed(let name, let reason): failed.append((name, reason))
+		}
+	}
+
+	/// One line, and the failures at the front of it.
+	///
+	/// A status line is a line — see ``ComposeWindowController/line(from:limit:)``
+	/// — so it names the first thing that went wrong and counts the rest. What
+	/// went wrong leads, because the number written is the part somebody assumes
+	/// and the part that failed is the part they need to read.
+	var line: String {
+		var parts: [String] = []
+		if let first = failed.first {
+			parts.append(failed.count > 1
+				? "could not write \(first.name) — \(first.reason) · and \(failed.count - 1) more"
+				: "could not write \(first.name) — \(first.reason)")
+		}
+		switch written.count {
+		case 0: break
+		case 1: parts.append("saved \(written[0])")
+		default: parts.append("saved \(written.count) documents")
+		}
+		if let first = untitled.first {
+			parts.append(untitled.count > 1
+				? "\(untitled.count) documents have never been saved — ⌥⌘S says where"
+				: "\(first) has never been saved — ⌥⌘S says where")
+		}
+		// Never nothing. A keystroke that appears to do nothing is a keystroke
+		// somebody presses again, harder.
+		return parts.isEmpty ? "everything is already saved" : parts.joined(separator: "  ·  ")
 	}
 }

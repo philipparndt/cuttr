@@ -122,7 +122,8 @@ naming a clip is the same keystroke that made it.
 | `M` | cycle what you hear |
 | `F` `Z` `-` `=` | fit · zoom to clip · out · in |
 | `⌘Z` `⇧⌘Z` | undo · redo |
-| `⌘S` | save |
+| `⌘S` | save everything open that has changed — the takes and the project |
+| `⌥⌘S` | save just the document in front, or say where an unsaved one goes |
 | `⇧⌘I` | import subclips from Resolve |
 
 Everything above is also in the menu bar, on `⌘` equivalents. That is not

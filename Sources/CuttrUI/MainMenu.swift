@@ -74,7 +74,23 @@ enum MainMenu {
 		importItem.toolTip = "An EDL, FCPXML or Final Cut Pro 7 XML timeline exported from DaVinci Resolve"
 		file.addItem(importItem)
 		file.addItem(.separator())
-		file.addItem(withTitle: "Save", action: #selector(AppDelegate.save(_:)), keyEquivalent: "s")
+		// ⌘S is all of it, and the title says so.
+		//
+		// A cut is several takes and the project that assembles them, and the
+		// window a keystroke happens to be in is no way to decide which of them
+		// gets written. Only what has changed goes down; see
+		// ``AppDelegate/saveEverything()``.
+		let saveAll = NSMenuItem(title: "Save All", action: #selector(AppDelegate.saveAll(_:)),
+		                         keyEquivalent: "s")
+		saveAll.toolTip = "Writes every open document that has changed — the takes and the project"
+		file.addItem(saveAll)
+		// Still one keystroke for one file, because "write this one now" is a
+		// real thing to want and because it is the way to say where an untitled
+		// document should live.
+		let saveThis = NSMenuItem(title: "Save This One",
+		                          action: #selector(AppDelegate.save(_:)), keyEquivalent: "s")
+		saveThis.keyEquivalentModifierMask = [.command, .option]
+		file.addItem(saveThis)
 		let saveAs = NSMenuItem(title: "Save As…", action: #selector(AppDelegate.saveAs(_:)), keyEquivalent: "S")
 		saveAs.keyEquivalentModifierMask = [.command, .shift]
 		file.addItem(saveAs)
@@ -436,7 +452,11 @@ enum MainMenu {
 	  ⌥-drag       slide the audio waveform
 
 	Files
-	  ⌘S           save the cut list
+	  ⌘S           save everything open that has changed — the takes and the
+	               project, in one keystroke. What has not changed is not
+	               rewritten, and the line in the bar says what went down
+	  ⌥⌘S          save just the document in front — and the way to say where
+	               one that has never been saved should go
 	  ⇧⌘Y          versions of the project — every pause in the editing leaves
 	               one, on refs/cuttr/saves, and this is the way back to one
 	  ⇧⌘I          import subclips from a Resolve EDL or XML
