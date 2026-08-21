@@ -140,7 +140,7 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		// constraints by its autoresizing mask, and every content minimum
 		// inside it is then one half of a system with no solution.
 		let lists = PaneStack([
-			PaneBox("clips", content: clipTable, accessory: swatches),
+			PaneBox("clips", content: clipTable),
 			PaneBox("faces", content: anchorTable),
 			PaneBox("words", content: transcriptPane,
 			        accessory: transcriptPane.detachedHead()),
@@ -282,6 +282,13 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		}
 		bar.onPlayPause = { [weak self] in self?.playSelectionOrToggle() }
 		bar.addLeading(monitor)
+		// The lane colours are in the bar, not on the clips pane's heading.
+		// Which lane the next cut goes on is true of the whole window — the
+		// timeline draws every lane, the words pane cuts on to one, the
+		// keyboard marks on one — so it was a window-level choice sitting in
+		// the heading of one of the four panes, and invisible whenever that
+		// pane was folded away.
+		bar.addLeading(swatches)
 		bar.setPlaying(transport.isPlaying)
 		bar.setStatus(said)
 		bar.setProgress(progressed)
@@ -434,6 +441,23 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			self?.setTime(id, isStart: isStart, text: text)
 		}
 		clipTable.contextMenu = { [weak self] id in self?.clipMenu(for: id, at: nil) }
+		// Space is a look at the clip that is selected, and the same key again
+		// puts it away; escape does too, and only while it is open. Both
+		// questions are asked of `QuickLook` rather than answered here, for the
+		// same reason the tree asks them: space belongs to several things in
+		// this program and the only safe way to take it is to be able to say
+		// where it is *not* taken.
+		clipTable.onKey = { [weak self] event in
+			guard let self else { return false }
+			if QuickLook.dismisses(event), self.clipLook != nil {
+				self.closeClipLook()
+				return true
+			}
+			guard QuickLook.claims(event, editing: false, hasSpan: self.selectedClipSpan != nil)
+			else { return false }
+			if self.clipLook != nil { self.closeClipLook() } else { self.showClipLook() }
+			return true
+		}
 
 		// Selecting words is setting in and out. That is the whole claim this
 		// pane makes: a sentence you can read is a cut you can make, and the
@@ -925,6 +949,60 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			}
 			self.refresh()
 		}
+	}
+
+	// MARK: - A look at one clip
+
+	private var clipLook: QuickLookPanel?
+
+	/// The selected clip's span on the take's clock, which is the clock the
+	/// transport's composition is on.
+	private var selectedClipSpan: QuickLook.Span? {
+		guard let id = selectedClip,
+		      let clip = takeDocument.take.clips.first(where: { $0.id == id }),
+		      clip.end > clip.start else { return nil }
+		return QuickLook.Span(start: clip.start, end: clip.end)
+	}
+
+	/// For the tests: the span a look would play, and the selection without a
+	/// mouse.
+	var clipLookSpanForTesting: QuickLook.Span? { selectedClipSpan }
+
+	func selectForTesting(clip id: Clip.ID) { selectedClip = id }
+
+	/// A look at the selected clip, beside the row it was chosen from.
+	///
+	/// Playing the transport's own composition rather than one built here: it is
+	/// the take with its recorder track already at the offset, kept in step by
+	/// whatever moves the alignment, and a second assembly of the same media
+	/// would be a second thing to get wrong.
+	private func showClipLook() {
+		guard let window, let span = selectedClipSpan,
+		      let id = selectedClip,
+		      let clip = takeDocument.take.clips.first(where: { $0.id == id }) else {
+			closeClipLook()
+			return
+		}
+		let panel = clipLook ?? QuickLookPanel()
+		clipLook = panel
+		let row = window.convertToScreen(clipTable.convert(clipTable.rectOfSelectedRow(), to: nil))
+		let column = window.convertToScreen(clipTable.convert(clipTable.bounds, to: nil))
+		panel.show(
+			span, titled: clip.name.isEmpty ? clip.slug : clip.name,
+			saying: "\(Timecode.string(span.start)) → \(Timecode.string(span.end))"
+				+ "   \(TakeWriter.number(span.duration, places: 1))s",
+			playing: { [weak self] in
+				guard let played = self?.transport.playing else { return nil }
+				return (played.composition, played.videoComposition,
+				        played.audioMix, played.duration)
+			},
+			over: window, beside: column, row: row,
+			output: takeDocument.videoInfo?.naturalSize ?? CGSize(width: 1920, height: 1080))
+	}
+
+	private func closeClipLook() {
+		clipLook?.hide()
+		clipLook = nil
 	}
 
 	/// Brings the clips of this take level with each other.

@@ -3,12 +3,17 @@ import CuttrKit
 
 /// The six lane colours, in a row.
 ///
-/// On the clips pane's heading rather than in the window's bar: they are about
-/// the clips, and the clips are the list underneath them. A colour is chosen
-/// *before* the cut as often as after it — somebody working through alternate
-/// takes picks rose, marks four of them, picks green, marks the keepers — so
-/// this is a row of swatches and not only a menu item on a clip that already
-/// exists.
+/// In the window's bar, because that is the scope of the thing: which lane the
+/// next cut goes on is true of the whole window. The timeline draws every lane,
+/// the words pane cuts on to one, and the mark key marks on one — so on the
+/// clips pane's heading, where this used to be, it was a window-level choice
+/// living in one of four panes and gone from the screen whenever that pane was
+/// folded away.
+///
+/// A row of swatches rather than only a menu item on a clip that already
+/// exists, because a colour is chosen *before* the cut as often as after it:
+/// somebody working through alternate takes picks rose, marks four of them,
+/// picks green, marks the keepers.
 @MainActor
 public final class ColorSwatches: NSView {
 
