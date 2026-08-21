@@ -311,10 +311,21 @@ the row and plays exactly that — a clip is its span, a section is everything
 inside it, an overlay or a sound is the stretch it is on for, several rows are
 the run from the first to the last — and it plays the assembly the window has
 already built, so it arrives in a few milliseconds rather than being rendered.
-`space` again, `escape`, or a click anywhere but the tree puts it away; arrowing
-down the tree with it open moves it on to the next thing. It is a look, not a
-place: the playhead the window is showing does not move, and nothing about the
-file changes. A whole section watched properly is still `Preview “name” on its
+The captions, spinners, scenes and bubbles are on it, drawn by the same builder
+that draws them over the preview and encodes them into the file, so a look is a
+look at what will be rendered. `space` again, `escape`, or a click anywhere but
+the tree puts it away; arrowing down the tree with it open moves it on to the
+next thing. Drag the caption strip along the bottom of it to move it, its
+right-hand corner to resize it — a look that was put somewhere stays there while
+you walk the tree, and the size it was given is kept for the next one. It is a
+look, not a place: the playhead the window is showing does not move, and nothing
+about the file changes.
+
+**`space` in the library is a look at the clip.** The same panel, playing the
+take's own media at the take's alignment — the material as it was recorded,
+which is what you want before deciding whether to place it. It works for a clip
+that is nowhere near the programme, because it is not playing the programme.
+`return` is still what puts a clip on the timeline. A whole section watched properly is still `Preview “name” on its
 own` from the row's own menu, which takes the window to the picture — and both
 play the same stretch of programme.
 

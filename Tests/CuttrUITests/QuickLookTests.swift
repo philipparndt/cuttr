@@ -330,6 +330,152 @@ import Testing
 		#expect(!panel.isLooking)
 	}
 
+	// MARK: - Moving it and sizing it
+
+	/// The caption strip is the handle, its right-hand end is the size, and the
+	/// picture is neither: a press on the picture is somebody finished looking,
+	/// which is the rule this panel has always had.
+	@Test func theCaptionStripIsTheHandleAndItsCornerTheSize() {
+		let bounds = NSRect(x: 0, y: 0, width: 480, height: 304)
+		let strip = QuickLookPanel.captionHeight
+		#expect(QuickLook.grip(at: NSPoint(x: 200, y: strip / 2), in: bounds) == .bar)
+		#expect(QuickLook.grip(at: NSPoint(x: 474, y: strip / 2), in: bounds) == .corner)
+		#expect(QuickLook.grip(at: NSPoint(x: 200, y: 200), in: bounds) == nil)
+		#expect(QuickLook.grip(at: NSPoint(x: 474, y: 200), in: bounds) == nil,
+		        "above the strip is the picture, corner or not")
+	}
+
+	/// A corner drag keeps the programme's shape and the panel's top left corner,
+	/// because the panel is anchored beside the row it is about.
+	@Test func aCornerDragKeepsTheShapeAndTheCornerItIsAnchoredBy() {
+		let window = NSRect(x: 0, y: 0, width: 1400, height: 900)
+		let output = NSSize(width: 1920, height: 1080)
+		let frame = QuickLook.size(for: output, in: window)
+		let start = NSRect(x: 500, y: 400, width: frame.width, height: frame.height)
+		let bigger = QuickLook.resized(start, by: NSSize(width: 120, height: 0),
+		                               output: output, inside: window)
+		#expect(bigger.width == start.width + 120)
+		#expect(bigger.minX == start.minX)
+		#expect(bigger.maxY == start.maxY)
+		let picture = bigger.height - QuickLookPanel.captionHeight
+		#expect(abs(picture - bigger.width * 9 / 16) < 1, "the shape drifted")
+
+		// Dragging down does the same thing, because one number decides it.
+		let down = QuickLook.resized(start, by: NSSize(width: 0, height: 120),
+		                             output: output, inside: window)
+		#expect(down == bigger)
+		// And dragging back shrinks it.
+		#expect(QuickLook.resized(start, by: NSSize(width: -60, height: 0),
+		                          output: output, inside: window).width == start.width - 60)
+	}
+
+	/// It cannot be dragged smaller than a look or bigger than the window it
+	/// hovers over.
+	@Test func aCornerDragStaysWithinReason() {
+		let window = NSRect(x: 0, y: 0, width: 1000, height: 700)
+		let output = NSSize(width: 1920, height: 1080)
+		let start = NSRect(x: 100, y: 100, width: 400, height: 259)
+		let tiny = QuickLook.resized(start, by: NSSize(width: -900, height: 0),
+		                             output: output, inside: window)
+		#expect(tiny.width == QuickLook.narrowest)
+		let huge = QuickLook.resized(start, by: NSSize(width: 5000, height: 0),
+		                             output: output, inside: window)
+		#expect(huge.width <= window.width - 2 * QuickLook.margin)
+		#expect(huge.height <= window.height - 2 * QuickLook.margin)
+	}
+
+	/// A tall programme in a short window is sized by the height it has room
+	/// for. A panel taller than the window it hovers over cannot be placed clear
+	/// of anything in it.
+	///
+	/// Not at any cost: a window shorter than a look is narrow keeps the width,
+	/// because a panel 90 points across says nothing about anything. That is a
+	/// window nobody composes in.
+	@Test func aTallProgrammeIsSizedByTheRoomAbove() {
+		let window = NSRect(x: 0, y: 0, width: 1600, height: 700)
+		let size = QuickLook.size(for: NSSize(width: 1080, height: 1920), in: window)
+		#expect(size.height <= window.height - 2 * QuickLook.margin)
+		let place = QuickLook.place(size, beside: NSRect(x: 0, y: 0, width: 300, height: 500),
+		                            row: NSRect(x: 0, y: 250, width: 300, height: 26),
+		                            inside: window)
+		#expect(window.contains(place))
+	}
+
+	/// A look that has been put somewhere stays there while the tree is walked.
+	///
+	/// Anchoring it beside the row is right until somebody moves it, and then it
+	/// is not: a panel that snapped back to the row on every arrow key would be a
+	/// panel that cannot be moved at all.
+	@Test func aLookThatWasPutSomewhereStaysThere() throws {
+		let (project, resolved) = try programme()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
+		                      styleMask: [.titled], backing: .buffered, defer: true)
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 440, height: 820))
+		window.contentView?.addSubview(panel)
+		panel.resolved = resolved
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary())
+		panel.selectRow(0)
+		panel.showLook()
+		let look = try #require(panel.lookPanelForTesting)
+
+		look.grabForTesting()
+		look.setFrameOrigin(NSPoint(x: 40, y: 60))
+		panel.selectRow(2)
+		panel.showLook()
+		#expect(look.frame.origin == NSPoint(x: 40, y: 60))
+
+		// Put away and taken again, it is beside the row once more: where it was
+		// put was about that look.
+		panel.closeLook()
+		panel.showLook()
+		#expect(look.frame.origin != NSPoint(x: 40, y: 60))
+		panel.closeLook()
+	}
+
+	/// The size it was dragged to is a preference and outlives the look: somebody
+	/// who wants a bigger picture wants it for the next row as well.
+	@Test func theSizeItWasGivenOutlivesTheLook() throws {
+		let (project, resolved) = try programme()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1600, height: 1000),
+		                      styleMask: [.titled], backing: .buffered, defer: true)
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 440, height: 1000))
+		window.contentView?.addSubview(panel)
+		panel.resolved = resolved
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary())
+		panel.selectRow(0)
+		panel.showLook()
+		let look = try #require(panel.lookPanelForTesting)
+		let was = look.frame.width
+		look.sizeForTesting(by: NSSize(width: 150, height: 0))
+		let chosen = look.frame.width
+		#expect(chosen == was + 150)
+
+		panel.closeLook()
+		panel.showLook()
+		#expect(look.frame.width == chosen)
+		panel.closeLook()
+	}
+
+	/// The list keeps the keyboard while a look is open, which is what makes
+	/// space and the arrows go on working where somebody is looking. Now that the
+	/// panel answers the mouse, that has to be said out loud.
+	@Test func theLookNeverTakesTheKeyboard() throws {
+		let (project, resolved) = try programme()
+		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
+		                      styleMask: [.titled], backing: .buffered, defer: true)
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 440, height: 820))
+		window.contentView?.addSubview(panel)
+		panel.resolved = resolved
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary())
+		panel.selectRow(0)
+		panel.showLook()
+		let look = try #require(panel.lookPanelForTesting)
+		#expect(!look.canBecomeKey)
+		#expect(!look.canBecomeMain)
+		#expect(!look.isKeyWindow)
+		panel.closeLook()
+	}
+
 	/// The picture is the programme's shape, so nothing is letterboxed inside a
 	/// panel that is itself the wrong shape — and it stays a look rather than
 	/// growing into the window.
