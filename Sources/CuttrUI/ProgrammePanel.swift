@@ -54,7 +54,8 @@ extension ProjectSelection {
 /// nesting, what is on and what is off — and the properties of whatever is
 /// selected are edited beside it, where there is room for them to be labelled.
 @MainActor
-public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
+public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
+                                    NSMenuItemValidation {
 
 	/// A whole project, edited.
 	public var onChange: ((Project) -> Void)?
@@ -117,7 +118,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	/// Dragging an entry means dragging its position, so the position is what
 	/// travels: `0.2.1` is the second entry of the third entry of the first.
-	private static let entryType = NSPasteboard.PasteboardType("de.rnd7.cuttr.entry")
+	static let entryType = NSPasteboard.PasteboardType("de.rnd7.cuttr.entry")
 	/// An overlay or a sound being dragged from one home to another, which is a
 	/// different question from where an entry goes and so a different type.
 	private static let carriedType = NSPasteboard.PasteboardType("de.rnd7.cuttr.carried")
@@ -126,6 +127,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// one: it is a thing to be *drawn*, and what it needs underneath it is a
 	/// card.
 	public static let sceneType = NSPasteboard.PasteboardType("de.rnd7.cuttr.scene")
+	/// Entries themselves, for ⌘C: not where they are but what they *are*.
+	///
+	/// A path is enough for a drag, which ends half a second later in the same
+	/// tree. A copy on the pasteboard has to survive the original being deleted
+	/// and being pasted into another project, so it carries the entry — and it
+	/// carries it as the file writes it. See ``write(_:)``.
+	static let entriesType = NSPasteboard.PasteboardType("de.rnd7.cuttr.entries")
 
 	// MARK: - Tree
 
@@ -511,7 +519,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		// than one at a time, and delete on four selected rows should take four
 		// off rather than the last one clicked.
 		outline.allowsMultipleSelection = true
-		outline.setDraggingSourceOperationMask(.move, forLocal: true)
+		// Both, because ⌥ is how macOS says "copy that" — and AppKit will only
+		// offer it, and only draw the `+` on the cursor, if the source says it
+		// is possible. Which of the two a drag turns out to be is
+		// ``copies(_:)``.
+		outline.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
 
 		let scroll = TableScroll.fitting(outline)
 		over(scroll, programmeHint)
@@ -679,6 +691,20 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		outline.selectedRowIndexes.compactMap { (outline.item(atRow: $0) as? Node)?.path }
 	}
 
+	/// The selected rows that are entries, and only those.
+	///
+	/// A row that is an overlay or a sound carries the path of the entry it
+	/// hangs on, which is right for asking what it belongs to and wrong for ⌘C:
+	/// copying a shot because somebody had one of its captions selected would
+	/// copy something they never pointed at.
+	private var selectedEntryPaths: [[Int]] {
+		outline.selectedRowIndexes.compactMap { row in
+			guard let node = outline.item(atRow: row) as? Node,
+			      node.carried == nil, !node.isOverlayRoot else { return nil }
+			return node.path
+		}
+	}
+
 	@objc private func addClip() { insert(TimelineEntry(clip: ClipReference("clip"))) }
 	@objc private func addGroup() { insert(TimelineEntry(group: "section", entries: [])) }
 	/// Four seconds of black, named — because a card is nearly always there to
@@ -710,14 +736,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	private func insert(_ entry: TimelineEntry) {
 		var next = project
-		// Inside a selected section rather than after it. A section is a place
-		// to put things, and the commonest reason to have one selected is that
-		// the next thing belongs in it.
-		if let path = selectedPath, case .group = project.entry(at: path)?.source {
-			pending = .entry(next.insertEntry(entry, into: path, at: Int.max))
-		} else {
-			next.insertEntry(entry, after: selectedPath)
-		}
+		let target = additionTarget
+		pending = .entry(next.insertEntry(entry, into: target.parent, at: target.index))
 		onChange?(next)
 	}
 
@@ -729,10 +749,20 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		insert(entry)
 	}
 
+	/// Another one just like it: the entry, with everything written inside it,
+	/// directly after the original.
+	///
+	/// The arithmetic and the naming are the model's — see
+	/// ``CuttrCompose/Project/copy(of:avoiding:)``. This used to insert the
+	/// entry a second time as it stood, which duplicated its `as:` name too:
+	/// two entries answering to `@shot` are not two things a caption picks
+	/// between, they are one stretch of programme from the first to the last of
+	/// them, so a caption hung on the name quietly grew to cover both.
 	@objc private func duplicateEntry() {
-		guard let path = selectedPath, let entry = project.entry(at: path) else { return }
+		guard let path = selectedPath else { return }
 		var next = project
-		next.insertEntry(entry, after: path)
+		guard let landed = next.duplicateEntry(at: path) else { return }
+		pending = .entry(landed)
 		onChange?(next)
 	}
 
@@ -1382,7 +1412,20 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			let parent = self.node(at: Array(node.path.dropLast()))
 			outlineView.setDropItem(parent, dropChildIndex: (node.path.last ?? 0) + 1)
 		}
-		return info.draggingSource as? NSOutlineView === outlineView ? .move : .copy
+		guard info.draggingSource as? NSOutlineView === outlineView else { return .copy }
+		return Self.copies(info.draggingSourceOperationMask) ? .copy : .move
+	}
+
+	/// Whether a drag inside the tree is asking to copy rather than to move.
+	///
+	/// ⌥ is the gesture and AppKit is what reads it: a source offering both
+	/// operations has its mask narrowed to the copy while the key is held, which
+	/// is the same thing that puts the `+` on the cursor. Read from the mask
+	/// rather than asked of `NSEvent`, so the answer here and the cursor the
+	/// pointer is showing cannot disagree — and so it can be answered without a
+	/// mouse.
+	static func copies(_ mask: NSDragOperation) -> Bool {
+		mask.contains(.copy) && !mask.contains(.move)
 	}
 
 	public func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo,
@@ -1392,7 +1435,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			let node = item as? Node
 			return rehome(carried, onto: node?.isOverlayRoot == true ? nil : node?.path)
 		}
-		return dropItems(from: info.draggingPasteboard, into: (item as? Node)?.path ?? [], at: index)
+		return dropItems(from: info.draggingPasteboard, into: (item as? Node)?.path ?? [],
+		                 at: index, copying: Self.copies(info.draggingSourceOperationMask))
 	}
 
 	/// An overlay or a sound dropped on a row: it belongs to that row now.
@@ -1451,8 +1495,15 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	}
 
 	/// What a drop does, without an `NSDraggingInfo` to make one.
+	///
+	/// `copying` is ⌥ held down. It changes one line: the entries on the
+	/// pasteboard are duplicated into the destination instead of being taken
+	/// out of where they were. The machinery is the same machinery either way,
+	/// which is the point — a copy is a move without the removal, and the
+	/// arithmetic that made the move right is not worth having twice.
 	@discardableResult
-	func dropItems(from board: NSPasteboard, into parent: [Int], at index: Int) -> Bool {
+	func dropItems(from board: NSPasteboard, into parent: [Int], at index: Int,
+	               copying: Bool = false) -> Bool {
 		var next = project
 
 		// Every entry on the pasteboard, because a drag of four rows writes four
@@ -1465,7 +1516,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				.split(separator: ".").compactMap { Int($0) }
 		}
 		if !dragged.isEmpty {
-			let landed = next.moveEntries(at: dragged, toParent: parent, index: index)
+			let landed = copying
+				? next.duplicateEntries(at: dragged, toParent: parent, index: index)
+				: next.moveEntries(at: dragged, toParent: parent, index: index)
+			// A copy that copied nothing is not an edit, and writing the project
+			// back unchanged would put a save in the history for a drag that did
+			// nothing.
+			if copying, landed.isEmpty { return false }
 			pending = landed.last.map { ProjectSelection.entry($0) } ?? .output
 			onChange?(next)
 			return true
@@ -1489,6 +1546,118 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		pending = .entry(landed)
 		onChange?(next)
 		return true
+	}
+
+	// MARK: - Copy and paste
+
+	// ⌘C and ⌘V arrive through the *menu*: Edit ▸ Copy is `copy:` with no
+	// target, so it goes down the responder chain and finds these two on the
+	// panel the tree is inside. Not the tree's own key handler — the compose
+	// window's key monitor hands every ⌘ press straight back to the menu,
+	// deliberately, because that is where ⌘ keys are routed in this program.
+	// The pair is here rather than on the outline view because the panel is
+	// what holds the project.
+
+	@objc public func copy(_ sender: Any?) { write(NSPasteboard.general) }
+
+	@objc public func paste(_ sender: Any?) { paste(from: NSPasteboard.general) }
+
+	/// What ⌘C puts on the pasteboard: the selected entries, written the way
+	/// the project file writes them.
+	///
+	/// The file's own bytes rather than a spelling of this panel's own, for two
+	/// reasons. It is the one form of an entry that is already known to survive
+	/// a round trip — ``ProjectWriter`` out, ``ProjectReader`` back — so a copy
+	/// carries everything an entry has, including the overlays and sounds
+	/// written inside it and everything inside a section, without a second
+	/// encoder to keep in step with the first. And it is the same text on
+	/// `.string`, so ⌘C here and ⌘V in the project file's own editor puts the
+	/// lines in by hand — which is the whole promise of a format somebody is
+	/// meant to be able to read.
+	@discardableResult
+	func write(_ board: NSPasteboard) -> Bool {
+		let entries = Project.outermost(selectedEntryPaths).compactMap { project.entry(at: $0) }
+		guard !entries.isEmpty else { return false }
+		board.clearContents()
+		board.writeObjects(entries.map { entry in
+			let item = NSPasteboardItem()
+			let text = Self.lines(of: entry)
+			item.setString(text, forType: Self.entriesType)
+			item.setString(text, forType: .string)
+			return item
+		})
+		return true
+	}
+
+	/// ⌘V: whatever is on the pasteboard, onto the programme.
+	///
+	/// Where it lands is the rule the `＋` button already uses, because pasting
+	/// *is* adding: inside the selected section, after the selected entry, or on
+	/// the end of the programme when nothing is selected. Nothing selected is
+	/// the case worth stating — a paste has to go somewhere, and the end of the
+	/// programme is the only place that is not a guess about which row somebody
+	/// meant.
+	///
+	/// Every entry is named against the project as it stands, so pasting a shot
+	/// called `@opening` back into the same programme gives `@opening-2` rather
+	/// than a second answer to the same name. Pasting it into a project that has
+	/// never heard the name keeps it.
+	@discardableResult
+	func paste(from board: NSPasteboard) -> Bool {
+		let entries = Self.entries(on: board)
+		guard !entries.isEmpty else { return false }
+		let target = additionTarget
+		var next = project
+		var landed: [Int] = []
+		for (offset, entry) in entries.enumerated() {
+			landed = next.insertEntry(
+				next.copy(of: entry), into: target.parent,
+				at: target.index == Int.max ? Int.max : target.index + offset)
+		}
+		pending = .entry(landed)
+		onChange?(next)
+		return true
+	}
+
+	/// Whether there is anything on the pasteboard to paste. Asked by the menu,
+	/// so that Paste is grey when it would do nothing rather than doing nothing
+	/// when it is pressed.
+	func canPaste(from board: NSPasteboard) -> Bool { !Self.entries(on: board).isEmpty }
+
+	/// One entry as the file writes it, without the `timeline:` line above it —
+	/// so several of them can be pasted into a file's timeline as they stand.
+	private static func lines(of entry: TimelineEntry) -> String {
+		let fragment = ProjectWriter.fragment(for: entry)
+		guard let end = fragment.firstIndex(of: "\n") else { return fragment }
+		return String(fragment[fragment.index(after: end)...])
+	}
+
+	/// The entries a pasteboard holds, read with the reader the file uses.
+	///
+	/// Plain text is tried as well as this panel's own type, and read the same
+	/// way: text copied out of the project file *is* a timeline, so lines lifted
+	/// from the editor beside this tree paste onto the programme. Text that is
+	/// not one yields nothing, which is how Paste knows to be grey — a stray
+	/// sentence from another program must not become an entry naming a clip
+	/// nobody has.
+	private static func entries(on board: NSPasteboard) -> [TimelineEntry] {
+		(board.pasteboardItems ?? []).flatMap { item -> [TimelineEntry] in
+			guard let text = item.string(forType: Self.entriesType)
+				?? item.string(forType: .string) else { return [] }
+			return (try? ProjectReader.read("timeline:\n" + text).timeline) ?? []
+		}
+	}
+
+	/// Where something added lands: inside the selected section, after the
+	/// selected entry, or on the end of the programme.
+	///
+	/// `Int.max` is "on the end" — see ``CuttrCompose/Project/insertEntry(_:into:at:)``.
+	private var additionTarget: (parent: [Int], index: Int) {
+		guard let path = selectedPath, !path.isEmpty else { return ([], Int.max) }
+		// A section is a place to put things, and the commonest reason to have
+		// one selected is that the next thing belongs in it.
+		if case .group = project.entry(at: path)?.source { return (path, Int.max) }
+		return (Array(path.dropLast()), (path.last ?? 0) + 1)
 	}
 
 	/// A scene dropped on the programme becomes an intro screen: a card with
@@ -1515,16 +1684,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		let seconds = last > 0.05 ? (last * 10).rounded(.up) / 10 : 4
 
 		// The label has to be one nothing else answers to, or an overlay that
-		// hangs on it would follow whichever came first.
-		var label = name
-		var suffix = 2
-		let taken = Set(next.timeline.flatMap { entry -> [String] in
-			entry.label.map { [$0] } ?? []
-		})
-		while taken.contains(label) {
-			label = "\(name)-\(suffix)"
-			suffix += 1
-		}
+		// hangs on it would follow whichever came first. Every name on the
+		// timeline, not the top level's labels: a section's name and an `as:`
+		// are one namespace, and this used to miss both the sections and
+		// anything nested inside one.
+		let label = Slug.unique(name, taken: next.entryNames)
 
 		let card = TimelineEntry(source: .card(Card(duration: seconds)), label: label)
 		let where_ = next.insertEntry(card, into: parent, at: index < 0 ? Int.max : index)
@@ -1650,6 +1814,15 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			play.target = self
 			play.representedObject = name
 			menu.addItem(play)
+		}
+		// Another one just like it, where the pointer already is. The button
+		// above the tree does the same thing, and a verb that only exists as a
+		// symbol on a small button is a verb with one user.
+		if node.carried == nil, !node.isOverlayRoot {
+			let again = NSMenuItem(title: "Duplicate", action: #selector(duplicateSelected),
+			                       keyEquivalent: "")
+			again.target = self
+			menu.addItem(again)
 		}
 		if case .clip = node.entry.source, node.overlay == nil, !node.isOverlayRoot {
 			// Not "Open “clip-4” in its take": the row it was opened from says
@@ -1825,6 +1998,24 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	public override func viewDidMoveToWindow() {
 		super.viewDidMoveToWindow()
 		if window == nil { closeLook() }
+	}
+
+	// MARK: - What the Edit menu may do
+
+	/// Whether Edit ▸ Copy and Edit ▸ Paste mean anything with this selection.
+	///
+	/// Everything else the panel is the target of is its own menus — the `＋`
+	/// items, the row menu — and those are built for the row they are shown on,
+	/// so they are enabled.
+	public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+		switch item.action {
+		case #selector(copy(_:)):
+			return !selectedEntryPaths.isEmpty
+		case #selector(paste(_:)):
+			return canPaste(from: .general)
+		default:
+			return true
+		}
 	}
 
 	// MARK: - Rows
