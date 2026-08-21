@@ -42,7 +42,14 @@ final class PersonMask: @unchecked Sendable {
 
 	private let request = VNGeneratePersonSegmentationRequest()
 	/// For turning the mask into pixels of our own, straight away.
-	private let context = CIContext(options: [.workingColorSpace: NSNull()])
+	///
+	/// The same unmanaged context as every other pass — ``Renderer/context()``
+	/// says why — and for a mask it is the only right answer either way. A mask
+	/// is coverage, not colour: its values say how much of a person is at a
+	/// pixel, and a transfer function applied to them bends the edge. So the day
+	/// the rest of the passes go managed, this one still has to say that these
+	/// numbers are to be left alone.
+	private let context = Renderer.context()
 	/// One request object, one frame at a time. Vision's handler is not two
 	/// things and Core Image asks from several threads.
 	private let lock = NSLock()

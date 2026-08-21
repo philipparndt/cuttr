@@ -80,10 +80,9 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 
 	// MARK: - AVVideoCompositing
 
-	/// Colour management off, for the reason the renderer records: converting
-	/// Rec. 709 video into Core Image's linear space and back does not come
-	/// home, and the picture arrives seven or eight levels lifted.
-	private let context = CIContext(options: [.workingColorSpace: NSNull()])
+	/// Colour management off — ``Renderer/context()`` records what that costs,
+	/// what it was thought to cost, and what has to be true before it can go on.
+	private let context = Renderer.context()
 
 	let sourcePixelBufferAttributes: [String: any Sendable]? = [
 		kCVPixelBufferPixelFormatTypeKey as String: [kCVPixelFormatType_32BGRA],
@@ -171,10 +170,18 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 			return
 		}
 		// No colour space, no colour matching: the values that came out of the
-		// footage are the values written back. Handing this a space converts
-		// them, and the picture arrives forty levels dark.
+		// footage are the values written back.
+		//
+		// `nil` and not `CGColorSpace(name: .itur_709)`, which is what stood
+		// here under this same comment — a contradiction that was harmless only
+		// because with the working space null the argument is ignored, and that
+		// would have been the bug the day it stopped being ignored. Measured: it
+		// is *not* the space these buffers are tagged with, and landing a
+		// managed pass in it lifts the picture by up to nineteen levels. When
+		// management goes on, the space to name here is the one Core Video
+		// builds from the buffer's own attachments.
 		context.render(image, to: buffer, bounds: CGRect(origin: .zero, size: size),
-		               colorSpace: CGColorSpace(name: CGColorSpace.itur_709))
+		               colorSpace: nil)
 		request.finish(withComposedVideoFrame: buffer)
 	}
 
