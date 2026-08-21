@@ -1,3 +1,4 @@
+import CuttrKit
 import Foundation
 
 /// Editing the timeline as a tree.
@@ -151,16 +152,8 @@ extension Project {
 		for path in paths where parent.count >= path.count
 			&& Array(parent.prefix(path.count)) == path { return paths }
 
-		let outermost = paths.filter { path in
-			!paths.contains { other in
-				other.count < path.count && Array(path.prefix(other.count)) == other
-			}
-		}
 		// In the order they appear, so they arrive in that order too.
-		let ordered = outermost.sorted { a, b in
-			for (x, y) in zip(a, b) where x != y { return x < y }
-			return a.count < b.count
-		}
+		let ordered = Self.outermost(paths)
 		let lifted = ordered.compactMap { entry(at: $0) }
 		guard lifted.count == ordered.count else { return paths }
 
@@ -245,6 +238,205 @@ extension Project {
 	/// which is what the tree's arrows do now that both live there.
 	public mutating func editEntry(at path: [Int], _ change: (inout TimelineEntry) -> Void) {
 		modify(at: path) { list, at in change(&list[at]) }
+	}
+
+
+	// MARK: - Copying
+
+	/// Every name the timeline answers to: the sections, and the `as:` labels.
+	///
+	/// One set, because they are one namespace. An overlay hangs on `@name`
+	/// without caring which of the two put the name there, and the resolver
+	/// keeps both in the same dictionary — so two entries answering to one name
+	/// are not two things a caption picks between, they are *one* stretch of
+	/// programme reaching from the first to the last of them. A caption hung on
+	/// that quietly covers everything in between, which is the failure this set
+	/// exists to prevent.
+	public var entryNames: Set<String> {
+		var out: Set<String> = []
+		func walk(_ entries: [TimelineEntry]) {
+			for entry in entries {
+				if let label = entry.label { out.insert(label) }
+				if case .group(let name, let inner) = entry.source {
+					out.insert(name)
+					walk(inner)
+				}
+			}
+		}
+		walk(timeline)
+		return out
+	}
+
+	/// A copy of an entry with everything hung on it, named so that nothing on
+	/// the programme answers to two things.
+	///
+	/// This is the operation the whole feature is: somebody has built a shot up
+	/// with a film look, a bubble, a caption and a sting, wants the same
+	/// treatment on a different shot, and should not have to hang any of it
+	/// again. Copy the entry, then change which clip it points at.
+	///
+	/// **What comes with it.** The overlays and the sounds written *inside* the
+	/// entry, and — for a section — everything inside it, with whatever those
+	/// entries have written inside them, all the way down. A section whose
+	/// contents did not come would make the word a lie.
+	///
+	/// **What does not.** An overlay or a sound in the project's own list that
+	/// *names* this entry stays exactly where it is and goes on covering what
+	/// it covered. It is not written inside the entry, so it is not part of it —
+	/// the tree files it under the entry it names, but that is where it is shown
+	/// rather than where it lives. Two of the three cases are not copyable
+	/// honestly in any event: one that names the entry's own `@name` would have
+	/// to be rebound to whatever the copy is called, which is a change to a list
+	/// nobody pointed at, and one that names a *clip* already covers the copy,
+	/// because it names material and the copy is another use of the same
+	/// material.
+	///
+	/// **The names.** Every `as:` label and every section name in the copy is
+	/// made unique against the ones the timeline already uses — `shot` becomes
+	/// `shot-2` — because a duplicate that left them alone would produce
+	/// exactly the ambiguity above. References *within* the copy follow it: a
+	/// caption inside the copied section that said `within: @shot` says
+	/// `within: @shot-2` afterwards, so the copy is as self-contained as the
+	/// original was. A name that is free is left alone, which is what makes
+	/// this the right function for a paste from somewhere else as well.
+	///
+	/// A span bound to a **clip** is a different matter and is left as it is:
+	/// the copy plays the same material, so `from: intro` now finds two places
+	/// and a caption hung on it comes on over both. That is not this operation
+	/// misbehaving, it is what putting the same clip on the programme twice has
+	/// always meant, and `as:` with a name is the file's own answer to it.
+	public func copy(of entry: TimelineEntry, avoiding extra: Set<String> = []) -> TimelineEntry {
+		var taken = entryNames.union(extra)
+		var renames: [String: String] = [:]
+		// Two passes, because a name is used before it is read: an overlay on
+		// the first entry of a section may hang on the name of the last, so
+		// nothing can be rebound until every name in the copy is settled.
+		let renamed = Self.renaming(entry, taken: &taken, recording: &renames)
+		return Self.rebinding(renamed, to: renames)
+	}
+
+	/// Pass one: every name in the subtree, made free, recorded as it goes.
+	private static func renaming(
+		_ entry: TimelineEntry, taken: inout Set<String>, recording renames: inout [String: String]
+	) -> TimelineEntry {
+		var out = entry
+		if let label = entry.label {
+			let now = Slug.unique(label, taken: taken)
+			taken.insert(now)
+			renames[label] = now
+			out.label = now
+		}
+		if case .group(let name, let inner) = entry.source {
+			let now = Slug.unique(name, taken: taken)
+			taken.insert(now)
+			renames[name] = now
+			out.source = .group(now, inner.map {
+				renaming($0, taken: &taken, recording: &renames)
+			})
+		}
+		return out
+	}
+
+	/// Pass two: every span inside the subtree, pointed at the copy's names.
+	private static func rebinding(_ entry: TimelineEntry, to renames: [String: String])
+		-> TimelineEntry
+	{
+		var out = entry
+		for index in out.overlays.indices {
+			for appearance in out.overlays[index].appearances.indices {
+				out.overlays[index].appearances[appearance].span =
+					rebinding(out.overlays[index].appearances[appearance].span, to: renames)
+			}
+		}
+		for index in out.sounds.indices {
+			out.sounds[index].span = out.sounds[index].span.map { rebinding($0, to: renames) }
+		}
+		if case .group(let name, let inner) = out.source {
+			out.source = .group(name, inner.map { rebinding($0, to: renames) })
+		}
+		return out
+	}
+
+	private static func rebinding(_ span: Overlay.Span, to renames: [String: String])
+		-> Overlay.Span
+	{
+		func moved(_ endpoint: Overlay.Span.Endpoint) -> Overlay.Span.Endpoint {
+			// Only the names this copy brought with it. A clip endpoint names
+			// material and is right as it stands, and a name from outside the
+			// copy is a reference to something outside the copy.
+			guard case .group(let name) = endpoint, let now = renames[name] else { return endpoint }
+			return .group(now)
+		}
+		switch span {
+		case .marks(let from, let to): return .marks(from: moved(from), to: moved(to))
+		case .within(let mark, let from, let to): return .within(moved(mark), from: from, to: to)
+		case .times: return span
+		}
+	}
+
+	/// Duplicates an entry where it stands: the copy goes directly after the
+	/// original, in the same section.
+	///
+	/// Directly after rather than at the end, because a duplicate is read
+	/// against the thing it was made from. `into:at:` rather than
+	/// ``insertEntry(_:after:)``, because "after" a *section* means inside it —
+	/// deliberately, for adding — and a copy of a section put inside the
+	/// original is not what anybody asked for.
+	@discardableResult
+	public mutating func duplicateEntry(at path: [Int]) -> [Int]? {
+		guard let entry = self.entry(at: path), let index = path.last else { return nil }
+		return insertEntry(copy(of: entry), into: Array(path.dropLast()), at: index + 1)
+	}
+
+	/// Duplicates entries into a parent and an index — a drop with ⌥ held.
+	///
+	/// Simpler than ``moveEntries(at:toParent:index:)`` in the one way that
+	/// matters: nothing is taken out, so nothing shifts underneath the
+	/// destination and there is no arithmetic to get wrong. What is left is
+	/// the two rules that are not about arithmetic. Everything is lifted before
+	/// anything is put back, because inserting a copy above an original moves
+	/// that original's path; and each copy is named against the project as it
+	/// stands *after* the one before it went in, so duplicating two sections
+	/// called `shot` gives `shot-2` and `shot-3` rather than `shot-2` twice.
+	///
+	/// A section and something inside it means the section, exactly as it does
+	/// for a move: the child is already coming with it, and a second copy of it
+	/// beside the section would be one more than anybody dragged.
+	///
+	/// Nothing is refused. A section *can* be copied into itself — the copy is
+	/// taken before anything is inserted, so it is a plain nesting rather than
+	/// the paradox the same move is.
+	@discardableResult
+	public mutating func duplicateEntries(at paths: [[Int]], toParent parent: [Int],
+	                                      index: Int) -> [[Int]] {
+		let ordered = Self.outermost(paths)
+		let lifted = ordered.compactMap { entry(at: $0) }
+		guard lifted.count == ordered.count else { return [] }
+
+		var at = index < 0 ? Int.max : index
+		var landed: [[Int]] = []
+		for entry in lifted {
+			landed.append(insertEntry(copy(of: entry), into: parent, at: at))
+			if at != Int.max { at += 1 }
+		}
+		return landed
+	}
+
+	/// The paths that are not inside another of them, in the order they appear.
+	///
+	/// Both a move and a copy of several rows need exactly this: a section and
+	/// one of its own clips is one thing being dragged, not two, and they have
+	/// to arrive in the order the programme had them rather than the order
+	/// somebody happened to click.
+	public static func outermost(_ paths: [[Int]]) -> [[Int]] {
+		paths.filter { path in
+			!paths.contains { other in
+				other.count < path.count && Array(path.prefix(other.count)) == other
+			}
+		}.sorted { a, b in
+			for (x, y) in zip(a, b) where x != y { return x < y }
+			return a.count < b.count
+		}
 	}
 
 	// MARK: - Overlays, wherever they are written
