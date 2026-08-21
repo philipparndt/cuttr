@@ -55,6 +55,38 @@ import Testing
 		#expect(span?.end == 7)
 	}
 
+	/// The bug this shipped with: the window's key monitor catches every key
+	/// press before any view sees one, so a table answering space for itself was
+	/// never asked and the tape started rolling instead. The test that missed it
+	/// asked the table's own handler; this asks the window's, which is the path
+	/// the keyboard actually takes, and reads the outcome rather than the answer.
+	@Test func spaceOpensTheLookOnlyWhenTheListHasTheKeyboard() {
+		_ = NSApplication.shared
+		let document = TakeDocument(take: take())
+		let controller = MainWindowController(document: document)
+		defer { controller.window?.close() }
+		let window = controller.windowForTesting
+		window.setContentSize(NSSize(width: 1400, height: 900))
+		window.makeKeyAndOrderFront(nil)
+		window.layoutIfNeeded()
+		controller.selectForTesting(clip: document.take.clips[0].id)
+
+		// The keyboard somewhere else: space is the tape, as it always was, and
+		// no look appears.
+		_ = controller.handleKeyForTesting(space())
+		#expect(controller.clipLookIsOpenForTesting == false)
+
+		// The list focused: the same key is a look at the selected clip.
+		controller.clipListForTesting.focusForTesting()
+		#expect(controller.clipListForTesting.hasKeyboard)
+		_ = controller.handleKeyForTesting(space())
+		#expect(controller.clipLookIsOpenForTesting)
+
+		// And the same key again puts it away.
+		_ = controller.handleKeyForTesting(space())
+		#expect(controller.clipLookIsOpenForTesting == false)
+	}
+
 	/// A clip of no length has nothing to play, so there is nothing to claim
 	/// space for.
 	@Test func aClipOfNoLengthIsNotALook() {

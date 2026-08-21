@@ -22,12 +22,6 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 	/// How much to turn one clip up or down, in decibels, as somebody typed it.
 	/// Empty means nought — see ``CuttrKit/Clip/gain``.
 	public var onGainChange: ((Clip.ID, String) -> Void)?
-	/// A key pressed with the list focused, answered before the table sees it.
-	/// `true` means it was dealt with. Space is a look at the selected clip; the
-	/// table's own use for it is to scroll, which is not what anybody means with
-	/// a clip selected.
-	public var onKey: ((NSEvent) -> Bool)?
-
 	/// Where the selected row is, in this view's own coordinates, for a look
 	/// that has to sit beside it. Empty when nothing is selected.
 	public func rectOfSelectedRow() -> NSRect {
@@ -43,10 +37,11 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 	/// Double-click: show me this one.
 	public var onActivate: ((Clip.ID) -> Void)?
 
-	/// Asks before it answers, so the window can claim a key the table would
-	/// otherwise spend on its selection. `KeyTable`'s single-column sizing is
-	/// inert here — this list has nine.
-	private let table = KeyTable()
+	private let table = NSTableView()
+
+	/// For the tests: gives the list the keyboard, so a key can be asked about
+	/// without one.
+	func focusForTesting() { window?.makeFirstResponder(table) }
 
 	/// Whether the list itself has the keyboard — which is what decides whether
 	/// a key press is about the selected clip or about the window.
@@ -116,7 +111,6 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 		table.allowsMultipleSelection = false
 		table.backgroundColor = Theme.panel
 		table.gridStyleMask = []
-		table.onKey = { [weak self] event in self?.onKey?(event) ?? false }
 		table.target = self
 		table.doubleAction = #selector(doubleClicked)
 		// The table must not eat the keys the timeline lives on. An operator

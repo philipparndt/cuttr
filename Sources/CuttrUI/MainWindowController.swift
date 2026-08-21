@@ -441,23 +441,6 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			self?.setTime(id, isStart: isStart, text: text)
 		}
 		clipTable.contextMenu = { [weak self] id in self?.clipMenu(for: id, at: nil) }
-		// Space is a look at the clip that is selected, and the same key again
-		// puts it away; escape does too, and only while it is open. Both
-		// questions are asked of `QuickLook` rather than answered here, for the
-		// same reason the tree asks them: space belongs to several things in
-		// this program and the only safe way to take it is to be able to say
-		// where it is *not* taken.
-		clipTable.onKey = { [weak self] event in
-			guard let self else { return false }
-			if QuickLook.dismisses(event), self.clipLook != nil {
-				self.closeClipLook()
-				return true
-			}
-			guard QuickLook.claims(event, editing: false, hasSpan: self.selectedClipSpan != nil)
-			else { return false }
-			if self.clipLook != nil { self.closeClipLook() } else { self.showClipLook() }
-			return true
-		}
 
 		// Selecting words is setting in and out. That is the whole claim this
 		// pane makes: a sentence you can read is a cut you can make, and the
@@ -963,6 +946,33 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		      clip.end > clip.start else { return nil }
 		return QuickLook.Span(start: clip.start, end: clip.end)
 	}
+
+	/// Space, while the clip list has the keyboard, is a look at the clip that
+	/// is selected — and the same key puts it away, as does escape while it is
+	/// open. Everywhere else in this window space is still the tape.
+	///
+	/// Asked of ``QuickLook`` rather than answered here, because space belongs
+	/// to several things in this program and the only safe way to take it is to
+	/// be able to say where it is *not* taken.
+	private func clipListKey(_ event: NSEvent) -> Bool {
+		guard clipTable.hasKeyboard else { return false }
+		if QuickLook.dismisses(event), clipLook != nil {
+			closeClipLook()
+			return true
+		}
+		guard QuickLook.claims(event, editing: false, hasSpan: selectedClipSpan != nil)
+		else { return false }
+		if clipLook != nil { closeClipLook() } else { showClipLook() }
+		return true
+	}
+
+	/// For the tests: the whole key path this window uses, so a test asks the
+	/// same question the keyboard does. Asking a view's own handler instead is
+	/// how a look that never opened passed its test.
+	func handleKeyForTesting(_ event: NSEvent) -> Bool { handle(event) }
+
+	var clipListForTesting: ClipTable { clipTable }
+	var clipLookIsOpenForTesting: Bool { clipLook != nil }
 
 	/// For the tests: the span a look would play, and the selection without a
 	/// mouse.
@@ -2165,6 +2175,11 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		// second. Nothing here is claimed under a modifier, so the menu keeps
 		// every ⌘ it had.
 		if transcriptPane.handleKey(event) { return true }
+		// And the clip list on the same terms. Every key in this window comes
+		// through here — the monitor above catches them before any view sees
+		// one — so a table that answered space for itself would never be asked:
+		// the tape would already have started rolling. Which is what happened.
+		if clipListKey(event) { return true }
 
 		let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 		let shift = flags.contains(.shift)
