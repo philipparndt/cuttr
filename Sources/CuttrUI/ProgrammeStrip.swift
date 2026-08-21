@@ -118,6 +118,75 @@ public final class ProgrammeStrip: NSView {
 
 	// MARK: - Zooming
 
+	/// The three buttons at the right of the ruler: out, in, and the whole
+	/// thing.
+	///
+	/// Drawn rather than left to the keyboard. A zoom that exists only as a key
+	/// is a zoom somebody has to be told about, and this one has been reported
+	/// as broken three times — twice because the key genuinely never arrived,
+	/// and once because the only way to find out was to guess. A control that is
+	/// visible cannot be missed and cannot depend on a keyboard layout.
+	enum Button: CaseIterable {
+		case out, `in`, whole
+
+		var glyph: String {
+			switch self {
+			case .out: return "−"
+			case .in: return "+"
+			case .whole: return "⤢"
+			}
+		}
+
+		var help: String {
+			switch self {
+			case .out: return "Show more of the programme (−)"
+			case .in: return "Show less of it (+)"
+			case .whole: return "The whole programme (F)"
+			}
+		}
+	}
+
+	private static let buttonSize: CGFloat = 15
+
+	/// Where each one is, from the right-hand end of the ruler.
+	private func buttonRects() -> [(Button, NSRect)] {
+		let size = Self.buttonSize
+		var x = bounds.maxX - 6 - size
+		var out: [(Button, NSRect)] = []
+		for button in [Button.whole, .in, .out] {
+			out.append((button, NSRect(x: x, y: 1, width: size, height: size)))
+			x -= size + 3
+		}
+		return out
+	}
+
+	private func drawButtons() {
+		let attributes: [NSAttributedString.Key: Any] = [
+			.font: Theme.monoSmall, .foregroundColor: Theme.dimText,
+		]
+		for (button, rect) in buttonRects() {
+			Theme.card.setFill()
+			NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
+			Theme.rule.setStroke()
+			NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
+			             xRadius: 3, yRadius: 3).stroke()
+			let glyph = button.glyph as NSString
+			let size = glyph.size(withAttributes: attributes)
+			glyph.draw(at: NSPoint(x: rect.midX - size.width / 2,
+			                       y: rect.midY - size.height / 2),
+			           withAttributes: attributes)
+		}
+	}
+
+	/// Pressing one of them. Internal so a test can press one without a mouse.
+	func press(_ button: Button) {
+		switch button {
+		case .out: zoomOut()
+		case .in: zoomIn()
+		case .whole: fit()
+		}
+	}
+
 	/// ⌥ or ⌘ with the wheel, and a pinch, both about the pointer. The bare
 	/// wheel is left alone: this strip sits under a picture in a window that
 	/// scrolls, and a view that swallows the wheel is a trap.
@@ -393,6 +462,7 @@ public final class ProgrammeStrip: NSView {
 		line.line(to: NSPoint(x: px, y: bounds.height))
 		line.stroke()
 
+		drawButtons()
 		drawNotice()
 	}
 
@@ -556,6 +626,15 @@ public final class ProgrammeStrip: NSView {
 		}
 	}
 
+	/// Frames the selected overlay, or says there is nothing to frame.
+	public func frameSelection() {
+		guard let bar = selectedBar() else {
+			say("nothing selected to frame")
+			return
+		}
+		reveal(from: bar.start, to: bar.end)
+	}
+
 	private func zoomIn() { zoom(by: 1 / 1.6, at: middleOfTrack()) }
 	private func zoomOut() { zoom(by: 1.6, at: middleOfTrack()) }
 
@@ -622,6 +701,11 @@ public final class ProgrammeStrip: NSView {
 	}
 
 	var noticeForTesting: String? { notice }
+
+	func buttonCentreForTesting(_ button: Button) -> NSPoint {
+		let rect = buttonRects().first { $0.0 == button }?.1 ?? .zero
+		return NSPoint(x: rect.midX, y: rect.midY)
+	}
 	var shownForTesting: (start: Double, end: Double) { aimed().shown }
 	func timeForTesting(atFraction fraction: CGFloat) -> Double {
 		aimed().time(atFraction: fraction)
@@ -636,6 +720,14 @@ public final class ProgrammeStrip: NSView {
 
 	public override func mouseDown(with event: NSEvent) {
 		let point = convert(event.locationInWindow, from: nil)
+
+		// The zoom buttons first: they sit over the ruler, where a click would
+		// otherwise move the playhead.
+		if let (button, _) = buttonRects().first(where: { $0.1.insetBy(dx: -2, dy: -2).contains(point) }) {
+			press(button)
+			return
+		}
+
 		let t = time(forX: point.x)
 
 		// A bar under the pointer is a thing to move; anywhere else is the

@@ -733,29 +733,62 @@ public final class ComposeWindowController: DocumentEditor,
 		// keys have to work wherever the focus happens to be.
 		keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
 			guard let self, event.window === self.window else { return event }
-			if self.window?.firstResponder is NSTextView { return event }
-			// The Play page's timeline, asked before anything else takes its
-			// keys. It used to answer only its own `keyDown`, which meant it was
-			// asked only while it held the focus — and when it did not, `i` fell
-			// through the responder chain and beeped. Nothing is claimed here
-			// that the strip does not answer, so every other key carries on to
-			// wherever it was going.
-			if !self.strip.isHidden, self.strip.handleKey(event) { return nil }
-			// A list has its own use for the arrows and the space bar: moving
-			// the selection, folding a section, acting on a row. The window's
-			// own shortcuts are for when nothing is being navigated — otherwise
-			// this monitor eats the keys on their way to the list and the
-			// keyboard silently does nothing there.
-			if self.window?.firstResponder is NSTableView { return event }
-			if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) { return event }
-			switch event.keyCode {
-			case 49: self.togglePlay(nil); return nil                       // space
-			case 123: self.seek(to: self.playhead - self.frameStep); return nil
-			case 124: self.seek(to: self.playhead + self.frameStep); return nil
-			case 115: self.seek(to: 0); return nil                          // home
-			case 119: self.seek(to: self.composeDocument.resolved?.duration ?? 0); return nil
-			default: return event
-			}
+			return self.handle(event) ? nil : event
+		}
+	}
+
+	// MARK: - The View menu's zooms
+
+	/// ⌘+, ⌘− and ⌘0, which the View menu has always offered and which only the
+	/// cutting window answered — so in this window the items were simply greyed
+	/// out and the same keys that zoom a take did nothing to a programme.
+	///
+	/// Answered here rather than claimed in this window's key monitor: they are
+	/// menu items with key equivalents, the menu is where somebody finds them,
+	/// and a window that took ⌘ keys behind the menu's back would be a second
+	/// answer to the same question.
+	@objc public func zoomIn(_ sender: Any?) { strip.press(.in) }
+	@objc public func zoomOut(_ sender: Any?) { strip.press(.out) }
+	@objc public func zoomFit(_ sender: Any?) { strip.press(.whole) }
+
+	/// Framing the selected overlay, which is this window's answer to "zoom to
+	/// the clip".
+	@objc public func zoomToClipAction(_ sender: Any?) { strip.frameSelection() }
+
+	/// For the tests: the strip whose keys keep being reported as not working.
+	var stripForTesting: ProgrammeStrip { strip }
+
+	/// Every key this window answers, in one function.
+	///
+	/// A function rather than the body of the monitor closure, because a
+	/// closure installed on a window cannot be tested — and the keys on this
+	/// window have now been reported not working three times, each time for a
+	/// reason no unit test could see: the key never reached the code that
+	/// answers it. A test can call this.
+	func handle(_ event: NSEvent) -> Bool {
+		if window?.firstResponder is NSTextView { return false }
+		// The Play page's timeline, asked before anything else takes its keys.
+		// It used to answer only its own `keyDown`, which meant it was asked
+		// only while it held the focus — and when it did not, the key fell
+		// through the responder chain and beeped. Nothing is claimed here that
+		// the strip does not answer, so every other key carries on.
+		if !strip.isHidden, strip.handleKey(event) { return true }
+		// A list has its own use for the arrows and the space bar: moving the
+		// selection, folding a section, acting on a row. The window's own
+		// shortcuts are for when nothing is being navigated — otherwise this
+		// eats the keys on their way to the list and the keyboard silently does
+		// nothing there.
+		if window?.firstResponder is NSTableView { return false }
+		if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
+			return false
+		}
+		switch event.keyCode {
+		case 49: togglePlay(nil); return true                       // space
+		case 123: seek(to: playhead - frameStep); return true
+		case 124: seek(to: playhead + frameStep); return true
+		case 115: seek(to: 0); return true                          // home
+		case 119: seek(to: composeDocument.resolved?.duration ?? 0); return true
+		default: return false
 		}
 
 		transport.onTick = { [weak self] time in

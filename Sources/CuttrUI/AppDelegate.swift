@@ -1001,11 +1001,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	@objc func importSubclips(_ sender: Any?) { currentTake?.importSubclips(sender) }
 
 	@objc func showShortcuts(_ sender: Any?) {
-		let alert = NSAlert()
-		alert.messageText = "Keys"
-		alert.informativeText = MainMenu.shortcutSheet
-		alert.addButton(withTitle: "OK")
-		alert.runModal()
+		ShortcutsPanel.present(MainMenu.shortcutSheet)
 	}
 }
 

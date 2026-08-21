@@ -176,8 +176,48 @@ import Testing
 		}
 	}
 
-	/// A real modifier is still a decision: ⌘− belongs to the menu.
-	@Test func aCommandKeyIsNotAZoom() throws {
+	/// And there are buttons, because a zoom that exists only as a key is one
+	/// somebody has to be told about — and this one has been reported broken
+	/// three times, once simply because there was no way to find it.
+	@Test func theButtonsZoomToo() throws {
+		let (strip, resolved) = try programme()
+		let whole = resolved.duration
+
+		strip.press(.in)
+		let inned = strip.shownForTesting.end - strip.shownForTesting.start
+		#expect(inned < whole)
+
+		strip.press(.out)
+		#expect(strip.shownForTesting.end - strip.shownForTesting.start > inned)
+
+		strip.press(.in)
+		strip.press(.in)
+		#expect(strip.shownForTesting.end - strip.shownForTesting.start < whole)
+		strip.press(.whole)
+		#expect(abs(strip.shownForTesting.end - strip.shownForTesting.start - whole) < 1e-9)
+	}
+
+	/// Clicking one presses it, rather than moving the playhead — they sit over
+	/// the ruler, which is where a click otherwise means "go there".
+	@Test func clickingAButtonDoesNotMoveThePlayhead() throws {
+		let (strip, resolved) = try programme()
+		var scrubbed: Double?
+		strip.onScrub = { scrubbed = $0 }
+		strip.drawForTesting()
+		let spot = strip.buttonCentreForTesting(.in)
+		strip.mouseDown(with: NSEvent.mouseEvent(
+			with: .leftMouseDown, location: strip.convert(spot, to: nil),
+			modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+			eventNumber: 0, clickCount: 1, pressure: 1)!)
+		#expect(scrubbed == nil)
+		#expect(strip.shownForTesting.end - strip.shownForTesting.start < resolved.duration)
+	}
+
+	/// ⌘− is still declined *here*, and that is not the same as not working:
+	/// the View menu owns ⌘+, ⌘− and ⌘0, and this window answers those items
+	/// now. A window taking ⌘ keys behind the menu's back would be a second
+	/// answer to the same question.
+	@Test func aCommandKeyBelongsToTheMenu() throws {
 		let (strip, _) = try programme()
 		#expect(strip.handleKey(key("-", flags: .command, code: 27)) == false)
 	}
