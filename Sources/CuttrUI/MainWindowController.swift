@@ -574,6 +574,7 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		setup.onChooseAudio = { [weak self] in self?.chooseMedia(video: false) }
 		setup.onOffsetTyped = { [weak self] value in self?.setOffset(value, commit: true) }
 		setup.onAlign = { [weak self] in self?.autoAlign() }
+		setup.onGainTyped = { [weak self] value in self?.takeDocument.setTakeGain(value) }
 		swatches.onChoose = { [weak self] color in self?.chooseLane(color) }
 
 		// Which microphone you hear, in the bar with the rest of the controls
@@ -1043,13 +1044,32 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			(clip.start - offset) ... max(clip.start - offset, clip.end - offset)
 		}
 		say("listening to \(clips.count) clips to level them…")
+		showProgress(0)
 		levelsTask = Task { [weak self] in
-			var measured: [Double?] = []
-			for span in spans {
-				let heard = try? await LoudnessMeter.measure(url: url, ranges: [span])
-				measured.append(heard?.integrated)
+			// Every clip at once. One at a time meant a decode per clip in
+			// series, and on a take of three dozen clips that is minutes of a
+			// window that looks like it did nothing — which is indistinguishable
+			// from a feature that does not work, and was reported as one.
+			var measured = [Double?](repeating: nil, count: spans.count)
+			var done = 0
+			await withTaskGroup(of: (Int, Double?).self) { group in
+				for (index, span) in spans.enumerated() {
+					group.addTask {
+						let heard = try? await LoudnessMeter.measure(url: url, ranges: [span])
+						return (index, heard?.integrated)
+					}
+				}
+				for await (index, loudness) in group {
+					measured[index] = loudness
+					done += 1
+					// Something moving, because a pass this long has to say it
+					// is still going.
+					let fraction = Double(done) / Double(max(1, spans.count))
+					await MainActor.run { self?.showProgress(fraction) }
+				}
 			}
 			guard let self, !Task.isCancelled else { return }
+			self.showProgress(nil)
 			self.levelsTask = nil
 			let wanted = Levelling.match(measured, existing: clips.map(\.gain))
 			var gains: [Clip.ID: Double] = [:]

@@ -490,6 +490,15 @@ public final class TakeDocument {
 		apply(next, actionName: "Change Order")
 	}
 
+	/// How much to turn this whole recording up or down. See
+	/// ``CuttrKit/Take/gain``.
+	public func setTakeGain(_ gain: Double) {
+		guard take.gain != gain else { return }
+		var next = take
+		next.gain = gain
+		apply(next, actionName: "Change Level")
+	}
+
 	/// How much to turn one clip up or down. See ``CuttrKit/Clip/gain``.
 	public func setGain(_ gain: Double, for id: Clip.ID) {
 		var next = take

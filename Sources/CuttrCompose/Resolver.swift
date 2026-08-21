@@ -570,7 +570,7 @@ public enum Resolver {
 			// still does and a take nobody has levelled is unchanged. The
 			// ceiling above guards the automatic match; it does not overrule a
 			// number somebody typed, because that number is the decision.
-			clips[index].gain += clips[index].clip.gain
+			clips[index].gain += take.gain + clips[index].clip.gain
 
 			// The take's own look over the profile it names, and then the match.
 			// The match is a `gain` the take may already carry from an analysis

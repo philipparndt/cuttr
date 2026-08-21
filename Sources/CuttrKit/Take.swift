@@ -33,6 +33,20 @@ public struct Take: Sendable, Equatable {
 	/// the per-channel gain an automatic match worked out.
 	public var look: Look
 
+	/// How much to turn this whole recording up or down, in decibels.
+	///
+	/// A decision about the take, the way ``Clip/gain`` is one about a clip, and
+	/// the two add: this one balances one recording against another, that one
+	/// balances the clips inside a recording against each other. Both are
+	/// separate again from the automatic match a project makes toward
+	/// `output.audio.target`, which is a measurement rather than a decision and
+	/// is the thing a hand-typed number is allowed to overrule.
+	///
+	/// Here because it is the reliable knob. Measuring every clip takes as long
+	/// as it takes to decode them, and somebody who can hear that this take is
+	/// four decibels under the others does not need it measured.
+	public var gain: Double
+
 	/// Points followed through the picture — an eye, usually — for overlays that
 	/// have to sit on somebody. See ``Anchor`` for why they belong to the take
 	/// rather than to a programme that uses it.
@@ -96,7 +110,8 @@ public struct Take: Sendable, Equatable {
 		anchors: [Anchor] = [], words: Words? = nil, speakers: [Speaker] = [],
 		sounds: [SoundEvent] = [],
 		measured: Measured = Measured(), look: Look = .none,
-		source: TakeSource? = nil, unknownKeys: [String: Any] = [:]
+		source: TakeSource? = nil, gain: Double = 0,
+		unknownKeys: [String: Any] = [:]
 	) {
 		self.video = video
 		self.audio = audio
@@ -108,6 +123,7 @@ public struct Take: Sendable, Equatable {
 		self.sounds = sounds
 		self.measured = measured
 		self.look = look
+		self.gain = gain
 		self.unknown = UnknownKeys(storage: unknownKeys)
 	}
 
@@ -116,7 +132,7 @@ public struct Take: Sendable, Equatable {
 			&& a.anchors == b.anchors && a.words == b.words
 			&& a.speakers == b.speakers && a.sounds == b.sounds
 			&& a.measured == b.measured && a.look == b.look
-			&& a.source == b.source
+			&& a.source == b.source && a.gain == b.gain
 	}
 
 	// MARK: - The cast

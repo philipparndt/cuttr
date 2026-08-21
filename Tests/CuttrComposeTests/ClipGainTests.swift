@@ -64,3 +64,34 @@ import Testing
 		#expect(try gains("timeline: [c0, c1, c2]\n", in: directory) == [0, 0, 0])
 	}
 }
+
+/// The take's level, on the programme.
+@Suite struct TakeGainTests {
+
+	private func fixture(takeGain: Double, clipGains: [Double]) throws -> URL {
+		let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+			.appendingPathComponent("cuttr-takegain-\(UUID().uuidString)")
+		try FileManager.default.createDirectory(
+			at: directory.appendingPathComponent("takes"), withIntermediateDirectories: true)
+		try Data().write(to: directory.appendingPathComponent("a.mov"))
+		var take = Take(video: "../a.mov", clips: clipGains.enumerated().map { index, gain in
+			Clip(slug: "c\(index)", start: Double(index), end: Double(index) + 1, gain: gain)
+		})
+		take.gain = takeGain
+		try TakeWriter.write(take).write(
+			to: directory.appendingPathComponent("takes/t.cuttr"),
+			atomically: true, encoding: .utf8)
+		return directory
+	}
+
+	/// The two add: the take's level moves the whole recording, the clip's
+	/// moves one clip inside it.
+	@Test func theTakeLevelAndTheClipLevelAdd() throws {
+		let directory = try fixture(takeGain: -6, clipGains: [0, 2, -1])
+		defer { try? FileManager.default.removeItem(at: directory) }
+		let project = try ProjectReader.read(
+			"takes: [takes/t.cuttr]\ntimeline: [c0, c1, c2]\n")
+		let gains = try Resolver.resolve(project, baseURL: directory).clips.map(\.gain)
+		#expect(gains == [-6, -4, -7])
+	}
+}

@@ -82,3 +82,37 @@ import Testing
 		#expect(!TakeWriter.write(read).contains("gain:"))
 	}
 }
+
+/// The take's own level, which balances one recording against another where a
+/// clip's balances the clips inside one.
+@Suite struct TakeGainFileTests {
+
+	@Test func aTakeLevelSurvivesTheFile() throws {
+		var take = Take(video: "a.mov", clips: [Clip(slug: "one", start: 0, end: 1)])
+		take.gain = -4.5
+		let written = TakeWriter.write(take)
+		#expect(written.contains("gain:  -4.5"))
+		let read = try TakeReader.read(written)
+		#expect(read.gain == -4.5)
+		#expect(TakeWriter.write(read) == written)
+	}
+
+	@Test func noughtIsNotWrittenDown() {
+		#expect(!TakeWriter.write(Take(video: "a.mov",
+		                               clips: [Clip(slug: "one", start: 0, end: 1)]))
+			.contains("gain:"))
+	}
+
+	/// The take's level and a clip's are two different numbers, and a file
+	/// carrying both reads both back.
+	@Test func theTakeLevelAndAClipsAreBothKept() throws {
+		var take = Take(video: "a.mov", clips: [
+			Clip(slug: "one", start: 0, end: 1, gain: 2),
+			Clip(slug: "two", start: 1, end: 2),
+		])
+		take.gain = -6
+		let read = try TakeReader.read(TakeWriter.write(take))
+		#expect(read.gain == -6)
+		#expect(read.clips.map(\.gain) == [2, 0])
+	}
+}

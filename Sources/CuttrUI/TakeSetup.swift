@@ -20,11 +20,14 @@ public final class TakeSetup: NSView {
 	public var onChooseAudio: (() -> Void)?
 	public var onOffsetTyped: ((Double) -> Void)?
 	public var onAlign: (() -> Void)?
+	/// How loud this whole recording should be, in decibels, as typed.
+	public var onGainTyped: ((Double) -> Void)?
 
 	private let videoButton = NSButton()
 	private let audioButton = NSButton()
 	private let offsetField = NSTextField()
 	private let alignButton = NSButton()
+	private let gainField = NSTextField()
 
 	public override init(frame: NSRect) {
 		super.init(frame: frame)
@@ -43,10 +46,19 @@ public final class TakeSetup: NSView {
 			+ "[ and ] nudge by 1 ms, ⇧ by 10 ms, ⌥ by 100 ms.\n"
 			+ "⌥-drag the audio waveform to slide it."
 
+		gainField.font = Theme.mono
+		gainField.alignment = .right
+		gainField.placeholderString = "0"
+		gainField.target = self
+		gainField.action = #selector(gainCommitted)
+		gainField.toolTip = "Decibels to add to this whole recording, for balancing it"
+			+ " against the others.\nA clip's own Level is added to it; blank is nought."
+
 		let rows = NSStackView(views: [
 			row("video", videoButton),
 			row("audio", audioButton),
 			row("offset", offsetField, alignButton),
+			row("level", gainField),
 		])
 		rows.orientation = .vertical
 		rows.alignment = .leading
@@ -60,6 +72,7 @@ public final class TakeSetup: NSView {
 			rows.leadingAnchor.constraint(equalTo: leadingAnchor),
 			rows.trailingAnchor.constraint(equalTo: trailingAnchor),
 			offsetField.widthAnchor.constraint(equalToConstant: 92),
+			gainField.widthAnchor.constraint(equalToConstant: 92),
 			videoButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
 			audioButton.widthAnchor.constraint(equalTo: videoButton.widthAnchor),
 		])
@@ -107,6 +120,11 @@ public final class TakeSetup: NSView {
 			offsetField.stringValue = hasAudio
 				? Timecode.offsetString(document.take.audio?.offset ?? 0) : ""
 		}
+		// Blank at nought rather than a zero that reads as a decision.
+		if window?.firstResponder !== gainField.currentEditor() {
+			gainField.stringValue = document.take.gain == 0
+				? "" : TakeWriter.number(document.take.gain, places: 2)
+		}
 	}
 
 	// MARK: - Actions
@@ -118,5 +136,14 @@ public final class TakeSetup: NSView {
 	@objc private func offsetCommitted() {
 		guard let value = Timecode.parse(offsetField.stringValue) else { return }
 		onOffsetTyped?(value)
+	}
+
+	@objc private func gainCommitted() {
+		let typed = gainField.stringValue.trimmingCharacters(in: .whitespaces)
+		// Blank is nought, which is how a level is taken back off. Anything that
+		// is not a number is refused rather than read as nought.
+		if typed.isEmpty { onGainTyped?(0); return }
+		guard let value = Double(typed) else { return }
+		onGainTyped?((value * 100).rounded() / 100)
 	}
 }

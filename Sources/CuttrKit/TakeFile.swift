@@ -237,6 +237,7 @@ public enum TakeReader {
 		return Take(video: video, audio: audio, clips: clips, anchors: anchors, words: words,
 		            speakers: speakers, sounds: sounds,
 		            measured: measured, look: look, source: source,
+		            gain: number(root.removeValue(forKey: "gain")) ?? 0,
 		            unknownKeys: root)
 	}
 
@@ -303,6 +304,13 @@ public enum TakeWriter {
 				out += "  offset: \(Timecode.offsetString(audio.offset))"
 				out += "   # audio + offset = video clock\n"
 			}
+		}
+
+		// How loud the whole recording should be, beside the files it is about.
+		// Nought is left out, so a take nobody has levelled does not carry it —
+		// see ``CuttrKit/Take/gain``.
+		if take.gain != 0 {
+			out += "gain:  \(number(take.gain, places: 2))   # dB, this whole recording\n"
 		}
 
 		// Where it came from. Directly under the media, because it is a fact
