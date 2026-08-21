@@ -345,6 +345,7 @@ public enum Renderer {
 		let cards = !resolved.cards.isEmpty
 		if !graded, effects.isEmpty, !painted, !dissolves, !filmed, !cards {
 			let plainComposition = AVMutableVideoComposition(propertiesOf: composition)
+			declareColour(on: plainComposition)
 			plainComposition.renderSize = size
 			plainComposition.frameDuration = CMTime(
 				value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
@@ -391,6 +392,7 @@ public enum Renderer {
 				// picture arrives seven or eight levels lifted.
 				request.finish(with: image, context: unmanaged)
 			}
+			declareColour(on: filtered)
 			filtered.renderSize = size
 			filtered.frameDuration = CMTime(
 				value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
@@ -409,13 +411,7 @@ public enum Renderer {
 
 		let videoComposition = AVMutableVideoComposition()
 		videoComposition.customVideoCompositorClass = ProgrammeCompositor.self
-		// Named for the compositor's own frames, which this program made and
-		// should say the colour of. Without it they come back forty levels
-		// dark; with it, about eight light. Neither is nothing, and the second
-		// is the one to have.
-		videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
-		videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
-		videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
+		declareColour(on: videoComposition)
 		videoComposition.renderSize = size
 		videoComposition.frameDuration = CMTime(
 			value: 1, timescale: CMTimeScale(max(1, output.framesPerSecond.rounded())))
@@ -456,6 +452,29 @@ public enum Renderer {
 			                              lanes: clipLanes, duration: resolved.duration,
 			                              silences: gaps,
 			                              sounds: liveSounds))
+	}
+
+	/// What colour the film is — said once, and said the same on every path.
+	///
+	/// Left unsaid, AVFoundation infers it from the footage, and the answer it
+	/// infers is the widest thing it can find. One iPhone clip in a project of
+	/// twenty exported the whole film as HLG BT.2020: every player that is not
+	/// HDR-aware showed all of it washed out, and the Rec. 709 clips in it were
+	/// flattened into HLG's range on the way in — measured at a hundred and
+	/// eighty where the footage said two hundred and forty-seven. Adding a
+	/// single card to that same project moved it onto the compositor, which
+	/// *does* say 709, and the same footage came out a different colour again.
+	///
+	/// Three paths cannot hold three opinions about what colour the film is,
+	/// and the one that decides must not be "which features does this project
+	/// happen to use". Rec. 709 is the answer here: this program writes an SDR
+	/// film that every player shows the same way, so a wider source is
+	/// converted into it rather than reinterpreted — which is a conversion
+	/// AVFoundation does correctly once it has been told where to land.
+	private static func declareColour(on composition: AVMutableVideoComposition) {
+		composition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+		composition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+		composition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
 	}
 
 	/// One black frame in a file, for a card to hold its place with.
