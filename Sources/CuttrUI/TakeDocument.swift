@@ -683,6 +683,28 @@ public final class TakeDocument {
 
 	// MARK: - File
 
+	/// The same take, under a new name.
+	///
+	/// Renaming a take from the project window renames its file, and a window
+	/// with that take open has to follow — otherwise its next save writes the
+	/// old name back and quietly undoes the rename, which is why renaming an
+	/// open take used to be refused outright. Being told is the same amount of
+	/// truth and none of the ceremony.
+	///
+	/// Only the last component may change. ``baseURL`` is this file's folder and
+	/// everything the take points at is relative to it, so a document told it
+	/// had moved to another folder would go on resolving against the old one.
+	/// Moving is ``write(to:)``, which re-relativises; this is a rename.
+	public func renamed(to fileURL: URL) {
+		guard let url,
+		      fileURL.deletingLastPathComponent().standardizedFileURL
+		      	== url.deletingLastPathComponent().standardizedFileURL,
+		      fileURL.standardizedFileURL != url.standardizedFileURL
+		else { return }
+		self.url = fileURL
+		onChange?()
+	}
+
 	public func read(from fileURL: URL) throws {
 		let text = try String(contentsOf: fileURL, encoding: .utf8)
 		take = try TakeReader.read(text)

@@ -466,31 +466,51 @@ public final class ComposeDocument {
 	/// they keep resolving.
 	///
 	/// Returns what went wrong, or `nil` when it worked.
-	public func renameTake(_ path: String, to requested: String) -> String? {
-		guard let baseURL else { return "Save the project first." }
+	/// What happened, and — when something did — where the file went.
+	///
+	/// Where it went is the part that matters. A take that is open in a window
+	/// has to be told its new name, and the only code that knows the new URL is
+	/// the code that worked it out; handing back nothing but an error string
+	/// meant the caller had to either guess or refuse.
+	public enum Renaming: Equatable {
+		case renamed(URL)
+		/// Nothing to do: the same name, or no name typed.
+		case unchanged
+		case refused(String)
+	}
+
+	public func renameTake(_ path: String, to requested: String) -> Renaming {
+		guard let baseURL else { return .refused("Save the project first.") }
 		let name = requested.trimmingCharacters(in: .whitespacesAndNewlines)
 			// A file name, so the characters a path cannot hold come out.
 			.replacingOccurrences(of: "/", with: "-")
 			.replacingOccurrences(of: ":", with: "-")
-		guard !name.isEmpty else { return nil }
+		guard !name.isEmpty else { return .unchanged }
 
 		let from = URL(fileURLWithPath: path, relativeTo: baseURL).standardizedFileURL
-		guard from.deletingPathExtension().lastPathComponent != name else { return nil }
+		guard from.deletingPathExtension().lastPathComponent != name else { return .unchanged }
 		let to = from.deletingLastPathComponent()
 			.appendingPathComponent(name).appendingPathExtension("cuttr")
 		guard !FileManager.default.fileExists(atPath: to.path) else {
-			return "There is already a take called \(name) in that folder."
+			return .refused("There is already a take called \(name) in that folder.")
 		}
 		do { try FileManager.default.moveItem(at: from, to: to) } catch {
-			return error.localizedDescription
+			return .refused(error.localizedDescription)
 		}
 
+		// The take's own folder does not change, so nothing inside the take has
+		// to: the video, the recorder track, the words sidecar and each anchor's
+		// file are all written relative to the take, and a rename in place
+		// leaves every one of them pointing where it pointed. The sidecar keeps
+		// its old name, which is right — it is referred to by the path in the
+		// file, not derived from the take's name, and renaming a file somebody
+		// may have open in another program is not this rename's business.
 		var next = project
 		let replacement = relativePath(to, from: baseURL)
 		next.takes = next.takes.map { $0 == path ? replacement : $0 }
 		apply(next)
 		try? write()
-		return nil
+		return .renamed(to)
 	}
 
 	public func removeTake(_ path: String) {

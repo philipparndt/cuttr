@@ -1826,6 +1826,19 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		}
 	}
 
+	/// The take this window has open was renamed from the project window.
+	///
+	/// Everything that says which document this is comes from
+	/// ``TakeDocument/url``, so re-pointing the document and refreshing is the
+	/// whole of it: the title, the bar, and the switcher's list of what is open
+	/// all read the same one answer.
+	func takeRenamed(to url: URL) {
+		guard takeDocument.url != nil else { return }
+		takeDocument.renamed(to: url)
+		say("renamed to \(url.lastPathComponent)")
+		refresh()
+	}
+
 	@objc public func save(_ sender: Any?) {
 		guard let url = takeDocument.url else { saveAs(sender); return }
 		write(to: url)
