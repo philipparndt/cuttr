@@ -1208,10 +1208,28 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			?? { let view = EntryRow(); view.identifier = .init("entry"); return view }()
 		view.entry = node.entry
 		view.count = node.children.count
+		view.length = length(ofSection: node.path, node.entry)
 		view.carries = carried(by: node.entry)
 		view.lane = lane(of: node.entry)
 		view.needsDisplay = true
 		return view
+	}
+
+	/// How long a section runs on the programme's clock.
+	///
+	/// Measured on the programme rather than by adding its clips up, so a
+	/// dissolve between two of them is counted once rather than twice — which
+	/// is the whole reason this asks ``CuttrCompose/Project/extent(of:in:)``
+	/// instead of doing arithmetic of its own.
+	///
+	/// `nil` for anything that is not a section, and for a section with nothing
+	/// in it yet: a length of nought seconds beside "0 entries" is the same
+	/// thing said twice.
+	func length(ofSection path: [Int], _ entry: TimelineEntry) -> Double? {
+		guard case .group = entry.source, let resolved,
+		      let extent = Project.extent(of: path, in: resolved) else { return nil }
+		let length = extent.end - extent.start
+		return length > 0 ? length : nil
 	}
 
 	/// A mark and a lighter ground, not a bar of saturated blue across the row.
@@ -1763,6 +1781,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	final class EntryRow: NSTableCellView {
 		var entry = TimelineEntry(clip: ClipReference(""))
 		var count = 0
+		/// How long a section runs, when the row is one. Nought seconds is a
+		/// section with nothing in it, which has nothing to say.
+		var length: Double?
 		/// The lane this clip was cut on, when the row is a clip and the take it
 		/// came from is readable. A stripe down the leading edge, exactly as on
 		/// the cutting timeline and on the programme strip — a clip should look
@@ -1805,6 +1826,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 			if case .group = entry.source {
 				x = note("\(count) entr\(count == 1 ? "y" : "ies")", at: x) + 10
+				// How long it runs, beside how much is in it. A section is the
+				// unit somebody plans a film in, and five entries does not say
+				// whether that is thirty seconds or four minutes.
+				if let length, length > 0 {
+					x = note(Timecode.string(length), at: x) + 10
+				}
 			}
 			// A card's own colour, drawn. The row says `card 00:04.000`, which
 			// is how long it is and nothing about what anybody will see.
