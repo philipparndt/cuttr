@@ -505,8 +505,34 @@ public final class ProgrammeStrip: NSView {
 	/// window asks about every press and a notice on each one would be noise.
 	@discardableResult
 	public func handleKey(_ event: NSEvent, explaining: Bool = false) -> Bool {
-		guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
-		      let character = event.charactersIgnoringModifiers?.lowercased().first
+		// Shift, the keypad and the function bit are not decisions anybody made
+		// about which key this is. Requiring *no* flags at all is what made the
+		// zoom keys beep: on a German keyboard `=` is Shift+0, and the keypad's
+		// own plus and minus arrive carrying `.numericPad`.
+		let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+			.subtracting([.shift, .numericPad, .function])
+		guard flags.isEmpty else { return false }
+
+		// The zoom keys by physical position first and by character second, the
+		// way the other strip and the cutting window do it.
+		// `charactersIgnoringModifiers` returns what the *layout* produces, and
+		// there is no layout on which every one of these characters is reachable
+		// without a modifier. A key code is a place on a keyboard and is the
+		// same place on all of them.
+		switch event.keyCode {
+		case 24, 69: zoomIn(); return true          // = / + , and the keypad's
+		case 27, 78: zoomOut(); return true         // - , and the keypad's
+		default: break
+		}
+		// And by what was typed, for the layouts where these sit somewhere else
+		// — German puts `+` and `-` on their own keys. Both spellings of each,
+		// shifted or not, because a person reaching for "bigger" does not check.
+		let typed = [event.charactersIgnoringModifiers, event.characters]
+			.compactMap { $0?.lowercased() }
+		if typed.contains(where: { $0 == "+" || $0 == "=" }) { zoomIn(); return true }
+		if typed.contains(where: { $0 == "-" || $0 == "_" }) { zoomOut(); return true }
+
+		guard let character = event.charactersIgnoringModifiers?.lowercased().first
 		else { return false }
 
 		switch character {
@@ -525,16 +551,13 @@ public final class ProgrammeStrip: NSView {
 		case "f":
 			fit()
 			return true
-		case "+", "=":
-			zoom(by: 1 / 1.6, at: middleOfTrack())
-			return true
-		case "-", "_":
-			zoom(by: 1.6, at: middleOfTrack())
-			return true
 		default:
 			return false
 		}
 	}
+
+	private func zoomIn() { zoom(by: 1 / 1.6, at: middleOfTrack()) }
+	private func zoomOut() { zoom(by: 1.6, at: middleOfTrack()) }
 
 	/// Whether there is an overlay chosen for `i` and `o` to be about.
 	public var hasSelectedOverlay: Bool { selectedBar() != nil }

@@ -32,11 +32,12 @@ import Testing
 		return (strip, resolved)
 	}
 
-	private func key(_ character: String) -> NSEvent {
+	private func key(_ character: String, flags: NSEvent.ModifierFlags = [],
+	                 code: UInt16 = 0, typed: String? = nil) -> NSEvent {
 		NSEvent.keyEvent(
-			with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-			windowNumber: 0, context: nil, characters: character,
-			charactersIgnoringModifiers: character, isARepeat: false, keyCode: 0)!
+			with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+			windowNumber: 0, context: nil, characters: typed ?? character,
+			charactersIgnoringModifiers: character, isARepeat: false, keyCode: code)!
 	}
 
 	// MARK: - The keys
@@ -142,6 +143,43 @@ import Testing
 		let shown = strip.shownForTesting
 		#expect(shown.end - shown.start < 10)
 		#expect(abs(strip.timeForTesting(atFraction: 0.5) - before) < 0.05)
+	}
+
+	/// The zoom keys beeped, and this is why: requiring no modifier flags at
+	/// all threw away every layout on which the key is not bare. On a German
+	/// keyboard `=` is Shift+0, and the keypad's own plus and minus arrive
+	/// carrying `.numericPad`. Every one of these has to zoom.
+	@Test func theZoomKeysWorkOnEveryLayoutAndOnTheKeypad() throws {
+		let whole = try programme().1.duration
+		for press in [
+			key("=", code: 24),                                  // US, by position
+			key("+", code: 24),
+			key("0", flags: .shift, code: 24, typed: "="),        // German: Shift+0
+			key("+", flags: .numericPad, code: 69),               // the keypad's
+			key("+", code: 30),                                   // German, by character
+		] {
+			let (strip, _) = try programme()
+			#expect(strip.handleKey(press), "\(press.keyCode) did not zoom in")
+			#expect(strip.shownForTesting.end - strip.shownForTesting.start < whole)
+		}
+		// And out again, from every spelling of it.
+		for press in [
+			key("-", code: 27), key("_", flags: .shift, code: 27),
+			key("-", flags: .numericPad, code: 78), key("-", code: 44),
+		] {
+			let (strip, _) = try programme()
+			strip.zoomForTesting(by: 0.25, atFraction: 0.5)
+			let before = strip.shownForTesting
+			#expect(strip.handleKey(press), "\(press.keyCode) did not zoom out")
+			#expect(strip.shownForTesting.end - strip.shownForTesting.start
+				> before.end - before.start)
+		}
+	}
+
+	/// A real modifier is still a decision: ⌘− belongs to the menu.
+	@Test func aCommandKeyIsNotAZoom() throws {
+		let (strip, _) = try programme()
+		#expect(strip.handleKey(key("-", flags: .command, code: 27)) == false)
 	}
 
 	@Test func fittingShowsTheWholeThingAgain() throws {
