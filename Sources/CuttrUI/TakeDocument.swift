@@ -193,6 +193,34 @@ public final class TakeDocument {
 		onChange?()
 	}
 
+	// MARK: - Where the lines end
+
+	/// Ends the line before this word, or takes back the break that is there.
+	///
+	/// One method rather than two, because the pane has one key for it and the
+	/// answer to "which of the two did you mean" is in the transcript both of
+	/// them are looking at. `false` when neither can be done — see
+	/// ``CuttrKit/Transcript/addBreak(before:)``.
+	@discardableResult
+	public func breakLine(before index: Int) -> Bool {
+		var next = transcript
+		let broken = next.hasBreak(before: index)
+		guard broken ? next.removeBreak(before: index) : next.addBreak(before: index)
+		else { return false }
+		// A guess about the line being split is a guess about both halves of
+		// it: it was made from the whole line's voice, and the second half is
+		// part of that line. Left alone, the offer would keep the name on the
+		// top half and quietly stop offering anything for the bottom one, so
+		// the page would lose an offer to a keystroke that was not about
+		// speakers at all.
+		if !broken, let line = transcript.line(of: index),
+		   let offered = suggestedSpeakers[transcript.lines[line].lowerBound] {
+			suggestedSpeakers[index] = offered
+		}
+		applyTranscript(next, actionName: broken ? "Join the Line" : "End the Line")
+		return true
+	}
+
 	// MARK: - Editing
 
 	/// The one way the take changes.
@@ -390,8 +418,15 @@ public final class TakeDocument {
 	public func setTranscript(
 		_ transcript: Transcript, recogniser: Words.Recogniser, locale: String
 	) throws {
-		self.transcript = transcript
-		self.savedTranscript = transcript
+		// The words are the recogniser's; where the lines end is not. Asking
+		// for a transcript again replaces every word, and the breaks somebody
+		// put in are carried across and resolved against the new ones — which
+		// is the whole reason they are times and not word indices. A break the
+		// new pass leaves nothing to break is dropped by
+		// ``CuttrKit/Transcript/init(words:breaks:)``.
+		let carried = Transcript(words: transcript.words, breaks: self.transcript.breaks)
+		self.transcript = carried
+		self.savedTranscript = carried
 		var next = take
 		next.words = Words(
 			path: take.words?.path ?? "words/\(Slug.make(from: displayName)).words",

@@ -485,6 +485,17 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			self.say(changed == 1 ? "this line is \(who)" : "\(changed) lines are \(who)")
 			self.refresh()
 		}
+		// Where a line ends. The recording says it for four hundred lines and is
+		// wrong about the one somebody is reading, so `B` says it by hand — and
+		// what it changes is the transcript, which means ⌘Z takes it back like
+		// any other edit.
+		transcriptPane.onBreakLine = { [weak self] index in
+			guard let self, self.takeDocument.breakLine(before: index) else { return }
+			self.say(self.takeDocument.transcript.hasBreak(before: index)
+				? "the line ends here — B again to put it back"
+				: "the line is whole again")
+			self.refresh()
+		}
 		transcriptPane.onAddSpeaker = { [weak self] name, word in
 			guard let self, let added = self.takeDocument.addSpeaker(named: name) else { return }
 			self.refresh()

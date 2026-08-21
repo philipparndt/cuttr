@@ -49,8 +49,51 @@ public struct Word: Sendable, Equatable {
 public struct Transcript: Sendable, Equatable {
 	public var words: [Word]
 
-	public init(words: [Word] = []) {
+	/// Where somebody ended a line themselves, on the video's clock.
+	///
+	/// The breaks in ``lines`` are derived from the recording: half a second of
+	/// silence ends a line, two and a half seconds ends a paragraph, a full
+	/// stop ends a sentence. Derived is the right answer for four hundred lines
+	/// and the wrong one for the line somebody is looking at, where two turns
+	/// of a conversation came back as one because nobody paused and the
+	/// recogniser heard no full stop. That break is a *decision*, and this
+	/// program keeps decisions in files — the same split `TakeDocument`'s
+	/// `manualSlugs` draws between a slug that was derived and one that was
+	/// typed, and the same one between a speaker a model offered and a speaker
+	/// somebody confirmed.
+	///
+	/// **A time, not a word index.** Every other time in a take is on the
+	/// video's clock and this is no exception, and the reason is what happens
+	/// when the words change underneath it: asking for the transcript again
+	/// replaces every ``Word``, so an index is off by however many words the
+	/// new pass heard differently — silently, and further out the further down
+	/// the take you read. A time is a fact about the recording, and the same
+	/// instant is the same instant to whatever pass hears it next.
+	///
+	/// Each of these is the start of the word the break comes *before*, and
+	/// ``word(breakingAt:)`` is what turns it back into a word. What that
+	/// answers, when the words have changed underneath it: the same words in
+	/// the same places put the break back exactly; a word heard that was not
+	/// heard before, or one dropped, leaves it between the same two words,
+	/// which is the whole of what an index could not do; times nudged by a few
+	/// milliseconds carry it along. Beyond a ``beat`` from any boundary it goes
+	/// — a take re-timed by more than that has been re-aligned, and moving
+	/// somebody's line break half a second down the conversation without
+	/// saying so is the one outcome worth refusing.
+	///
+	/// Kept canonical by ``init(words:breaks:)``, which is what makes writing,
+	/// reading and writing again produce the same bytes: every time in here is
+	/// some word's own `start`, and no two of them are before the same word.
+	public private(set) var breaks: [Double]
+
+	public init(words: [Word] = [], breaks: [Double] = []) {
 		self.words = words.sorted { $0.start < $1.start }
+		self.breaks = []
+		var before = Set<Int>()
+		for time in breaks {
+			if let index = word(breakingAt: time) { before.insert(index) }
+		}
+		self.breaks = before.sorted().map { self.words[$0].start }
 	}
 
 	public var isEmpty: Bool { words.isEmpty }
@@ -84,6 +127,9 @@ public struct Transcript: Sendable, Equatable {
 		/// pause — measured on a real interview, a question and its answer are
 		/// forty milliseconds apart — so without this a transcript cut on the
 		/// clock alone could not be labelled a line at a time at all.
+		///
+		/// Also what a break somebody put in themselves comes back as, and for
+		/// the same reason: see ``Transcript/breaks``.
 		case sentence
 		/// A beat: somebody thinking, or the end of a sentence with air after
 		/// it. A new line, and a pause that is part of the take.
@@ -131,15 +177,26 @@ public struct Transcript: Sendable, Equatable {
 
 	/// What follows the word at `index`.
 	///
-	/// The clock is asked first and the punctuation second, so a long silence
+	/// The clock is asked first and the punctuation last, so a long silence
 	/// after a full stop is still a paragraph rather than merely a line: the
 	/// shape of a take is what the recording did, and the sentence ends are
 	/// what the recogniser noticed on top of it.
+	///
+	/// A break somebody put in themselves sits between the two, and it can only
+	/// ever be a ``Silence/sentence`` — a new line with nothing behind it to
+	/// point at. ``beat`` and ``rest`` are *measurements*: the pane draws each
+	/// of them as an ellipsis somebody can select, play and cut, because there
+	/// is that much silence there. A hand can say where a line ends; it cannot
+	/// put a second and a half of air into a recording that has none. So a
+	/// break only ever turns a ``Silence/none`` into a ``Silence/sentence``,
+	/// and it takes nothing away from the page: a `none` had no pause to point
+	/// at either.
 	public func silence(after index: Int) -> Silence {
 		guard index >= 0, index + 1 < words.count else { return .none }
 		let gap = words[index + 1].start - words[index].end
 		if gap >= Self.rest { return .rest }
 		if gap >= Self.beat { return .beat }
+		if hasBreak(before: index + 1) { return .sentence }
 		return Self.endsASentence(words[index].text) ? .sentence : .none
 	}
 
@@ -214,6 +271,76 @@ public struct Transcript: Sendable, Equatable {
 		var last = first
 		while last < words.count, words[last].start < span.upperBound { last += 1 }
 		return first ..< last
+	}
+
+	// MARK: - Ending a line by hand
+
+	/// Which word a break at `time` comes before.
+	///
+	/// The word whose start is nearest it, and `nil` when that is further off
+	/// than a ``beat`` — or when there is no word a line could start at, the
+	/// first one being no line's second.
+	///
+	/// Nearest rather than "the gap it falls in", because a break sits *on* a
+	/// boundary and two words that touch make that boundary one instant: a
+	/// second pass that moves it by two milliseconds would otherwise put the
+	/// break inside the word before it and lose it. `beat` is the bound
+	/// because it is already this program's answer to how much silence is
+	/// worth seeing, so a boundary further away than that is somewhere else in
+	/// the conversation rather than the same place re-timed.
+	public func word(breakingAt time: Double) -> Int? {
+		guard words.count > 1 else { return nil }
+		var best = 1
+		// `<=`, so where two starts are equally far off the later one wins: a
+		// line somebody ended after a word should keep that word rather than
+		// hand it to the line below.
+		for index in 2 ..< words.count
+		where abs(words[index].start - time) <= abs(words[best].start - time) { best = index }
+		return abs(words[best].start - time) <= Self.beat ? best : nil
+	}
+
+	/// Whether somebody put a break in before this word.
+	public func hasBreak(before index: Int) -> Bool {
+		guard index > 0, index < words.count else { return false }
+		// The list first, which is a handful of comparisons and is why this is
+		// cheap enough to ask once per word in ``lines``. The resolution only
+		// for a time that is actually in it, so that two words sharing a start
+		// cannot both claim the same break.
+		return breaks.contains(words[index].start)
+			&& word(breakingAt: words[index].start) == index
+	}
+
+	/// Ends the line before this word.
+	///
+	/// `false` when there is nothing to record — the recording already ends the
+	/// line there, or the word is not one a line could start at. A fact that
+	/// changes nothing does not belong in the file.
+	@discardableResult
+	public mutating func addBreak(before index: Int) -> Bool {
+		guard index > 0, index < words.count else { return false }
+		guard silence(after: index - 1) == .none else { return false }
+		let time = words[index].start
+		// Refuses to write down a break it could not read back, which is only
+		// possible where two words share a start time.
+		guard word(breakingAt: time) == index, !breaks.contains(time) else { return false }
+		breaks.append(time)
+		breaks.sort()
+		return true
+	}
+
+	/// Takes a break back out.
+	///
+	/// Only one somebody put in. A break the *recording* made is not somebody's
+	/// to take out: there is half a second of silence there, the pane draws it
+	/// as a pause that can be selected and played, and joining the two lines
+	/// would swallow a stretch of the take nothing else can point at. See the
+	/// note on ``Silence``.
+	@discardableResult
+	public mutating func removeBreak(before index: Int) -> Bool {
+		guard hasBreak(before: index) else { return false }
+		let time = words[index].start
+		breaks.removeAll { $0 == time }
+		return true
 	}
 
 	// MARK: - Making a clip out of words
@@ -352,19 +479,34 @@ public struct Transcript: Sendable, Equatable {
 	/// paragraphs, so a marker appears where the speaker *changes* — a couple
 	/// of dozen lines in a five-minute interview rather than four hundred.
 	/// `# speaker:` with nothing after it says nobody knows.
+	///
+	/// A line somebody ended themselves is a comment for the same reason and by
+	/// the same trick: `# line: break`, above the word the line starts at. An
+	/// older reader throws it away and lays the words out by their silences,
+	/// which is exactly what it did before anybody could end a line by hand.
+	/// The marker carries no time, because where it sits in the file already
+	/// says which two words it is between — one fact, written once. The time in
+	/// ``breaks`` is what that position means, and it is read back off the word
+	/// underneath.
 	public func write(name: String, recogniser: String, locale: String) -> String {
 		var out = "# cuttr transcript — \(name)\n"
 		out += "# \(recogniser), \(locale), times on the video's clock\n"
-		// The explaining line only when there is something to explain, so a
+		// The explaining lines only when there is something to explain, so a
 		// take nobody has labelled writes byte for byte what it always did.
 		if words.contains(where: { $0.speaker != nil }) {
 			out += "# `# speaker:` names who says what follows, until the next one\n"
+		}
+		if !breaks.isEmpty {
+			out += "# `# line: break` ends a line where the recording does not\n"
 		}
 		out += "# start      end        word\n"
 		// Starts as nobody, so a take with no speakers in it writes no markers
 		// at all rather than one saying so.
 		var current: String? = nil
-		for word in words {
+		for (index, word) in words.enumerated() {
+			// The break first: it ends the line above, and the name that
+			// follows heads the line it starts.
+			if hasBreak(before: index) { out += "# line: break\n" }
 			if current != word.speaker {
 				current = word.speaker
 				out += "# speaker: \(word.speaker ?? "")\n"
@@ -377,11 +519,22 @@ public struct Transcript: Sendable, Equatable {
 	public static func read(_ text: String) -> Transcript {
 		var words: [Word] = []
 		var speaker: String?
+		var breaks: [Double] = []
+		var breaking = false
 		for line in text.components(separatedBy: .newlines) {
 			let trimmed = line.trimmingCharacters(in: .whitespaces)
 			guard !trimmed.isEmpty else { continue }
 			if trimmed.hasPrefix("#") {
 				let comment = trimmed.dropFirst().trimmingCharacters(in: .whitespaces)
+				if comment.lowercased().hasPrefix("line:") {
+					// Only `break` is understood. Anything else under this key
+					// belongs to a version that has not been written yet, and
+					// the honest thing for this one to do with it is nothing.
+					if Slug.make(from: String(comment.dropFirst("line:".count))) == "break" {
+						breaking = true
+					}
+					continue
+				}
 				guard comment.lowercased().hasPrefix("speaker:") else { continue }
 				let named = Slug.make(from: String(comment.dropFirst("speaker:".count)))
 				speaker = named.isEmpty ? nil : named
@@ -397,8 +550,13 @@ public struct Transcript: Sendable, Equatable {
 			words.append(Word(start: start, end: end,
 			                  text: String(fields[2]).trimmingCharacters(in: .whitespaces),
 			                  speaker: speaker))
+			// Off the word rather than off the numbers on the line, so a
+			// hand-edit that has written them the wrong way round still puts
+			// the break where the word ended up.
+			if breaking, let word = words.last { breaks.append(word.start) }
+			breaking = false
 		}
-		return Transcript(words: words)
+		return Transcript(words: words, breaks: breaks)
 	}
 
 	// MARK: - Who is speaking

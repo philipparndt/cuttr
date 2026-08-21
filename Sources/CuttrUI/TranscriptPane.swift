@@ -6,14 +6,16 @@ import CuttrKit
 /// The rest of this window looks at a recording as a shape — a waveform, a
 /// picture, a bar on a timeline — and every one of those makes you *listen* to
 /// find the sentence you meant. This pane is the same recording as words, so
-/// finding it is reading, and the four things it can do are the four things
+/// finding it is reading, and the five things it can do are the five things
 /// somebody does with a sentence they have found:
 ///
 /// - drag across it, and it becomes the in/out span, so `⏎` makes it a clip;
 /// - click a word, and the playhead goes there;
 /// - play, and the word being spoken is lit, so the pane and the picture stay
 ///   in step in both directions;
-/// - type a phrase into the field and be taken to it.
+/// - type a phrase into the field and be taken to it;
+/// - `B` ends the line before the word the caret is in, for the turn of a
+///   conversation the recogniser ran together.
 ///
 /// A text view rather than a list of rows. Speech is prose and it wraps like
 /// prose: a table would give one word per line and a five-minute take would be
@@ -43,6 +45,10 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	public var onStatus: ((String) -> Void)?
 	/// Somebody said who is talking from this word's line on. `nil` is nobody.
 	public var onAssign: ((_ words: Range<Int>, _ slug: String?) -> Void)?
+	/// End the line before this word — or, where somebody already said so, do
+	/// not. The pane asks; the document decides which way round it is, from the
+	/// same transcript this one is showing.
+	public var onBreakLine: ((_ before: Int) -> Void)?
 	/// A name that is not in the cast yet, typed into the pane.
 	public var onAddSpeaker: ((_ name: String, _ wordIndex: Int?) -> Void)?
 	/// A speaker's prose name changed. Their slug does not.
@@ -143,6 +149,8 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	private var known: [Transcriber.Language] = []
 	/// What the menu that is open is about, on the video's clock.
 	private var pointed: (start: Double, end: Double)?
+	/// And which word its line-break item would break before, if it has one.
+	private var pointedWord: Int?
 
 	/// Who is in this take, as the take says. Parallel to the chips, and the
 	/// numbers on the chips are the keys that assign them.
@@ -778,6 +786,11 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		// `u` for a voice nobody can name. Not the same key as `0`: that one
 		// takes an answer back, this one gives one.
 		if character == "u" { assignChosen(Speaker.unknown); return true }
+		// `b` for a break. `⏎` is taken — it makes a clip of the selection,
+		// which is what this pane is for — and every other verb here is a bare
+		// letter beside the digits, so a soft-return chord would be the odd one
+		// out as well as one slip away from cutting a clip nobody asked for.
+		if character == "b" { breakLineAtCaret(); return true }
 		return false
 	}
 
@@ -851,6 +864,44 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 			wantedCaret = laidOutLines[line + 1].lowerBound
 		}
 		onAssign?(words, slug)
+	}
+
+	// MARK: - Ending a line by hand
+
+	/// `B`: the line ends before the word the caret is in.
+	///
+	/// The caret rather than the selection, because this is about one boundary
+	/// and a selection has two. A caret in a name in the margin means the line
+	/// that name heads, the same as it does everywhere else in this pane — so
+	/// clicking the name of a line somebody broke and pressing `B` puts it
+	/// back.
+	func breakLineAtCaret() {
+		guard let word = caretWord else { return }
+		breakLine(before: word)
+	}
+
+	/// Asks for a break before this word, or for the one there to come out.
+	///
+	/// Refused rather than quietly ignored, because the two reasons it can be
+	/// refused are the two things somebody has to be told: there is no line
+	/// above the first word, and a line the *recording* ends is not somebody's
+	/// to end again. Both go through ``CuttrKit/Transcript/addBreak(before:)``,
+	/// which is the one place that rule lives.
+	func breakLine(before index: Int) {
+		guard index > 0, index < transcript.count else {
+			onStatus?("a line cannot start before the first word")
+			return
+		}
+		if !transcript.hasBreak(before: index), transcript.silence(after: index - 1) != .none {
+			onStatus?("the recording already ends the line here")
+			return
+		}
+		// The caret goes to the word the break is about, so it is on the line
+		// that has just been made and `B` again takes it out. Naming a line
+		// walks the caret on; this does not, because the thing somebody wants
+		// to look at after breaking a line is the line they broke.
+		wantedCaret = index
+		onBreakLine?(index)
 	}
 
 	/// Puts the caret at the head of a word, and shows the line it is in.
@@ -1070,9 +1121,35 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 		let length = String(format: "%.1fs", about.end - about.start)
 		made.addItem(item("Play \(about.name) · \(length)", #selector(playPointed)))
 		made.addItem(item("Make a clip of \(about.count == 1 ? "it" : "them")", #selector(clipPointed)))
+		// Where the line could be ended, and only there: the item is about one
+		// boundary, and a break "before this pause" is not a thing somebody can
+		// mean.
+		pointedWord = breakable(at: charIndex)
+		if let word = pointedWord {
+			made.addItem(.separator())
+			made.addItem(item(transcript.hasBreak(before: word)
+				? "Join this line to the one above" : "End the line before this word",
+				#selector(breakPointed)))
+		}
 		made.addItem(.separator())
 		made.addItem(item("Copy", #selector(NSText.copy(_:)), target: view))
 		return made
+	}
+
+	/// The word a break would go before, for a right-click at `charIndex`.
+	///
+	/// `nil` when there is nothing to offer. `orBefore: false` so a click in
+	/// the space ahead of a word means that word — the break goes in front of
+	/// it — and so that a click on an ellipsis or a sound answers with the word
+	/// after it, which is a line the recording already ends and is refused on
+	/// the next line down.
+	private func breakable(at charIndex: Int) -> Int? {
+		let index = line(named: charIndex).map { laidOutLines[$0].lowerBound }
+			?? word(containing: charIndex, orBefore: false)
+		guard let index, index > 0, index < transcript.count else { return nil }
+		guard transcript.hasBreak(before: index)
+			|| transcript.silence(after: index - 1) == .none else { return nil }
+		return index
 	}
 
 	private func item(_ title: String, _ action: Selector, target: AnyObject? = nil) -> NSMenuItem {
@@ -1169,6 +1246,11 @@ public final class TranscriptPane: NSView, NSTextViewDelegate {
 	@objc private func clipPointed() {
 		guard let pointed else { return }
 		onClipWords?(pointed.start, pointed.end)
+	}
+
+	@objc private func breakPointed() {
+		guard let pointedWord else { return }
+		breakLine(before: pointedWord)
 	}
 
 	// MARK: - What it does

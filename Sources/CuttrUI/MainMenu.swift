@@ -424,6 +424,9 @@ enum MainMenu {
 	  drag across the transcript to set in and out; ⏎ makes it a clip
 	  click a word to go there; the word being said is lit as it plays
 	  W            name the selected clip after its first words
+	  B            end the line before the word the caret is in — again to
+	               take it back. For the turn of a conversation the recogniser
+	               ran together, where nobody paused
 	  type in the pane's field to find a phrase and be taken to it
 
 	Aligning the separate audio
