@@ -321,16 +321,19 @@ public enum Renderer {
 
 		// Nothing to filter? Then do not filter.
 		//
-		// Core Image's pass costs colour: measured against the same frame of the
-		// same footage, the picture came back seven or eight levels lifted right
-		// across, which is what "washed out" was. A programme with no grade and
-		// no effects, at the size it was shot, has nothing for that pass to do —
-		// so it goes through AVFoundation's own path instead and comes out
-		// identical to what went in. A fit, when one is needed, is a transform
-		// on a layer instruction, which is exact.
+		// Core Image's pass costs a decode and an encode per frame, and used to
+		// be thought to cost colour — the seven or eight levels that "washed
+		// out" meant. Re-measured against the source frame, the pass as it
+		// stands is not the eight levels: a fifth of a level on the mean at
+		// worst, which is the HEVC re-encode rather than the pass. What is left
+		// is time. Still not worth paying: a programme with no grade and no
+		// effects, at the size it was shot, has nothing for that pass to *do*,
+		// and AVFoundation's own path hands the frames that were shot straight
+		// to the encoder. A fit, when one is needed, is a transform on a layer
+		// instruction, which is exact.
 		let graded = grades.contains { $0.look != .none }
 		let dissolves = resolved.clips.contains { $0.transition > 0 }
-		let unmanaged = CIContext(options: [.workingColorSpace: NSNull()])
+		let unmanaged = context()
 		// Anything that goes behind somebody is painted into the frame, which
 		// is the filter pass's job — so there *is* something for it to do.
 		let painted = resolved.overlays.contains { $0.overlay.behind == .people }
@@ -372,9 +375,10 @@ public enum Renderer {
 		// A dissolve needs two frames at once, and only the compositor can hold
 		// two. Everything else goes through Core Image, which is where it has
 		// always gone — and, measured against the footage, comes out with the
-		// numbers it went in with. The compositor's own frames arrive about
-		// three per cent lifted, which is worth it for a dissolve and is not
-		// worth it for a programme of straight cuts.
+		// numbers it went in with. The compositor's own frames come out about
+		// three quarters of a level *darker* on the mean, not the three per cent
+		// lifted this used to claim: an extra generation of chroma, and worth it
+		// for a dissolve rather than for a programme of straight cuts.
 		guard dissolves || cards else {
 			let filtered = AVMutableVideoComposition(asset: composition) { request in
 				let time = request.compositionTime.seconds
@@ -387,9 +391,11 @@ public enum Renderer {
 					                       baseURL: resolved.baseURL, overlays: resolved.overlays,
 					                       effects: effects.map { ($0.overlay, $0.renderer) },
 					                       people: people))
-				// Colour management off: converting Rec. 709 video into Core
-				// Image's linear space and back does not come home, and the
-				// picture arrives seven or eight levels lifted.
+				// Unmanaged, and ``context()`` says why — which is not the reason
+				// this comment used to give. AVFoundation owns the buffer here,
+				// so the day management goes on it is the context's
+				// `outputColorSpace` that has to name the destination: there is
+				// nowhere to pass one.
 				request.finish(with: image, context: unmanaged)
 			}
 			declareColour(on: filtered)
@@ -475,6 +481,60 @@ public enum Renderer {
 		composition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
 		composition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
 		composition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
+	}
+
+	/// The one Core Image context every pass that makes a frame uses, and the
+	/// reason colour management is off in it.
+	///
+	/// There were three of these, in three files, each with its own half of the
+	/// same story written above it. One place now, because the story is one
+	/// story and it has been measured twice.
+	///
+	/// **What was believed.** That management could not be turned on: measured
+	/// against the same frame of the same footage, a managed pass came back
+	/// seven or eight levels lifted right across, which is what "washed out"
+	/// was. So `workingColorSpace` was set to null everywhere, which switches
+	/// off every conversion Core Image would do — and made the arithmetic
+	/// correct only because *everything* in the pipe then happens to be raw
+	/// Rec. 709 code values.
+	///
+	/// **What is true.** Management was never the problem; the destination was.
+	/// A frame arriving from AVFoundation is tagged 709 and its space is the
+	/// profile Core Video builds from those tags, which is called HDTV — and
+	/// `CGColorSpace(name: .itur_709)`, the constant anybody reaches for, is a
+	/// *different* profile with a different curve. Measured on a 0…255 ramp
+	/// through one pass, worst error in levels:
+	///
+	///     working             destination                    worst
+	///     linear sRGB         sRGB                              11
+	///     linear sRGB         itur_709                          19
+	///     linear sRGB         the space the frame arrived in     0
+	///     that space          that space                        0
+	///
+	/// So the round trip comes home exactly, and always could have. The eight
+	/// levels were a pass landing in the wrong 709. Turned on that way and
+	/// measured end to end — a 709 shot and an HLG shot, through the filtering
+	/// path and through the compositor — every rendered frame came out *byte
+	/// identical* to the unmanaged render it replaced. ``ColourPassTests`` holds
+	/// those numbers so that the next person to try this starts from the
+	/// answer rather than from the eight levels.
+	///
+	/// **Why it is still off.** Because of the colour this program *paints*. A
+	/// managed pass converts a `CIColor` out of sRGB and into the film, and the
+	/// Core Animation pass that draws a caption or a scene does not: measured on
+	/// one rendered file, `#808080` came out at 116 as a card's fill and at 127
+	/// as a scene's shape. One hex, two colours in one film — which is the same
+	/// class of fault as three render paths holding three opinions about what
+	/// colour the film is, and no better for being the correct half of it that
+	/// moved. Off, everything painted agrees at 127, by accident.
+	///
+	/// So this waits on the painted colour being declared too — ``RGBA/ciColor``
+	/// naming the space it is in, and the layer pass agreeing — and then it is
+	/// two lines and a table of zeroes. It is also the first thing an HDR mode
+	/// needs: raw-code-value arithmetic works only while everything in the pipe
+	/// is one space, and a wider film is a second one.
+	static func context() -> CIContext {
+		CIContext(options: [.workingColorSpace: NSNull()])
 	}
 
 	/// One black frame in a file, for a card to hold its place with.
