@@ -202,7 +202,8 @@ enum ConstraintConflicts {
 		window.setContentSize(NSSize(width: 1600, height: 1000))
 		window.layoutIfNeeded()
 
-		for mode in [ComposeWindowController.Mode.project, .edit, .text, .preview, .edit] {
+		for mode in [ComposeWindowController.Mode.project, .edit, .text, .preview,
+		             .levels, .edit] {
 			controller.show(mode)
 			window.layoutIfNeeded()
 			for size in [NSSize(width: 1600, height: 1000), NSSize(width: 1300, height: 840),
