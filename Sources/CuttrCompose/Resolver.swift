@@ -722,6 +722,34 @@ public enum Resolver {
 					warnings.append("Nothing is called `@\(name)` on this timeline, "
 						+ "so \(overlay.described) is not on it.")
 				}
+				// Written inside an entry, and pinned to programme times that
+				// have drifted off it.
+				//
+				// This is the one way an overlay can be quietly wrong. Written
+				// inside a clip with no range it *covers* that clip and follows
+				// it through every re-cut. Written inside a clip with
+				// `from:`/`to:`, it is pinned to the programme's clock — so the
+				// moment anything upstream changes length, the clip moves and
+				// the overlay does not. It was found on a real project: three
+				// spinners five seconds early, playing over the shot before the
+				// one they were written on, and nothing anywhere said so.
+				//
+				// Said rather than corrected. The times are what somebody wrote
+				// and this cannot know which of the two they meant — but it can
+				// refuse to let it pass in silence, and name `within:` as the
+				// spelling that would have survived.
+				if let covering, case .times = appearance.span {
+					let outside = spans.filter {
+						$0.end <= covering.start + 0.001 || $0.start >= covering.end - 0.001
+					}
+					if !outside.isEmpty {
+						warnings.append("\(overlay.described) is written inside a "
+							+ "timeline entry but pinned to programme times, and those "
+							+ "times no longer touch it — so it plays over something "
+							+ "else. Write it as `within:` that clip, or take the "
+							+ "range off to cover the whole of it.")
+					}
+				}
 				for span in spans where span.end > span.start {
 					// What it says *here*: a spinner that comes back saying
 					// something else is one overlay with two appearances, and by

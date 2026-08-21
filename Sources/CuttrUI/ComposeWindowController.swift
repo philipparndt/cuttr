@@ -643,17 +643,33 @@ public final class ComposeWindowController: DocumentEditor,
 		strip.onMoveOverlay = { [weak self] origin, appearance, start, end in
 			guard let self, let resolved = self.composeDocument.resolved else { return }
 			var next = self.composeDocument.project
+			// An overlay written inside an entry stays relative to that entry.
+			//
+			// It used to be written as programme times, and that quietly undid
+			// the thing putting it inside a clip was *for*: it stopped following
+			// the clip, so the next change upstream moved the shot and left the
+			// overlay behind. See ``CuttrCompose/Overlay/Span/inside(_:start:end:in:)``
+			// for what it cost. Same drag, same two ends, written the way that
+			// survives a re-cut.
+			let relative: Overlay.Span?
+			if case .entry(let path, _) = origin, let entry = next.entry(at: path) {
+				relative = Overlay.Span.inside(entry, start: start, end: end, in: resolved)
+			} else {
+				relative = nil
+			}
 			next.editOverlay(at: origin) { overlay in
-				// An overlay written inside an entry and given no range covers
-				// that entry. Dragging its bar is somebody saying it should
-				// cover something else, so it stops being that and starts
-				// saying when it is on — written the way anything dragged here
-				// is, snapped to whatever the programme has at those moments.
 				guard appearance < overlay.appearances.count else {
 					guard overlay.appearances.isEmpty else { return }
-					overlay.appearances = [Overlay.Appearance(
-						Overlay.Span.times(from: start, to: end)
+					overlay.appearances = [Overlay.Appearance(relative
+						?? Overlay.Span.times(from: start, to: end)
 							.moved(start: start, end: end, in: resolved))]
+					return
+				}
+				// A range that already says how it wants to be written keeps
+				// that spelling; only programme times — the fragile one — are
+				// turned into something relative.
+				if case .times = overlay.appearances[appearance].span, let relative {
+					overlay.appearances[appearance].span = relative
 					return
 				}
 				overlay.appearances[appearance].span = overlay.appearances[appearance].span

@@ -58,6 +58,36 @@ extension Overlay.Span {
 	}
 }
 
+extension Overlay.Span {
+
+	/// What to write for an overlay that lives **inside** a timeline entry,
+	/// after a drag put its ends here.
+	///
+	/// Absolute programme times are the wrong answer for one of these, and it
+	/// has already cost a real project its placements. An overlay written inside
+	/// a clip with no range *covers* that clip and follows it through every
+	/// re-cut. Dragging its bar used to convert that into `from:`/`to:` on the
+	/// programme's clock — after which the first change anywhere upstream moved
+	/// the clip and left the overlay behind. Three spinners ended up five
+	/// seconds early, playing over the shot before the one they were written
+	/// on, and because the file was perfectly intact there was nothing to see.
+	///
+	/// So a drag on one of these is written *relative to the clip it is inside*,
+	/// which is the same drag and survives the re-cut. `nil` when the entry has
+	/// no clip to be relative to — a card, or a section — and then the caller's
+	/// ordinary arithmetic stands and the resolver's warning is the safety net.
+	public static func inside(
+		_ entry: TimelineEntry, start: Double, end: Double, in resolved: ResolvedProject
+	) -> Overlay.Span? {
+		guard case .clip(let reference) = entry.source,
+		      let place = Endpoint.clip(reference).place(in: resolved, nearest: start)
+		else { return nil }
+		return Overlay.Span
+			.within(.clip(reference), from: start - place.start, to: end - place.start)
+			.clamped(in: resolved, nearest: start)
+	}
+}
+
 extension Overlay.Span.Endpoint {
 
 	/// Where this mark is on the programme's clock — once for each time it is
