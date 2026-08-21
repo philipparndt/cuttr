@@ -114,6 +114,17 @@ twenty-five. That is the workflow the pane was always described as having and
 now it is the workflow it rewards: answer a couple, ask, correct a few, ask
 again.
 
+**And on take A it is still not usable, by the bar set at the top of this file.**
+63% against a constant of 67.1% means that on that take, answering `mia`
+everywhere and correcting by hand beats asking — so the honest reading is not
+"56% on average" but this: the pass is worth having where the speaking time is
+shared, and is not yet worth having where one person holds most of the take.
+Take A is one child and two adults with the child on 67% of the lines; take B is
+three people closer to even, and there the same method turns 45% into 63%. A
+constant is cheap in proportion to how lopsided the take is, and that — not
+which voices are easier to tell apart — is what decides whether this earns its
+place. It is the reason the offer is still an offer and nothing runs by itself.
+
 Reproduce any row:
 
 ```
