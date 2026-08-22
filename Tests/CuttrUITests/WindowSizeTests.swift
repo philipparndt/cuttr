@@ -76,7 +76,7 @@ import Testing
 	}
 
 	@Test func theLibraryTakesTheSizeItIsGiven() {
-		let library = LibraryView()
+		let library = MaterialTree()
 		library.reload(ComposeDocument.Vocabulary())
 		#expect(fits(library, NSSize(width: 500, height: 700)))
 	}

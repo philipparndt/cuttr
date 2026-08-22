@@ -23,7 +23,7 @@ import Testing
 	/// media is *there* is what the library has to decide, and what is inside it
 	/// is the player's business.
 	private func library(offset: Double = 0.5, mediaOnDisk: Bool = true) throws
-		-> (LibraryView, NSWindow, URL) {
+		-> (MaterialTree, NSWindow, URL) {
 		let folder = URL(fileURLWithPath: NSTemporaryDirectory())
 			.appendingPathComponent("cuttr-library-\(UUID().uuidString)")
 		try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -47,7 +47,7 @@ import Testing
 
 		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820),
 		                      styleMask: [.titled], backing: .buffered, defer: true)
-		let library = LibraryView(frame: NSRect(x: 0, y: 0, width: 320, height: 820))
+		let library = MaterialTree(frame: NSRect(x: 0, y: 0, width: 320, height: 820))
 		window.contentView?.addSubview(library)
 		library.reload(vocabulary)
 		return (library, window, folder)

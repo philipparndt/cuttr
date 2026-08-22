@@ -16,7 +16,22 @@ import Testing
 /// nobody can learn.
 @MainActor @Suite struct TakesListGestureTests {
 
-	private func list() throws -> (TakesTable, NSTableView, URL) {
+	/// Which row a named thing is on. The tree has headings in it, so a row
+	/// number is not a thing a test can know in advance — and it should not,
+	/// because what is being checked is the gesture and not the arithmetic.
+	private func row(of list: MaterialTree, _ table: NSOutlineView, _ name: String) -> Int? {
+		for index in 0 ..< table.numberOfRows {
+			guard let held = table.item(atRow: index) as? MaterialTree.Held else { continue }
+			switch held.node.row {
+			case .take(let take, _, _, _) where take == name: return index
+			case .scene(let scene) where scene == name: return index
+			default: continue
+			}
+		}
+		return nil
+	}
+
+	private func list() throws -> (MaterialTree, NSOutlineView, URL) {
 		_ = NSApplication.shared
 		let folder = URL(fileURLWithPath: NSTemporaryDirectory())
 			.appendingPathComponent("cuttr-gesture-\(UUID().uuidString)")
@@ -31,11 +46,11 @@ import Testing
 		let document = ComposeDocument()
 		try document.read(from: projectFile)
 
-		let list = TakesTable(frame: NSRect(x: 0, y: 0, width: 520, height: 240))
+		let list = MaterialTree(frame: NSRect(x: 0, y: 0, width: 520, height: 240))
 		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 240),
 		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
 		window.contentView = list
-		list.reload(document.takes, scenes: document.project.scenes)
+		list.reload(document.vocabulary, takes: document.takes)
 		window.layoutIfNeeded()
 		let table = list.tableForTesting
 		table.layoutSubtreeIfNeeded()
@@ -44,8 +59,10 @@ import Testing
 
 	/// Every column of every row hands the mouse to the table.
 	@Test func aClickAnywhereInARowReachesTheTable() throws {
-		let (_, table, _) = try list()
-		#expect(table.numberOfRows == 2, "the list has \(table.numberOfRows) rows")
+		let (list, table, _) = try list()
+		// Four roots, the take under the first and the scene under the second.
+		#expect(table.numberOfRows == 6, "the tree has \(table.numberOfRows) rows")
+		_ = list
 		#expect(table.doubleAction != nil && table.target != nil)
 
 		for row in 0..<table.numberOfRows {
@@ -58,10 +75,16 @@ import Testing
 				// Well inside the cell's text, which is where somebody aims.
 				let point = NSPoint(x: cellRect.midX, y: cellRect.midY)
 				let hit = table.hitTest(table.convert(point, to: table.superview))
+				// The list itself, and not a control inside a row. Said as
+				// "is it the list" rather than "is it not a control": an
+				// `NSTableView` is itself an `NSControl`, so the old spelling
+				// asks the wrong question of a click that landed exactly
+				// where it should.
 				let landed = "row \(row), column \(name): the click lands on "
-					+ "\(type(of: hit as Any)), which answers the mouse itself — "
-					+ "the table never sees it and `clickedRow` stays at −1"
-				#expect(!(hit is NSControl), .init(rawValue: landed))
+					+ "\(hit.map { String(describing: type(of: $0)) } ?? "nothing"), "
+					+ "which answers the mouse itself — the list never sees it "
+					+ "and `clickedRow` stays at −1"
+				#expect(hit === table, .init(rawValue: landed))
 				// And the table agrees on which row that point is.
 				let said = "row \(row), column \(name): the table says "
 					+ "\(table.row(at: point))"
@@ -74,9 +97,11 @@ import Testing
 	/// otherwise the caret could not be put anywhere in it.
 	@Test func theNameTakesTheMouseWhileItIsBeingRenamed() throws {
 		let (list, table, _) = try list()
-		list.beginRenaming("mia-take-1.cuttr")
+		let take = try #require(row(of: list, table, "mia-take-1"))
+		table.selectRowIndexes([take], byExtendingSelection: false)
+		list.beginRenamingForTesting()
 		table.layoutSubtreeIfNeeded()
-		let cellRect = table.frameOfCell(atColumn: 0, row: 0)
+		let cellRect = table.frameOfCell(atColumn: 0, row: take)
 		let point = NSPoint(x: cellRect.midX, y: cellRect.midY)
 		let hit = table.hitTest(table.convert(point, to: table.superview))
 		#expect(hit is NSTextField || hit is NSTextView,
@@ -85,7 +110,7 @@ import Testing
 
 	/// The gesture arrives at the take's own file, and at nothing else.
 	@Test func theGestureOpensTheTakeItLandedOn() throws {
-		let (list, table, take) = try list()
+		let (list, table, file) = try list()
 		var opened: [URL] = []
 		var aside: [Bool] = []
 		var scenes: [String?] = []
@@ -97,21 +122,23 @@ import Testing
 
 		// The row is chosen and the table's own double-click handler run, which
 		// is the method `doubleAction` names.
-		table.selectRowIndexes([0], byExtendingSelection: false)
-		list.chooseRowForTesting(0)
-		#expect(opened.map(\.standardizedFileURL) == [take.standardizedFileURL],
+		let take = try #require(row(of: list, table, "Mia 1") ?? row(of: list, table, "mia-take-1"))
+		table.selectRowIndexes([take], byExtendingSelection: false)
+		list.chooseRowForTesting(take)
+		#expect(opened.map(\.standardizedFileURL) == [file.standardizedFileURL],
 		        "the take opened was \(opened)")
 		#expect(scenes.isEmpty)
 
 		// And a scene row goes to the scene editor rather than to a file.
-		list.chooseRowForTesting(1)
+		let scene = try #require(row(of: list, table, "intro"))
+		list.chooseRowForTesting(scene)
 		#expect(scenes == ["intro"], "the scene chosen was \(scenes)")
 		#expect(opened.count == 1)
 
 		// The ordinary gesture swaps the document in place; ⌥ asks for a window
 		// of its own, and the list says which was meant rather than deciding.
 		#expect(aside == [false], "the plain double-click asked for a new window")
-		list.chooseRowForTesting(0, aside: true)
+		list.chooseRowForTesting(take, aside: true)
 		#expect(aside == [false, true], "⌥ on the row did not ask for a new window")
 	}
 }

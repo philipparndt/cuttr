@@ -193,7 +193,8 @@ import Testing
 		let window = try #require(open.composer.window)
 
 		// Through the list's own `doubleAction` path, not through the delegate.
-		open.composer.takesForTesting.chooseRowForTesting(0)
+		// Row 1: the tree's first row is the `takes` heading.
+		open.composer.materialForTesting.chooseRowForTesting(1)
 
 		#expect(open.delegate.documentWindows.count == 1,
 		        "the double click opened a window")
@@ -209,7 +210,7 @@ import Testing
 		let open = try inThePlace(NSRect(x: 160, y: 120, width: 1280, height: 800))
 		let first = try #require(open.composer.window)
 
-		open.composer.takesForTesting.chooseRowForTesting(0, aside: true)
+		open.composer.materialForTesting.chooseRowForTesting(1, aside: true)
 
 		#expect(open.delegate.documentWindows.count == 2,
 		        "⌥ did not give the take a window of its own")

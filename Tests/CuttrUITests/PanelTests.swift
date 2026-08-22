@@ -100,7 +100,7 @@ import Testing
 
 	@Test func libraryListsTheMaterial() {
 		_ = NSApplication.shared
-		let library = LibraryView()
+		let library = MaterialTree()
 		library.reload(vocabulary())
 		library.reload(ComposeDocument.Vocabulary())
 		library.layoutSubtreeIfNeeded()
@@ -142,17 +142,20 @@ import Testing
 
 	@Test func foldingAHeadingHidesWhatIsUnderIt() throws {
 		_ = NSApplication.shared
-		let library = LibraryView()
+		let library = MaterialTree()
 		library.reload(vocabulary())
 		let table = try #require(self.table(in: library))
 		let all = table.numberOfRows
 
-		// The take's heading is the first row; folding it takes its clips away
-		// and leaves everything else.
-		library.fold("take-01")
-		#expect(table.numberOfRows == all - 2)
-		library.fold("take-01")
-		#expect(table.numberOfRows == all)
+		// A take starts folded, so it is opened first — which is itself the
+		// thing worth checking: the tree opens showing the takes and not a
+		// wall of every clip in the project.
+		library.fold(take: "take-01")
+		let opened = table.numberOfRows
+		#expect(opened > all, "opening a take showed nothing")
+
+		library.fold(take: "take-01")
+		#expect(table.numberOfRows == all, "folding it did not put the clips away")
 	}
 }
 
@@ -287,7 +290,7 @@ import Testing
 	/// item — with the moment it starts, so nobody has to read the take again.
 	@Test func theLibraryOffersTheClipUnderThePointer() {
 		_ = NSApplication.shared
-		let library = LibraryView(frame: NSRect(x: 0, y: 0, width: 300, height: 400))
+		let library = MaterialTree(frame: NSRect(x: 0, y: 0, width: 300, height: 400))
 		library.reload(vocabulary())
 		library.layoutSubtreeIfNeeded()
 		var opened: ComposeDocument.Vocabulary.Item?

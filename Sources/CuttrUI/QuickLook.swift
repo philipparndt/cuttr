@@ -404,7 +404,7 @@ public final class QuickLookPanel: NSPanel {
 		audioMix: AVAudioMix?, duration: Double)?
 
 	/// A take's own media, for a look at material that is not on the programme
-	/// at all — see ``LibraryView``.
+	/// at all — see ``MaterialTree``.
 	///
 	/// The three things a take says about what it is made of, which is exactly
 	/// what ``Transport/load(video:audio:offset:completion:)`` takes: the

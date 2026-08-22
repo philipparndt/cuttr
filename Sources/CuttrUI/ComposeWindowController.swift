@@ -25,8 +25,15 @@ public final class ComposeWindowController: DocumentEditor,
 	private let strip = ProgrammeStrip()
 	private let markers = AnchorMarkerView()
 	private let overlayHost = NSView()
-	private let takesTable = TakesTable()
-	private let library = LibraryView()
+	/// Everything the project is made of, in one tree. This was two panes with
+	/// a drag handle between them; see ``Material``.
+	private let materialTree = MaterialTree()
+	/// The width of the pane it sits in, held so it can be folded to the side.
+	private var materialPaneWidth: NSLayoutConstraint?
+	/// What it was before it was folded, so it comes back the size it was.
+	private var materialWasWide: CGFloat = 260
+	/// The button in the bar that folds it, kept so its state can follow.
+	private var materialFold: NSButton?
 	private let inspector = ProjectInspector()
 	private let source = ProjectTextEditor()
 	/// A real frame, for the reason in `roomToLayOutIn`: a tab view sizes the
@@ -276,11 +283,7 @@ public final class ComposeWindowController: DocumentEditor,
 		// tracked faces. A project is assembled by dragging from that list onto
 		// the programme, which is why the two live in one column — the material
 		// on the left, the programme in the middle, its properties on the right.
-		let material = NSSplitView(frame: .roomToLayOutIn)
-		material.isVertical = false
-		material.dividerStyle = .thin
-		material.addArrangedSubview(takesTable)
-		material.addArrangedSubview(library)
+		let material = materialTree
 
 		let editing = NSSplitView(frame: .roomToLayOutIn)
 		editing.isVertical = true
@@ -359,21 +362,17 @@ public final class ComposeWindowController: DocumentEditor,
 		// and since nothing else does, they are also what pulls a dragged
 		// divider back. Held on to and followed along as the dividers move.
 		let materialWidth = material.widthAnchor.constraint(equalToConstant: 260)
-		let takesHeight = takesTable.heightAnchor.constraint(equalToConstant: 180)
 		let stripHeight = strip.heightAnchor.constraint(equalToConstant: 200)
-		dragged = [(material, materialWidth, true), (takesTable, takesHeight, false),
-		           (strip, stripHeight, false)]
+		dragged = [(material, materialWidth, true), (strip, stripHeight, false)]
+		materialPaneWidth = materialWidth
 		editing.delegate = self
-		material.delegate = self
 		split.delegate = self
-		let wishes = [materialWidth, takesHeight, stripHeight]
+		let wishes = [materialWidth, stripHeight]
 		for wish in wishes { wish.priority = preferred; wish.isActive = true }
 		NSLayoutConstraint.activate([
 			// Floors, not laws — see `asFloor`. All five are inside split views
 			// inside a tab view, and the item that is not showing has no size.
 			material.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).asFloor,
-			takesTable.heightAnchor.constraint(greaterThanOrEqualToConstant: 90).asFloor,
-			library.heightAnchor.constraint(greaterThanOrEqualToConstant: 120).asFloor,
 			strip.heightAnchor.constraint(greaterThanOrEqualToConstant: 90).asFloor,
 			playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180).asFloor,
 		])
@@ -429,7 +428,7 @@ public final class ComposeWindowController: DocumentEditor,
 	var railForTesting: Rail { rail }
 	/// For the tests: the takes list, so the double-click that opens a take can
 	/// be driven where it actually starts.
-	var takesForTesting: TakesTable { takesTable }
+	var materialForTesting: MaterialTree { materialTree }
 	/// For the tests: the levels page, so a slider can be driven at its seam
 	/// rather than by an event nobody handles.
 	var levelsForTesting: LevelsPage { levels }
@@ -489,6 +488,27 @@ public final class ComposeWindowController: DocumentEditor,
 		// A project is the outermost thing there is; there is nowhere to go back to.
 		bar.setBack(false)
 		bar.addTrailing(renderButton)
+
+		// The fold, in the bar rather than in the pane it folds: a chevron
+		// inside the material goes away with it, and then nothing on screen
+		// brings it back. Run on every appearance, so it is made once and kept.
+		let fold = materialFold ?? NSButton()
+		if materialFold == nil {
+			fold.isBordered = false
+			fold.bezelStyle = .inline
+			fold.imagePosition = .imageOnly
+			fold.image = NSImage(systemSymbolName: "sidebar.leading",
+			                     accessibilityDescription: "the material")?
+				.withSymbolConfiguration(.init(pointSize: 12, weight: .semibold)
+					.applying(.init(paletteColors: [Theme.dimText])))
+			fold.target = self
+			fold.action = #selector(toggleMaterial(_:))
+			fold.toolTip = "Fold the material away"
+			fold.translatesAutoresizingMaskIntoConstraints = false
+			fold.widthAnchor.constraint(equalToConstant: 22).isActive = true
+			materialFold = fold
+		}
+		bar.addLeading(fold)
 		bar.onPlayPause = { [weak self] in self?.playPressed() }
 		// The two halves of the capsule: the documents on the left, and what can
 		// be done about the repository this one sits in on the right.
@@ -690,7 +710,7 @@ public final class ComposeWindowController: DocumentEditor,
 			self.transport.play(from: group.start, to: group.end)
 		}
 
-		library.onOpenInTake = { [weak self] item in
+		materialTree.onOpenInTake = { [weak self] item in
 			guard let self, let take = self.composeDocument.takes
 				.first(where: { $0.name == item.take })
 			else { return }
@@ -768,10 +788,10 @@ public final class ComposeWindowController: DocumentEditor,
 			try? self.composeDocument.write()
 		}
 
-		takesTable.onOpen = { [weak self] url, aside in self?.onOpenTake?(url, aside) }
-		takesTable.onRemove = { [weak self] path in self?.composeDocument.removeTake(path) }
-		takesTable.onAdd = { [weak self] in self?.addTake(nil) }
-		takesTable.onRename = { [weak self] path, name in
+		materialTree.onOpen = { [weak self] url, aside in self?.onOpenTake?(url, aside) }
+		materialTree.onRemove = { [weak self] path in self?.composeDocument.removeTake(path) }
+		materialTree.onAdd = { [weak self] in self?.addTake(nil) }
+		materialTree.onRename = { [weak self] path, name in
 			guard let self else { return }
 			let from = URL(fileURLWithPath: path, relativeTo: self.composeDocument.baseURL)
 				.standardizedFileURL
@@ -792,16 +812,16 @@ public final class ComposeWindowController: DocumentEditor,
 				self.rebuild()
 			}
 		}
-		takesTable.onNew = { [weak self] in self?.newTake(nil) }
+		materialTree.onNew = { [weak self] in self?.newTake(nil) }
 
 		// A scene is material this project is made of, so it is worked on from
 		// the list of what the project is made of. `nil` is a new one.
-		takesTable.onScene = { [weak self] name in
+		materialTree.onScene = { [weak self] name in
 			guard let self else { return }
 			self.onEditScene?(self.composeDocument, name)
 		}
-		takesTable.onAddScene = { [weak self] in self?.addScene() }
-		takesTable.onRemoveScene = { [weak self] name in
+		materialTree.onAddScene = { [weak self] in self?.addScene() }
+		materialTree.onRemoveScene = { [weak self] name in
 			guard let self else { return }
 			var next = self.composeDocument.project
 			next.scenes.removeValue(forKey: name)
@@ -835,11 +855,7 @@ public final class ComposeWindowController: DocumentEditor,
 				Task { @MainActor in done(picture) }
 			}
 		}
-		library.onInsert = { [weak self] reference in self?.inspector.insert(reference: reference) }
-		library.onEditScene = { [weak self] name in
-			guard let self else { return }
-			self.onEditScene?(self.composeDocument, name)
-		}
+		materialTree.onInsert = { [weak self] reference in self?.inspector.insert(reference: reference) }
 
 		// The same arrangement as the cutting window, for the same reason: the
 		// keys have to work wherever the focus happens to be.
@@ -885,6 +901,36 @@ public final class ComposeWindowController: DocumentEditor,
 			// reached for them.
 			if rate == 0 { self.controls.wake(for: 4) }
 		}
+	}
+
+	// MARK: - Folding the material away
+
+	/// Whether the material pane is showing.
+	public private(set) var isMaterialShowing = true
+
+	/// Folds the tree away to the side, and brings it back the width it was.
+	///
+	/// **The control cannot live in the pane.** A chevron inside it goes away
+	/// with it, and then there is nothing on screen to bring it back — which is
+	/// how a sidebar becomes a thing somebody loses. So it is in the bar, which
+	/// is outside every pane and always there.
+	///
+	/// The width is remembered rather than reset, because the pane is dragged
+	/// to a width somebody chose and coming back at 260 would throw that away.
+	@objc public func toggleMaterial(_ sender: Any?) {
+		guard let width = materialPaneWidth else { return }
+		isMaterialShowing.toggle()
+		if isMaterialShowing {
+			width.constant = materialWasWide
+			materialTree.isHidden = false
+		} else {
+			materialWasWide = max(width.constant, 200)
+			materialTree.isHidden = true
+			width.constant = 0
+		}
+		materialFold?.state = isMaterialShowing ? .on : .off
+		materialFold?.toolTip = isMaterialShowing
+			? "Fold the material away" : "Show the material"
 	}
 
 	// MARK: - The View menu's zooms
@@ -948,10 +994,10 @@ public final class ComposeWindowController: DocumentEditor,
 		findRepository()
 		bar?.setName(composeDocument.displayName)
 		bar?.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
-		takesTable.reload(composeDocument.takes, scenes: composeDocument.project.scenes)
 		inspector.resolved = composeDocument.resolved
 		let vocabulary = composeDocument.vocabulary
-		library.reload(vocabulary)
+		materialTree.reload(vocabulary, takes: composeDocument.takes)
+
 		// So the file can say which of its names point at nothing.
 		source.vocabulary = vocabulary
 		inspector.reload(composeDocument.project, vocabulary: vocabulary)

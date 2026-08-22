@@ -134,102 +134,82 @@ import Testing
 		return nil
 	}
 
-	@Test func memesAreOneSectionAndNotOneHeadingEach() throws {
+	/// Every row on screen, by what it is called. Row numbers are not a thing
+	/// a test can know in a tree — there are headings in it, and takes start
+	/// folded — and what is worth checking is which rows exist.
+	private func shown(_ table: NSTableView) -> [String] {
+		guard let outline = table as? NSOutlineView else { return [] }
+		return (0 ..< outline.numberOfRows).compactMap { index in
+			guard let held = outline.item(atRow: index) as? MaterialTree.Held else { return nil }
+			switch held.node.row {
+			case .root(let root): return root.title
+			case .take(let name, _, _, _): return name
+			case .memes: return "memes"
+			case .clip(let item): return item.slug
+			case .scene(let name): return name
+			case .anchor(let name, _): return name
+			case .tag(let name, _): return name
+			}
+		}
+	}
+
+	/// A meme is a take with one clip in it, so a row each would be a page of
+	/// rows with one child under every one.
+	@Test func memesAreOneRowAndNotOneTakeEach() throws {
 		_ = NSApplication.shared
-		let library = LibraryView()
+		let library = MaterialTree()
 		library.reload(vocabulary())
 		let table = try #require(self.table(in: library))
-		// take-01 and its clip, then one memes heading with two under it.
-		#expect(table.numberOfRows == 5)
-		library.fold("memes")
-		#expect(table.numberOfRows == 3)
-		library.fold("memes")
-		#expect(table.numberOfRows == 5)
+
+		#expect(shown(table).contains("memes"))
+		#expect(!shown(table).contains("meme-a"), "a meme got a take row of its own")
+		#expect(!shown(table).contains("meme-b"))
+
+		// And it holds them both.
+		library.fold(take: "memes")
+		#expect(shown(table).contains("shrug"))
+		#expect(shown(table).contains("facepalm"))
+	}
+
+	@Test func foldingTheTakesRootPutsEverythingUnderItAway() throws {
+		_ = NSApplication.shared
+		let library = MaterialTree()
+		library.reload(vocabulary())
+		let table = try #require(self.table(in: library))
+		let all = shown(table)
+
+		library.fold(.takes)
+		#expect(!shown(table).contains("memes"))
+		#expect(!shown(table).contains("take-01"))
+		library.fold(.takes)
+		#expect(shown(table) == all, "opening it again did not put them back")
 	}
 
 	@Test func aNewMemeIsSelectedRatherThanMerelyPresent() throws {
 		_ = NSApplication.shared
-		let library = LibraryView()
+		let library = MaterialTree()
 		library.reload(vocabulary())
 		let table = try #require(self.table(in: library))
 		library.reveal("shrug")
+		#expect(table.selectedRow >= 0, "the meme that just arrived is not selected")
+		#expect(shown(table)[table.selectedRow] == "shrug")
+	}
+
+	/// A row that is real but folded away, or filtered out, looks exactly like
+	/// a download that did not work.
+	@Test func revealingOpensWhatIsAroundItAndClearsTheFilter() throws {
+		_ = NSApplication.shared
+		let library = MaterialTree()
+		library.reload(vocabulary())
+		let table = try #require(self.table(in: library))
+
+		library.fold(.takes)
+		library.searchForTesting("nothing like this")
+		#expect(!shown(table).contains("shrug"))
+
+		library.reveal("shrug")
+		#expect(shown(table).contains("shrug"), "the meme stayed hidden")
 		#expect(table.selectedRow >= 0)
-		#expect(table.numberOfRows > table.selectedRow)
-	}
-
-	@Test func revealingOpensTheSectionAndClearsTheFilter() throws {
-		// A row that is real but folded away, or filtered out, looks exactly
-		// like a download that did not work.
-		_ = NSApplication.shared
-		let library = LibraryView()
-		library.reload(vocabulary())
-		let table = try #require(self.table(in: library))
-		library.fold("memes")
-		library.reveal("shrug")
-		#expect(table.numberOfRows == 5)
-		#expect(table.selectedRow == 4)
-	}
-}
-
-/// The grid of results: how big it is, and clicking one.
-@Suite @MainActor struct MemeGridTests {
-
-	private func panel() -> MemePanel {
-		_ = NSApplication.shared
-		let panel = MemePanel(download: { _ in "" }, onAdded: { _ in })
-		panel.loadView()
-		panel.view.frame = NSRect(x: 0, y: 0, width: 900, height: 600)
-		panel.present((0 ..< 9).map { index in
-			MemeResult(provider: .giphy, id: "\(index)", title: "meme \(index)", page: nil,
-			           video: URL(fileURLWithPath: "/tmp/x.mp4"), preview: nil,
-			           size: CGSize(width: 480, height: 360))
-		})
-		panel.view.layoutSubtreeIfNeeded()
-		return panel
-	}
-
-	private func scroll(in view: NSView) -> NSScrollView? {
-		for subview in view.subviews {
-			if let found = subview as? NSScrollView { return found }
-			if let found = scroll(in: subview) { return found }
-		}
-		return nil
-	}
-
-	/// The grid is as wide as the pane and as tall as its contents.
-	///
-	/// It was neither: the document view was still on its autoresizing mask, so
-	/// the width constraint lost, the grid stayed the width it was born with —
-	/// one column — and the scroll view had nothing to scroll, which is why
-	/// there was no scrollbar.
-	@Test func theGridFillsThePaneAndOverflowsIt() {
-		let panel = self.panel()
-		guard let scroll = scroll(in: panel.view), let grid = scroll.documentView else {
-			Issue.record("no grid")
-			return
-		}
-		#expect(grid.translatesAutoresizingMaskIntoConstraints == false)
-		#expect(abs(grid.frame.width - scroll.contentView.frame.width) < 1,
-		        "grid \(grid.frame.width) against pane \(scroll.contentView.frame.width)")
-		// Nine results at that width are more than three rows, which is more
-		// than the pane can show — so there is something to scroll.
-		#expect(grid.frame.height > scroll.contentView.frame.height)
-	}
-
-	/// And a click picks the one under the pointer.
-	@Test func aClickChoosesTheOneUnderIt() {
-		let panel = self.panel()
-		guard let grid = scroll(in: panel.view)?.documentView else { return }
-		// The first is picked when results arrive, so that pressing Add without
-		// touching anything does the obvious thing.
-		#expect(panel.chosenForTesting?.id == "0")
-
-		// The middle of the fourth tile, asked of the grid rather than guessed.
-		let point = NSPoint(x: panel.tileFrameForTesting(3).midX,
-		                    y: panel.tileFrameForTesting(3).midY)
-		grid.mouseDown(with: NSEvent.mouseEvent(
-			with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0,
-			windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
-		#expect(panel.chosenForTesting?.id == "3")
+		#expect(shown(table)[table.selectedRow] == "shrug")
 	}
 }

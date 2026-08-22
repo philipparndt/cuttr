@@ -1543,7 +1543,14 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		// Several clips dragged from the library arrive as several items, and
 		// they go on in the order they were listed rather than all on top of
 		// each other.
-		let references = (board.pasteboardItems ?? []).compactMap { $0.string(forType: .string) }
+		// Split on newlines as well as taken item by item. A multi-row drag
+		// gives one item each, and one *take* row gives one item holding every
+		// clip it has — a take is a container, and dropping one lays down what
+		// is in it. It also makes a block of lines pasted from anywhere behave
+		// the way the same lines dragged would.
+		let references = (board.pasteboardItems ?? [])
+			.compactMap { $0.string(forType: .string) }
+			.flatMap { $0.split(separator: "\n").map(String.init) }
 		let entries = references.compactMap { try? TimelineEntry(text: $0) }
 		guard !entries.isEmpty else { return false }
 		var landed: [Int] = []
