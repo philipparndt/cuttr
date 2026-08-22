@@ -2220,6 +2220,25 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			return over ?? "on the picture"
 		}
 
+		/// What a spinner's row says on its first line.
+		///
+		/// Blank words are dropped rather than joined. A spinner with no words
+		/// only turns, and has always fallen back to its style — but the
+		/// properties panel adds a word *empty* and waits to be typed into, so
+		/// `words` is not empty and the one text in it is `""`. Joined, that is
+		/// the empty string, and the row drew nothing on the line the eye goes
+		/// to first, which reads as a broken row rather than as a spinner that
+		/// has not been given anything to say yet. Emptying one word of several
+		/// left a stray separator for the same reason.
+		///
+		/// Separate from ``draw(_:)`` so it can be checked without a window.
+		static func said(_ spinner: Spinner) -> String {
+			let words = spinner.words.map(\.text)
+				.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+				.joined(separator: " · ")
+			return words.isEmpty ? "spinner (\(spinner.style.rawValue))" : words
+		}
+
 		/// The shortest true name for one, for the row above's benefit.
 		static func name(_ overlay: Overlay) -> String {
 			switch overlay.kind {
@@ -2266,9 +2285,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				title = "“\(text)”"
 			case .spinner(let spinner):
 				kind = .spinner
-				title = spinner.words.isEmpty
-					? "spinner (\(spinner.style.rawValue))"
-					: spinner.words.map(\.text).joined(separator: " · ")
+				title = Self.said(spinner)
 			case .bubble(let bubble):
 				kind = .bubble
 				title = bubble.text.isEmpty
