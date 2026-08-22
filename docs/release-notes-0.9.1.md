@@ -52,6 +52,19 @@ It was worked out once, when the bar arrived in its window, so the eighty-two
 points held clear for three buttons stayed held in full screen, where there are
 no buttons — a hole at the leading edge with nothing in it.
 
+## The project window's playhead moves again
+
+While a programme played, the picture ran but the playhead line stood still, the
+clock in the bar did not count, and the full-screen preview's own controls
+showed nothing. The two handlers that move them were written at the bottom of a
+function after a `switch` in which every case returns, so nothing ever reached
+them — the compiler has been saying "will never be executed" about that line
+since the first commit.
+
+The picture played anyway, which is why it went unnoticed for so long: that part
+is `AVPlayer`'s doing and needs nobody's help. Everything that has to be told
+the time was never being told.
+
 ## A click in the clip list picks a clip
 
 Single-clicking a clip in the take editor put a caret in it. Choosing a clip and
