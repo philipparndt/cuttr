@@ -20,6 +20,22 @@ final class KeyTable: NSTableView {
 		super.keyDown(with: event)
 	}
 
+	/// Clicking a row puts the keyboard in this list.
+	///
+	/// Said out loud rather than left to AppKit, which is what every other view
+	/// in this program that answers a click already does — the timeline, the
+	/// span strip, the scene stage, the big picture. The takes list never came
+	/// up lit: the row selected, so the click was arriving, and the keyboard
+	/// stayed wherever it had been — so the arrow keys went on moving something
+	/// else while the row that looked chosen was not the one they moved.
+	///
+	/// Before `super`, so the selection this click is about to make is drawn
+	/// emphasised the first time it is drawn rather than a moment later.
+	override func mouseDown(with event: NSEvent) {
+		if window?.firstResponder !== self { window?.makeFirstResponder(self) }
+		super.mouseDown(with: event)
+	}
+
 	override func menu(for event: NSEvent) -> NSMenu? {
 		onMenu?(event) ?? super.menu(for: event)
 	}

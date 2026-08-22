@@ -185,8 +185,22 @@ public enum Theme {
 	/// and the hues are left to mean what they mean.
 	public static let accent = NSColor(calibratedRed: 0.80, green: 0.84, blue: 0.90, alpha: 1)
 
-	/// What a selected row sits on: the panel, lifted. Never a bar of colour.
+	/// What a selected row sits on when the list it is in does not have the
+	/// keyboard: the panel, lifted, and no hue.
 	public static let selected = NSColor(calibratedWhite: 0.26, alpha: 1)
+
+	/// And what it sits on when the list *does* have the keyboard.
+	///
+	/// Selection and focus are two different facts and a list that says only
+	/// the first leaves somebody guessing where the arrow keys will go. This
+	/// was one colour for both, on the grounds that a saturated blue bar paints
+	/// over the hue that carries the meaning — which is true, and is why this
+	/// is not a saturated blue bar. It is the same steel as ``accent``, at a
+	/// value that reads as lit rather than as a colour of its own: the hues
+	/// still show through, and the row somebody is about to arrow away from is
+	/// obvious across the desk.
+	public static let selectedFocused = NSColor(calibratedRed: 0.30, green: 0.34, blue: 0.42,
+	                                            alpha: 1)
 
 	/// One hue per kind of thing a project names, used everywhere that kind
 	/// appears — in the library, on the programme, on its badge, in the
