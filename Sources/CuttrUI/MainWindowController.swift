@@ -264,6 +264,18 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	/// transcribing rather than an empty bar.
 	override func furnish(_ bar: DocumentBar) {
 		bar.setUp = setup
+		// Once, not once per appearance. Until now nothing listened for this
+		// and the branch in the capsule was right by accident: `showDocument`
+		// re-asked git on every playhead tick, so a checkout was picked up
+		// within a frame of the next play. Asking properly, once, is what makes
+		// it safe to stop asking thirty times a second.
+		if repositoryWatch == nil {
+			repositoryWatch = NotificationCenter.default.addObserver(
+				forName: BranchMenu.repositoryChanged, object: nil, queue: .main
+			) { [weak self] _ in
+				MainActor.assumeIsolated { self?.repositoryMoved() }
+			}
+		}
 		// The two halves of the capsule: the documents on the left, and what can
 		// be done about the repository this one sits in on the right.
 		bar.onProject = { [weak self] in
@@ -396,7 +408,7 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 			self.transcriptPane.follows = self.transport.isPlaying
 			self.transcriptPane.playhead = time
 			if self.transport.isPlaying { self.timeline.followPlayhead() }
-			self.showDocument(at: time)
+			self.showClock(at: time)
 		}
 
 		timeline.onScrub = { [weak self] time in self?.move(to: time) }
@@ -1281,18 +1293,51 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	/// it is still a subprocess.
 	private var repositoryRoot: URL?
 	private var repositoryFor: URL?
+	/// The branch that repository is on, kept rather than asked for: reading it
+	/// is a subprocess. See ``findRepository()``.
+	private var branch: String?
+	/// Held so the observer is added once and taken off with the window.
+	private var repositoryWatch: NSObjectProtocol?
 
+	/// Which repository this take sits in, and which branch it is on.
+	///
+	/// Both asked once per document rather than once per frame. `root(for:)`
+	/// and `branch(in:)` each fork a `git` and wait for it, and this used to be
+	/// called from ``showDocument(at:)`` — which the playhead tick called, thirty
+	/// times a second for as long as the tape was rolling. Playing a clip meant
+	/// a process spawn per frame on the main thread, which is a player that
+	/// stutters and a window that stops answering. Scrubbing did it too, once
+	/// per mouse event.
 	private func findRepository() {
 		guard takeDocument.url != repositoryFor else { return }
 		repositoryFor = takeDocument.url
 		repositoryRoot = takeDocument.url.flatMap { GitRepository.root(for: $0) }
+		branch = repositoryRoot.flatMap { GitRepository.branch(in: $0) }
+	}
+
+	/// Asks again after something that can have moved the branch — a checkout
+	/// from the capsule's own menu is the one that happens in this program.
+	private func repositoryMoved() {
+		repositoryFor = nil
+		findRepository()
+		bar?.setBranch(branch)
+	}
+
+	/// The clock, and nothing else.
+	///
+	/// What a playhead tick is allowed to cost. Everything else
+	/// ``showDocument(at:)`` does is a fact about the *document* — its name, its
+	/// branch, whether it has a separate recorder — and none of that changes
+	/// because the tape moved a frame.
+	private func showClock(at time: Double) {
+		bar?.setClock(time)
 	}
 
 	private func showDocument(at time: Double) {
 		findRepository()
 		bar?.setName(takeDocument.displayName)
-		bar?.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
-		bar?.setClock(time)
+		bar?.setBranch(branch)
+		showClock(at: time)
 		setup.update(document: takeDocument)
 		let hasAudio = takeDocument.take.audio != nil
 		monitor.isHidden = !hasAudio
@@ -1342,7 +1387,7 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		markers.playhead = playhead
 		transcriptPane.playhead = playhead
 		transport.seek(to: playhead)
-		showDocument(at: playhead)
+		showClock(at: playhead)
 	}
 
 	private func step(_ seconds: Double) { move(to: playhead + seconds) }

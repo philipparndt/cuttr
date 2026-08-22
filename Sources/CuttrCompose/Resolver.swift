@@ -330,7 +330,9 @@ public enum Resolver {
 		for path in project.takes {
 			let url = URL(fileURLWithPath: path, relativeTo: baseURL).standardizedFileURL
 			do {
-				let take = try TakeReader.read(try String(contentsOf: url, encoding: .utf8))
+				// Read through the cache: unchanged since the last resolve means
+				// unparsed this time. See ``ResolvedFiles``.
+				let take = try ResolvedFiles.shared.take(at: url)
 				takes.append((url.deletingPathExtension().lastPathComponent, take, url.deletingLastPathComponent()))
 			} catch {
 				throw ResolveError.takeUnreadable(path, error.localizedDescription)
@@ -628,12 +630,13 @@ public enum Resolver {
 		for entry in takes {
 			for anchor in entry.take.anchors {
 				anchorsByName[anchor.name] = anchor
+				// The expensive one: a line per tracked frame, twenty-five a
+				// second for as long as the shot runs, and it had not changed
+				// since the last keystroke either.
 				guard let sidecar = anchor.path,
-				      let text = try? String(
-					      contentsOf: URL(fileURLWithPath: sidecar, relativeTo: entry.directory),
-					      encoding: .utf8)
+				      let solved = ResolvedFiles.shared.anchorPath(
+					      at: URL(fileURLWithPath: sidecar, relativeTo: entry.directory))
 				else { continue }
-				let solved = AnchorPath.read(text)
 
 				// Every clip this shot overlaps, not the one clip it was solved
 				// over — that is the point of tracking a shot rather than a
