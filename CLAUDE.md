@@ -2,10 +2,16 @@
 
 How not to break this while working on cuttr.
 
-## Never push, and never publish
+## Never push or publish unasked
 
-Never `git push`. Never publish to a registry or a package index. A commit
-somebody can read is the deliverable.
+Not on your own initiative, and not as the tidy end of a job somebody asked for:
+a commit somebody can read is the deliverable, and pushing it is a separate
+decision that is theirs.
+
+When they do ask — in so many words, for this release — go ahead and run it
+through. `make release-publish VERSION=x.y.z` tags, pushes, uploads the
+notarised image and re-points the tap; `docs/releasing.md` says what it needs
+and what it refuses. Asking once covers that release and no other.
 
 ## Never `make install`
 
