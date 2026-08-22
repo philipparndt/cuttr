@@ -36,6 +36,14 @@ final class KeyTable: NSTableView {
 		super.mouseDown(with: event)
 	}
 
+
+	// Page Up, Page Down, Home and End move the selection. See the extension at
+	// the foot of this file for why.
+	override func scrollPageUp(_ sender: Any?) { selectAndShow(rowAPageAway(-1)) }
+	override func scrollPageDown(_ sender: Any?) { selectAndShow(rowAPageAway(1)) }
+	override func scrollToBeginningOfDocument(_ sender: Any?) { selectAndShow(0) }
+	override func scrollToEndOfDocument(_ sender: Any?) { selectAndShow(numberOfRows - 1) }
+
 	override func menu(for event: NSEvent) -> NSMenu? {
 		onMenu?(event) ?? super.menu(for: event)
 	}
@@ -69,6 +77,13 @@ final class MenuOutline: NSOutlineView {
 	var onMenu: ((NSEvent) -> NSMenu?)?
 	var onKey: ((NSEvent) -> Bool)?
 
+	// Page Up, Page Down, Home and End move the selection. See the extension at
+	// the foot of this file for why.
+	override func scrollPageUp(_ sender: Any?) { selectAndShow(rowAPageAway(-1)) }
+	override func scrollPageDown(_ sender: Any?) { selectAndShow(rowAPageAway(1)) }
+	override func scrollToBeginningOfDocument(_ sender: Any?) { selectAndShow(0) }
+	override func scrollToEndOfDocument(_ sender: Any?) { selectAndShow(numberOfRows - 1) }
+
 	override func menu(for event: NSEvent) -> NSMenu? {
 		onMenu?(event) ?? super.menu(for: event)
 	}
@@ -91,4 +106,50 @@ func isDelete(_ event: NSEvent) -> Bool {
 	return key == Unicode.Scalar(NSDeleteCharacter)
 		|| key == Unicode.Scalar(NSBackspaceCharacter)
 		|| key == Unicode.Scalar(NSDeleteFunctionKey)!
+}
+
+// MARK: - Paging moves the selection
+
+/// What Page Up, Page Down, Home and End do in a list.
+///
+/// AppKit's answer is to scroll and leave the selection where it was, which is
+/// right for a document and wrong for a list of things you are choosing between:
+/// the row that is chosen ends up off screen, the arrow keys carry on from
+/// there, and the page you are looking at has nothing to do with what is
+/// selected. Every list in this program is a list somebody is picking from.
+///
+/// So the keys move the selection and bring it into view, which is what the
+/// arrows already do — these are the same gesture at a coarser grain.
+extension NSTableView {
+
+	/// How many whole rows are on screen at once.
+	var rowsAPage: Int {
+		let step = rowHeight + intercellSpacing.height
+		guard step > 0 else { return 1 }
+		// The scroll view's, not this table's: a table sizes itself to its
+		// *content*, so its own height is the length of the whole list and a
+		// page worked out from it is "everything".
+		let visible = enclosingScrollView?.contentView.bounds.height ?? visibleRect.height
+		// One less than fits, so a page keeps a row of context — the row that
+		// was at the bottom is at the top afterwards, which is how somebody
+		// keeps their place. Never less than one, or the keys would do nothing.
+		return max(1, Int(visible / step) - 1)
+	}
+
+	/// Where a paging key should land, counted from the selection rather than
+	/// from what is scrolled into view: the selection is the thing being moved.
+	func rowAPageAway(_ direction: Int) -> Int {
+		let from = selectedRow >= 0 ? selectedRow : (direction > 0 ? -1 : numberOfRows)
+		return from + direction * rowsAPage
+	}
+
+	/// Selects a row, clamped to the list, and shows it. Nothing at all for an
+	/// empty list — `selectRowIndexes` on one is a crash waiting for the first
+	/// person with no takes.
+	func selectAndShow(_ wanted: Int) {
+		guard numberOfRows > 0 else { return }
+		let row = max(0, min(wanted, numberOfRows - 1))
+		selectRowIndexes([row], byExtendingSelection: false)
+		scrollRowToVisible(row)
+	}
 }

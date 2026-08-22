@@ -31,7 +31,10 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 	/// Double-click: show me this one.
 	public var onActivate: ((Clip.ID) -> Void)?
 
-	private let table = NSTableView()
+	/// A `KeyTable` for what every other list in this program uses one for: a
+	/// click puts the keyboard here, and Page Up, Page Down, Home and End move
+	/// the selection rather than only scrolling past it.
+	private let table = KeyTable()
 
 	/// For the tests: gives the list the keyboard, so a key can be asked about
 	/// without one.
