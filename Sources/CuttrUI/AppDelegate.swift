@@ -681,6 +681,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		openProject(url)
 	}
 
+	/// What the Dock icon offers when it is pressed and held.
+	///
+	/// **Why there is one at all.** macOS puts its own Recent Documents section
+	/// in that menu, built from the same list, and draws each row as the file's
+	/// display name and nothing else. Two projects called `film.cuttrproj` in
+	/// two different folders are therefore two rows saying `film` — and which
+	/// one is which is exactly the question somebody is asking when they reach
+	/// for that menu. The system's section is the Dock's to draw and not ours to
+	/// relabel, so this adds a section that *is* ours, above it, with the folder
+	/// on any name that needs one.
+	///
+	/// The same list and the same naming as Open Recent, from
+	/// ``RecentProjects``, so the two never disagree about what a project is
+	/// called.
+	///
+	/// This only applies while cuttr is running; a Dock icon for an application
+	/// that is not shows the system's list alone.
+	func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+		// Targeted at the delegate rather than sent down the responder chain: a
+		// Dock menu is used when there may be no window at all, and there is
+		// nothing for a chain to run along.
+		RecentProjects.dockMenu(for: RecentProjects.entries(limit: 8),
+		                        action: #selector(openRecent(_:)), target: self)
+	}
+
 	@objc func clearRecents(_ sender: Any?) {
 		NSDocumentController.shared.clearRecentDocuments(nil)
 	}

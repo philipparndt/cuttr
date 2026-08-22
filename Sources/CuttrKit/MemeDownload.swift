@@ -106,14 +106,10 @@ public enum MemeDownload {
 	/// Comparing them as text is both correct and the only thing that can be
 	/// correct, since one of the two files is always about to be created.
 	public static func relativePath(from base: URL, to target: URL) -> String {
-		let baseParts = base.standardized.deletingLastPathComponent().pathComponents
-		let targetParts = target.standardized.pathComponents
-		var shared = 0
-		while shared < baseParts.count, shared < targetParts.count,
-		      baseParts[shared] == targetParts[shared] { shared += 1 }
-		let ups = baseParts.count - shared
-		guard ups <= 3 else { return target.path }
-		return (Array(repeating: "..", count: ups) + targetParts[shared...]).joined(separator: "/")
+		// Three rather than ``MediaPath/ordinaryUps``: a meme lands in `memes/`
+		// beside the project while the take that names it is a folder deeper,
+		// so the ordinary route back is already one longer than usual.
+		MediaPath.relative(target, beside: base, ups: 3)
 	}
 
 	// MARK: - Doing it

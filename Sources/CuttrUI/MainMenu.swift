@@ -356,42 +356,17 @@ enum MainMenu {
 
 		func menuNeedsUpdate(_ menu: NSMenu) {
 			menu.removeAllItems()
-			// Filtered as well as gated on the way in, so takes recorded before
-			// that rule existed drop out of the menu rather than lingering in
-			// somebody's list for ever.
-			let urls = NSDocumentController.shared.recentDocumentURLs
-				.filter { $0.pathExtension.lowercased() == "cuttrproj" }
-			guard !urls.isEmpty else {
+			let entries = RecentProjects.entries()
+			guard !entries.isEmpty else {
 				let empty = NSMenuItem(title: "No Projects Yet", action: nil, keyEquivalent: "")
 				empty.isEnabled = false
 				menu.addItem(empty)
 				return
 			}
-			// Two files can share a name — a take and a project beside each
-			// other usually do — so the ones that collide say which folder they
-			// are in, and the ones that do not stay short.
-			var counts: [String: Int] = [:]
-			for url in urls {
-				counts[url.deletingPathExtension().lastPathComponent, default: 0] += 1
-			}
-
-			for url in urls {
-				let name = url.deletingPathExtension().lastPathComponent
-				let folder = url.deletingLastPathComponent().lastPathComponent
-				let item = NSMenuItem(
-					title: counts[name, default: 0] > 1 ? "\(name)  —  \(folder)" : name,
-					action: #selector(AppDelegate.openRecent(_:)), keyEquivalent: "")
-				item.representedObject = url
-				// The icon says which kind it is without a second column of
-				// text: a take and a project are different documents and the
-				// names are often the same word.
-				let icon = NSWorkspace.shared.icon(forFile: url.path)
-				icon.size = NSSize(width: 16, height: 16)
-				item.image = icon
-				// A file that has moved is still worth listing — its absence is
-				// information — but it is not worth pretending it will open.
-				item.isEnabled = FileManager.default.fileExists(atPath: url.path)
-				menu.addItem(item)
+			for entry in entries {
+				menu.addItem(RecentProjects.item(for: entry,
+				                                 action: #selector(AppDelegate.openRecent(_:)),
+				                                 target: nil))
 			}
 			menu.addItem(.separator())
 			menu.addItem(NSMenuItem(

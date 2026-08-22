@@ -811,8 +811,13 @@ public final class PropertiesPanel: NSView {
 
 		section("what it is")
 		field("file", [
-			text(sound.file, width: 210, placeholder: "music/opening.wav") { value in
-				change { $0.file = value.trimmingCharacters(in: .whitespaces) }
+			text(sound.file, width: 210, placeholder: "music/opening.wav") { [weak self] value in
+				// Tidied, because dragging a file onto a text field puts its
+				// absolute path in and so does pasting one out of the Finder —
+				// and the `…` button beside this has always written a relative
+				// one. Two doors into one field wrote two different things.
+				let tidied = MediaPath.tidy(value, against: self?.resolved?.baseURL)
+				change { $0.file = tidied }
 			},
 			ellipsis("choose a sound file") { [weak self] _ in self?.chooseSound(origin) },
 		], note: "relative to the project file, the same as the takes")
@@ -938,11 +943,7 @@ public final class PropertiesPanel: NSView {
 		panel.allowsMultipleSelection = false
 		panel.message = "The sound to lay under the programme"
 		guard panel.runModal() == .OK, let url = panel.url else { return }
-		let base = resolved?.baseURL.standardizedFileURL.path
-		var path = url.standardizedFileURL.path
-		if let base, path.hasPrefix(base + "/") {
-			path = String(path.dropFirst(base.count + 1))
-		}
+		let path = resolved.map { MediaPath.relative(url, toFolder: $0.baseURL) } ?? url.path
 		var next = project
 		next.editSound(at: origin) { $0.file = path }
 		commit(next)

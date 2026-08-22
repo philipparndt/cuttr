@@ -29,8 +29,29 @@ enum TableScroll {
 	}
 
 	/// A list of one column, which fills the pane and never scrolls sideways.
+	///
+	/// **`.plain`, and that is the whole of it.** A table's default `style` is
+	/// `.automatic`, which in a scroll view resolves to the inset look AppKit
+	/// gives a source list: rows held sixteen points in from each edge, and the
+	/// *table* made thirty-two points wider than the clip view to make room for
+	/// them. Nothing is wrong on screen until a cell asks how wide it is —
+	/// because the answer is measured against an edge that is off the side of
+	/// the pane.
+	///
+	/// That is what put the paths in the document switcher past the rounded
+	/// corner. Each one is drawn right-aligned and truncated at the head, so
+	/// that the tail — the half that says which file this is — is the half you
+	/// keep. Right-aligned against sixteen points of nowhere, it read instead as
+	/// a left-aligned path with the end sliced off, and two projects called the
+	/// same thing in two different folders were two identical rows. It also held
+	/// every coloured rail sixteen points off the leading edge it is supposed to
+	/// be flush against.
+	///
+	/// `aRowIsAsWideAsTheList` did not catch it: the *column* was 380 in a 380
+	/// pane and correct, and it was the table around it that was 412.
 	static func fitting(_ table: NSTableView) -> NSScrollView {
 		table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+		table.style = .plain
 		let scroll = wrap(table, horizontal: false)
 		table.autoresizingMask = [.width]
 		return scroll

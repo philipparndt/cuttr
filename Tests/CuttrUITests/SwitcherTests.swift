@@ -275,5 +275,57 @@ import Testing
 		// width to place a right-aligned path in.
 		#expect(abs(table.tableColumns[0].width - clip.bounds.width) < 1)
 		#expect(table.tableColumns[0].width > 300)
+
+		// And the *table* is no wider than the pane, which is the half this
+		// test used to miss. A default `style` of `.automatic` resolves to the
+		// inset source-list look and makes the table thirty-two points wider
+		// than the clip view to hold rows sixteen points in from each edge —
+		// so the column measured 380 in a 380 pane and was correct, while
+		// every cell in it was drawing against an edge sixteen points off the
+		// side of the panel.
+		#expect(abs(table.bounds.width - clip.bounds.width) < 1,
+		        "the table is \(table.bounds.width) in a pane of \(clip.bounds.width)")
+	}
+
+	/// The right-hand column of a row has to end inside the pane. It did not:
+	/// the path ran under the rounded corner and the tail — the half that says
+	/// which of two projects called the same thing this is — was the half that
+	/// went.
+	@Test func aPathEndsInsideThePanel() throws {
+		let switcher = DocumentSwitcher.Switcher([
+			.init("Recent Documents", [
+				.init(name: "dingsda", path: "/Volumes/500G/dingsda-cuttr", kind: .scene, open: {}),
+				.init(name: "dingsda", path: "/Volumes/500G/dingsda", kind: .scene, open: {}),
+			]),
+		])
+		switcher.loadView()
+		switcher.view.frame = NSRect(origin: .zero, size: switcher.preferredContentSize)
+		switcher.view.layoutSubtreeIfNeeded()
+
+		func find<T: NSView>(_ kind: T.Type, in view: NSView) -> T? {
+			if let hit = view as? T { return hit }
+			for sub in view.subviews { if let hit = find(kind, in: sub) { return hit } }
+			return nil
+		}
+		guard let clip = find(NSClipView.self, in: switcher.view),
+		      let table = find(NSTableView.self, in: switcher.view) else {
+			Issue.record("no list in the panel"); return
+		}
+		table.reloadData()
+		table.layoutSubtreeIfNeeded()
+
+		var checked = 0
+		for row in 0 ..< table.numberOfRows {
+			guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true),
+			      cell is DocumentSwitcher.EntryCell else { continue }
+			checked += 1
+			// In the clip view's own coordinates, because that is what somebody
+			// can actually see.
+			let onScreen = cell.convert(cell.bounds, to: clip)
+			#expect(onScreen.maxX <= clip.bounds.maxX + 0.5,
+			        "row \(row) runs to \(onScreen.maxX) in a pane of \(clip.bounds.maxX)")
+			#expect(onScreen.minX >= -0.5, "row \(row) starts at \(onScreen.minX)")
+		}
+		#expect(checked == 2, "expected two document rows, checked \(checked)")
 	}
 }

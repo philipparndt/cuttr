@@ -751,15 +751,7 @@ public final class TakeDocument {
 	/// `/Users/somebody/...` survives none of that.
 	private func pathString(for fileURL: URL) -> String {
 		guard let baseURL else { return fileURL.path }
-		let base = baseURL.standardizedFileURL.pathComponents
-		let target = fileURL.standardizedFileURL.pathComponents
-		var shared = 0
-		while shared < base.count, shared < target.count, base[shared] == target[shared] { shared += 1 }
-		// Anything more than a couple of `..` is not a folder somebody will
-		// copy around, and an absolute path at least says where the file is.
-		let ups = base.count - shared
-		guard ups <= 2 else { return fileURL.path }
-		return (Array(repeating: "..", count: ups) + target[shared...]).joined(separator: "/")
+		return MediaPath.relative(fileURL, toFolder: baseURL)
 	}
 
 	// MARK: - File

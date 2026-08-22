@@ -594,15 +594,7 @@ public final class ComposeDocument {
 	}
 
 	private func relativePath(_ url: URL, from base: URL) -> String {
-		let baseParts = base.standardizedFileURL.pathComponents
-		let target = url.standardizedFileURL.pathComponents
-		var shared = 0
-		while shared < baseParts.count, shared < target.count, baseParts[shared] == target[shared] { shared += 1 }
-		let ups = baseParts.count - shared
-		// More than a couple of `..` is not a folder anybody will copy around,
-		// and an absolute path at least says where the file is.
-		guard ups <= 2 else { return url.path }
-		return (Array(repeating: "..", count: ups) + target[shared...]).joined(separator: "/")
+		MediaPath.relative(url, toFolder: base)
 	}
 
 	/// Where a new take should be written: a `takes/` folder beside the project.
