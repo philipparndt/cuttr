@@ -144,6 +144,7 @@ import Testing
 			switch held.node.row {
 			case .root(let root): return root.title
 			case .take(let name, _, _, _): return name
+			case .folder(let name, _): return name
 			case .memes: return "memes"
 			case .clip(let item): return item.slug
 			case .scene(let name): return name

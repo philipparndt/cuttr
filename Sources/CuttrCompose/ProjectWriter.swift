@@ -221,6 +221,25 @@ public enum ProjectWriter {
 			out += "\n"
 		}
 
+		// The arrangement, when there is one. A project that has never made a
+		// folder writes no block at all, so nothing changes in a file nobody
+		// has arranged — and an empty folder is written as `takes: []` rather
+		// than omitted, because it has to survive the save that follows making
+		// it.
+		if !project.folders.isEmpty {
+			out += "folders:\n"
+			for folder in project.folders {
+				out += "  - name:  \(scalar(folder.name))\n"
+				if folder.takes.isEmpty {
+					out += "    takes: []\n"
+				} else {
+					out += "    takes:\n"
+					for take in folder.takes { out += "      - \(scalar(take))\n" }
+				}
+			}
+			out += "\n"
+		}
+
 		out += "output:\n"
 		out += "  size: \(project.output.width)x\(project.output.height)\n"
 		out += "  fps:  \(trim(project.output.framesPerSecond))\n"

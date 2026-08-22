@@ -820,6 +820,36 @@ public final class ComposeWindowController: DocumentEditor,
 			guard let self else { return }
 			self.onEditScene?(self.composeDocument, name)
 		}
+		// Arranging the takes. Each goes through `apply`, so each is one step
+		// of undo with a name on it.
+		materialTree.onNewFolder = { [weak self] name in
+			guard let self else { return }
+			var next = self.composeDocument.project
+			next.addFolder(named: name)
+			self.composeDocument.apply(next, actionName: "New Folder")
+			try? self.composeDocument.write()
+		}
+		materialTree.onRenameFolder = { [weak self] name, wanted in
+			guard let self else { return }
+			var next = self.composeDocument.project
+			next.renameFolder(name, to: wanted)
+			self.composeDocument.apply(next, actionName: "Rename Folder")
+			try? self.composeDocument.write()
+		}
+		materialTree.onRemoveFolder = { [weak self] name in
+			guard let self else { return }
+			var next = self.composeDocument.project
+			next.removeFolder(name)
+			self.composeDocument.apply(next, actionName: "Remove Folder")
+			try? self.composeDocument.write()
+		}
+		materialTree.onMoveTake = { [weak self] take, folder in
+			guard let self else { return }
+			var next = self.composeDocument.project
+			next.move(take: take, toFolder: folder)
+			self.composeDocument.apply(next, actionName: "Move Take")
+			try? self.composeDocument.write()
+		}
 		materialTree.onAddScene = { [weak self] in self?.addScene() }
 		materialTree.onRemoveScene = { [weak self] name in
 			guard let self else { return }
@@ -996,7 +1026,8 @@ public final class ComposeWindowController: DocumentEditor,
 		bar?.setBranch(repositoryRoot.flatMap { GitRepository.branch(in: $0) })
 		inspector.resolved = composeDocument.resolved
 		let vocabulary = composeDocument.vocabulary
-		materialTree.reload(vocabulary, takes: composeDocument.takes)
+		materialTree.reload(vocabulary, takes: composeDocument.takes,
+		                    folders: composeDocument.project.folders)
 
 		// So the file can say which of its names point at nothing.
 		source.vocabulary = vocabulary

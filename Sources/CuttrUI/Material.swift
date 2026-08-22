@@ -41,6 +41,9 @@ public enum Material {
 
 	public enum Row: Sendable, Equatable {
 		case root(Root)
+		/// A named gathering of takes, which is an arrangement somebody made
+		/// rather than anything the takes themselves know about.
+		case folder(name: String, takes: Int)
 		/// A take the project lists. `problem` is what went wrong reading it —
 		/// a moved take is the commonest fault in a project, and the first
 		/// anybody should hear of it is here.
@@ -63,7 +66,7 @@ public enum Material {
 		/// is a heading rather than material.
 		public var reference: String? {
 			switch self {
-			case .root, .memes: return nil
+			case .root, .memes, .folder: return nil
 			// A take is not written as one reference — see ``Node/references``.
 			case .take: return nil
 			case .clip(let item): return item.reference
@@ -79,6 +82,7 @@ public enum Material {
 		public var kind: Theme.Kind? {
 			switch self {
 			case .root(let root): return root.kind
+			case .folder: return .section
 			case .take, .memes: return .take
 			case .clip: return .clip
 			case .scene: return .scene
@@ -108,8 +112,16 @@ public enum Material {
 		/// row that looks draggable and is not. A heading drags nothing.
 		public var references: [String] {
 			if let own = row.reference { return [own] }
-			guard case .take = row else { return [] }
-			return children.compactMap(\.row.reference)
+			switch row {
+			case .take, .memes:
+				return children.compactMap(\.row.reference)
+			// A folder is a container of containers: everything in everything
+			// it holds, in order, on the same rule a take follows.
+			case .folder:
+				return children.flatMap(\.references)
+			default:
+				return []
+			}
 		}
 	}
 
@@ -122,21 +134,24 @@ public enum Material {
 	/// where `Anchors` is and then cannot find it in the project that has none.
 	public static func tree(of vocabulary: ComposeDocument.Vocabulary,
 	                        takes: [ComposeDocument.TakeEntry] = [],
+	                        folders: [Project.Folder] = [],
 	                        matching needle: String = "") -> [Node] {
 		let wanted = needle.trimmingCharacters(in: .whitespaces).lowercased()
 		return Root.allCases.map { root in
 			Node(.root(root), children(under: root, of: vocabulary, takes: takes,
-			                           matching: wanted))
+			                           folders: folders, matching: wanted))
 		}
 	}
 
 	private static func children(under root: Root,
 	                             of vocabulary: ComposeDocument.Vocabulary,
 	                             takes: [ComposeDocument.TakeEntry],
+	                             folders: [Project.Folder],
 	                             matching needle: String) -> [Node] {
 		switch root {
 		case .takes:
-			return takeNodes(of: vocabulary, takes: takes, matching: needle)
+			return arranged(takeNodes(of: vocabulary, takes: takes, matching: needle),
+			                into: folders, takes: takes)
 		case .scenes:
 			return vocabulary.scenes.filter { hit(needle, $0) }.map { Node(.scene($0)) }
 		case .anchors:
@@ -193,6 +208,42 @@ public enum Material {
 	private static func matches(_ needle: String,
 	                            _ item: ComposeDocument.Vocabulary.Item) -> Bool {
 		hit(needle, [item.slug, item.name] + item.tags)
+	}
+
+	/// The takes gathered into the folders somebody made, folders first and the
+	/// loose ones after — so the arrangement reads as an arrangement rather than
+	/// as names scattered among names.
+	///
+	/// A folder is kept even when nothing in it survived a search *only* when
+	/// nothing is being searched for: an empty folder is a real thing, and a
+	/// folder emptied by a filter is a row that answers a search with nothing.
+	private static func arranged(_ nodes: [Node], into folders: [Project.Folder],
+	                             takes: [ComposeDocument.TakeEntry]) -> [Node] {
+		guard !folders.isEmpty else { return nodes }
+		// Which take a path names, so a folder written in paths can be matched
+		// against rows written in names.
+		var nameOf: [String: String] = [:]
+		for entry in takes { nameOf[entry.path] = entry.name }
+
+		var claimed: Set<String> = []
+		var out: [Node] = []
+		for folder in folders {
+			// The first folder that names a take wins it, which is why this
+			// walks the folders in order and remembers what has gone.
+			let wanted = folder.takes.compactMap { nameOf[$0] }.filter { !claimed.contains($0) }
+			claimed.formUnion(wanted)
+			let held = nodes.filter { node in
+				guard case .take(let name, _, _, _) = node.row else { return false }
+				return wanted.contains(name)
+			}
+			out.append(Node(.folder(name: folder.name, takes: held.count), held))
+		}
+		// Everything the folders did not claim, in the order it already had.
+		out += nodes.filter { node in
+			guard case .take(let name, _, _, _) = node.row else { return true }
+			return !claimed.contains(name)
+		}
+		return out
 	}
 
 	/// Plain containment, lower-cased. The library matched names this way, and

@@ -81,6 +81,15 @@ final class MaterialRow: NSTableCellView {
 				              y: bounds.height - 28, colour: dim)
 			}
 
+		case .folder(let name, let held):
+			mark(.section)
+			primary(name, x: 26, y: bounds.height - 16)
+			// An empty folder says so rather than saying "0 takes", which reads
+			// as a count that failed rather than as a folder waiting to be
+			// filled — and waiting to be filled is what it is for.
+			_ = secondary(held == 0 ? "empty" : "\(held) take\(held == 1 ? "" : "s")",
+			              x: 26, y: bounds.height - 28, colour: dim)
+
 		case .memes(let count):
 			mark(.take)
 			primary("memes", x: 26, y: bounds.height - 16)

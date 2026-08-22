@@ -14,6 +14,33 @@ public struct Project: Sendable, Equatable {
 	/// The take files this project draws from, relative to the project file.
 	public var takes: [String]
 
+	/// How somebody has arranged those takes.
+	///
+	/// A folder *refers* to takes; it does not contain them. ``takes`` stays the
+	/// flat list of everything the project draws on, because that is what the
+	/// resolver, the vocabulary, the exporter and sharing all read, and none of
+	/// them has any business learning about an arrangement in a window.
+	///
+	/// Which means the two can disagree, and ``takes`` is the authority: a
+	/// folder naming a take the project does not list is ignored, and a take
+	/// named by two folders belongs to the first of them. Neither is an error —
+	/// both are what a hand-edited file or a half-finished merge looks like, and
+	/// a project has to open.
+	public var folders: [Folder] = []
+
+	/// A named gathering of takes. Empty is a perfectly good folder: making one
+	/// before there is anything to put in it is the reason to be able to make
+	/// one at all.
+	public struct Folder: Sendable, Equatable {
+		public var name: String
+		public var takes: [String]
+
+		public init(name: String, takes: [String] = []) {
+			self.name = name
+			self.takes = takes
+		}
+	}
+
 	public var output: Output
 
 	/// The programme, in order.
@@ -85,10 +112,72 @@ public struct Project: Sendable, Equatable {
 	}
 
 	public static func == (a: Project, b: Project) -> Bool {
-		a.takes == b.takes && a.output == b.output && a.timeline == b.timeline
+		a.takes == b.takes && a.folders == b.folders && a.output == b.output
+			&& a.timeline == b.timeline
 			&& a.overlays == b.overlays && a.sounds == b.sounds
 			&& a.styles == b.styles && a.profiles == b.profiles
 			&& a.scenes == b.scenes
+	}
+
+	// MARK: - Arranging the takes
+
+	/// Which folder a take is in, or nothing when it is loose.
+	///
+	/// The *first* folder that names it. A take in two folders is not a state
+	/// this program can produce and is one a text editor can, and the answer
+	/// has to be one of them rather than the take appearing twice.
+	public func folder(of take: String) -> String? {
+		folders.first { $0.takes.contains(take) }?.name
+	}
+
+	/// The takes in no folder at all, in project order.
+	public var looseTakes: [String] {
+		takes.filter { folder(of: $0) == nil }
+	}
+
+	/// The takes a folder holds, in project order rather than in the order the
+	/// folder happens to list them — the project's order is somebody's
+	/// arrangement and the file already keeps it. A path the project does not
+	/// list is not one of them.
+	public func takes(in folder: String) -> [String] {
+		guard let found = folders.first(where: { $0.name == folder }) else { return [] }
+		return takes.filter { found.takes.contains($0) && self.folder(of: $0) == folder }
+	}
+
+	@discardableResult
+	public mutating func addFolder(named name: String) -> String {
+		let wanted = name.trimmingCharacters(in: .whitespaces)
+		guard !wanted.isEmpty else { return "" }
+		guard !folders.contains(where: { $0.name == wanted }) else { return wanted }
+		folders.append(Folder(name: wanted))
+		return wanted
+	}
+
+	public mutating func renameFolder(_ name: String, to wanted: String) {
+		let tidied = wanted.trimmingCharacters(in: .whitespaces)
+		guard !tidied.isEmpty, !folders.contains(where: { $0.name == tidied }),
+		      let at = folders.firstIndex(where: { $0.name == name }) else { return }
+		folders[at].name = tidied
+	}
+
+	/// Takes the folder away and leaves its takes in the project, loose. An
+	/// arrangement is not the material.
+	public mutating func removeFolder(_ name: String) {
+		folders.removeAll { $0.name == name }
+	}
+
+	/// Puts a take in a folder, or — with `nil` — takes it out of the one it is
+	/// in. Out of every other folder either way, so a take is in one place.
+	public mutating func move(take: String, toFolder folder: String?) {
+		for index in folders.indices { folders[index].takes.removeAll { $0 == take } }
+		guard let folder, let at = folders.firstIndex(where: { $0.name == folder })
+		else { return }
+		folders[at].takes.append(take)
+	}
+
+	/// A take leaving the project leaves its folder with it.
+	public mutating func forgetTakeInFolders(_ take: String) {
+		for index in folders.indices { folders[index].takes.removeAll { $0 == take } }
 	}
 
 	/// The style a name refers to, falling back through the built-ins.

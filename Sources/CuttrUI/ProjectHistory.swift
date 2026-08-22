@@ -495,6 +495,26 @@ public struct ProjectVersions: Sendable {
 			var timedOut = false
 		}
 
+		/// What the two pipes have said so far, from whichever queue said it.
+		private final class Gathered: @unchecked Sendable {
+			private let lock = NSLock()
+			private var stdout = Data()
+			private var stderr = Data()
+
+			func out(_ data: Data) {
+				guard !data.isEmpty else { return }
+				lock.lock(); stdout.append(data); lock.unlock()
+			}
+
+			func error(_ data: Data) {
+				guard !data.isEmpty else { return }
+				lock.lock(); stderr.append(data); lock.unlock()
+			}
+
+			var said: Data { lock.lock(); defer { lock.unlock() }; return stdout }
+			var complaint: Data { lock.lock(); defer { lock.unlock() }; return stderr }
+		}
+
 		/// A one-shot flag the watchdog sets and the caller reads, from two
 		/// queues. Small enough that a lock is cheaper than anything cleverer.
 		private final class Fired: @unchecked Sendable {
@@ -537,18 +557,36 @@ public struct ProjectVersions: Sendable {
 			// holds 64K and a project with hundreds of takes writes more index
 			// lines than that. Everything in one thread deadlocks the day
 			// somebody's project gets big.
-			DispatchQueue.global().async {
-				if let input { stdin.fileHandleForWriting.write(input) }
-				try? stdin.fileHandleForWriting.close()
+			// **Nothing here blocks a thread waiting on a pipe.**
+			//
+			// It used to: stdin was written on one `DispatchQueue.global()`
+			// block and stderr read on another, while this thread read stdout.
+			// That is three threads per `git`, two of them parked on a
+			// `read`, and the moment enough of these run at once — which the
+			// sharing tests do, a repository at a time — the global pool has
+			// no thread left to run the stderr block on. The semaphore below
+			// then waited for a signal that could not come, stdout's pipe
+			// filled behind it, and the whole thing sat there at three per
+			// cent of a core for as long as anybody let it. It took a test
+			// suite down and, before that, a release.
+			//
+			// Read as it arrives instead. `readabilityHandler` is called on a
+			// queue the framework owns and parks nothing, so a hundred of
+			// these cost a hundred file descriptors and no threads.
+			let gathered = Gathered()
+			out.fileHandleForReading.readabilityHandler = { handle in
+				let data = handle.availableData
+				if data.isEmpty { handle.readabilityHandler = nil } else { gathered.out(data) }
 			}
-			var complaint = Data()
-			let waited = DispatchSemaphore(value: 0)
-			DispatchQueue.global().async {
-				complaint = error.fileHandleForReading.readDataToEndOfFile()
-				waited.signal()
+			error.fileHandleForReading.readabilityHandler = { handle in
+				let data = handle.availableData
+				if data.isEmpty { handle.readabilityHandler = nil } else { gathered.error(data) }
 			}
-			// Killing it is what unblocks the read below: the pipes close with
-			// the process, and nothing here polls.
+			if let input { try? stdin.fileHandleForWriting.write(contentsOf: input) }
+			try? stdin.fileHandleForWriting.close()
+
+			// Killing it is what ends the wait below: the pipes close with the
+			// process, and nothing here polls.
 			let fired = Fired()
 			if let timeout {
 				DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
@@ -557,9 +595,16 @@ public struct ProjectVersions: Sendable {
 					process.terminate()
 				}
 			}
-			let said = out.fileHandleForReading.readDataToEndOfFile()
-			waited.wait()
 			process.waitUntilExit()
+			// Whatever was still in flight when it went. The handlers stop
+			// being called once the descriptor is at end of file, and the
+			// process exiting is not by itself that moment.
+			out.fileHandleForReading.readabilityHandler = nil
+			error.fileHandleForReading.readabilityHandler = nil
+			gathered.out(out.fileHandleForReading.availableData)
+			gathered.error(error.fileHandleForReading.availableData)
+			let said = gathered.said
+			let complaint = gathered.complaint
 			func trimmed(_ data: Data) -> String {
 				String(data: data, encoding: .utf8)?
 					.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

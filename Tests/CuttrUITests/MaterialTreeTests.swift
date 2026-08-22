@@ -43,6 +43,7 @@ import Testing
 			switch node.row {
 			case .root(let r): return r.title
 			case .take(let name, _, _, _): return name
+			case .folder(let name, _): return name
 			case .memes: return "memes"
 			case .clip(let item): return item.slug
 			case .scene(let name): return name

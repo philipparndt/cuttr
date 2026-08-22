@@ -624,7 +624,11 @@ public final class ComposeDocument {
 	public func removeTake(_ path: String) {
 		var next = project
 		next.takes.removeAll { $0 == path }
-		apply(next)
+		// And out of whatever folder it was filed in. A folder naming a take
+		// the project no longer lists is harmless — `takes:` is the authority —
+		// but leaving it there is leaving rubbish in somebody's file.
+		next.forgetTakeInFolders(path)
+		apply(next, actionName: "Remove Take")
 		try? write()
 	}
 

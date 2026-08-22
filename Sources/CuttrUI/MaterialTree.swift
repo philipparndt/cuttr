@@ -34,11 +34,17 @@ public final class MaterialTree: NSView, NSOutlineViewDataSource, NSOutlineViewD
 	public var onScene: ((String?) -> Void)?
 	public var onAddScene: (() -> Void)?
 	public var onRemoveScene: ((String) -> Void)?
+	/// Arranging the takes. `nil` for the folder means out of the one it is in.
+	public var onNewFolder: ((String) -> Void)?
+	public var onRenameFolder: ((String, String) -> Void)?
+	public var onRemoveFolder: ((String) -> Void)?
+	public var onMoveTake: ((String, String?) -> Void)?
 
 	// MARK: - What it holds
 
 	private var vocabulary = ComposeDocument.Vocabulary()
 	private var takes: [ComposeDocument.TakeEntry] = []
+	private var folders: [Project.Folder] = []
 	private var nodes: [Material.Node] = []
 	/// Boxed, because an outline view holds its items by identity and a
 	/// `struct` handed to it twice is two different items.
@@ -56,6 +62,9 @@ public final class MaterialTree: NSView, NSOutlineViewDataSource, NSOutlineViewD
 	private let search = NSSearchField()
 	private let findMeme = NSButton()
 	private var renaming: String?
+
+	/// Which take a drag is carrying, for a drop inside this tree.
+	static let takeType = NSPasteboard.PasteboardType("de.rnd7.cuttr.take")
 
 	/// One row, with an identity an outline view can hold on to.
 	final class Held: NSObject {
@@ -112,10 +121,12 @@ public final class MaterialTree: NSView, NSOutlineViewDataSource, NSOutlineViewD
 		column.width = 240
 		outline.addTableColumn(column)
 		outline.outlineTableColumn = column
-		// Dragged out, never into: this is what the takes contain, and dropping
-		// something here would be asking to change a take from the project
-		// window.
-		outline.setDraggingSourceOperationMask(.copy, forLocal: true)
+		outline.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
+		// Dropped back into itself, and only that: a take onto a folder files
+		// it there. Nothing from outside — this is what the takes contain, and
+		// a drop from elsewhere would be asking to change a take from the
+		// project window.
+		outline.registerForDraggedTypes([Self.takeType])
 
 		let top = NSStackView(views: [search, findMeme])
 		top.orientation = .horizontal
@@ -188,20 +199,42 @@ public final class MaterialTree: NSView, NSOutlineViewDataSource, NSOutlineViewD
 	// MARK: - Contents
 
 	public func reload(_ vocabulary: ComposeDocument.Vocabulary,
-	                   takes: [ComposeDocument.TakeEntry] = []) {
+	                   takes: [ComposeDocument.TakeEntry] = [],
+	                   folders: [Project.Folder] = []) {
 		// A reload puts a look away: the rows are about to move under it, and
 		// the take it was playing may not be one of this project's any more.
 		closeLook()
 		self.vocabulary = vocabulary
 		self.takes = takes
+		self.folders = folders
 		rebuild()
 	}
 
 	@objc private func filterChanged() { rebuild() }
 
+	/// Opening and closing rows without letting AppKit animate it.
+	///
+	/// `expandItem` animates, and an animation is `-[NSAnimation _runBlocking]`
+	/// on a dispatch worker thread spinning a nested run loop. This tree opens
+	/// every root on every reload, so a window that reloads often — or a test
+	/// suite that builds hundreds of trees — fills the 64-thread dispatch pool
+	/// with blocked animations and stops. It took the whole suite down for two
+	/// hours before `sample` said so in as many words: "too many dispatch
+	/// threads blocked in synchronous operations".
+	///
+	/// Nothing is lost by it. These are rows appearing as a list is built, not
+	/// a gesture somebody made.
+	private func withoutAnimation(_ work: () -> Void) {
+		NSAnimationContext.beginGrouping()
+		NSAnimationContext.current.duration = 0
+		work()
+		NSAnimationContext.endGrouping()
+	}
+
 	private func rebuild() {
 		let needle = search.stringValue
-		nodes = Material.tree(of: vocabulary, takes: takes, matching: needle)
+		nodes = Material.tree(of: vocabulary, takes: takes, folders: folders,
+		                      matching: needle)
 		boxes = [:]
 		let held = nodes.map { box($0, under: "") }
 		roots = held
@@ -213,15 +246,25 @@ public final class MaterialTree: NSView, NSOutlineViewDataSource, NSOutlineViewD
 		//
 		// While something is being searched for, everything that survived the
 		// filter is opened instead — a match has to be visible to be a match.
-		for root in held {
-			outline.expandItem(root)
-			guard !needle.trimmingCharacters(in: .whitespaces).isEmpty else {
-				for child in root.children where opened.contains(child.key) {
-					outline.expandItem(child)
+		withoutAnimation {
+			for root in held {
+				outline.expandItem(root)
+				guard !needle.trimmingCharacters(in: .whitespaces).isEmpty else {
+					for child in root.children where opened.contains(child.key) {
+						outline.expandItem(child)
+						for grandchild in child.children where opened.contains(grandchild.key) {
+							outline.expandItem(grandchild)
+						}
+					}
+					continue
 				}
-				continue
+				// A match has to be visible to be a match, and there are two
+				// levels to open now that takes can be in folders.
+				for child in root.children {
+					outline.expandItem(child)
+					for grandchild in child.children { outline.expandItem(grandchild) }
+				}
 			}
-			for child in root.children { outline.expandItem(child) }
 		}
 	}
 
@@ -240,6 +283,7 @@ public final class MaterialTree: NSView, NSOutlineViewDataSource, NSOutlineViewD
 	static func key(of row: Material.Row) -> String {
 		switch row {
 		case .root(let root): return "root:\(root.rawValue)"
+		case .folder(let name, _): return "folder:\(name)"
 		case .take(let name, _, _, _): return "take:\(name)"
 		case .memes: return "memes"
 		case .clip(let item): return "clip:\(item.take)/\(item.slug)"
@@ -309,9 +353,18 @@ public final class MaterialTree: NSView, NSOutlineViewDataSource, NSOutlineViewD
 			return written
 		}
 		let references = held.node.references
-		guard !references.isEmpty else { return nil }
 		let written = NSPasteboardItem()
-		written.setString(references.joined(separator: "\n"), forType: .string)
+		// A take also says which take it is, on a type only this tree reads, so
+		// that dropping one on a folder can file it. The plain text stays what
+		// it was, so dropping the same drag on the programme still lays down
+		// its clips.
+		if case .take(let name, let path, _, _) = held.node.row {
+			written.setString(path.isEmpty ? name : path, forType: Self.takeType)
+		}
+		guard !references.isEmpty || written.types.contains(Self.takeType) else { return nil }
+		if !references.isEmpty {
+			written.setString(references.joined(separator: "\n"), forType: .string)
+		}
 		return written
 	}
 }
@@ -336,7 +389,7 @@ extension MaterialTree {
 
 	func activate(_ held: Held) {
 		switch held.node.row {
-		case .root, .memes:
+		case .root, .memes, .folder:
 			// A heading opens and closes, which is what a triangle means.
 			if outline.isItemExpanded(held) { outline.collapseItem(held) }
 			else { outline.expandItem(held) }
@@ -428,12 +481,27 @@ extension MaterialTree {
 		let row = outline.row(at: place)
 		guard row >= 0, let held = outline.item(atRow: row) as? Held else { return nil }
 		outline.selectRowIndexes([row], byExtendingSelection: false)
+		return menu(for: held)
+	}
 
+	/// The menu for a row, split from the event that found it so a test can
+	/// ask what a row offers without making a mouse.
+	func menu(for held: Held) -> NSMenu? {
 		let menu = NSMenu()
 		switch held.node.row {
 		case .root(.takes), .memes:
 			add(to: menu, "Add Take…", #selector(addTake))
 			add(to: menu, "New Take…", #selector(newTake))
+			menu.addItem(.separator())
+			add(to: menu, "New Folder…", #selector(newFolder))
+
+		case .folder(let name, _):
+			add(to: menu, "Rename “\(name)”…", #selector(renameChosenFolder))
+			// The takes stay in the project: an arrangement is not the
+			// material, and the menu should not read as though it were.
+			add(to: menu, "Remove Folder", #selector(removeChosenFolder))
+			menu.addItem(.separator())
+			add(to: menu, "New Folder…", #selector(newFolder))
 		case .root(.scenes):
 			add(to: menu, "Add Scene…", #selector(addScene))
 			add(to: menu, "New Scene…", #selector(newScene))
@@ -446,6 +514,10 @@ extension MaterialTree {
 			menu.addItem(.separator())
 			add(to: menu, "Rename…", #selector(renameChosen))
 			add(to: menu, "Reveal in Finder", #selector(revealChosenInFinder))
+			// Where this take is filed, if anywhere.
+			let move = NSMenuItem(title: "Move to Folder", action: nil, keyEquivalent: "")
+			move.submenu = foldersMenu(for: path.isEmpty ? name : path)
+			menu.addItem(move)
 			add(to: menu, "Remove from Project", #selector(removeChosen))
 			menu.addItem(.separator())
 			// The `Where` column of the pane this replaced. There is no room
@@ -578,7 +650,7 @@ extension MaterialTree {
 			parents.append(some)
 			walk = parent(of: some)
 		}
-		for some in parents.reversed() { outline.expandItem(some) }
+		withoutAnimation { for some in parents.reversed() { outline.expandItem(some) } }
 		let row = outline.row(forItem: held)
 		guard row >= 0 else { return }
 		outline.selectRowIndexes([row], byExtendingSelection: false)
@@ -613,11 +685,15 @@ extension MaterialTree {
 		flip(held)
 	}
 
-	/// And the same for one take, which is the level the clips are at.
+	/// And the same for anything under a root that has children of its own: a
+	/// folder, a take, the memes.
 	public func fold(take name: String) {
 		for root in roots {
 			for child in root.children {
 				switch child.node.row {
+				case .folder(let found, _) where found == name:
+					flip(child)
+					return
 				case .take(let found, _, _, _) where found == name:
 					flip(child)
 					return
@@ -634,8 +710,10 @@ extension MaterialTree {
 	}
 
 	private func flip(_ held: Held) {
-		if outline.isItemExpanded(held) { outline.collapseItem(held) }
-		else { outline.expandItem(held) }
+		withoutAnimation {
+			if outline.isItemExpanded(held) { outline.collapseItem(held) }
+			else { outline.expandItem(held) }
+		}
 	}
 
 	// MARK: - For the tests
@@ -666,6 +744,20 @@ extension MaterialTree {
 
 	/// Starts a rename on whatever take is selected, the way its menu does.
 	func beginRenamingForTesting() { renameChosen() }
+
+	/// The menu a row would show, without a mouse event to make one from.
+	func menuForTesting(_ held: Held) -> NSMenu? {
+		outline.selectRowIndexes([outline.row(forItem: held)], byExtendingSelection: false)
+		return menu(for: held)
+	}
+
+	/// A drop, without a dragging session to carry it.
+	@discardableResult
+	func dropForTesting(_ take: String, on held: Held) -> Bool {
+		guard let wanted = target(of: held) else { return false }
+		onMoveTake?(take, wanted.folder)
+		return true
+	}
 
 	func searchForTesting(_ text: String) {
 		search.stringValue = text
@@ -782,4 +874,160 @@ extension MaterialTree {
 
 
 	/// For the tests: where the look landed, and what it is playing.
+}
+
+// MARK: - Arranging the takes
+
+extension MaterialTree {
+
+	/// Which folders a take could go in, and the two other things it can do.
+	///
+	/// Every folder that exists, a way out of the one it is in, and a new one
+	/// at the end — so the whole arrangement can be done from the row without
+	/// going anywhere else first.
+	func foldersMenu(for take: String) -> NSMenu {
+		let menu = NSMenu()
+		let inside = folders.first { $0.takes.contains(take) }?.name
+		for folder in folders {
+			let item = NSMenuItem(title: folder.name, action: #selector(moveChosen(_:)),
+			                      keyEquivalent: "")
+			item.target = self
+			item.representedObject = folder.name
+			item.state = folder.name == inside ? .on : .off
+			menu.addItem(item)
+		}
+		if inside != nil {
+			if !folders.isEmpty { menu.addItem(.separator()) }
+			let out = NSMenuItem(title: "Out of the Folder",
+			                     action: #selector(moveChosen(_:)), keyEquivalent: "")
+			out.target = self
+			menu.addItem(out)
+		}
+		if !menu.items.isEmpty { menu.addItem(.separator()) }
+		let made = NSMenuItem(title: "New Folder…", action: #selector(moveToNewFolder),
+		                      keyEquivalent: "")
+		made.target = self
+		menu.addItem(made)
+		return menu
+	}
+
+	/// The path a take row means, which is what a folder holds.
+	private func path(of held: Held) -> String? {
+		guard case .take(let name, let path, _, _) = held.node.row else { return nil }
+		return path.isEmpty ? name : path
+	}
+
+	@objc private func moveChosen(_ sender: NSMenuItem) {
+		guard let held = chosen.first, let take = path(of: held) else { return }
+		onMoveTake?(take, sender.representedObject as? String)
+	}
+
+	@objc private func moveToNewFolder() {
+		guard let held = chosen.first, let take = path(of: held) else { return }
+		ask("New Folder", "What is it called?") { [weak self] name in
+			self?.onNewFolder?(name)
+			self?.onMoveTake?(take, name)
+		}
+	}
+
+	@objc private func newFolder() {
+		ask("New Folder", "What is it called?") { [weak self] name in
+			self?.onNewFolder?(name)
+		}
+	}
+
+	@objc private func renameChosenFolder() {
+		guard case .folder(let name, _) = chosen.first?.node.row else { return }
+		ask("Rename Folder", "What should it be called?", filled: name) { [weak self] wanted in
+			self?.onRenameFolder?(name, wanted)
+		}
+	}
+
+	@objc private func removeChosenFolder() {
+		guard case .folder(let name, _) = chosen.first?.node.row else { return }
+		onRemoveFolder?(name)
+	}
+
+	/// A name, asked for.
+	///
+	/// An alert rather than a field in the row: a folder made from a menu has
+	/// no row yet to type into, and inventing one to be typed into and then
+	/// throwing it away is more moving parts than the question deserves.
+	private func ask(_ title: String, _ question: String, filled: String = "",
+	                 then use: @escaping (String) -> Void) {
+		let alert = NSAlert()
+		alert.messageText = title
+		alert.informativeText = question
+		alert.addButton(withTitle: "OK")
+		alert.addButton(withTitle: "Cancel")
+		let field = NSTextField(string: filled)
+		field.frame = NSRect(x: 0, y: 0, width: 220, height: 22)
+		alert.accessoryView = field
+		alert.window.initialFirstResponder = field
+		guard alert.runModal() == .alertFirstButtonReturn else { return }
+		let wanted = field.stringValue.trimmingCharacters(in: .whitespaces)
+		guard !wanted.isEmpty else { return }
+		use(wanted)
+	}
+}
+
+// MARK: - Dropping a take into a folder
+
+extension MaterialTree {
+
+	/// Where a take may be dropped: on a folder, or on the `Takes` root, which
+	/// is how it comes back out of one.
+	///
+	/// On the row itself and never between rows. The order of the takes is the
+	/// project's and is not something this tree rearranges — what a drop here
+	/// means is "file this there", and an insertion point would promise a
+	/// reordering that does not happen.
+	public func outlineView(_ outlineView: NSOutlineView,
+	                        validateDrop info: NSDraggingInfo,
+	                        proposedItem item: Any?,
+	                        proposedChildIndex index: Int) -> NSDragOperation {
+		guard let take = draggedTake(info) else { return [] }
+		guard index == NSOutlineViewDropOnItemIndex else {
+			// Between two rows: retarget onto whatever they are inside, so the
+			// drop still means something rather than being refused.
+			guard let held = item as? Held, target(of: held) != nil else { return [] }
+			outlineView.setDropItem(held, dropChildIndex: NSOutlineViewDropOnItemIndex)
+			return .move
+		}
+		guard let held = item as? Held, let wanted = target(of: held) else { return [] }
+		// Already there is not a move.
+		return folders.first(where: { $0.takes.contains(take) })?.name == wanted.name
+			? [] : .move
+	}
+
+	public func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo,
+	                        item: Any?, childIndex index: Int) -> Bool {
+		guard let take = draggedTake(info), let held = item as? Held,
+		      let wanted = target(of: held) else { return false }
+		onMoveTake?(take, wanted.folder)
+		return true
+	}
+
+	/// What a row means as a place to put a take.
+	///
+	/// A folder is itself. The `Takes` root is "out of any folder". A take is
+	/// wherever *it* is, so dropping one take on another files it beside its
+	/// neighbour, which is what the gesture looks like it should do.
+	func target(of held: Held) -> (name: String?, folder: String?)? {
+		switch held.node.row {
+		case .folder(let name, _):
+			return (name, name)
+		case .root(.takes):
+			return (nil, nil)
+		case .take(let name, let path, _, _):
+			let mine = folders.first { $0.takes.contains(path.isEmpty ? name : path) }?.name
+			return (mine, mine)
+		default:
+			return nil
+		}
+	}
+
+	private func draggedTake(_ info: NSDraggingInfo) -> String? {
+		info.draggingPasteboard.string(forType: Self.takeType)
+	}
 }

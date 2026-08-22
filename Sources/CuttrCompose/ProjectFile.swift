@@ -57,6 +57,16 @@ public enum ProjectReader {
 
 		let takes = stringList(root.removeValue(forKey: "takes"))
 
+		// How somebody has arranged them. A folder with no takes reads as an
+		// empty folder rather than being dropped: making one before there is
+		// anything to put in it is the reason to be able to make one.
+		var folders: [Project.Folder] = []
+		for entry in (root.removeValue(forKey: "folders") as? [Any]) ?? [] {
+			guard let m = mapping(entry),
+			      let name = nonEmpty((m["name"] as? String) ?? "") else { continue }
+			folders.append(Project.Folder(name: name, takes: stringList(m["takes"])))
+		}
+
 		var output = Output()
 		if let m = root.removeValue(forKey: "output").flatMap(mapping) {
 			// `1920x1080`, because that is how a frame size is written down.
@@ -221,6 +231,7 @@ public enum ProjectReader {
 		var project = Project(takes: takes, output: output, timeline: timeline,
 		                      overlays: overlays, sounds: sounds, styles: styles,
 		                      profiles: profiles, scenes: scenes, unknownKeys: root)
+		project.folders = folders
 		// The two things the parse above cannot see: what somebody wrote in the
 		// margins, and the order they wrote their named blocks in. Both are
 		// facts about the text, so both are read from the text.
