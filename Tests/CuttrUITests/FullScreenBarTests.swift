@@ -58,4 +58,37 @@ import Testing
 		}
 		#expect(DocumentBar.roomForTrafficLights(in: window) == DocumentBar.trafficLights)
 	}
+
+	// MARK: - The toolbar getting out of the way
+
+	/// The empty toolbar is what makes the 52-point band and centres the
+	/// traffic lights in it. Full screen has neither of those to do, and an
+	/// empty toolbar AppKit still draws sits across the top of a content view
+	/// that now runs to the top of the screen — over the capsule and the clock.
+	@Test func theEmptyToolbarStepsAsideInFullScreen() {
+		let place = DocumentPlace(size: NSSize(width: 900, height: 600))
+		let toolbar = place.window.toolbar
+		#expect(toolbar != nil, "the band is made by a toolbar and there is not one")
+		#expect(toolbar?.isVisible == true)
+
+		place.windowWillEnterFullScreen(Notification(name: NSWindow.willEnterFullScreenNotification))
+		#expect(toolbar?.isVisible == false, "the toolbar is still over the bar in full screen")
+
+		place.windowWillExitFullScreen(Notification(name: NSWindow.willExitFullScreenNotification))
+		#expect(toolbar?.isVisible == true, "the band did not come back")
+	}
+
+	/// The bar is content, not titlebar, and that is the whole of why it is on
+	/// screen in full screen at all. Moving it into an
+	/// `NSTitlebarAccessoryViewController` is the tidy-looking change that
+	/// would lose it, so the arrangement is written down here.
+	@Test func theBarLivesInTheContentView() {
+		let place = DocumentPlace(size: NSSize(width: 900, height: 600))
+		let bar = place.window.contentView?.subviews.contains { $0 is DocumentBar }
+		#expect(bar == true, "the bar is not in the content view")
+		#expect(place.window.titlebarAccessoryViewControllers.isEmpty,
+		        "the bar has moved into the titlebar, where full screen hides it")
+		#expect(place.window.styleMask.contains(.fullSizeContentView),
+		        "without this the content stops below the titlebar")
+	}
 }

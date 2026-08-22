@@ -378,13 +378,36 @@ final class DocumentPlace: NSObject, NSWindowDelegate {
 
 	func windowDidResize(_ notification: Notification) { showing?.placeDidResize() }
 
+	/// **The toolbar has no job in full screen, and it was doing harm.**
+	///
+	/// It holds no items. It exists for one reason — see
+	/// ``DocumentBar/growTitleBand(of:)`` — which is that macOS gives a
+	/// `.unified` toolbar a 52-point band and centres the traffic lights in it,
+	/// and that is exactly the band this bar wants. Windowed, it is an empty
+	/// transparent strip and the bar shows through it.
+	///
+	/// Full screen takes away both of the things it was for: there are no
+	/// traffic lights to centre and no title band to size. What is left is an
+	/// empty toolbar that AppKit still draws, across the top of a content view
+	/// that runs to the top of the screen — over the project capsule and the
+	/// clock, which is the whole of what the bar had to say.
+	///
+	/// So it goes away on the way in and comes back on the way out. The bar
+	/// itself is untouched: it is a view in the *content* view and nothing in
+	/// the titlebar, which is what keeps it on screen in full screen at all.
+	func windowWillEnterFullScreen(_ notification: Notification) {
+		window.toolbar?.isVisible = false
+	}
+
 	/// The traffic lights go into the sliding titlebar on the way in and come
 	/// back on the way out, so the room kept for them is measured again at both
-	/// ends. Nothing else about the bar changes: it is a view in the content
-	/// view rather than anything in the titlebar, which is what keeps it on
-	/// screen in full screen at all.
+	/// ends.
 	func windowDidEnterFullScreen(_ notification: Notification) {
 		bar.remeasure()
+	}
+
+	func windowWillExitFullScreen(_ notification: Notification) {
+		window.toolbar?.isVisible = true
 	}
 
 	func windowDidExitFullScreen(_ notification: Notification) {
