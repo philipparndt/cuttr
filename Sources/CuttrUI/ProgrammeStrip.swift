@@ -43,6 +43,17 @@ public final class ProgrammeStrip: NSView {
 	private enum Grip { case body(Double), start, end }
 	private var dragging: (origin: Origin, appearance: Int, grip: Grip,
 	                       start: Double, end: Double)?
+	/// Where the bar was when it was taken hold of.
+	///
+	/// So that letting go without having moved writes nothing. A click on a bar
+	/// is how it gets *selected*, and it used to also go through
+	/// ``onMoveOverlay`` with the two ends it already had — which is not the
+	/// nothing it looks like: the range gets re-spelled on the way, so
+	/// selecting an overlay written `within:` a clip could rewrite it as
+	/// programme times, and one with no range at all could be given one. A
+	/// click that edits the file is bad enough; a click that edits the file
+	/// while somebody is only trying to look at something is worse.
+	private var grabbedAt: (start: Double, end: Double)?
 
 	private let clipRowHeight: CGFloat = 34
 	/// Tall enough to be grabbed. A bar somebody is meant to drag has to be
@@ -703,6 +714,32 @@ public final class ProgrammeStrip: NSView {
 
 	var noticeForTesting: String? { notice }
 
+	/// Taking hold of the first bar and letting go, with the pointer moved by
+	/// `by` seconds in between — nought for a plain click.
+	///
+	/// Driven through the same three steps a mouse would, rather than by
+	/// sending events: an `NSEvent` needs a window to have a location in, and
+	/// what is under test is whether letting go writes anything.
+	func clickFirstBarForTesting(movingBy by: Double = 0) {
+		guard let first = bars.first else { return }
+		let inside = NSPoint(x: first.rect.midX, y: first.rect.midY)
+		mouseDown(with: fakeClick(at: inside))
+		if by != 0 {
+			mouseDragged(with: fakeClick(at: NSPoint(x: x(for: first.start + by) + 
+			                                         (inside.x - first.rect.minX),
+			                                         y: inside.y)))
+		}
+		mouseUp(with: fakeClick(at: inside))
+	}
+
+	private func fakeClick(at point: NSPoint) -> NSEvent {
+		NSEvent.mouseEvent(
+			with: .leftMouseDown, location: convert(point, to: nil), modifierFlags: [],
+			timestamp: 0, windowNumber: window?.windowNumber ?? 0, context: nil,
+			eventNumber: 0, clickCount: 1, pressure: 1)
+			?? NSEvent()
+	}
+
 	func buttonCentreForTesting(_ button: Button) -> NSPoint {
 		let rect = buttonRects().first { $0.0 == button }?.1 ?? .zero
 		return NSPoint(x: rect.midX, y: rect.midY)
@@ -743,6 +780,7 @@ public final class ProgrammeStrip: NSView {
 				grip = .body(t - bar.start)
 			}
 			dragging = (bar.origin, bar.appearance, grip, bar.start, bar.end)
+			grabbedAt = (bar.start, bar.end)
 			selected = (bar.origin, bar.appearance)
 			notice = nil
 			window?.makeFirstResponder(self)
@@ -793,8 +831,14 @@ public final class ProgrammeStrip: NSView {
 
 	public override func mouseUp(with event: NSEvent) {
 		guard let moving = dragging else { return }
+		let began = grabbedAt
 		dragging = nil
+		grabbedAt = nil
 		needsDisplay = true
+		// Only if it actually went somewhere. See ``grabbedAt``.
+		guard began == nil || moving.start != began!.start || moving.end != began!.end else {
+			return
+		}
 		onMoveOverlay?(moving.origin, moving.appearance, moving.start, moving.end)
 	}
 }

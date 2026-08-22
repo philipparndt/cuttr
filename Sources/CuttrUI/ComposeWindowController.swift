@@ -408,6 +408,10 @@ public final class ComposeWindowController: DocumentEditor,
 	}
 
 	/// For the tests: which of the four is showing.
+	/// ⌘Z on a programme. There was none until now — see
+	/// ``ComposeDocument/apply(_:actionName:)``.
+	override var documentUndoManager: UndoManager? { composeDocument.undoManager }
+
 	var modeForTesting: Mode { mode }
 	/// For the test that watching the film does not mean watching the tracking
 	/// marks over everybody's faces.
@@ -743,7 +747,7 @@ public final class ComposeWindowController: DocumentEditor,
 				overlay.appearances[appearance].span = overlay.appearances[appearance].span
 					.moved(start: start, end: end, in: resolved)
 			}
-			self.composeDocument.apply(next)
+			self.composeDocument.apply(next, actionName: "Move Overlay")
 			try? self.composeDocument.write()
 		}
 
@@ -1713,6 +1717,7 @@ public final class ComposeWindowController: DocumentEditor,
 	@objc public func togglePlay(_ sender: Any?) { transport.togglePlay() }
 
 	public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+		if let undo = validateUndo(item) { return undo }
 		switch item.action {
 		case #selector(render(_:)): return composeDocument.resolved != nil
 		case #selector(exportProject(_:)): return !composeDocument.project.takes.isEmpty

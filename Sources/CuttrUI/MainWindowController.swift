@@ -2232,44 +2232,16 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	/// name, so ⌘Z inside one takes back a keystroke.
 	override var documentUndoManager: UndoManager? { takeDocument.undoManager }
 
-	/// Undo and redo, as actions this controller answers to.
-	///
-	/// Not the bare `undo:` selector, which is what this was and which left the
-	/// Edit menu permanently grey. `undo:` is `NSUndoManager`'s own method, and
-	/// an undo manager is not in the responder chain — nothing between the first
-	/// responder and the application implements it, so AppKit found no target,
-	/// disabled the item, and never called `validateMenuItem` to ask. The chain
-	/// has to reach an object that actually declares the method, and this is it.
-	///
-	/// A field editor still wins while somebody is typing, because it is earlier
-	/// in the chain and has an undo manager of its own for the keystrokes.
-	@objc public func undoEdit(_ sender: Any?) {
-		if let editor = window?.firstResponder as? NSTextView,
-		   let manager = editor.undoManager, manager !== takeDocument.undoManager, manager.canUndo {
-			manager.undo()
-			return
-		}
-		takeDocument.undoManager.undo()
-	}
-
-	@objc public func redoEdit(_ sender: Any?) {
-		takeDocument.undoManager.redo()
-	}
+	// Undo and redo are answered by ``DocumentEditor``, which every window
+	// shares. They were here, named directly in the Edit menu, and so only
+	// this window ever had them.
 
 	/// Names what ⌘Z will do, so the menu says "Undo Trim Clip" rather than
 	/// "Undo" — which is the only way to know whether it is about to take back
 	/// the thing you meant.
 	public func validateMenuItem(_ item: NSMenuItem) -> Bool {
-		let manager = takeDocument.undoManager
+		if let undo = validateUndo(item) { return undo }
 		switch item.action {
-		case #selector(undoEdit(_:)):
-			item.title = manager.canUndo && !manager.undoActionName.isEmpty
-				? "Undo \(manager.undoActionName)" : "Undo"
-			return manager.canUndo
-		case #selector(redoEdit(_:)):
-			item.title = manager.canRedo && !manager.redoActionName.isEmpty
-				? "Redo \(manager.redoActionName)" : "Redo"
-			return manager.canRedo
 		case #selector(deleteAction(_:)), #selector(renameSelected(_:)),
 		     #selector(editSlugOfSelected(_:)), #selector(editTagsOfSelected(_:)),
 		     #selector(zoomToClipAction(_:)),

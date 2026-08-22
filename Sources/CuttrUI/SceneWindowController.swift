@@ -408,19 +408,12 @@ public final class SceneWindowController: DocumentEditor, NSMenuItemValidation {
 
 	override var documentUndoManager: UndoManager? { sceneDocument.undoManager }
 
-	@objc public func undoEdit(_ sender: Any?) {
-		if let editor = window?.firstResponder as? NSTextView,
-		   let manager = editor.undoManager, manager !== sceneDocument.undoManager,
-		   manager.canUndo {
-			manager.undo()
-			return
-		}
-		sceneDocument.undoManager.undo()
-	}
-
-	@objc public func redoEdit(_ sender: Any?) { sceneDocument.undoManager.redo() }
+	// Undo and redo are answered by ``DocumentEditor``, which every window
+	// shares. This window had its own pair, character for character the same
+	// as the take editor's.
 
 	public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+		if let undo = validateUndo(item) { return undo }
 		let manager = sceneDocument.undoManager
 		switch item.action {
 		case #selector(undoEdit(_:)):

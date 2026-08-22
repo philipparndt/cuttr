@@ -86,6 +86,59 @@ public class DocumentEditor: NSWindowController {
 	/// The undo manager the responder chain gets while this is on screen.
 	var documentUndoManager: UndoManager? { nil }
 
+	// MARK: - Undo
+
+	/// ⌘Z and ⇧⌘Z, for whichever document is showing.
+	///
+	/// **Not the bare `undo:` selector.** That is `NSUndoManager`'s own method
+	/// and an undo manager is not in the responder chain, so AppKit found no
+	/// target, greyed the menu item out and never called `validateMenuItem` to
+	/// ask why. The chain has to reach an object that actually declares the
+	/// method.
+	///
+	/// Here rather than on one window. The Edit menu named
+	/// `MainWindowController.undoEdit(_:)`, so only the take editor ever
+	/// answered: the project window had no undo at all — a drag that wrote the
+	/// wrong thing was permanent and the way back was git — and the scene
+	/// window had an undo manager that nothing in the menu could reach. A
+	/// selector on the shared base is one implementation and three windows.
+	///
+	/// A field editor still wins while somebody is typing, because it is
+	/// earlier in the chain and has an undo manager of its own for keystrokes.
+	@objc public func undoEdit(_ sender: Any?) {
+		guard let manager = documentUndoManager else { return }
+		if let editor = window?.firstResponder as? NSTextView,
+		   let typing = editor.undoManager, typing !== manager, typing.canUndo {
+			typing.undo()
+			return
+		}
+		manager.undo()
+	}
+
+	@objc public func redoEdit(_ sender: Any?) {
+		documentUndoManager?.redo()
+	}
+
+	/// Names what ⌘Z will do, so the menu says "Undo Move Overlay" rather than
+	/// "Undo" — which is the only way to know whether it is about to take back
+	/// the thing you meant. `nil` when the item is not one of these two, so a
+	/// window's own `validateMenuItem` can carry on.
+	func validateUndo(_ item: NSMenuItem) -> Bool? {
+		guard let manager = documentUndoManager else { return nil }
+		switch item.action {
+		case #selector(undoEdit(_:)):
+			item.title = manager.canUndo && !manager.undoActionName.isEmpty
+				? "Undo \(manager.undoActionName)" : "Undo"
+			return manager.canUndo
+		case #selector(redoEdit(_:)):
+			item.title = manager.canRedo && !manager.redoActionName.isEmpty
+				? "Redo \(manager.redoActionName)" : "Redo"
+			return manager.canRedo
+		default:
+			return nil
+		}
+	}
+
 	/// Furnishes the shared bar: the name, the clock, and whatever controls
 	/// this document puts in it. Called with a bar that has just been cleared.
 	func furnish(_ bar: DocumentBar) {}

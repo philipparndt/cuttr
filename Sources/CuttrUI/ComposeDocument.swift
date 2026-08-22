@@ -36,6 +36,9 @@ public final class ComposeDocument {
 	/// ``ProjectHistory/flushAndWait()``.
 	public let history = ProjectHistory()
 
+	/// One step back, per project. See ``apply(_:actionName:)``.
+	public let undoManager = UndoManager()
+
 	private var watcher: DispatchSourceFileSystemObject?
 	private var watchedDescriptor: CInt = -1
 	private var takeObserver: NSObjectProtocol?
@@ -96,6 +99,10 @@ public final class ComposeDocument {
 	/// being solved, and that is written to the file before it starts.
 	public func reload() {
 		guard let url else { return }
+		// The file has changed underneath. Every step on the stack is about a
+		// project that is no longer the one on disk, and replaying one would
+		// put back a state nobody can get to from here.
+		undoManager.removeAllActions()
 		do {
 			project = try ProjectReader.read(try String(contentsOf: url, encoding: .utf8))
 			problem = nil
@@ -111,7 +118,33 @@ public final class ComposeDocument {
 		resolve()
 	}
 
-	public func apply(_ newProject: Project) {
+	/// What every change to the project goes through, and now the only thing
+	/// that has to know about undo.
+	///
+	/// There was none. `TakeDocument` and `SceneDocument` have both had an undo
+	/// manager since they were written; the project window had nothing at all,
+	/// so ⌘Z on a programme did nothing and the way back from a mistake was
+	/// git. A drag that wrote the wrong thing was permanent.
+	///
+	/// Registered here because this is the one door — sixty-odd call sites go
+	/// through it — and skipped when nothing actually changed, so a re-apply of
+	/// the same value does not put an empty step on the stack.
+	///
+	/// The undo *writes*, which the forward direction leaves to its caller.
+	/// This program's claim is that the file is the product: an undo that put
+	/// the model back and left the file saying the other thing would be a
+	/// window disagreeing with its own document.
+	public func apply(_ newProject: Project, actionName: String = "Change") {
+		if newProject != project {
+			let previous = project
+			undoManager.registerUndo(withTarget: self) { document in
+				MainActor.assumeIsolated {
+					document.apply(previous, actionName: actionName)
+					try? document.write()
+				}
+			}
+			undoManager.setActionName(actionName)
+		}
 		project = newProject
 		isDirty = true
 		resolve()
