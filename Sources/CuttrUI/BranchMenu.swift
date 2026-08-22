@@ -25,6 +25,23 @@ public enum BranchMenu {
 		let menu = NSMenu()
 		menu.autoenablesItems = false
 
+		// First, and above the separator, because it is the one thing in here
+		// somebody presses to *do* something rather than to go and look at
+		// something. Absent rather than disabled where there is nowhere to send
+		// to: plenty of repositories are one person's and never leave the
+		// machine, and a greyed-out Share on one of those is a question nobody
+		// asked.
+		if GitRemote(root: root).hasOrigin() {
+			let share = NSMenuItem(title: "Share…", action: #selector(Target.share(_:)),
+			                       keyEquivalent: "")
+			share.target = Target.shared
+			share.image = NSImage(systemSymbolName: "arrow.trianglehead.2.clockwise",
+			                      accessibilityDescription: nil)
+			share.toolTip = "Send your changes and bring back everybody else's"
+			menu.addItem(share)
+			menu.addItem(.separator())
+		}
+
 		var handedOff = false
 		if let fork = Handoff.fork.applicationURL() {
 			menu.addItem(handoff("Open in Fork", root, fork, Handoff.fork.icon()))
@@ -195,6 +212,13 @@ public enum BranchMenu {
 			guard let url = sender.representedObject as? URL else { return }
 			NSPasteboard.general.clearContents()
 			NSPasteboard.general.setString(url.absoluteString, forType: .string)
+		}
+
+		/// Sent up the responder chain rather than done here, so that the
+		/// capsule and the File menu are one implementation and not two. The
+		/// window that is in front is the one holding the project.
+		@objc func share(_ sender: NSMenuItem) {
+			NSApp.sendAction(#selector(AppDelegate.shareProject(_:)), to: nil, from: sender)
 		}
 
 		@objc func checkout(_ sender: NSMenuItem) {

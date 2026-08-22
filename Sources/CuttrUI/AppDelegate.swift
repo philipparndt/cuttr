@@ -998,6 +998,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	/// kept as part of the project that names it, because a version has to
 	/// restore a coherent state rather than half of one.
 	@objc func showVersions(_ sender: Any?) { currentComposer?.showVersions(sender) }
+	@objc func shareProject(_ sender: Any?) { currentComposer?.shareProject(sender) }
 	@objc func importSubclips(_ sender: Any?) { currentTake?.importSubclips(sender) }
 
 	@objc func showShortcuts(_ sender: Any?) {

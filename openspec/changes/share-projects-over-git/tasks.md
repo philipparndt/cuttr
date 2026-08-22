@@ -43,37 +43,37 @@
 
 ## 4. The Share action
 
-- [ ] 4.1 Wire the sequence: flush the pending version, refuse on `busy` or
+- [x] 4.1 Wire the sequence: flush the pending version, refuse on `busy` or
       `inTheWay`, commit, fetch, integrate, push.
-- [ ] 4.2 Integrate by replaying our own share commits; merge with two parents
+- [x] 4.2 Integrate by replaying our own share commits; merge with two parents
       instead when the person has commits of their own on the branch.
-- [ ] 4.3 Retry the fetch-integrate-push cycle on a rejected push, at most three
+- [x] 4.3 Retry the fetch-integrate-push cycle on a rejected push, at most three
       times, then refuse and say so.
-- [ ] 4.4 Add the outcome vocabulary — nothing to send, sent, brought in and
+- [x] 4.4 Add the outcome vocabulary — nothing to send, sent, brought in and
       sent, refused-and-why — in the program's own words, no git terms.
-- [ ] 4.5 Say when an incoming take names footage this machine has not got.
+- [x] 4.5 Say when an incoming take names footage this machine has not got.
 
 ## 5. Resolving a conflict
 
-- [ ] 5.1 Add the conflict sheet beside `VersionsSheet`: one conflicting clip at
+- [x] 5.1 Add the conflict sheet beside `VersionsSheet`: one conflicting clip at
       a time, named by name and slug, times as timecode, mine and theirs side by
       side.
-- [ ] 5.2 Write nothing until every conflict is answered; dismissing leaves the
+- [x] 5.2 Write nothing until every conflict is answered; dismissing leaves the
       work tree exactly as it was.
-- [ ] 5.3 Test that no conflict marker is ever written to a `.cuttr` or
+- [x] 5.3 Test that no conflict marker is ever written to a `.cuttr` or
       `.cuttrproj`, including transiently.
 
 ## 6. Where it lives
 
-- [ ] 6.1 Add Share to `MainMenu` with a key equivalent, and to the capsule's
+- [x] 6.1 Add Share to `MainMenu` with a key equivalent, and to the capsule's
       branch half via `BranchMenu`.
-- [ ] 6.2 Show it only for a work tree that has an `origin`; absent, not
+- [x] 6.2 Show it only for a work tree that has an `origin`; absent, not
       disabled, when there is none.
-- [ ] 6.3 Extend `BranchMenu.documentsInTheWay` use so Share refuses over the
+- [x] 6.3 Extend `BranchMenu.documentsInTheWay` use so Share refuses over the
       same open take windows a checkout and a restore already refuse over.
 
 ## 7. Finishing
 
-- [ ] 7.1 A `docs/sharing.md` written for somebody who does not know git: what
+- [x] 7.1 A `docs/sharing.md` written for somebody who does not know git: what
       Share does, what it cannot do (footage), and what to do when it refuses.
-- [ ] 7.2 `make test` clean, including the real-decode test.
+- [x] 7.2 `make test` clean, including the real-decode test.

@@ -59,9 +59,15 @@ struct GitRemote: Sendable {
 
 	/// How far apart a branch and its upstream have got: what we have that they
 	/// have not, and what they have that we have not.
+	///
+	/// `--no-merges`, because these numbers are said out loud. A merge commit is
+	/// bookkeeping this program wrote itself, and counting one would tell
+	/// somebody "brought in 2 changes" when one person made one edit — which is
+	/// worse than saying nothing, because it is specific and wrong.
 	func counts(_ branch: String, against upstream: String) -> (ahead: Int, behind: Int)? {
 		guard let said = plumbing.run(
-			["rev-list", "--left-right", "--count", "\(upstream)...\(branch)"]),
+			["rev-list", "--left-right", "--count", "--no-merges",
+			 "\(upstream)...\(branch)"]),
 			said.status == 0 else { return nil }
 		let parts = said.out.split(whereSeparator: { $0 == "\t" || $0 == " " })
 			.compactMap { Int($0) }

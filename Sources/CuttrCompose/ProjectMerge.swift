@@ -35,6 +35,8 @@ public enum ProjectMerge {
 
 		public var subject: Subject
 
+		public init(subject: Subject) { self.subject = subject }
+
 		public var id: String {
 			switch subject {
 			case .entry(let key, _, _): return "entry:\(key)"
@@ -61,6 +63,11 @@ public enum ProjectMerge {
 		public var project: Project
 		public var conflicts: [Conflict]
 		public var isClean: Bool { conflicts.isEmpty }
+
+		public init(project: Project, conflicts: [Conflict]) {
+			self.project = project
+			self.conflicts = conflicts
+		}
 	}
 
 	// MARK: - Merging

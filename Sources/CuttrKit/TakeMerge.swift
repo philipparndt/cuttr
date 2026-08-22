@@ -44,6 +44,8 @@ public enum TakeMerge {
 
 		public var subject: Subject
 
+		public init(subject: Subject) { self.subject = subject }
+
 		/// A stable handle for the row in the chooser.
 		public var id: String {
 			switch subject {
@@ -83,6 +85,11 @@ public enum TakeMerge {
 		public var take: Take
 		public var conflicts: [Conflict]
 		public var isClean: Bool { conflicts.isEmpty }
+
+		public init(take: Take, conflicts: [Conflict]) {
+			self.take = take
+			self.conflicts = conflicts
+		}
 	}
 
 	// MARK: - Merging

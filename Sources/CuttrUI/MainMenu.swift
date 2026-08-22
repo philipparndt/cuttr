@@ -104,6 +104,16 @@ enum MainMenu {
 		versions.keyEquivalentModifierMask = [.command, .shift]
 		versions.toolTip = "Versions kept on refs/cuttr/saves every time the editing went quiet"
 		file.addItem(versions)
+		// Beside the versions, because they are the same subject seen from two
+		// sides: what this machine has kept, and what everybody has. ⌃⌘S rather
+		// than another ⇧ or ⌥ on S — all three of those are a kind of saving
+		// already, and sharing is not one.
+		let share = NSMenuItem(title: "Share…",
+		                       action: #selector(AppDelegate.shareProject(_:)),
+		                       keyEquivalent: "s")
+		share.keyEquivalentModifierMask = [.command, .control]
+		share.toolTip = "Send your changes and bring back everybody else's"
+		file.addItem(share)
 		file.addItem(.separator())
 		// ⌘W closes the *document*, not the window.
 		//

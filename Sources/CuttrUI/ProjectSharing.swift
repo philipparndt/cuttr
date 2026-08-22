@@ -212,3 +212,295 @@ public struct ProjectSharing: Sendable {
 		return nil
 	}
 }
+
+// MARK: - The whole of sharing
+
+public extension ProjectSharing {
+
+	/// What a share needs somebody to answer, and enough to ask them with.
+	///
+	/// Held rather than applied. The spec's rule is that dismissing the chooser
+	/// leaves the work tree exactly as it was, so the merge is worked out,
+	/// *abandoned*, and worked out again when the answers come back — which is
+	/// deterministic, because nothing on either side has moved in between.
+	struct MustChoose: @unchecked Sendable {
+		public var takes: [(path: String, merged: TakeMerge.Merged)]
+		public var projects: [(path: String, merged: ProjectMerge.Merged)]
+
+		public init(takes: [(path: String, merged: TakeMerge.Merged)],
+		            projects: [(path: String, merged: ProjectMerge.Merged)]) {
+			self.takes = takes
+			self.projects = projects
+		}
+
+		/// Every conflict across every file, for the sheet to walk through.
+		public var titles: [String] {
+			takes.flatMap { $0.merged.conflicts.map(\.title) }
+				+ projects.flatMap { $0.merged.conflicts.map(\.title) }
+		}
+
+		public var isEmpty: Bool { takes.isEmpty && projects.isEmpty }
+	}
+
+	/// Send what is here and bring back what is not, in that order.
+	///
+	/// The caller keeps a version first — ``ComposeDocument/keepAVersion()`` —
+	/// so that whatever this does, the state before it is recoverable from
+	/// `refs/cuttr/saves`. This does not do it itself, because the document is
+	/// the thing that knows whether anything is owed.
+	/// Not on the main actor: this fetches and pushes, and a window that waited
+	/// on the main thread for a remote would beachball for as long as the remote
+	/// took. The caller checks ``mustWait()`` first, on the main actor, because
+	/// asking which take windows are open is a question only the main actor can
+	/// answer.
+	func share() -> (outcome: Outcome, choose: MustChoose?) {
+		if let busy = plumbing.midSomething() { return (.busy(busy), nil) }
+		guard let branch = branch() else {
+			return (.failed("this repository is not on a branch"), nil)
+		}
+		let remote = GitRemote(root: root)
+		guard remote.hasOrigin() else { return (.noRemote, nil) }
+
+		let committed = commitOurs(on: branch)
+		if case .failed(let why) = committed { return (.failed(why), nil) }
+		let hadOwnWork = committed != .nothingChanged
+
+		// Three goes at the whole cycle, because the only thing worth trying
+		// again is somebody else pushing between our fetch and our push — and
+		// that can happen twice.
+		var lastTrouble: Trouble?
+		for _ in 0 ..< 3 {
+			if let trouble = remote.fetch() { return (.trouble(trouble), nil) }
+
+			guard let upstream = remote.upstream(of: branch) else {
+				// Never pushed. There is nothing to bring in and nowhere for a
+				// merge to go wrong.
+				if let trouble = remote.push(branch, setUpstream: true) {
+					return (.trouble(trouble), nil)
+				}
+				return (hadOwnWork ? .sent : .nothingToSend, nil)
+			}
+			guard let counted = remote.counts(branch, against: upstream) else {
+				return (.failed("git could not say how far apart the two are"), nil)
+			}
+			if counted.ahead == 0, counted.behind == 0 {
+				return (hadOwnWork ? .sent : .nothingToSend, nil)
+			}
+
+			var brought = 0
+			if counted.behind > 0 {
+				switch integrate(upstream, on: branch) {
+				case .done: brought = counted.behind
+				case .mustChoose(let choose):
+					return (.mustChoose(choose.titles), choose)
+				case .failed(let why): return (.failed(why), nil)
+				}
+			}
+			if counted.ahead == 0, brought == 0 { return (.nothingToSend, nil) }
+
+			if let trouble = remote.push(branch) {
+				guard trouble.isWorthRetrying else { return (.trouble(trouble), nil) }
+				lastTrouble = trouble
+				continue
+			}
+			if brought > 0 {
+				return (.brought(theirs: brought, sentMine: counted.ahead > 0 || hadOwnWork), nil)
+			}
+			return (.sent, nil)
+		}
+		return (.trouble(lastTrouble ?? .raced), nil)
+	}
+
+	/// Applies the answers and finishes the share the chooser interrupted.
+	func finish(choosing choices: [String: TakeMerge.Side]) -> Outcome {
+		if let busy = plumbing.midSomething() { return .busy(busy) }
+		guard let branch = branch() else { return .failed("this repository is not on a branch") }
+		let remote = GitRemote(root: root)
+		guard let upstream = remote.upstream(of: branch) else { return .noRemote }
+
+		switch integrate(upstream, on: branch, choosing: choices) {
+		case .mustChoose:
+			return .failed("something changed while you were choosing — try sharing again")
+		case .failed(let why): return .failed(why)
+		case .done: break
+		}
+		if let trouble = remote.push(branch) { return .trouble(trouble) }
+		return .sent
+	}
+}
+
+// MARK: - Bringing theirs in
+
+extension ProjectSharing {
+
+	enum Integrated {
+		case done
+		case mustChoose(MustChoose)
+		case failed(String)
+	}
+
+	/// Brings the upstream's commits in.
+	///
+	/// A fast-forward where one is possible, which is the common case and moves
+	/// no files nobody has touched. Otherwise a real merge, with the cuttr files
+	/// resolved by ``TakeMerge`` and ``ProjectMerge`` rather than by git's line
+	/// merge — the whole reason those exist.
+	func integrate(_ upstream: String, on branch: String,
+	               choosing choices: [String: TakeMerge.Side] = [:]) -> Integrated {
+		let git = plumbing
+
+		// A merge that has to be abandoned is abandoned with `--abort`, and
+		// `--abort` can take unrelated uncommitted work with it. So it is not
+		// started while there is any: the repository is the person's, and a
+		// tidy-up of ours that loses a file of theirs would be unforgivable.
+		if let dirty = git.run(["diff", "--name-only", "HEAD"]), dirty.status == 0,
+		   !dirty.out.isEmpty {
+			return .failed("there are uncommitted changes in this folder — "
+				+ "commit or put them aside first, then share")
+		}
+
+		if let fast = git.run(["merge", "--ff-only", upstream]), fast.status == 0 {
+			return .done
+		}
+		guard let started = git.run(["merge", "--no-commit", "--no-ff", upstream]) else {
+			return .failed("git could not start the merge")
+		}
+		if started.status == 0 {
+			return commitMerge(upstream, message: "Merge \(upstream)")
+		}
+
+		let stuck = (git.run(["diff", "--name-only", "--diff-filter=U"])?.out ?? "")
+			.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+		guard !stuck.isEmpty else {
+			_ = git.run(["merge", "--abort"])
+			return .failed(started.error.isEmpty
+				? "git could not merge" : started.error)
+		}
+
+		var choose = MustChoose(takes: [], projects: [])
+		var resolved: [String] = []
+		for path in stuck {
+			switch path.hasSuffix(".cuttr") ? resolveTake(path, choosing: choices)
+				: path.hasSuffix(".cuttrproj") ? resolveProject(path, choosing: choices)
+				: Resolution.cannot {
+			case .wrote:
+				resolved.append(path)
+			case .ask(let take, let project):
+				if let take { choose.takes.append((path, take)) }
+				if let project { choose.projects.append((path, project)) }
+			case .cannot:
+				// Not ours to merge, and pretending otherwise is how somebody's
+				// README gets mangled. Handed back whole.
+				_ = git.run(["merge", "--abort"])
+				return .failed("\(path) was changed on both sides and cuttr cannot merge it — "
+					+ "open the folder in a git client to sort it out")
+			}
+		}
+		guard choose.isEmpty else {
+			// Nothing is written until every one is answered.
+			_ = git.run(["merge", "--abort"])
+			return .mustChoose(choose)
+		}
+		guard !resolved.isEmpty else {
+			_ = git.run(["merge", "--abort"])
+			return .failed("git could not merge")
+		}
+		guard let added = git.run(["add", "--"] + resolved), added.status == 0 else {
+			_ = git.run(["merge", "--abort"])
+			return .failed("git would not take the merged files")
+		}
+		return commitMerge(upstream, message: "Merge \(upstream)")
+	}
+
+	private func commitMerge(_ upstream: String, message: String) -> Integrated {
+		guard let made = plumbing.run(["commit", "--no-edit", "-m", message]),
+		      made.status == 0 else {
+			// A merge that changed nothing is not a failure.
+			if plumbing.midSomething() == nil { return .done }
+			_ = plumbing.run(["merge", "--abort"])
+			return .failed("git could not finish the merge")
+		}
+		return .done
+	}
+
+	enum Resolution {
+		case wrote
+		case ask(TakeMerge.Merged?, ProjectMerge.Merged?)
+		/// A file this program has no business merging.
+		case cannot
+	}
+
+	/// The three sides of a conflicted file, as git holds them during a merge:
+	/// stage 1 is the base, 2 is ours, 3 is theirs.
+	private func stages(_ path: String) -> (base: String?, mine: String?, theirs: String?) {
+		func stage(_ n: Int) -> String? {
+			guard let said = plumbing.run(["show", ":\(n):\(path)"]), said.status == 0
+			else { return nil }
+			return String(decoding: said.data, as: UTF8.self)
+		}
+		return (stage(1), stage(2), stage(3))
+	}
+
+	private func resolveTake(_ path: String,
+	                         choosing choices: [String: TakeMerge.Side]) -> Resolution {
+		let text = stages(path)
+		guard let mineText = text.mine, let theirsText = text.theirs,
+		      let mine = try? TakeReader.read(mineText),
+		      let theirs = try? TakeReader.read(theirsText) else { return .cannot }
+		let base = text.base.flatMap { try? TakeReader.read($0) }
+		let merged = TakeMerge.merge(base: base, mine: mine, theirs: theirs)
+
+		let unanswered = merged.conflicts.filter { choices[$0.id] == nil }
+		guard unanswered.isEmpty else { return .ask(merged, nil) }
+		let take = TakeMerge.resolve(merged, choosing: choices)
+		guard write(TakeWriter.write(take), to: path) else { return .cannot }
+		return .wrote
+	}
+
+	private func resolveProject(_ path: String,
+	                            choosing choices: [String: TakeMerge.Side]) -> Resolution {
+		let text = stages(path)
+		guard let mineText = text.mine, let theirsText = text.theirs,
+		      let mine = try? ProjectReader.read(mineText),
+		      let theirs = try? ProjectReader.read(theirsText) else { return .cannot }
+		let base = text.base.flatMap { try? ProjectReader.read($0) }
+		let merged = ProjectMerge.merge(base: base, mine: mine, theirs: theirs)
+
+		let unanswered = merged.conflicts.filter { choices[$0.id] == nil }
+		guard unanswered.isEmpty else { return .ask(nil, merged) }
+		let project = ProjectMerge.resolve(merged, choosing: choices)
+		guard write(ProjectWriter.write(project), to: path) else { return .cannot }
+		return .wrote
+	}
+
+	private func write(_ text: String, to path: String) -> Bool {
+		let url = root.appendingPathComponent(path)
+		do { try text.write(to: url, atomically: true, encoding: .utf8) } catch { return false }
+		return true
+	}
+
+	// MARK: - Footage
+
+	/// Media an incoming take names that this machine has not got.
+	///
+	/// Sharing moves text. The takes are kilobytes and the recordings are
+	/// gigabytes and are not in the repository, so two people sharing a project
+	/// still need the footage on a shared volume at the same relative paths.
+	/// Saying which file is missing is the difference between that and a
+	/// project that opens to black.
+	public func missingFootage() -> [String] {
+		var missing: [String] = []
+		for url in versions.files() where url.pathExtension == "cuttr" {
+			guard let text = try? String(contentsOf: url, encoding: .utf8),
+			      let take = try? TakeReader.read(text) else { continue }
+			let beside = url.deletingLastPathComponent()
+			for named in [take.video, take.audio?.file].compactMap({ $0 }) {
+				let media = URL(fileURLWithPath: named, relativeTo: beside).standardizedFileURL
+				if !FileManager.default.fileExists(atPath: media.path) {
+					missing.append(media.lastPathComponent)
+				}
+			}
+		}
+		return missing
+	}
+}

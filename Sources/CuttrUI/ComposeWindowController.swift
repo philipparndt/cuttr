@@ -1422,6 +1422,87 @@ public final class ComposeWindowController: DocumentEditor,
 			: "no versions kept yet")
 	}
 
+	// MARK: - Sharing
+
+	/// Send what is here and bring back what everybody else did.
+	///
+	/// A version is kept first, so that whatever the share turns out to do, the
+	/// state before it is on `refs/cuttr/saves` and one keystroke away. Then the
+	/// two refusals every other write into this repository already makes — a
+	/// merge or rebase in progress, and an open take window whose in-memory cuts
+	/// would land back on top of what just arrived.
+	///
+	/// The work happens off the main thread. It fetches and pushes, and a window
+	/// that waited here for a remote would beachball for as long as the remote
+	/// took — which on a train is for ever.
+	@objc public func shareProject(_ sender: Any?) {
+		guard let url = composeDocument.url else {
+			say("save the project somewhere before sharing it")
+			return
+		}
+		guard let sharing = ProjectSharing(project: url) else {
+			say(ProjectSharing.Outcome.noRepository.sentence)
+			return
+		}
+		// Asked here, on the main actor, because which take windows are open is
+		// a question only the main actor can answer.
+		if let waiting = ProjectVersions.inTheWay(of: sharing.root) {
+			say(waiting)
+			return
+		}
+		composeDocument.keepAVersion()
+		say("sharing…")
+		Task.detached { [weak self] in
+			let (outcome, choose) = sharing.share()
+			await MainActor.run { self?.shared(outcome, choose, with: sharing) }
+		}
+	}
+
+	/// What came back, and the one case that needs somebody.
+	@MainActor
+	private func shared(_ outcome: ProjectSharing.Outcome,
+	                    _ choose: ProjectSharing.MustChoose?,
+	                    with sharing: ProjectSharing) {
+		// Whatever happened, the files on disk may have moved under the window.
+		if case .brought = outcome {
+			composeDocument.reload()
+			rebuild()
+		}
+		guard case .mustChoose = outcome, let choose, let view = window?.contentView else {
+			say(outcome.sentence)
+			mentionMissingFootage(sharing)
+			return
+		}
+		let shown = ConflictSheet.present(over: view, rows: ConflictSheet.rows(for: choose)) {
+			[weak self] choices in
+			self?.say("finishing…")
+			Task.detached {
+				let outcome = sharing.finish(choosing: choices)
+				await MainActor.run {
+					self?.composeDocument.reload()
+					self?.rebuild()
+					self?.say(outcome.sentence)
+					self?.mentionMissingFootage(sharing)
+				}
+			}
+		}
+		if !shown { say(outcome.sentence) }
+	}
+
+	/// Sharing moves text. The recordings are gigabytes and are not in the
+	/// repository, so a take can arrive naming a file this machine has not got —
+	/// and a project that opens to black with no explanation is the worst way to
+	/// find that out.
+	@MainActor
+	private func mentionMissingFootage(_ sharing: ProjectSharing) {
+		let missing = sharing.missingFootage()
+		guard !missing.isEmpty else { return }
+		let named = missing.prefix(3).joined(separator: ", ")
+		let more = missing.count > 3 ? " and \(missing.count - 3) more" : ""
+		say("\(named)\(more) " + (missing.count == 1 ? "is" : "are")
+			+ " not on this machine — the footage is not shared, only the cut")
+	}
+
 	/// A project must be on disk before it can point at anything: every path in
 	/// it is relative to where it sits.
 	private func ensureSaved() -> Bool {
