@@ -546,6 +546,11 @@ public final class DocumentBar: NSView {
 			group.removeView(view)
 		}
 		for view in trailing.arrangedSubviews { trailing.removeView(view) }
+		// The far end too, which was missed when it was added: the lane colours
+		// stayed in the bar when the take that put them there left, so a
+		// project window showed them, and a second take furnishing the bar
+		// added a second set beside the first.
+		for view in afterClock.arrangedSubviews { afterClock.removeView(view) }
 		setUp = nil
 		onProject = nil
 		onBranch = nil

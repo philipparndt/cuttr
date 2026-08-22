@@ -607,9 +607,22 @@ public final class ComposeWindowController: DocumentEditor,
 		}
 	}
 
-	private func say(_ text: String) {
+	/// Said in the corner, where somebody will see it.
+	///
+	/// The status line stays, because it is also the caption over the progress
+	/// bar and a progress bar with no words is a bar. What changed is that it
+	/// is no longer the *only* place a message goes: a line at the top of the
+	/// window, small and grey and replaced by the next thing, is a message
+	/// somebody has to already be looking at. See ``Toast``.
+	///
+	/// Nothing is toasted while something is being counted. A transcription
+	/// says where it has got to many times a minute, and a toast per update is
+	/// a wall of them.
+	private func say(_ text: String, _ kind: Toast.Kind = .news) {
 		said = text
 		bar?.setStatus(text)
+		guard progressed == nil, !text.isEmpty else { return }
+		toasts.show(Toast(kind, text))
 	}
 
 	private func showProgress(_ fraction: Double?) {
@@ -1660,17 +1673,17 @@ public final class ComposeWindowController: DocumentEditor,
 	/// took — which on a train is for ever.
 	@objc public func shareProject(_ sender: Any?) {
 		guard let url = composeDocument.url else {
-			say("save the project somewhere before sharing it")
+			say("save the project somewhere before sharing it", .refusal)
 			return
 		}
 		guard let sharing = ProjectSharing(project: url) else {
-			say(ProjectSharing.Outcome.noRepository.sentence)
+			say(ProjectSharing.Outcome.noRepository.sentence, .refusal)
 			return
 		}
 		// Asked here, on the main actor, because which take windows are open is
 		// a question only the main actor can answer.
 		if let waiting = ProjectVersions.inTheWay(of: sharing.root) {
-			say(waiting)
+			say(waiting, .refusal)
 			return
 		}
 		composeDocument.keepAVersion()
@@ -1756,12 +1769,11 @@ public final class ComposeWindowController: DocumentEditor,
 		}
 		refreshStanding()
 		guard case .mustChoose = outcome, let choose, let view = window?.contentView else {
-			say(outcome.sentence)
-			// A refusal is a thing somebody has to act on — close a take
-			// window, sign in, finish a rebase — and a line of status that is
-			// gone by the time they look is how "it refused" became "nothing
-			// happens". Success stays quiet: the button going away says it.
-			if outcome.needsAnswering { insist(outcome.sentence) }
+			// A refusal names something to be done — close a take window, sign
+			// in, finish a rebase — so it stays in the corner more than twice
+			// as long as the rest. Not a sheet: an alert would be in the way of
+			// doing the very thing it is asking for.
+			say(outcome.sentence, outcome.needsAnswering ? .refusal : .done)
 			mentionMissingFootage(sharing)
 			return
 		}
@@ -1782,24 +1794,6 @@ public final class ComposeWindowController: DocumentEditor,
 		if !shown { say(outcome.sentence) }
 	}
 
-	/// Said in a way somebody cannot walk past.
-	///
-	/// Only for the outcomes that need them to do something. An alert for
-	/// "sent your changes" would be a program congratulating itself.
-	@MainActor
-	private func insist(_ what: String) {
-		let alert = NSAlert()
-		alert.messageText = "Not shared"
-		alert.informativeText = what
-		alert.addButton(withTitle: "OK")
-		// Only over a real window. Conjuring one to hang a sheet on is how a
-		// window with no sheet parent aborts the process, which is what it did
-		// the first time this ran in a test — and a window nobody can see is
-		// not a place to put something somebody has to answer anyway.
-		guard let window else { return }
-		alert.beginSheetModal(for: window) { _ in }
-	}
-
 	/// Sharing moves text. The recordings are gigabytes and are not in the
 	/// repository, so a take can arrive naming a file this machine has not got —
 	/// and a project that opens to black with no explanation is the worst way to
@@ -1811,7 +1805,7 @@ public final class ComposeWindowController: DocumentEditor,
 		let named = missing.prefix(3).joined(separator: ", ")
 		let more = missing.count > 3 ? " and \(missing.count - 3) more" : ""
 		say("\(named)\(more) " + (missing.count == 1 ? "is" : "are")
-			+ " not on this machine — the footage is not shared, only the cut")
+			+ " not on this machine — the footage is not shared, only the cut", .refusal)
 	}
 
 	/// A project must be on disk before it can point at anything: every path in

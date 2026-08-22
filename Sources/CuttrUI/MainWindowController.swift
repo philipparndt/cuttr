@@ -343,9 +343,22 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	private var said = ""
 	private var progressed: Double?
 
-	private func say(_ text: String) {
+	/// Said in the corner, where somebody will see it.
+	///
+	/// The status line stays, because it is also the caption over the progress
+	/// bar and a progress bar with no words is a bar. What changed is that it
+	/// is no longer the *only* place a message goes: a line at the top of the
+	/// window, small and grey and replaced by the next thing, is a message
+	/// somebody has to already be looking at. See ``Toast``.
+	///
+	/// Nothing is toasted while something is being counted. A transcription
+	/// says where it has got to many times a minute, and a toast per update is
+	/// a wall of them.
+	private func say(_ text: String, _ kind: Toast.Kind = .news) {
 		said = text
 		bar?.setStatus(text)
+		guard progressed == nil, !text.isEmpty else { return }
+		toasts.show(Toast(kind, text))
 	}
 
 	private func showProgress(_ fraction: Double?) {

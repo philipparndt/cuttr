@@ -137,3 +137,53 @@ import Testing
 		        "the colours are crowding the clock at \(onBar.minX)")
 	}
 }
+
+/// What the bar keeps between documents, and what it must not.
+///
+/// The bar belongs to the *place*, not the document, so a document leaving has
+/// to take its furniture with it. The lane colours did not: a project window
+/// showed the last take's, and a second take furnishing the bar put a second
+/// set beside the first.
+@Suite @MainActor struct BarResetTests {
+
+	private func bar() -> DocumentBar {
+		_ = NSApplication.shared
+		let bar = DocumentBar(frame: NSRect(x: 0, y: 0, width: 1200, height: DocumentBar.height))
+		bar.layoutSubtreeIfNeeded()
+		return bar
+	}
+
+	private func swatch() -> NSView {
+		let view = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 16))
+		view.translatesAutoresizingMaskIntoConstraints = false
+		view.widthAnchor.constraint(equalToConstant: 120).isActive = true
+		view.heightAnchor.constraint(equalToConstant: 16).isActive = true
+		return view
+	}
+
+	private func atTheEnd(_ bar: DocumentBar) -> Int {
+		bar.subviews.compactMap { $0 as? NSStackView }
+			.reduce(0) { $0 + $1.arrangedSubviews.filter { $0.frame.width == 120 }.count }
+	}
+
+	@Test func whatWasAddedAtTheEndGoesOnReset() {
+		let bar = bar()
+		bar.addAfterClock(swatch())
+		bar.layoutSubtreeIfNeeded()
+		#expect(atTheEnd(bar) == 1)
+
+		bar.reset()
+		bar.layoutSubtreeIfNeeded()
+		#expect(atTheEnd(bar) == 0, "the last document's controls stayed in the bar")
+	}
+
+	/// Two documents furnishing the bar in turn leave one set, not two.
+	@Test func aSecondDocumentDoesNotAddASecondSet() {
+		let bar = bar()
+		bar.addAfterClock(swatch())
+		bar.reset()
+		bar.addAfterClock(swatch())
+		bar.layoutSubtreeIfNeeded()
+		#expect(atTheEnd(bar) == 1, "the colours are shown twice")
+	}
+}

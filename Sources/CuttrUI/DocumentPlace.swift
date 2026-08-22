@@ -86,6 +86,19 @@ public class DocumentEditor: NSWindowController {
 	/// The undo manager the responder chain gets while this is on screen.
 	var documentUndoManager: UndoManager? { nil }
 
+	/// Where this window says things nobody asked about.
+	///
+	/// Made when it is first needed, because it needs a window and a document
+	/// has one only once it is on screen.
+	private var madeToasts: ToastPresenter?
+
+	public var toasts: ToastPresenter {
+		if let madeToasts, madeToasts.isFor(window) { return madeToasts }
+		let made = ToastPresenter(window: window)
+		madeToasts = made
+		return made
+	}
+
 	// MARK: - Undo
 
 	/// ⌘Z and ⇧⌘Z, for whichever document is showing.
