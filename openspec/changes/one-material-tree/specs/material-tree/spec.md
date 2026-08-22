@@ -50,6 +50,24 @@ SHALL say so on the row.
 - **WHEN** a clip row is shown
 - **THEN** it SHALL not be expandable, and its tags SHALL be shown on the row
 
+### Requirement: Memes are one row, not a take each
+
+Downloaded memes SHALL be gathered under a single row beneath `Takes`, holding
+every meme clip, rather than appearing as one take row each.
+
+A meme is a take with a single clip in it, so a row each would be a page of rows
+with one child under every one. This is the behaviour the library already had
+and the tree keeps it.
+
+#### Scenario: Several memes have been downloaded
+- **WHEN** the project draws on three meme takes of one clip each
+- **THEN** `Takes` SHALL hold one `memes` row with those three clips under it
+- **AND** SHALL NOT hold a row for each meme take
+
+#### Scenario: A project with no memes
+- **WHEN** no take is a meme
+- **THEN** there SHALL be no `memes` row
+
 ### Requirement: Tags are a root, not children of a take
 
 Tags SHALL be listed under the `Tags` root, each once, with the number of clips

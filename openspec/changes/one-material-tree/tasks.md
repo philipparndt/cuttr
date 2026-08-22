@@ -1,23 +1,23 @@
 ## 1. The rows, before any view
 
-- [ ] 1.1 Add `MaterialTree.Row` in `CuttrUI`: the four roots, a take, a clip, a
+- [x] 1.1 Add `MaterialTree.Row` in `CuttrUI`: the four roots, a take, a clip, a
       scene, an anchor, a tag. Each says what it drags as, and a root drags as
       nothing.
-- [ ] 1.2 Build the rows from `ComposeDocument.Vocabulary` — takes in
+- [x] 1.2 Build the rows from `ComposeDocument.Vocabulary` — takes in
       `takeNames` order, clips from `items` grouped by take, anchors from
       `anchorTakes`, scenes and tags from their lists. A pure function from a
       vocabulary to a tree, so it can be checked without a view.
-- [ ] 1.3 Test the shape: four roots always, empty roots kept, takes in project
+- [x] 1.3 Test the shape: four roots always, empty roots kept, takes in project
       order, a tag counted once across takes, a clip with no children.
 
 ## 2. Searching
 
-- [ ] 2.1 Match a take by name; a clip by name, slug or tag; a scene, anchor and
+- [x] 2.1 Match a take by name; a clip by name, slug or tag; a scene, anchor and
       tag by name. Reuse `LibraryView`'s existing letters-in-order rule for
       names and its plain-text rule for anything path-like.
-- [ ] 2.2 A match keeps its parents and expands them; a matching take shows all
+- [x] 2.2 A match keeps its parents and expands them; a matching take shows all
       its clips.
-- [ ] 2.3 Test: a clip found inside a folded take opens it; a take that matches
+- [x] 2.3 Test: a clip found inside a folded take opens it; a take that matches
       shows its clips; nothing matching leaves the roots; clearing the field
       puts back what was folded.
 

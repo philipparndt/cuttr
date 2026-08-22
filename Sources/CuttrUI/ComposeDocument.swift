@@ -408,7 +408,9 @@ public final class ComposeDocument {
 		/// quietly stops being a meme.
 		public var memeTakes: Set<String> = []
 
-		public struct Item: Sendable {
+		/// `Equatable` so a tree built from a vocabulary can be compared with the
+		/// tree somebody expected — see ``Material``.
+		public struct Item: Sendable, Equatable {
 			public var take: String
 			public var slug: String
 			public var name: String
