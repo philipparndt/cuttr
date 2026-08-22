@@ -11,7 +11,7 @@ import Testing
 /// and every tracked-face sidecar. The only thing worth asserting about the fix
 /// is that the work is not done twice — and that it *is* done again when the
 /// file actually changed, which is the way a cache goes wrong.
-@Suite(.serialized) struct ResolvedFilesTests {
+@Suite struct ResolvedFilesTests {
 
 	private func folder() throws -> URL {
 		let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
@@ -33,8 +33,7 @@ import Testing
 		let url = folder.appendingPathComponent("one.cuttr")
 		try writeTake(url, end: 10)
 
-		let files = ResolvedFiles.shared
-		files.forget()
+		let files = ResolvedFiles()
 		for _ in 0 ..< 20 { _ = try files.take(at: url) }
 		#expect(files.reads(of: url) == 1,
 		        "the take was parsed \(files.reads(of: url)) times for twenty resolves")
@@ -46,9 +45,9 @@ import Testing
 		let url = folder.appendingPathComponent("one.cuttr")
 		try writeTake(url, end: 10)
 
-		ResolvedFiles.shared.forget()
-		let first = try ResolvedFiles.shared.take(at: url)
-		let again = try ResolvedFiles.shared.take(at: url)
+		let files = ResolvedFiles()
+		let first = try files.take(at: url)
+		let again = try files.take(at: url)
 		#expect(first == again)
 		#expect(again.clips[0].end == 10)
 	}
@@ -61,16 +60,16 @@ import Testing
 		let url = folder.appendingPathComponent("one.cuttr")
 		try writeTake(url, end: 10)
 
-		ResolvedFiles.shared.forget()
-		#expect(try ResolvedFiles.shared.take(at: url).clips[0].end == 10)
+		let files = ResolvedFiles()
+		#expect(try files.take(at: url).clips[0].end == 10)
 
 		// A different length as well as a different time, because the stamp is
 		// both — a date on its own has a resolution and two writes can land
 		// inside it.
 		try writeTake(url, end: 1234.5)
-		#expect(try ResolvedFiles.shared.take(at: url).clips[0].end == 1234.5,
+		#expect(try files.take(at: url).clips[0].end == 1234.5,
 		        "a re-cut take was served from the cache")
-		#expect(ResolvedFiles.shared.reads(of: url) == 2)
+		#expect(files.reads(of: url) == 2)
 	}
 
 	/// A file that has gone is still an error and still says so, rather than
@@ -79,8 +78,8 @@ import Testing
 		let folder = try folder()
 		defer { try? FileManager.default.removeItem(at: folder) }
 		let url = folder.appendingPathComponent("gone.cuttr")
-		ResolvedFiles.shared.forget()
-		#expect(throws: (any Error).self) { _ = try ResolvedFiles.shared.take(at: url) }
+		let files = ResolvedFiles()
+		#expect(throws: (any Error).self) { _ = try files.take(at: url) }
 	}
 
 	// MARK: - Anchor paths
@@ -94,8 +93,7 @@ import Testing
 		let lines = (0 ..< 500).map { "\(Double($0) / 25) 0.5 0.5" }.joined(separator: "\n")
 		try lines.write(to: url, atomically: true, encoding: .utf8)
 
-		let files = ResolvedFiles.shared
-		files.forget()
+		let files = ResolvedFiles()
 		for _ in 0 ..< 20 { _ = files.anchorPath(at: url) }
 		#expect(files.reads(of: url) == 1,
 		        "500 samples were parsed \(files.reads(of: url)) times")
@@ -108,18 +106,18 @@ import Testing
 		let url = folder.appendingPathComponent("mia.path")
 		try "0 0.5 0.5".write(to: url, atomically: true, encoding: .utf8)
 
-		ResolvedFiles.shared.forget()
-		#expect(ResolvedFiles.shared.anchorPath(at: url)?.samples.count == 1)
+		let files = ResolvedFiles()
+		#expect(files.anchorPath(at: url)?.samples.count == 1)
 		try "0 0.5 0.5\n1 0.6 0.6\n2 0.7 0.7".write(to: url, atomically: true, encoding: .utf8)
-		#expect(ResolvedFiles.shared.anchorPath(at: url)?.samples.count == 3,
+		#expect(files.anchorPath(at: url)?.samples.count == 3,
 		        "a re-tracked shot was served from the cache")
 	}
 
 	@Test func anAnchorPathThatIsNotThereIsNothing() throws {
 		let folder = try folder()
 		defer { try? FileManager.default.removeItem(at: folder) }
-		ResolvedFiles.shared.forget()
-		#expect(ResolvedFiles.shared.anchorPath(at: folder.appendingPathComponent("no.path"))
+		let files = ResolvedFiles()
+		#expect(files.anchorPath(at: folder.appendingPathComponent("no.path"))
 			== nil)
 	}
 
@@ -136,12 +134,12 @@ import Testing
 		var project = Project(takes: ["one.cuttr"])
 		project.timeline = [try TimelineEntry(text: "intro")]
 
-		ResolvedFiles.shared.forget()
+		let files = ResolvedFiles()
 		for _ in 0 ..< 30 {
-			_ = try Resolver.resolve(project, baseURL: folder)
+			_ = try Resolver.resolve(project, baseURL: folder, files: files)
 		}
-		#expect(ResolvedFiles.shared.reads(of: take) == 1,
-		        "thirty resolves read the take \(ResolvedFiles.shared.reads(of: take)) times")
+		#expect(files.reads(of: take) == 1,
+		        "thirty resolves read the take \(files.reads(of: take)) times")
 	}
 
 	/// And it still resolves to the same thing it did before there was a cache.
@@ -153,9 +151,9 @@ import Testing
 		var project = Project(takes: ["one.cuttr"])
 		project.timeline = [try TimelineEntry(text: "intro")]
 
-		ResolvedFiles.shared.forget()
-		let cold = try Resolver.resolve(project, baseURL: folder)
-		let warm = try Resolver.resolve(project, baseURL: folder)
+		let files = ResolvedFiles()
+		let cold = try Resolver.resolve(project, baseURL: folder, files: files)
+		let warm = try Resolver.resolve(project, baseURL: folder, files: files)
 		#expect(cold.duration == warm.duration)
 		#expect(cold.clips.count == warm.clips.count)
 		#expect(cold.clips.first?.clip.slug == warm.clips.first?.clip.slug)

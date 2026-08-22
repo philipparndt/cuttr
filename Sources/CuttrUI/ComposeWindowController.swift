@@ -419,6 +419,11 @@ public final class ComposeWindowController: DocumentEditor,
 	/// For the tests: the levels page, so a slider can be driven at its seam
 	/// rather than by an event nobody handles.
 	var levelsForTesting: LevelsPage { levels }
+	/// For the test that this window still follows the tape. The handlers that
+	/// do it spent every release so far stranded after a `return`, which is a
+	/// thing only a test that asks whether they are installed can see.
+	var transportForTesting: Transport { transport }
+	var playheadForTesting: Double { playhead }
 	/// For the tests: the project page's panel, so the frame in its head can be
 	/// waited for.
 	var projectPanelForTesting: PropertiesPanel { projectPanel }
@@ -575,6 +580,7 @@ public final class ComposeWindowController: DocumentEditor,
 	// MARK: - Wiring
 
 	private func wire() {
+		followTheTape()
 		composeDocument.onChange = { [weak self] in self?.rebuild() }
 		// A version being kept is worth a word in the line that already carries
 		// what just happened, and nothing more. It must never be a sheet: the
@@ -792,6 +798,44 @@ public final class ComposeWindowController: DocumentEditor,
 		}
 	}
 
+	/// What the tape rolling looks like: the playhead, the clock, and the
+	/// overlay tree held at the same moment as the picture.
+	///
+	/// **This was never installed.** It sat at the bottom of `handle(_:)`,
+	/// after a `switch` in which every case returns, so nothing ever reached
+	/// it — the compiler said so and said so from the first commit. The picture
+	/// played, because that is `AVPlayer`'s doing and needs nobody's help; the
+	/// playhead line, the clock and the full-screen controls did not move,
+	/// because this is what moves them.
+	private func followTheTape() {
+		transport.onTick = { [weak self] time in
+			guard let self else { return }
+			self.playhead = time
+			self.strip.playhead = time
+			self.markers.playhead = time
+			// The overlay tree is paused; this is what puts it at the same
+			// moment as the picture, exactly, every tick.
+			self.overlayLayer?.timeOffset = time
+			self.bar?.setClock(time)
+			// The full-screen bar shows the same clock, and only while it is
+			// the thing on screen.
+			if self.presenting {
+				self.controls.playhead = time
+				self.controls.duration = self.composeDocument.resolved?.duration ?? 0
+				self.controls.isPlaying = self.transport.isPlaying
+			}
+		}
+		transport.onRateChange = { [weak self] rate in
+			guard let self else { return }
+			self.bar?.setPlaying(rate != 0)
+			guard self.presenting else { return }
+			self.controls.isPlaying = rate != 0
+			// Pausing is a reason to see the controls: somebody has just
+			// reached for them.
+			if rate == 0 { self.controls.wake(for: 4) }
+		}
+	}
+
 	// MARK: - The View menu's zooms
 
 	/// ⌘+, ⌘− and ⌘0, which the View menu has always offered and which only the
@@ -844,33 +888,6 @@ public final class ComposeWindowController: DocumentEditor,
 		case 115: seek(to: 0); return true                          // home
 		case 119: seek(to: composeDocument.resolved?.duration ?? 0); return true
 		default: return false
-		}
-
-		transport.onTick = { [weak self] time in
-			guard let self else { return }
-			self.playhead = time
-			self.strip.playhead = time
-			self.markers.playhead = time
-			// The overlay tree is paused; this is what puts it at the same
-			// moment as the picture, exactly, every tick.
-			self.overlayLayer?.timeOffset = time
-			self.bar?.setClock(time)
-			// The full-screen bar shows the same clock, and only while it is
-			// the thing on screen.
-			if self.presenting {
-				self.controls.playhead = time
-				self.controls.duration = self.composeDocument.resolved?.duration ?? 0
-				self.controls.isPlaying = self.transport.isPlaying
-			}
-		}
-		transport.onRateChange = { [weak self] rate in
-			guard let self else { return }
-			self.bar?.setPlaying(rate != 0)
-			guard self.presenting else { return }
-			self.controls.isPlaying = rate != 0
-			// Pausing is a reason to see the controls: somebody has just
-			// reached for them.
-			if rate == 0 { self.controls.wake(for: 4) }
 		}
 	}
 

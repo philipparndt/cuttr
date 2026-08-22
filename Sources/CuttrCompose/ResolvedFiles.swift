@@ -28,12 +28,19 @@ import Foundation
 /// all. Size catches the ones where the content actually changed. A file
 /// rewritten to the same length in the same second is the one case this misses,
 /// and it is the case where re-reading would have made no difference.
-final class ResolvedFiles: @unchecked Sendable {
+public final class ResolvedFiles: @unchecked Sendable {
+
+	/// A cache of its own, for a caller that wants one — which in practice
+	/// means a test. Asserting how many times a file was parsed is only a
+	/// statement about the test doing the asserting if nothing else can be
+	/// reading through the same cache at the same moment, and suites run in
+	/// parallel.
+	public init() {}
 
 	/// Shared, because the point is to survive from one resolve to the next.
 	/// Behind a lock because a render resolves off the main thread while a
 	/// window resolves on it.
-	static let shared = ResolvedFiles()
+	public static let shared = ResolvedFiles()
 
 	private let lock = NSLock()
 	private var takes: [String: Stamped<Take>] = [:]

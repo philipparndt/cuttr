@@ -316,7 +316,13 @@ public enum Resolver {
 	/// `baseURL` is the project file's directory: every path in the file is
 	/// relative to it, which is what lets a project, its takes and its media
 	/// travel as one folder.
-	public static func resolve(_ project: Project, baseURL: URL) throws -> ResolvedProject {
+	/// `files` is the read-through cache. It defaults to the shared one, which
+	/// is what the program wants — the whole point is that it survives from one
+	/// resolve to the next. A test hands in its own, so that asserting how many
+	/// times a file was parsed is a statement about *that* test rather than
+	/// about whatever else the suite happened to be resolving at the time.
+	public static func resolve(_ project: Project, baseURL: URL,
+	                           files: ResolvedFiles = .shared) throws -> ResolvedProject {
 		// Said explicitly, because `URL(fileURLWithPath:relativeTo:)` only
 		// treats the base as a folder when it ends in a slash — and a URL built
 		// by `appendingPathComponent` does not. Without this, every relative
@@ -332,7 +338,7 @@ public enum Resolver {
 			do {
 				// Read through the cache: unchanged since the last resolve means
 				// unparsed this time. See ``ResolvedFiles``.
-				let take = try ResolvedFiles.shared.take(at: url)
+				let take = try files.take(at: url)
 				takes.append((url.deletingPathExtension().lastPathComponent, take, url.deletingLastPathComponent()))
 			} catch {
 				throw ResolveError.takeUnreadable(path, error.localizedDescription)
@@ -634,7 +640,7 @@ public enum Resolver {
 				// second for as long as the shot runs, and it had not changed
 				// since the last keystroke either.
 				guard let sidecar = anchor.path,
-				      let solved = ResolvedFiles.shared.anchorPath(
+				      let solved = files.anchorPath(
 					      at: URL(fileURLWithPath: sidecar, relativeTo: entry.directory))
 				else { continue }
 

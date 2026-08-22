@@ -116,4 +116,32 @@ import Testing
 		#expect(controller.handle(key("-", flags: .command, code: 27)) == false)
 		#expect(controller.handle(key("q")) == false)
 	}
+
+	// MARK: - Following the tape
+
+	/// The playhead, the clock and the overlay tree are moved by
+	/// `transport.onTick`, and that handler was never installed: it sat at the
+	/// bottom of `handle(_:)`, after a `switch` in which every case returns.
+	/// The picture played — `AVPlayer` needs nobody's help for that — and the
+	/// playhead line and the clock stood still.
+	///
+	/// Asked of the window rather than of the code that would have run, for the
+	/// same reason as every other test in this file: what went wrong was never
+	/// the answering code, it was that nothing reached it.
+	@Test func theWindowFollowsTheTape() throws {
+		let controller = try window()
+		#expect(controller.transportForTesting.onTick != nil,
+		        "nothing moves the playhead while the tape rolls")
+		#expect(controller.transportForTesting.onRateChange != nil,
+		        "nothing tells the bar it is playing")
+	}
+
+	/// And the tick does move it. Called directly, because a real play would
+	/// need media and a run loop; what this holds down is that the handler that
+	/// is now installed is the one that does the work.
+	@Test func aTickMovesThePlayhead() throws {
+		let controller = try window()
+		controller.transportForTesting.onTick?(4.25)
+		#expect(abs(controller.playheadForTesting - 4.25) < 0.001)
+	}
 }
