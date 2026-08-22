@@ -378,7 +378,17 @@ final class DocumentPlace: NSObject, NSWindowDelegate {
 
 	func windowDidResize(_ notification: Notification) { showing?.placeDidResize() }
 
+	/// The traffic lights go into the sliding titlebar on the way in and come
+	/// back on the way out, so the room kept for them is measured again at both
+	/// ends. Nothing else about the bar changes: it is a view in the content
+	/// view rather than anything in the titlebar, which is what keeps it on
+	/// screen in full screen at all.
+	func windowDidEnterFullScreen(_ notification: Notification) {
+		bar.remeasure()
+	}
+
 	func windowDidExitFullScreen(_ notification: Notification) {
+		bar.remeasure()
 		showing?.placeDidExitFullScreen()
 	}
 

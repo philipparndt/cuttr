@@ -77,6 +77,18 @@ public final class DocumentBar: NSView {
 		super.viewDidMoveToWindow()
 		// The buttons are placed by AppKit, and where they end has changed
 		// under this program once already. Ask them.
+		remeasure()
+	}
+
+	/// Asks the window where the buttons are now.
+	///
+	/// Called again whenever they can have moved, which in practice means going
+	/// in and out of full screen: it was measured once when the bar arrived in
+	/// its window and never again, so the eighty-two points held for three
+	/// buttons stayed held in full screen, where there are no buttons. A hole
+	/// at the leading edge with nothing in it, and the capsule sitting where it
+	/// had been pushed by furniture that was no longer there.
+	public func remeasure() {
 		leading?.constant = Self.roomForTrafficLights(in: window)
 	}
 
@@ -86,12 +98,33 @@ public final class DocumentBar: NSView {
 	/// The gap is the same one the buttons have between each other, so the
 	/// capsule reads as the next thing in the row rather than as a separate
 	/// arrangement that happens to start nearby.
+	///
+	/// Nothing to clear in full screen: macOS takes the buttons into the
+	/// titlebar that slides down, and asking the ones it left behind gives
+	/// their last windowed frame — a measurement of where they used to be.
 	public static func roomForTrafficLights(in window: NSWindow?) -> CGFloat {
-		let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+		let edges = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
 			.compactMap { window?.standardWindowButton($0) }
-		guard let last = buttons.map({ $0.frame.maxX }).max() else { return trafficLights }
+			.filter { !$0.isHidden }
+			.map(\.frame.maxX)
+		return room(clearing: edges,
+		            inFullScreen: window?.styleMask.contains(.fullScreen) ?? false)
+	}
+
+	/// The arithmetic on its own, so it can be checked without a window.
+	///
+	/// `.fullScreen` cannot be put into a style mask by hand — AppKit traps on
+	/// it — so a test cannot make a window that is in full screen. What it can
+	/// do is ask this the question a full-screen window would.
+	static func room(clearing edges: [CGFloat], inFullScreen: Bool) -> CGFloat {
+		if inFullScreen { return edgeOfTheScreen }
+		guard let last = edges.max() else { return trafficLights }
 		return last + 20
 	}
+
+	/// The inset with no buttons to clear. The same air the capsule has above
+	/// and below it, so it sits in from the corner rather than against it.
+	public static let edgeOfTheScreen: CGFloat = 20
 
 	/// The setting-up controls, shown in a popover from the document's name.
 	///
