@@ -241,6 +241,9 @@ public final class PropertiesPanel: NSView {
 	/// For the tests: the picture the selected overlay is dragged around in.
 	var previewForTesting: FramePreview? { currentPreview }
 
+	/// For the tests: the frame in the head, if one was ever had.
+	var thumbnailForTesting: NSImage? { thumbnail.image }
+
 	/// For the tests: the head, without going through the view tree looking for
 	/// a font.
 	var subjectForTesting: SubjectLine { subject }
@@ -321,8 +324,36 @@ public final class PropertiesPanel: NSView {
 		guard let poster, let time else { return }
 		let asked = generation
 		poster(time) { [weak self] image in
-			guard let self, self.generation == asked else { return }
+			// Nothing rather than nothing-in-particular: a `nil` here means the
+			// window had no composition to cut a frame out of yet, and putting
+			// it in the head would only overwrite a picture that arrived while
+			// this question was in flight. See ``framesCanBeHad()``.
+			guard let self, self.generation == asked, let image else { return }
 			self.thumbnail.image = image
+		}
+	}
+
+	/// The window has a composition now, so the frames it had none of can be
+	/// asked for again.
+	///
+	/// Both pictures in this panel are asked for at the moment the form is
+	/// built, and there is one arrival where that moment is too early: opening
+	/// a project resolves it and reloads every panel synchronously, and *then*
+	/// starts building the composition the frames would come out of. The poster
+	/// answers `nil` because there is nothing to answer with, and nobody asks
+	/// again — this form is rebuilt when the selection or the project changes,
+	/// and a build finishing is neither of those. That is the blank picture that
+	/// stayed blank until something unrelated happened to rebuild the form.
+	///
+	/// Only what is still missing is asked for again. Every edit builds again,
+	/// and re-fetching a frame that is already on screen would decode two for
+	/// every one anybody looks at.
+	public func framesCanBeHad() {
+		if thumbnail.image == nil { showThumbnail(at: momentOfSelection) }
+		if let preview = currentPreview, preview.poster == nil,
+		   case .overlay(let origin) = selection, let overlay = project.overlay(at: origin) {
+			showPlacementFrame(preview, of: origin,
+			                   titled: ProgrammePanel.OverlayRow.name(overlay))
 		}
 	}
 
@@ -2354,21 +2385,31 @@ public final class PropertiesPanel: NSView {
 		// of them shows in both.
 		if let placing, placing.isShowing { enlarge(preview, titled: name) }
 
-		// The frame at the moment it appears — asked for now, drawn whenever it
-		// arrives, and dropped if the selection has moved on by then.
-		if let poster, let start = found?.start {
-			let generation = self.generation
-			poster(start) { [weak self, weak preview] image in
-				guard let self, self.generation == generation, let preview else { return }
-				preview.poster = image
-				// The big picture is showing the same frame, and while it is
-				// open it is the one somebody is looking at.
-				if let placing = self.placing, placing.isShowing {
-					self.enlarge(preview, titled: name)
-				}
+		showPlacementFrame(preview, of: origin, titled: name)
+		return preview
+	}
+
+	/// The frame the overlay appears on — asked for now, drawn whenever it
+	/// arrives, and dropped if the selection has moved on by then.
+	///
+	/// Its own method because it is asked twice: once as the picture is built,
+	/// and again from ``framesCanBeHad()`` when the first ask was made before
+	/// there was a composition to cut a frame out of.
+	private func showPlacementFrame(_ preview: FramePreview, of origin: Origin,
+	                                titled name: String) {
+		guard let poster,
+		      let start = resolved?.overlays.first(where: { $0.origin == origin })?.start
+		else { return }
+		let generation = self.generation
+		poster(start) { [weak self, weak preview] image in
+			guard let self, self.generation == generation, let preview, let image else { return }
+			preview.poster = image
+			// The big picture is showing the same frame, and while it is
+			// open it is the one somebody is looking at.
+			if let placing = self.placing, placing.isShowing {
+				self.enlarge(preview, titled: name)
 			}
 		}
-		return preview
 	}
 
 	/// The placement picture again, big enough to place in.

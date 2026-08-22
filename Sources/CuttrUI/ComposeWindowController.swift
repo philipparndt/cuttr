@@ -419,6 +419,9 @@ public final class ComposeWindowController: DocumentEditor,
 	/// For the tests: the levels page, so a slider can be driven at its seam
 	/// rather than by an event nobody handles.
 	var levelsForTesting: LevelsPage { levels }
+	/// For the tests: the project page's panel, so the frame in its head can be
+	/// waited for.
+	var projectPanelForTesting: PropertiesPanel { projectPanel }
 
 	/// The bar: the project's name, the clock, what just happened — and two
 	/// things that are true whatever mode is showing.
@@ -936,6 +939,19 @@ public final class ComposeWindowController: DocumentEditor,
 			self.builtVideoComposition = built.videoComposition
 			self.builtAudioMix = built.audioMix
 			self.builtDuration = resolved.duration
+			// The panels can have their frames now.
+			//
+			// Everything above this line ran before the build started, and the
+			// panels ask for their pictures up there: opening a project reloads
+			// them synchronously and the composition a frame is cut out of does
+			// not exist until here. Whoever asked and was told `nil` gets no
+			// second chance of their own — a form is rebuilt when the selection
+			// or the project changes, and a build finishing is neither — so the
+			// window says. Without this the project page came up with an empty
+			// picture in its head and kept it until some unrelated edit happened
+			// to rebuild the form.
+			self.inspector.framesCanBeHad()
+			self.projectPanel.framesCanBeHad()
 			self.transport.present(built.composition,
 			                       videoComposition: built.videoComposition,
 			                       audioMix: built.audioMix,

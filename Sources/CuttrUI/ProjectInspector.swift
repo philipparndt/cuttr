@@ -312,6 +312,11 @@ public final class ProjectInspector: NSView, NSSplitViewDelegate {
 		showWhatItWrites()
 	}
 
+	/// The window has built the composition the frames come out of. Whatever was
+	/// asked for before it existed can be asked for again — see
+	/// ``PropertiesPanel/framesCanBeHad()``.
+	public func framesCanBeHad() { properties.framesCanBeHad() }
+
 	/// Puts a reference from the library on the programme.
 	public func insert(reference: String) { programme.insert(reference: reference) }
 }
