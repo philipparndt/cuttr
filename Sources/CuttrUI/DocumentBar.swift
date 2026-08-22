@@ -89,8 +89,25 @@ public final class DocumentBar: NSView {
 	/// at the leading edge with nothing in it, and the capsule sitting where it
 	/// had been pushed by furniture that was no longer there.
 	public func remeasure() {
-		leading?.constant = Self.roomForTrafficLights(in: window)
+		let room = Self.roomForTrafficLights(in: window)
+		backLeading?.constant = room
+		// The capsule starts after the chevron when there is one, and where the
+		// chevron would have been when there is not.
+		leading?.constant = room + (back.isHidden ? 0 : Self.backWidth + Self.backGap)
 	}
+
+	/// Whether there is anywhere to go back to. Said by the window, which is
+	/// the only thing that knows whether this document belongs to a project.
+	public func setBack(_ shown: Bool) {
+		guard back.isHidden == shown else { return }
+		back.isHidden = !shown
+		remeasure()
+	}
+
+	@objc private func goBack() { onBack?() }
+
+	static let backWidth: CGFloat = 18
+	static let backGap: CGFloat = 4
 
 	/// Where the first thing can start in this window, measured from the
 	/// buttons themselves.
@@ -162,6 +179,9 @@ public final class DocumentBar: NSView {
 	/// which is the ordinary case for footage.
 	public var onBranch: (() -> Void)?
 
+	/// Asked to go out to the project this take or scene belongs to.
+	public var onBack: (() -> Void)?
+
 	/// Rolling the tape, from the bar that says where the tape is.
 	///
 	/// Beside the clock rather than anywhere else, because it is the verb that
@@ -177,6 +197,7 @@ public final class DocumentBar: NSView {
 	/// How far in the capsule starts. Set from the buttons themselves once
 	/// there is a window to measure.
 	private var leading: NSLayoutConstraint?
+	private var backLeading: NSLayoutConstraint?
 	/// The way into the setting-up controls: an ellipsis, which is what a menu
 	/// of more things about the thing beside it looks like everywhere else on
 	/// this machine.
@@ -186,6 +207,13 @@ public final class DocumentBar: NSView {
 	/// it every time the name changed length. A button of its own sits still and
 	/// is a target somebody can hit.
 	private let more = NSButton()
+	/// The way back out of a take or a scene, to the project it belongs to.
+	///
+	/// Between the traffic lights and the capsule, which is where a back
+	/// chevron lives in everything else on this machine — and it is the same
+	/// direction the capsule reads in, so "out of this and up to that" is left
+	/// to right. Absent for a project, which has nowhere further out to go.
+	private let back = NSButton()
 	private let play = NSButton()
 	private let clock = NSTextField(labelWithString: "00:00.000")
 	private let statusLabel = NSTextField(labelWithString: "")
@@ -259,6 +287,19 @@ public final class DocumentBar: NSView {
 			.size(withAttributes: [.font: clock.font as Any]).width
 		clock.widthAnchor.constraint(equalToConstant: ceil(widest) + 2).isActive = true
 
+		back.isBordered = false
+		back.bezelStyle = .inline
+		back.imagePosition = .imageOnly
+		back.image = NSImage(systemSymbolName: "chevron.backward",
+		                     accessibilityDescription: "back to the project")?
+			.withSymbolConfiguration(.init(pointSize: 12, weight: .semibold)
+				.applying(.init(paletteColors: [Theme.dimText])))
+		back.target = self
+		back.action = #selector(goBack)
+		back.isHidden = true
+		back.translatesAutoresizingMaskIntoConstraints = false
+		back.widthAnchor.constraint(equalToConstant: Self.backWidth).isActive = true
+
 		more.isBordered = false
 		more.bezelStyle = .inline
 		more.imagePosition = .imageOnly
@@ -310,7 +351,8 @@ public final class DocumentBar: NSView {
 			divider.heightAnchor.constraint(equalToConstant: 16),
 		])
 
-		for view in [capsule, divider, group, play, clock, statusLabel, progress, trailing] as [NSView] {
+		for view in [back, capsule, divider, group, play, clock, statusLabel, progress,
+		             trailing] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			addSubview(view)
 		}
@@ -326,6 +368,10 @@ public final class DocumentBar: NSView {
 		// A progress indicator that appears *beside* a label pushes the label,
 		// and then every message that arrives with one arrives in a different
 		// place.
+		backLeading = back.leadingAnchor.constraint(equalTo: leadingAnchor,
+		                                            constant: Self.trafficLights)
+		backLeading?.isActive = true
+		back.centerYAnchor.constraint(equalTo: capsule.centerYAnchor).isActive = true
 		leading = capsule.leadingAnchor.constraint(equalTo: leadingAnchor,
 		                                           constant: Self.trafficLights)
 		NSLayoutConstraint.activate([

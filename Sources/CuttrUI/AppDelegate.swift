@@ -611,6 +611,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		return composers.first
 	}
 
+	/// The project a take belongs to: the open one that lists it.
+	///
+	/// Only one that actually lists it. ``projectOnScreen`` falls back to
+	/// whichever project happens to be open, which is the right answer to "what
+	/// else is there" and the wrong one to "where did this come from" — a
+	/// chevron that took somebody to a programme their take is not in would be
+	/// worse than no chevron.
+	func projectListing(_ take: TakeDocument) -> ComposeWindowController? {
+		guard let url = take.url?.standardizedFileURL else { return nil }
+		return composers.first { composer in
+			composer.composeDocument.takes.contains { $0.url.standardizedFileURL == url }
+		}
+	}
+
+	/// And the project a scene is a scene of, which the window already knows
+	/// because a scene is opened *from* a project.
+	func projectOwning(_ scene: SceneWindowController) -> ComposeWindowController? {
+		guard let owner = sceneOwners[ObjectIdentifier(scene)] else { return nil }
+		return composers.first { ObjectIdentifier($0.composeDocument) == owner }
+	}
+
 	/// A path as somebody would say it: under the home folder, `~` stands in.
 	private func shortPath(_ url: URL?) -> String {
 		guard let url else { return "" }

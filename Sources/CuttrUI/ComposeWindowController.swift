@@ -472,6 +472,8 @@ public final class ComposeWindowController: DocumentEditor,
 	/// What a project puts in the shared bar: its name, the branch, `Render…`,
 	/// and the two halves of the capsule.
 	override func furnish(_ bar: DocumentBar) {
+		// A project is the outermost thing there is; there is nowhere to go back to.
+		bar.setBack(false)
 		bar.addTrailing(renderButton)
 		bar.onPlayPause = { [weak self] in self?.playPressed() }
 		// The two halves of the capsule: the documents on the left, and what can

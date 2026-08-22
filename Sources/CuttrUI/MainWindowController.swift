@@ -264,6 +264,18 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	/// transcribing rather than an empty bar.
 	override func furnish(_ bar: DocumentBar) {
 		bar.setUp = setup
+		// Out to the programme this take was cut for. Only when one is open
+		// that actually lists it: a chevron that went somewhere arbitrary would
+		// be worse than none.
+		bar.setBack(AppDelegate.shared?.projectListing(takeDocument) != nil)
+		bar.onBack = { [weak self] in
+			guard let self else { return }
+			guard let project = AppDelegate.shared?.projectListing(self.takeDocument) else {
+				self.say("no open project lists this take")
+				return
+			}
+			AppDelegate.shared?.reveal(project)
+		}
 		// Once, not once per appearance. Until now nothing listened for this
 		// and the branch in the capsule was right by accident: `showDocument`
 		// re-asked git on every playhead tick, so a checkout was picked up

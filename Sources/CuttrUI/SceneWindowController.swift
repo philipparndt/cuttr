@@ -453,6 +453,13 @@ public final class SceneWindowController: DocumentEditor, NSMenuItemValidation {
 	/// What a scene puts in the shared bar: its name, the `…` behind which the
 	/// scene picker and the length sit, and the two halves of the capsule.
 	override func furnish(_ bar: DocumentBar) {
+		// A scene is opened *from* a project, so there is always one to go back
+		// out to and the window already knows which.
+		bar.setBack(AppDelegate.shared?.projectOwning(self) != nil)
+		bar.onBack = { [weak self] in
+			guard let self, let project = AppDelegate.shared?.projectOwning(self) else { return }
+			AppDelegate.shared?.reveal(project)
+		}
 		bar.setUp = setup
 		// The two halves of the capsule: the documents on the left, and what can
 		// be done about the repository this one sits in on the right.
