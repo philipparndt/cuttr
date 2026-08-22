@@ -306,6 +306,68 @@ import Testing
 		#expect(abs((opened?.start ?? 0) - 196.46) < 0.001)
 	}
 
+	// MARK: - And the same journey by double-click
+
+	/// Double-clicking a clip goes where the menu goes. What is worth checking
+	/// is not the gesture — `clickedRow` is only set while AppKit is delivering
+	/// a mouse event — but *which rows answer it*.
+	@Test func aDoubleClickedClipOpensItsTake() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+		panel.reload(Project(timeline: [
+			TimelineEntry(clip: ClipReference("clip-1")),
+			TimelineEntry(clip: ClipReference("clip-2")),
+		]), vocabulary: vocabulary())
+		var path: [Int]?
+		panel.onOpenInTake = { path = $0 }
+
+		panel.openInTake(row: 1)
+		#expect(path == [1], "the second clip did not open its take")
+	}
+
+	/// A card is a stretch of programme with no footage behind it, so there is
+	/// no take to open.
+	@Test func aDoubleClickedCardGoesNowhere() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+		panel.reload(Project(timeline: [TimelineEntry(card: Card(duration: 3))]),
+		             vocabulary: vocabulary())
+		var path: [Int]?
+		panel.onOpenInTake = { path = $0 }
+
+		panel.openInTake(row: 0)
+		#expect(path == nil, "a card offered to open a take")
+	}
+
+	/// And a section, where a double-click already means open and close it.
+	/// Taking that away to do nothing would be a loss.
+	@Test func aDoubleClickedSectionGoesNowhere() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+		panel.reload(Project(timeline: [
+			TimelineEntry(group: "introduction",
+			              entries: [TimelineEntry(clip: ClipReference("clip-1"))]),
+		]), vocabulary: vocabulary())
+		var path: [Int]?
+		panel.onOpenInTake = { path = $0 }
+
+		panel.openInTake(row: 0)
+		#expect(path == nil, "a section offered to open a take")
+	}
+
+	@Test func aRowThatIsNotThereIsNotAsked() {
+		_ = NSApplication.shared
+		let panel = ProgrammePanel(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+		panel.reload(Project(timeline: [TimelineEntry(clip: ClipReference("clip-1"))]),
+		             vocabulary: vocabulary())
+		var path: [Int]?
+		panel.onOpenInTake = { path = $0 }
+
+		panel.openInTake(row: -1)
+		panel.openInTake(row: 99)
+		#expect(path == nil)
+	}
+
 	/// And an entry on the programme hands back its path, which is what tells
 	/// one use of a clip from another.
 	@Test func theProgrammeOffersThePlacementUnderThePointer() {

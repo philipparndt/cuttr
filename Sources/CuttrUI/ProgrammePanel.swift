@@ -491,6 +491,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			self.removeEntry()
 			return true
 		}
+		// Double-click a clip and go to where it was cut. The same journey the
+		// row's own menu offers under "Open in Take", and the same one a
+		// double-click on the programme strip already makes — a list of clips
+		// where double-clicking one does nothing is a list that looks broken to
+		// anybody who has used a file browser.
+		outline.target = self
+		outline.doubleAction = #selector(openClickedInTake)
 		outline.rowHeight = Self.entryRowHeight
 		outline.backgroundColor = Theme.panel
 		outline.gridStyleMask = []
@@ -1859,6 +1866,25 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	@objc private func openInTake(_ sender: NSMenuItem) {
 		guard let path = sender.representedObject as? [Int] else { return }
 		onOpenInTake?(path)
+	}
+
+	/// The double-click, answered on exactly the rows the menu offers it on.
+	///
+	/// A clip, and not a section, a card, an overlay or the row an overlay
+	/// hangs under: none of those was cut out of a take, so there is nowhere to
+	/// go. Expanding and collapsing a section is what a double-click means
+	/// there, and taking that away to do nothing would be a loss.
+	@objc private func openClickedInTake() { openInTake(row: outline.clickedRow) }
+
+	/// Split from the click because `clickedRow` is only set while AppKit is
+	/// delivering a mouse event, so a double-click cannot be checked without
+	/// one — and what is worth checking is which rows answer, not the gesture.
+	func openInTake(row: Int) {
+		guard row >= 0, let node = outline.item(atRow: row) as? Node else { return }
+		guard case .clip = node.entry.source, node.overlay == nil, !node.isOverlayRoot else {
+			return
+		}
+		onOpenInTake?(node.path)
 	}
 
 	// MARK: - A look

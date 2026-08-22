@@ -214,7 +214,7 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 		if let reused = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTextField {
 			field = reused
 		} else {
-			field = NSTextField()
+			field = RowField()
 			field.identifier = identifier
 			field.isBordered = false
 			field.drawsBackground = false
@@ -306,5 +306,29 @@ public final class ClipTable: NSView, NSTableViewDataSource, NSTableViewDelegate
 	public func tableViewSelectionDidChange(_ notification: Notification) {
 		let row = table.selectedRow
 		onSelect?(row >= 0 && row < rows.count ? rows[row].id : nil)
+	}
+}
+
+/// A field in a list row that a click goes *through*, to the row.
+///
+/// A view-based table puts an editable `NSTextField` in every cell, and AppKit's
+/// own rule is that clicking one on a row that is already selected starts
+/// editing it. In a list somebody is picking clips out of, that is the wrong
+/// default by a mile: choosing a clip and typing into a clip are different
+/// intentions, and the second one arrived every time you tried the first. It
+/// was hard to select a clip at all.
+///
+/// So a click here means what a click in a list means — this one — and editing
+/// stays a deliberate act: the rename that follows making a clip, and the menu
+/// items for the slug and the tags, all of which go through
+/// `NSTableView.editColumn`, which does not ask this.
+///
+/// Only while the field is not already being edited. Once the field editor is
+/// up it is a subview with its own tracking, so this is not in the way of
+/// putting the caret somewhere in a name that is being typed.
+final class RowField: NSTextField {
+	override func mouseDown(with event: NSEvent) {
+		guard let row = superview else { super.mouseDown(with: event); return }
+		row.mouseDown(with: event)
 	}
 }
