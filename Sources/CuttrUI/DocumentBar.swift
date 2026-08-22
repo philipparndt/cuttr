@@ -234,6 +234,14 @@ public final class DocumentBar: NSView {
 	private let group = NSStackView()
 	/// The line that says where the name stops and the controls begin.
 	private let divider = NSView()
+	/// Controls that belong on the far side of the clock.
+	///
+	/// The bar filled up from the left and left half of itself empty: the name,
+	/// a rule, the monitor, six lane colours and a `…` all crowded against the
+	/// traffic lights while everything past the clock was air. What goes here is
+	/// what somebody reaches for rather than reads — the lane the next cut lands
+	/// on — and it reads better in the space that was going spare.
+	private let afterClock = NSStackView()
 	private var popover: NSPopover?
 
 	public override init(frame: NSRect) {
@@ -335,7 +343,7 @@ public final class DocumentBar: NSView {
 		progress.controlSize = .small
 		progress.isHidden = true
 
-		for stack in [group, trailing] {
+		for stack in [group, afterClock, trailing] {
 			stack.orientation = .horizontal
 			stack.spacing = 8
 			stack.alignment = .centerY
@@ -351,8 +359,8 @@ public final class DocumentBar: NSView {
 			divider.heightAnchor.constraint(equalToConstant: 16),
 		])
 
-		for view in [back, capsule, divider, group, play, clock, statusLabel, progress,
-		             trailing] as [NSView] {
+		for view in [back, capsule, divider, group, play, clock, afterClock, statusLabel,
+		             progress, trailing] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			addSubview(view)
 		}
@@ -396,12 +404,15 @@ public final class DocumentBar: NSView {
 			play.centerYAnchor.constraint(equalTo: centerYAnchor),
 			play.leadingAnchor.constraint(greaterThanOrEqualTo: group.trailingAnchor, constant: 16),
 
+			afterClock.leadingAnchor.constraint(equalTo: clock.trailingAnchor, constant: 14),
+			afterClock.centerYAnchor.constraint(equalTo: centerYAnchor),
+
 			trailing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
 			trailing.centerYAnchor.constraint(equalTo: centerYAnchor),
 
 			statusLabel.trailingAnchor.constraint(equalTo: trailing.leadingAnchor, constant: -10),
 			statusLabel.leadingAnchor.constraint(
-				greaterThanOrEqualTo: clock.trailingAnchor, constant: 12),
+				greaterThanOrEqualTo: afterClock.trailingAnchor, constant: 12),
 			statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -4),
 			statusLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
 
@@ -477,6 +488,11 @@ public final class DocumentBar: NSView {
 
 	/// Adds a document-level verb to the far right.
 	public func addTrailing(_ view: NSView) { trailing.addView(view, in: .trailing) }
+
+	/// Adds a control on the far side of the clock. See ``afterClock``.
+	public func addAfterClock(_ view: NSView) {
+		afterClock.addView(view, in: .leading)
+	}
 
 	/// Adds a control to the group, before the `…`.
 	///

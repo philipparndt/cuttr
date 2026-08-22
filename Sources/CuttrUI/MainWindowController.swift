@@ -318,7 +318,13 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		// keyboard marks on one — so it was a window-level choice sitting in
 		// the heading of one of the four panes, and invisible whenever that
 		// pane was folded away.
-		bar.addLeading(swatches)
+		//
+		// Past the clock rather than before it. Everything was crowding the
+		// left — the name, a rule, the monitor, six colours and a `…` against
+		// the traffic lights — while the whole right half of the bar was air.
+		// A lane is reached for rather than read, so it is the half that can
+		// move.
+		bar.addAfterClock(swatches)
 		bar.setPlaying(transport.isPlaying)
 		bar.setStatus(said)
 		bar.setProgress(progressed)

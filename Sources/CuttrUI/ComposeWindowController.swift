@@ -409,6 +409,16 @@ public final class ComposeWindowController: DocumentEditor,
 
 	/// For the tests: which of the four is showing.
 	var modeForTesting: Mode { mode }
+	/// For the test that watching the film does not mean watching the tracking
+	/// marks over everybody's faces.
+	var anchorsShowingForTesting: Bool { !markers.isHidden }
+
+	/// Driving the switch the way a click on it would, rather than by sending
+	/// one: an unhandled event reaches `NSResponder` and beeps.
+	func setAnchorsForTesting(_ on: Bool) {
+		anchorsSwitch.state = on ? .on : .off
+		anchorsChanged()
+	}
 
 	/// For the tests: the rail, so its place can be compared with the other
 	/// window's.
@@ -577,6 +587,41 @@ public final class ComposeWindowController: DocumentEditor,
 		// The markers are for placing an overlay against a face, and once it is
 		// placed they are in the way of seeing the thing they placed.
 		markers.isHidden = anchorsSwitch.state != .on
+	}
+
+	/// What the anchors were doing on the editing side, so going to watch the
+	/// programme and coming back does not lose the choice.
+	private var anchorsWereOn = true
+	private var anchorsQuiet = false
+
+	/// Anchors are off while the film is being watched, and on while it is
+	/// being made.
+	///
+	/// A tracked face is a thing you place an overlay *against*; once it is
+	/// placed, the dots are in the way of seeing the thing they placed. The
+	/// preview page and full screen are both "show me the film", and a film
+	/// with tracking marks over the faces is not the film.
+	///
+	/// One rule derived from where somebody is, rather than a pair of
+	/// hand-offs at each door. Full screen is entered *through* the preview
+	/// page, so an on-the-way-in and an on-the-way-out at both would fire
+	/// twice going in — the second remembering the state the first had just
+	/// set — and leaving full screen onto the preview page would have brought
+	/// them back on the page that is supposed not to have them.
+	///
+	/// Off by default and not off for good: the switch is still on the picture,
+	/// and turning them on while watching is a thing somebody may want once.
+	private func anchorsFollowTheMode() {
+		let watching = mode == .preview || presenting
+		guard watching != anchorsQuiet else { return }
+		anchorsQuiet = watching
+		if watching {
+			anchorsWereOn = anchorsSwitch.state == .on
+			anchorsSwitch.state = .off
+		} else {
+			anchorsSwitch.state = anchorsWereOn ? .on : .off
+		}
+		anchorsChanged()
 	}
 
 	// MARK: - Wiring
@@ -1114,6 +1159,7 @@ public final class ComposeWindowController: DocumentEditor,
 	/// Switches which of the four has the window.
 	public func show(_ mode: Mode) {
 		self.mode = mode
+		anchorsFollowTheMode()
 		modes.selectTabViewItem(at: mode.rawValue)
 		rail.select(mode.rawValue)
 		if mode == .preview {
@@ -1184,6 +1230,7 @@ public final class ComposeWindowController: DocumentEditor,
 		guard let window else { return }
 		presenting.toggle()
 		if presenting { show(.preview) }
+		anchorsFollowTheMode()
 		place?.setBarHidden(presenting)
 		rail.isHidden = presenting
 		strip.isHidden = presenting
@@ -1222,6 +1269,7 @@ public final class ComposeWindowController: DocumentEditor,
 	override func placeDidExitFullScreen() {
 		guard presenting else { return }
 		presenting = false
+		anchorsFollowTheMode()
 		stopWatchingThePointer()
 		place?.setBarHidden(false)
 		rail.isHidden = false
