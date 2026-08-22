@@ -378,25 +378,37 @@ final class DocumentPlace: NSObject, NSWindowDelegate {
 
 	func windowDidResize(_ notification: Notification) { showing?.placeDidResize() }
 
-	/// **The toolbar has no job in full screen, and it was doing harm.**
+	/// **The toolbar goes away with the titlebar in full screen, not on its own.**
 	///
-	/// It holds no items. It exists for one reason — see
+	/// The toolbar holds no items. It exists for one reason — see
 	/// ``DocumentBar/growTitleBand(of:)`` — which is that macOS gives a
-	/// `.unified` toolbar a 52-point band and centres the traffic lights in it,
-	/// and that is exactly the band this bar wants. Windowed, it is an empty
-	/// transparent strip and the bar shows through it.
+	/// `.unified` toolbar a 52-point band and centres the traffic lights in it.
+	/// Windowed, it is a transparent strip and the bar shows through.
 	///
-	/// Full screen takes away both of the things it was for: there are no
-	/// traffic lights to centre and no title band to size. What is left is an
-	/// empty toolbar that AppKit still draws, across the top of a content view
-	/// that runs to the top of the screen — over the project capsule and the
-	/// clock, which is the whole of what the bar had to say.
+	/// In full screen a toolbar does *not* hide with the titlebar unless it is
+	/// asked to: the menu bar and titlebar slide away and the toolbar stays,
+	/// drawn across the top of a content view that now runs to the top of the
+	/// screen — over the project capsule and the clock, which is the whole of
+	/// what the bar had to say.
 	///
-	/// So it goes away on the way in and comes back on the way out. The bar
-	/// itself is untouched: it is a view in the *content* view and nothing in
-	/// the titlebar, which is what keeps it on screen in full screen at all.
-	func windowWillEnterFullScreen(_ notification: Notification) {
-		window.toolbar?.isVisible = false
+	/// Hiding it outright was the first fix and it cost the thing the toolbar is
+	/// *for*: with no toolbar there is no band, so when the titlebar does slide
+	/// down the traffic lights are no longer centred in anything.
+	/// `.autoHideToolbar` is the door that does both — the toolbar stays, so the
+	/// band and the buttons in the middle of it are intact every time the
+	/// titlebar is on screen, and it goes away *with* the titlebar the rest of
+	/// the time, which is when the bar underneath needs to be seen.
+	///
+	/// Abydos never meets this, and the reason is worth writing down: its
+	/// toolbar has real items in it — the capsule, the pills, the run control —
+	/// so what is drawn in the band *is* its content. cuttr's bar is a view in
+	/// the content view instead, which is what keeps it on screen in full
+	/// screen at all, and is why the empty toolbar over it is a problem there
+	/// and not here.
+	func window(_ window: NSWindow,
+	            willUseFullScreenPresentationOptions proposed: NSApplication.PresentationOptions)
+		-> NSApplication.PresentationOptions {
+		proposed.union(.autoHideToolbar)
 	}
 
 	/// The traffic lights go into the sliding titlebar on the way in and come
@@ -404,10 +416,6 @@ final class DocumentPlace: NSObject, NSWindowDelegate {
 	/// ends.
 	func windowDidEnterFullScreen(_ notification: Notification) {
 		bar.remeasure()
-	}
-
-	func windowWillExitFullScreen(_ notification: Notification) {
-		window.toolbar?.isVisible = true
 	}
 
 	func windowDidExitFullScreen(_ notification: Notification) {

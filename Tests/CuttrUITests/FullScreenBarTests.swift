@@ -61,21 +61,27 @@ import Testing
 
 	// MARK: - The toolbar getting out of the way
 
-	/// The empty toolbar is what makes the 52-point band and centres the
-	/// traffic lights in it. Full screen has neither of those to do, and an
-	/// empty toolbar AppKit still draws sits across the top of a content view
-	/// that now runs to the top of the screen — over the capsule and the clock.
-	@Test func theEmptyToolbarStepsAsideInFullScreen() {
+	/// The toolbar stays — it is what makes the band and centres the traffic
+	/// lights in it, and hiding it outright cost exactly that. It is asked to
+	/// go away *with* the titlebar instead, which is when the bar underneath
+	/// needs to be seen.
+	@Test func theToolbarHidesWithTheTitlebarAndNotOnItsOwn() {
 		let place = DocumentPlace(size: NSSize(width: 900, height: 600))
 		let toolbar = place.window.toolbar
 		#expect(toolbar != nil, "the band is made by a toolbar and there is not one")
-		#expect(toolbar?.isVisible == true)
 
-		place.windowWillEnterFullScreen(Notification(name: NSWindow.willEnterFullScreenNotification))
-		#expect(toolbar?.isVisible == false, "the toolbar is still over the bar in full screen")
+		let asked = place.window(place.window, willUseFullScreenPresentationOptions: [
+			.fullScreen, .autoHideMenuBar,
+		])
+		#expect(asked.contains(.autoHideToolbar),
+		        "the toolbar will stay drawn over the capsule and the clock")
+		// What was proposed is kept: this adds to the options rather than
+		// deciding them.
+		#expect(asked.contains(.fullScreen) && asked.contains(.autoHideMenuBar))
 
-		place.windowWillExitFullScreen(Notification(name: NSWindow.willExitFullScreenNotification))
-		#expect(toolbar?.isVisible == true, "the band did not come back")
+		// And it is still there, because the band and the centred buttons are
+		// what it is for.
+		#expect(toolbar?.isVisible == true, "the band went away and took the centring with it")
 	}
 
 	/// The bar is content, not titlebar, and that is the whole of why it is on
