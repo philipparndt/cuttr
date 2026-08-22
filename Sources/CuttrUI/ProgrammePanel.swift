@@ -1228,6 +1228,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// Sections stand open unless somebody closed them. A collapsed section
 	/// hides work, and the commonest reason a project looks empty is that it is
 	/// not.
+	/// Without an animation: this runs on every reload, and an animation parks
+	/// a dispatch thread until it finishes. See `NSOutlineView.withoutAnimation`.
 	private func expandAll() {
 		func walk(_ nodes: [Node]) {
 			for node in nodes where !node.children.isEmpty {
@@ -1244,7 +1246,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				walk(node.children)
 			}
 		}
-		walk(roots)
+		outline.withoutAnimation { walk(roots) }
 	}
 
 	// MARK: - Outline

@@ -212,25 +212,6 @@ public final class MaterialTree: NSView, NSOutlineViewDataSource, NSOutlineViewD
 
 	@objc private func filterChanged() { rebuild() }
 
-	/// Opening and closing rows without letting AppKit animate it.
-	///
-	/// `expandItem` animates, and an animation is `-[NSAnimation _runBlocking]`
-	/// on a dispatch worker thread spinning a nested run loop. This tree opens
-	/// every root on every reload, so a window that reloads often — or a test
-	/// suite that builds hundreds of trees — fills the 64-thread dispatch pool
-	/// with blocked animations and stops. It took the whole suite down for two
-	/// hours before `sample` said so in as many words: "too many dispatch
-	/// threads blocked in synchronous operations".
-	///
-	/// Nothing is lost by it. These are rows appearing as a list is built, not
-	/// a gesture somebody made.
-	private func withoutAnimation(_ work: () -> Void) {
-		NSAnimationContext.beginGrouping()
-		NSAnimationContext.current.duration = 0
-		work()
-		NSAnimationContext.endGrouping()
-	}
-
 	private func rebuild() {
 		let needle = search.stringValue
 		nodes = Material.tree(of: vocabulary, takes: takes, folders: folders,
@@ -246,7 +227,7 @@ public final class MaterialTree: NSView, NSOutlineViewDataSource, NSOutlineViewD
 		//
 		// While something is being searched for, everything that survived the
 		// filter is opened instead — a match has to be visible to be a match.
-		withoutAnimation {
+		outline.withoutAnimation {
 			for root in held {
 				outline.expandItem(root)
 				guard !needle.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -650,7 +631,7 @@ extension MaterialTree {
 			parents.append(some)
 			walk = parent(of: some)
 		}
-		withoutAnimation { for some in parents.reversed() { outline.expandItem(some) } }
+		outline.withoutAnimation { for some in parents.reversed() { outline.expandItem(some) } }
 		let row = outline.row(forItem: held)
 		guard row >= 0 else { return }
 		outline.selectRowIndexes([row], byExtendingSelection: false)
@@ -710,7 +691,7 @@ extension MaterialTree {
 	}
 
 	private func flip(_ held: Held) {
-		withoutAnimation {
+		outline.withoutAnimation {
 			if outline.isItemExpanded(held) { outline.collapseItem(held) }
 			else { outline.expandItem(held) }
 		}

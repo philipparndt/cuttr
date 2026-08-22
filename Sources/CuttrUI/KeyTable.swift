@@ -153,3 +153,32 @@ extension NSTableView {
 		scrollRowToVisible(row)
 	}
 }
+
+// MARK: - Opening rows without an animation
+
+extension NSOutlineView {
+
+	/// Opens and closes rows without letting AppKit animate it.
+	///
+	/// **An animation blocks a thread.** `expandItem` animates, and an
+	/// animation is `-[NSAnimation _runBlocking]` on a dispatch worker spinning
+	/// a nested run loop until it finishes. A tree that opens its rows on every
+	/// reload therefore parks a thread per row per reload — and both trees in
+	/// this program do exactly that: the programme reopens every section it had
+	/// open, and the material tree reopens every root.
+	///
+	/// Enough of them and the 64-thread dispatch pool is full of animations
+	/// waiting on run loops that will not run, and the program stops. It took
+	/// the test suite down twice, an hour at a time, before `sample` said it in
+	/// as many words: "too many dispatch threads blocked in synchronous
+	/// operations".
+	///
+	/// Nothing is lost. These are rows being put back where they were as a list
+	/// is rebuilt, not a disclosure triangle anybody pressed.
+	func withoutAnimation(_ work: () -> Void) {
+		NSAnimationContext.beginGrouping()
+		NSAnimationContext.current.duration = 0
+		work()
+		NSAnimationContext.endGrouping()
+	}
+}

@@ -429,6 +429,18 @@ public final class ComposeWindowController: DocumentEditor,
 	/// For the tests: the takes list, so the double-click that opens a take can
 	/// be driven where it actually starts.
 	var materialForTesting: MaterialTree { materialTree }
+	/// The last thing the status line was told, for the tests. `say` is how
+	/// every outcome of a share reaches somebody, so a test that presses the
+	/// button and reads this is the only one that can tell "it worked" from
+	/// "it did nothing at all".
+	var saidForTesting: String { said }
+
+	/// Asking for a frame the way the info page does. A programme with no
+	/// footage in it has none, and asking AVFoundation anyway aborts the
+	/// process — see ``poster(at:then:)``.
+	func posterForTesting(at time: Double, then done: @escaping (NSImage?) -> Void) {
+		poster(at: time, then: done)
+	}
 	/// For the tests: the levels page, so a slider can be driven at its seam
 	/// rather than by an event nobody handles.
 	var levelsForTesting: LevelsPage { levels }
@@ -487,6 +499,16 @@ public final class ComposeWindowController: DocumentEditor,
 	override func furnish(_ bar: DocumentBar) {
 		// A project is the outermost thing there is; there is nowhere to go back to.
 		bar.setBack(false)
+		if shareButton.target == nil {
+			shareButton.bezelStyle = .rounded
+			shareButton.controlSize = .small
+			shareButton.font = NSFont.systemFont(ofSize: 11)
+			shareButton.target = self
+			shareButton.action = #selector(shareProject(_:))
+			shareButton.isHidden = true
+			shareButton.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+		}
+		bar.addTrailing(shareButton)
 		bar.addTrailing(renderButton)
 
 		// The fold, in the bar rather than in the pane it folds: a chevron
@@ -546,6 +568,45 @@ public final class ComposeWindowController: DocumentEditor,
 	private var said = ""
 	private var progressed: Double?
 
+	/// A frame of the finished programme, or nothing when there is no picture
+	/// to take one from.
+	///
+	/// **A composition with no video track is a real project**, not a broken
+	/// one: a programme of cards and scenes has no footage in it anywhere.
+	/// Asking `AVAssetImageGenerator` for a frame of one throws an
+	/// Objective-C exception from inside AVFoundation — `[videoTracks count]
+	/// >= 1` — and nothing in Swift can catch that, so it takes the whole
+	/// program down. It took the test process down first, which is the only
+	/// reason anybody found out.
+	///
+	/// One of these, not two. The info page and the placement dialogs both
+	/// want the same frame from the same composition.
+	/// Whether there is a frame to be had at all.
+	///
+	/// Split from the asking so it can be checked: reaching the throw needs a
+	/// *built* composition, and a test that stops at `builtComposition == nil`
+	/// passes whether or not the guard is there — which the first version of
+	/// this test did.
+	static func hasPicture(_ composition: AVAsset) -> Bool {
+		!composition.tracks(withMediaType: .video).isEmpty
+	}
+
+	private func poster(at time: Double, then done: @escaping (NSImage?) -> Void) {
+		guard let composition = builtComposition, Self.hasPicture(composition) else {
+			return done(nil)
+		}
+		let generator = AVAssetImageGenerator(asset: composition)
+		generator.videoComposition = builtVideoComposition
+		generator.requestedTimeToleranceBefore = CMTime(seconds: 0.25, preferredTimescale: 600)
+		generator.requestedTimeToleranceAfter = CMTime(seconds: 0.25, preferredTimescale: 600)
+		generator.generateCGImageAsynchronously(
+			for: CMTime(seconds: max(0, time), preferredTimescale: 600)
+		) { image, _, _ in
+			let picture = image.map { NSImage(cgImage: Self.asShown($0), size: .zero) }
+			Task { @MainActor in done(picture) }
+		}
+	}
+
 	private func say(_ text: String) {
 		said = text
 		bar?.setStatus(text)
@@ -560,6 +621,14 @@ public final class ComposeWindowController: DocumentEditor,
 	/// the overlays are laid out again against whatever size the window is now.
 	override func documentAppeared() {
 		layoutOverlays()
+		refreshStanding()
+		standingWatch?.invalidate()
+		// Slow on purpose. Everything it reads is local — it never fetches —
+		// but it is still three subprocesses, and what it watches for, somebody
+		// else pushing, does not happen twice a second.
+		standingWatch = Timer.scheduledTimer(timeInterval: 30, target: self,
+		                                     selector: #selector(refreshStanding),
+		                                     userInfo: nil, repeats: true)
 	}
 
 	/// Off screen and still open: the tape stops, and full-screen presentation
@@ -568,6 +637,8 @@ public final class ComposeWindowController: DocumentEditor,
 		if presenting { toggleFullScreenPreview(nil) }
 		transport.pause()
 		levels.stop()
+		standingWatch?.invalidate()
+		standingWatch = nil
 	}
 
 	/// The controls that belong to the picture, in the corner of the picture.
@@ -652,7 +723,13 @@ public final class ComposeWindowController: DocumentEditor,
 
 	private func wire() {
 		followTheTape()
-		composeDocument.onChange = { [weak self] in self?.rebuild() }
+		composeDocument.onChange = { [weak self] in
+			self?.rebuild()
+			// A save is what makes something to upload, so the button follows
+			// it — otherwise it says "nothing to do" over a file that has just
+			// changed, which is the way it was invisible before.
+			self?.refreshStanding()
+		}
 		// A version being kept is worth a word in the line that already carries
 		// what just happened, and nothing more. It must never be a sheet: the
 		// save has already happened by the time this runs, and interrupting an
@@ -873,17 +950,8 @@ public final class ComposeWindowController: DocumentEditor,
 			        self.builtDuration)
 		}
 		inspector.poster = { [weak self] time, done in
-			guard let self, let composition = self.builtComposition else { return done(nil) }
-			let generator = AVAssetImageGenerator(asset: composition)
-			generator.videoComposition = self.builtVideoComposition
-			generator.requestedTimeToleranceBefore = CMTime(seconds: 0.25, preferredTimescale: 600)
-			generator.requestedTimeToleranceAfter = CMTime(seconds: 0.25, preferredTimescale: 600)
-			generator.generateCGImageAsynchronously(
-				for: CMTime(seconds: max(0, time), preferredTimescale: 600)
-			) { image, _, _ in
-				let picture = image.map { NSImage(cgImage: Self.asShown($0), size: .zero) }
-				Task { @MainActor in done(picture) }
-			}
+			guard let self else { return done(nil) }
+			self.poster(at: time, then: done)
 		}
 		materialTree.onInsert = { [weak self] reference in self?.inspector.insert(reference: reference) }
 
@@ -1196,17 +1264,8 @@ public final class ComposeWindowController: DocumentEditor,
 		projectPanel.documentName = composeDocument.displayName
 		projectPanel.resolved = composeDocument.resolved
 		projectPanel.poster = { [weak self] time, done in
-			guard let self, let composition = self.builtComposition else { return done(nil) }
-			let generator = AVAssetImageGenerator(asset: composition)
-			generator.videoComposition = self.builtVideoComposition
-			generator.requestedTimeToleranceBefore = CMTime(seconds: 0.25, preferredTimescale: 600)
-			generator.requestedTimeToleranceAfter = CMTime(seconds: 0.25, preferredTimescale: 600)
-			generator.generateCGImageAsynchronously(
-				for: CMTime(seconds: max(0, time), preferredTimescale: 600)
-			) { image, _, _ in
-				let picture = image.map { NSImage(cgImage: Self.asShown($0), size: .zero) }
-				Task { @MainActor in done(picture) }
-			}
+			guard let self else { return done(nil) }
+			self.poster(at: time, then: done)
 		}
 		projectPanel.reload(composeDocument.project,
 		                    vocabulary: composeDocument.vocabulary, selection: .output)
@@ -1622,6 +1681,69 @@ public final class ComposeWindowController: DocumentEditor,
 		}
 	}
 
+	// MARK: - Saying where the project stands
+
+	/// The button that says there is something to send, or something to bring
+	/// in, and is the way to do either.
+	///
+	/// **Why a button and not a line of status.** Everything a share did, it
+	/// said once in the status bar and then the line was gone. There was no way
+	/// to tell "I have three changes nobody else has" from "the button did
+	/// nothing", which is how the button came to be reported as doing nothing.
+	/// This one is on screen for as long as there is something to do.
+	private let shareButton = NSButton()
+	private var standing: ProjectSharing.Standing?
+	private var standingWatch: Timer?
+
+	/// Asks the repository where things stand, off the main thread.
+	///
+	/// **Never fetches.** Asking a network how things stand is not something a
+	/// window may do on a timer — that is a password prompt, or a stall, every
+	/// half minute for as long as the program is open. What it reads is what is
+	/// already on this machine: the project's own uncommitted files, and how
+	/// far the branch is from the upstream as last fetched. A share fetches,
+	/// and a share is something somebody asked for.
+	@objc func refreshStanding() {
+		guard let url = composeDocument.url, let sharing = ProjectSharing(project: url) else {
+			standing = nil
+			showStanding()
+			return
+		}
+		Task.detached { [weak self] in
+			let found = sharing.standing()
+			await MainActor.run {
+				self?.standing = found
+				self?.showStanding()
+			}
+		}
+	}
+
+	private func showStanding() {
+		guard let standing, standing.hasRemote, !standing.isSettled else {
+			shareButton.isHidden = true
+			bar?.groupChanged()
+			return
+		}
+		shareButton.isHidden = false
+		// What to say first. Bringing somebody else's work in comes before
+		// sending yours: a push on top of work you have not seen is the thing
+		// this whole feature exists to avoid.
+		if standing.toMerge > 0 {
+			let what = standing.toMerge == 1 ? "1 change" : "\(standing.toMerge) changes"
+			shareButton.title = "Merge \(what)"
+			shareButton.toolTip = "Somebody else has \(what) you have not got"
+		} else {
+			let count = standing.toUpload + (standing.uncommitted > 0 ? 1 : 0)
+			let what = count == 1 ? "1 change" : "\(count) changes"
+			shareButton.title = "Upload \(what)"
+			shareButton.toolTip = standing.uncommitted > 0
+				? "\(standing.uncommitted) file\(standing.uncommitted == 1 ? "" : "s") "
+					+ "changed since the last share"
+				: "\(what) nobody else has yet"
+		}
+		bar?.groupChanged()
+	}
+
 	/// What came back, and the one case that needs somebody.
 	@MainActor
 	private func shared(_ outcome: ProjectSharing.Outcome,
@@ -1632,8 +1754,14 @@ public final class ComposeWindowController: DocumentEditor,
 			composeDocument.reload()
 			rebuild()
 		}
+		refreshStanding()
 		guard case .mustChoose = outcome, let choose, let view = window?.contentView else {
 			say(outcome.sentence)
+			// A refusal is a thing somebody has to act on — close a take
+			// window, sign in, finish a rebase — and a line of status that is
+			// gone by the time they look is how "it refused" became "nothing
+			// happens". Success stays quiet: the button going away says it.
+			if outcome.needsAnswering { insist(outcome.sentence) }
 			mentionMissingFootage(sharing)
 			return
 		}
@@ -1646,11 +1774,30 @@ public final class ComposeWindowController: DocumentEditor,
 					self?.composeDocument.reload()
 					self?.rebuild()
 					self?.say(outcome.sentence)
+					self?.refreshStanding()
 					self?.mentionMissingFootage(sharing)
 				}
 			}
 		}
 		if !shown { say(outcome.sentence) }
+	}
+
+	/// Said in a way somebody cannot walk past.
+	///
+	/// Only for the outcomes that need them to do something. An alert for
+	/// "sent your changes" would be a program congratulating itself.
+	@MainActor
+	private func insist(_ what: String) {
+		let alert = NSAlert()
+		alert.messageText = "Not shared"
+		alert.informativeText = what
+		alert.addButton(withTitle: "OK")
+		// Only over a real window. Conjuring one to hang a sheet on is how a
+		// window with no sheet parent aborts the process, which is what it did
+		// the first time this ran in a test — and a window nobody can see is
+		// not a place to put something somebody has to answer anyway.
+		guard let window else { return }
+		alert.beginSheetModal(for: window) { _ in }
 	}
 
 	/// Sharing moves text. The recordings are gigabytes and are not in the

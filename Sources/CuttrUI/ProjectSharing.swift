@@ -72,6 +72,21 @@ public struct ProjectSharing: Sendable {
 		case trouble(Trouble)
 		case failed(String)
 
+		/// Whether this is somebody's to do something about.
+		///
+		/// A refusal names a thing that has to happen first — close a take
+		/// window, sign in, finish a rebase — and saying it once in a status
+		/// line that is gone by the time they look is how "it refused" reads as
+		/// "nothing happened". The quiet outcomes stay quiet.
+		public var needsAnswering: Bool {
+			switch self {
+			case .nothingToSend, .sent, .brought, .mustChoose, .noRemote:
+				return false
+			case .noRepository, .busy, .inTheWay, .trouble, .failed:
+				return true
+			}
+		}
+
 		/// One line, in the program's own words. No `ahead`, no `behind`, no
 		/// `fast-forward`, and no commit hash — somebody who knew those words
 		/// would be using a git client.
@@ -502,5 +517,61 @@ extension ProjectSharing {
 			}
 		}
 		return missing
+	}
+}
+
+// MARK: - Where this project stands
+
+public extension ProjectSharing {
+
+	/// What there is to do, without doing any of it.
+	///
+	/// **Why this exists.** Everything a share does, it says in one line of the
+	/// status bar, and that line is easy to miss and gone by the time anybody
+	/// looks. So there was no way to tell "I have three changes nobody else
+	/// has" from "the button did nothing" — which is how the button came to be
+	/// reported as doing nothing.
+	///
+	/// Read-only and cheap: `status --porcelain` over the project's own files
+	/// and one `rev-list` against the upstream already fetched. **No fetch.**
+	/// Asking a network how things stand is not something a window may do on a
+	/// timer — that is a password prompt, or a stall, every thirty seconds for
+	/// as long as the program is open.
+	struct Standing: Sendable, Equatable {
+		/// Changes to the project's own files that are not committed yet.
+		public var uncommitted: Int
+		/// Commits this machine has that the remote has not.
+		public var toUpload: Int
+		/// Commits the remote had, last time anybody fetched, that this
+		/// machine has not.
+		public var toMerge: Int
+		/// Nothing to send and nothing to bring in.
+		public var isSettled: Bool { uncommitted == 0 && toUpload == 0 && toMerge == 0 }
+		/// Whether there is anywhere to send at all.
+		public var hasRemote: Bool
+	}
+
+	func standing() -> Standing {
+		let git = plumbing
+		guard GitRemote(root: root).hasOrigin() else {
+			return Standing(uncommitted: 0, toUpload: 0, toMerge: 0, hasRemote: false)
+		}
+		// Only the project's own files. Somebody's unrelated dirty README is
+		// not something this button has an opinion about.
+		let ours = Set(versions.trackable().map(\.path))
+		var uncommitted = 0
+		if let said = git.run(["status", "--porcelain", "--"] + ours.sorted()),
+		   said.status == 0 {
+			uncommitted = said.out.split(separator: "\n").filter { !$0.isEmpty }.count
+		}
+
+		var up = 0, down = 0
+		if let branch = branch(), let upstream = GitRemote(root: root).upstream(of: branch),
+		   let counted = GitRemote(root: root).counts(branch, against: upstream) {
+			up = counted.ahead
+			down = counted.behind
+		}
+		return Standing(uncommitted: uncommitted, toUpload: up, toMerge: down,
+		                hasRemote: true)
 	}
 }
