@@ -56,9 +56,18 @@ one.
 - **THEN** the merged file SHALL still carry that key
 
 #### Scenario: Unknown keys on both sides
-- **WHEN** both sides carry different unknown keys on the same clip
-- **AND** nothing else about that clip differs
+- **WHEN** each side carries a different unknown key at the take level
 - **THEN** both keys SHALL be present in the result
+
+#### Scenario: A clip's unknown keys are outside what this can promise
+- **WHEN** a clip carries a key this build does not know
+- **THEN** the merge SHALL NOT be the thing that loses it
+
+Note: `TakeReader` keeps leftover keys only at the take's root — a clip's
+mapping is read key by key and the remainder discarded — so a clip-level key
+from a later version is already lost on read, before any merge sees it. Closing
+that is a change to the reader and the emitter, and belongs in its own proposal;
+this requirement holds the merge to not making it worse.
 
 ### Requirement: Only a same-clip disagreement is a conflict
 

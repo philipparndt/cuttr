@@ -1,43 +1,43 @@
 ## 1. The remote questions git can answer
 
-- [ ] 1.1 Add a variant of `GitRepository.run` that keeps standard error instead
+- [x] 1.1 Add a variant of `GitRepository.run` that keeps standard error instead
       of discarding it, and returns exit status alongside output. Everything
       existing keeps the quiet `nil`-on-failure behaviour.
-- [ ] 1.2 Add `fetch(in:)`, `upstream(of:in:)` and `counts(against:in:)`
+- [x] 1.2 Add `fetch(in:)`, `upstream(of:in:)` and `counts(against:in:)`
       (ahead/behind) to `GitRepository`, each with a timeout so a hung remote
       cannot leave the action spinning.
-- [ ] 1.3 Add `push(_:in:)` returning either success or git's own stderr. Never
+- [x] 1.3 Add `push(_:in:)` returning either success or git's own stderr. Never
       `--force`, and no code path that could construct one.
-- [ ] 1.4 Add `Trouble`: read git's stderr and classify it as unreachable,
+- [x] 1.4 Add `Trouble`: read git's stderr and classify it as unreachable,
       unauthenticated, forbidden, rejected-race, or other. `RepositoryTests`
       covers each against real stderr text.
 
 ## 2. The merge, in CuttrKit
 
-- [ ] 2.1 Add `TakeMerge` beside `TakeFile`: given base, mine and theirs as
+- [x] 2.1 Add `TakeMerge` beside `TakeFile`: given base, mine and theirs as
       `Take` values, return either a merged `Take` or a list of conflicts. No
       AppKit, so it is testable without a window.
-- [ ] 2.2 Merge the clip list by slug — added, removed, changed-on-one-side,
+- [x] 2.2 Merge the clip list by slug — added, removed, changed-on-one-side,
       changed-identically — with a conflict only for same-slug different-value.
-- [ ] 2.3 Merge take-level keys (`video:`, `audio:`, `offset:`, `words:`) each on
+- [x] 2.3 Merge take-level keys (`video:`, `audio:`, `offset:`, `words:`) each on
       its own, so re-aligning and re-cutting do not collide.
-- [ ] 2.4 Carry unknown keys through from both sides; a key present on one side
+- [x] 2.4 Carry unknown keys through from both sides; a key present on one side
       only is kept. Test with a key no build knows.
-- [ ] 2.5 Add `ProjectMerge` for `.cuttrproj` on the same shape, keyed by the
+- [x] 2.5 Add `ProjectMerge` for `.cuttrproj` on the same shape, keyed by the
       timeline entry's `as:`/section name where it has one.
-- [ ] 2.6 Test that a merged take written by `TakeWriter` re-saves byte-identical,
+- [x] 2.6 Test that a merged take written by `TakeWriter` re-saves byte-identical,
       the same guarantee `writingIsStableForTheSameTake` makes.
 
 ## 3. Building the commit without disturbing the repository
 
-- [ ] 3.1 Add `ProjectSharing` in `CuttrUI` beside `ProjectHistory`, reusing
+- [x] 3.1 Add `ProjectSharing` in `CuttrUI` beside `ProjectHistory`, reusing
       `ProjectVersions.files()` for what to commit.
-- [ ] 3.2 Commit through plumbing on a temporary index: `read-tree HEAD`,
+- [x] 3.2 Commit through plumbing on a temporary index: `read-tree HEAD`,
       `update-index --add` the project's paths only, `write-tree`,
       `commit-tree -p HEAD`, `update-ref refs/heads/<branch>`.
-- [ ] 3.3 Refresh the real index for exactly those paths so `git status` does not
+- [x] 3.3 Refresh the real index for exactly those paths so `git status` does not
       report them modified afterwards, touching nothing else.
-- [ ] 3.4 Test: an unrelated dirty file stays dirty and uncommitted; an unrelated
+- [x] 3.4 Test: an unrelated dirty file stays dirty and uncommitted; an unrelated
       staged change stays staged. This is the analogue of
       `nothingIsTouchedInTheRepository` and is the test that matters most here.
 

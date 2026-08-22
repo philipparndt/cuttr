@@ -489,6 +489,19 @@ public struct ProjectVersions: Sendable {
 			var out: String
 			var error: String
 			var data: Data
+			/// Whether it was killed for taking too long rather than finishing.
+			/// Only ever true for a call that asked for a `timeout`, which in
+			/// practice means one that talks to a remote.
+			var timedOut = false
+		}
+
+		/// A one-shot flag the watchdog sets and the caller reads, from two
+		/// queues. Small enough that a lock is cheaper than anything cleverer.
+		private final class Fired: @unchecked Sendable {
+			private let lock = NSLock()
+			private var value = false
+			func set() { lock.lock(); value = true; lock.unlock() }
+			var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
 		}
 
 		/// Runs one git command in the work tree.
@@ -496,7 +509,12 @@ public struct ProjectVersions: Sendable {
 		/// `index` puts a temporary index file in `GIT_INDEX_FILE`, which is the
 		/// whole trick: `update-index` and `read-tree` then build a tree without
 		/// the repository's own index ever being opened.
-		func run(_ arguments: [String], input: Data? = nil, index: URL? = nil) -> Said? {
+		/// `timeout` is in seconds, and is for the calls that reach a network.
+		/// Everything local is left without one: a `write-tree` that has not
+		/// come back is a bug worth hanging on, where a `fetch` that has not is
+		/// an ordinary Tuesday on a train.
+		func run(_ arguments: [String], input: Data? = nil, index: URL? = nil,
+		         timeout: TimeInterval? = nil) -> Said? {
 			guard FileManager.default.isExecutableFile(atPath: Self.tool.path) else { return nil }
 			let process = Process()
 			process.executableURL = Self.tool
@@ -529,6 +547,16 @@ public struct ProjectVersions: Sendable {
 				complaint = error.fileHandleForReading.readDataToEndOfFile()
 				waited.signal()
 			}
+			// Killing it is what unblocks the read below: the pipes close with
+			// the process, and nothing here polls.
+			let fired = Fired()
+			if let timeout {
+				DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+					guard process.isRunning else { return }
+					fired.set()
+					process.terminate()
+				}
+			}
 			let said = out.fileHandleForReading.readDataToEndOfFile()
 			waited.wait()
 			process.waitUntilExit()
@@ -537,7 +565,7 @@ public struct ProjectVersions: Sendable {
 					.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 			}
 			return Said(status: process.terminationStatus, out: trimmed(said),
-			            error: trimmed(complaint), data: said)
+			            error: trimmed(complaint), data: said, timedOut: fired.isSet)
 		}
 
 		/// `-c user.name=…`, but only when the person has not said who they are.

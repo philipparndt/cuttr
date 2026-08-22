@@ -502,10 +502,17 @@ public struct Clip: Identifiable, Sendable, Equatable {
 	/// Two clips are the same clip if they say the same thing, whatever their
 	/// session identities are. Identity is a view concern; equality is used to
 	/// decide whether the document is dirty, which is a file concern.
+	///
+	/// Every field that is *written* belongs here and nothing else does. `gain`
+	/// was left out when it arrived, and the omission is the shape of fault
+	/// this comment exists to prevent: a clip levelled and nothing else changed
+	/// compared equal, so the document was not dirty, so the number somebody
+	/// had just set was never written. A merge asking "did this clip change"
+	/// got the same wrong answer.
 	public static func == (a: Clip, b: Clip) -> Bool {
 		a.slug == b.slug && a.name == b.name && a.start == b.start
 			&& a.end == b.end && a.note == b.note && a.color == b.color
-			&& a.tags == b.tags && a.order == b.order
+			&& a.tags == b.tags && a.order == b.order && a.gain == b.gain
 	}
 }
 
