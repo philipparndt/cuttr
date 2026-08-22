@@ -429,7 +429,46 @@ public enum ComponentBaker {
 					file: name, index: index,
 					why: taken.error?.localizedDescription ?? "it handed back nothing")
 			}
-			return cgImage
+			return try Self.onePixelPerPoint(cgImage, size, named: name, index: index)
+		}
+
+		/// The snapshot at one pixel per point, whatever the machine handed back.
+		///
+		/// `snapshotWidth` is a width in *points*, and asking for it is not the
+		/// same as getting it: on a Retina display WebKit satisfies the request
+		/// with a bitmap of twice as many pixels, so a project asking for
+		/// 1920×1080 baked to 3840×2160 on a laptop and to 1920×1080 on a
+		/// machine plugged into a projector. The frames are the artefact — kept
+		/// beside the project and exported with it — so which Mac drew them is
+		/// not allowed to decide what they are.
+		///
+		/// Resampled rather than asked for again, because there is no way to ask
+		/// WebKit for a backing scale the screen has not got. Down, and in
+		/// premultiplied alpha, which is the only space a soft edge averages
+		/// correctly in: blending the ink with what is transparent beside it
+		/// unassociated is how an edge picks up the dark fringe that
+		/// ``whatWasNotDrawnIsTransparent`` exists to catch.
+		private static func onePixelPerPoint(_ image: CGImage, _ size: CGSize,
+		                                     named name: String, index: Int) throws -> CGImage {
+			let width = Int(size.width), height = Int(size.height)
+			guard image.width != width || image.height != height else { return image }
+			guard let context = CGContext(
+				data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+				space: image.colorSpace ?? CGColorSpaceCreateDeviceRGB(),
+				bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+			else {
+				throw BakeError.noFrame(
+					file: name, index: index,
+					why: "a frame of \(image.width)×\(image.height) would not "
+						+ "resample to \(width)×\(height)")
+			}
+			context.interpolationQuality = .high
+			context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+			guard let scaled = context.makeImage() else {
+				throw BakeError.noFrame(file: name, index: index,
+				                        why: "the resampled frame would not come back")
+			}
+			return scaled
 		}
 
 		private func write(_ image: CGImage, to url: URL) throws {
