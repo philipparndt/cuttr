@@ -234,13 +234,19 @@ public final class DocumentBar: NSView {
 	private let group = NSStackView()
 	/// The line that says where the name stops and the controls begin.
 	private let divider = NSView()
-	/// Controls that belong on the far side of the clock.
+	/// Controls that belong at the far end of the bar.
 	///
 	/// The bar filled up from the left and left half of itself empty: the name,
 	/// a rule, the monitor, six lane colours and a `…` all crowded against the
 	/// traffic lights while everything past the clock was air. What goes here is
 	/// what somebody reaches for rather than reads — the lane the next cut lands
 	/// on — and it reads better in the space that was going spare.
+	///
+	/// Against the *right edge* rather than against the clock. Put straight
+	/// after it, the colours crowded the number they were meant to be giving
+	/// room to: the clock is the one thing in this bar that must not move, and a
+	/// row of swatches pressed up against it reads as part of it. Out at the
+	/// edge they are their own thing and the middle is the time.
 	private let afterClock = NSStackView()
 	private var popover: NSPopover?
 
@@ -404,15 +410,28 @@ public final class DocumentBar: NSView {
 			play.centerYAnchor.constraint(equalTo: centerYAnchor),
 			play.leadingAnchor.constraint(greaterThanOrEqualTo: group.trailingAnchor, constant: 16),
 
-			afterClock.leadingAnchor.constraint(equalTo: clock.trailingAnchor, constant: 14),
+			// Against the right rather than against the clock. Put straight
+			// after it they crowded the number they were supposed to be giving
+			// room to — the clock is the one thing in this bar that must not
+			// move, and a row of colours pressed up to it reads as part of it.
+			// Out at the edge they are their own thing, and the middle is the
+			// time.
+			afterClock.trailingAnchor.constraint(equalTo: trailing.leadingAnchor, constant: -10),
+			// And never close enough to touch the clock, however narrow the
+			// window gets.
+			afterClock.leadingAnchor.constraint(
+				greaterThanOrEqualTo: clock.trailingAnchor, constant: 14),
 			afterClock.centerYAnchor.constraint(equalTo: centerYAnchor),
 
 			trailing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
 			trailing.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-			statusLabel.trailingAnchor.constraint(equalTo: trailing.leadingAnchor, constant: -10),
+			// To the left of whatever is out at the edge, so a message that
+			// arrives does not land on the colours.
+			statusLabel.trailingAnchor.constraint(equalTo: afterClock.leadingAnchor,
+			                                      constant: -10),
 			statusLabel.leadingAnchor.constraint(
-				greaterThanOrEqualTo: afterClock.trailingAnchor, constant: 12),
+				greaterThanOrEqualTo: clock.trailingAnchor, constant: 12),
 			statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -4),
 			statusLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
 

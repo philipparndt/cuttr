@@ -94,3 +94,46 @@ import Testing
 		#expect(asked, "the chevron did nothing")
 	}
 }
+
+/// Where the lane colours sit, which is a question about the clock.
+///
+/// The clock is the one thing in this bar that must not move — it is centred on
+/// the window so it does not shuffle as the name beside it changes length — and
+/// a row of swatches pressed up against it reads as part of it.
+@Suite @MainActor struct BarFarEndTests {
+
+	private func bar() -> DocumentBar {
+		_ = NSApplication.shared
+		let bar = DocumentBar(frame: NSRect(x: 0, y: 0, width: 1200, height: DocumentBar.height))
+		let swatches = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 16))
+		swatches.translatesAutoresizingMaskIntoConstraints = false
+		swatches.widthAnchor.constraint(equalToConstant: 120).isActive = true
+		swatches.heightAnchor.constraint(equalToConstant: 16).isActive = true
+		bar.addAfterClock(swatches)
+		bar.layoutSubtreeIfNeeded()
+		return bar
+	}
+
+	private func added(_ bar: DocumentBar) -> NSView? {
+		bar.subviews.compactMap { $0 as? NSStackView }
+			.compactMap { $0.arrangedSubviews.first { $0.frame.width == 120 } }.first
+	}
+
+	@Test func whatIsAddedGoesToTheFarEnd() {
+		let bar = bar()
+		guard let swatches = added(bar) else { Issue.record("nothing was added"); return }
+		let onBar = swatches.convert(swatches.bounds, to: bar)
+		#expect(bar.bounds.maxX - onBar.maxX < 40,
+		        "the colours are \(bar.bounds.maxX - onBar.maxX) from the edge, not against it")
+	}
+
+	/// And well clear of the clock, which is the point of moving them.
+	@Test func theyLeaveTheClockAlone() {
+		let bar = bar()
+		guard let swatches = added(bar) else { Issue.record("nothing was added"); return }
+		let onBar = swatches.convert(swatches.bounds, to: bar)
+		// The clock is centred on the window, so the middle is where it is.
+		#expect(onBar.minX > bar.bounds.midX + 40,
+		        "the colours are crowding the clock at \(onBar.minX)")
+	}
+}
