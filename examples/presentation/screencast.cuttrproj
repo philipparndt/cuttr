@@ -1,0 +1,116 @@
+# cuttr project — the footage the explainer needs, made by cuttr.
+#
+# Every other example here renders on any machine because it is made of nothing
+# but the file it is written in. A presentation treatment cannot be: it moves a
+# *recording* aside and holds it, and a card is already still. So this project
+# makes the recording.
+#
+# What it draws is a screen capture of an app that does not exist — a window
+# chrome, a pointer crossing it, three steps happening in turn — at a quarter
+# size, because it is a stand-in and not the demonstration.
+#
+#     cuttr-render examples/presentation/screencast.cuttrproj
+#
+# That writes `screencast.mov` beside this file, which `screencast.cuttr` cuts
+# into clips and `explainer.cuttrproj` puts on a programme. Nothing is
+# committed: the whole of it is reproducible from these three files, and a
+# committed .mov would be a megabyte of something a hundred lines of text
+# already say.
+cuttr-project: 1
+
+output:
+  size: 1280x720
+  fps:  25
+  file: screencast.mov
+
+# Twenty-four seconds of one continuous "recording". One card rather than
+# several, because a recording is a recording: the explainer's job is to find
+# the moments in it, and it cannot do that if the moments are already cut.
+timeline:
+  - card:  00:24.000
+    as:    recording
+    fill:  "#0d1117"
+
+overlays:
+  - scene: window
+    from:  "@recording"
+
+scenes:
+  window:
+    parts:
+      # The chrome. A bar, three lights, and a ground — enough that the eye
+      # reads "an application" and stops asking.
+      - shape:  "#161b22"
+        corner: 0.012
+        keys:
+          - {t: 0, x: 0.5, y: 0.5, width: 0.86, height: 0.78, opacity: 1}
+      - shape:  "#21262d"
+        corner: 0.012
+        keys:
+          - {t: 0, x: 0.5, y: 0.855, width: 0.86, height: 0.07, opacity: 1}
+      - shape:  "#ff5f57"
+        corner: 0.5
+        keys:
+          - {t: 0, x: 0.11, y: 0.855, width: 0.012, height: 0.021, opacity: 1}
+      - shape:  "#febc2e"
+        corner: 0.5
+        keys:
+          - {t: 0, x: 0.135, y: 0.855, width: 0.012, height: 0.021, opacity: 1}
+      - shape:  "#28c840"
+        corner: 0.5
+        keys:
+          - {t: 0, x: 0.16, y: 0.855, width: 0.012, height: 0.021, opacity: 1}
+      - text:  "installer"
+        style: caption
+        keys:
+          - {t: 0, x: 0.5, y: 0.85, opacity: 0.7}
+
+      # Three steps, each arriving in turn and staying. The times are the
+      # important part of this file: 4, 11 and 18 seconds are where the
+      # explainer stops the picture, and they are the only numbers the two
+      # projects have to agree about.
+      - shape:  "#1f6feb"
+        corner: 0.008
+        keys:
+          - {t: 3.4, x: 0.5, y: 0.66, width: 0.62, height: 0.09, opacity: 0}
+          - {t: 4.0, opacity: 1, ease: out}
+      - text:  "1  download the disk image"
+        style: caption
+        keys:
+          - {t: 3.4, x: 0.5, y: 0.655, opacity: 0}
+          - {t: 4.0, opacity: 1, ease: out}
+
+      - shape:  "#238636"
+        corner: 0.008
+        keys:
+          - {t: 10.4, x: 0.5, y: 0.52, width: 0.62, height: 0.09, opacity: 0}
+          - {t: 11.0, opacity: 1, ease: out}
+      - text:  "2  drag it across"
+        style: caption
+        keys:
+          - {t: 10.4, x: 0.5, y: 0.515, opacity: 0}
+          - {t: 11.0, opacity: 1, ease: out}
+
+      - shape:  "#8957e5"
+        corner: 0.008
+        keys:
+          - {t: 17.4, x: 0.5, y: 0.38, width: 0.62, height: 0.09, opacity: 0}
+          - {t: 18.0, opacity: 1, ease: out}
+      - text:  "3  open it once from the Finder"
+        style: caption
+        keys:
+          - {t: 17.4, x: 0.5, y: 0.375, opacity: 0}
+          - {t: 18.0, opacity: 1, ease: out}
+
+      # A pointer crossing the window, so that there is something moving to
+      # stop. Without it a held frame and a playing one look the same.
+      - shape:  "#e6edf3"
+        corner: 0.5
+        keys:
+          - {t: 0,  x: 0.22, y: 0.30, width: 0.009, height: 0.016, opacity: 0.9}
+          - {t: 4,  x: 0.44, y: 0.66, ease: inOut}
+          - {t: 8,  x: 0.66, y: 0.30, ease: inOut}
+          - {t: 11, x: 0.44, y: 0.52, ease: inOut}
+          - {t: 15, x: 0.70, y: 0.44, ease: inOut}
+          - {t: 18, x: 0.44, y: 0.38, ease: inOut}
+          - {t: 24, x: 0.24, y: 0.28, ease: inOut}

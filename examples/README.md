@@ -5,8 +5,11 @@ effects, no footage — so every one of them renders on any machine:
 
     cuttr-render examples/scenes/scenes.cuttrproj
 
-One exception, marked below: `frames/remotion.cuttrproj` needs its pictures
-rendered first, because it is about pictures that come from somewhere else.
+Two exceptions, marked below. `frames/remotion.cuttrproj` needs its pictures
+rendered first, because it is about pictures that come from somewhere else; and
+`presentation/explainer.cuttrproj` needs a *recording*, because the thing it
+demonstrates is moving one aside — so the recording is made by cuttr, from a
+project beside it.
 
 | | |
 |---|---|
@@ -29,6 +32,7 @@ rendered first, because it is about pictures that come from somewhere else.
 | `frames/remotion.cuttrproj` | the same overlay fed by Remotion: an animated chart and a route that draws itself — **run `tools/remotion/render.sh chart` and `route` first** |
 
 | `components/chart.cuttrproj` | `component:` — a React chart, baked to frames in the browser macOS already has, with nothing installed |
+| `presentation/explainer.cuttrproj` | `presentations:` — the picture moved aside and held while a scene plays beside it, with `bullets`, `boxes` and a scene of the project's own — **run `cuttr-render examples/presentation/screencast.cuttrproj` first** |
 
 One of them bakes before it renders. `components/chart.cuttrproj` draws its
 component into `.cuttr/components/walks/` the first time — a few seconds — and

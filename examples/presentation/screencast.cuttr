@@ -1,0 +1,17 @@
+# cuttr take — a plain-text cut list. Edit it here or in the app.
+#
+# One recording, one clip. The explainer does not cut it up: a presentation
+# treatment holds the picture *inside* a clip and hands the rest of it back
+# afterwards, which is the whole difference between this and cutting to a card.
+#
+# `screencast.mov` is made by `screencast.cuttrproj` beside this file. Render
+# that first.
+cuttr: 1
+
+video: screencast.mov
+
+clips:
+  - slug:  install
+    name:  the whole install
+    start: 00:00.000
+    end:   00:24.000
