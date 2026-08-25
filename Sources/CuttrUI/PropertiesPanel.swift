@@ -776,6 +776,136 @@ public final class PropertiesPanel: NSView {
 			arrival.append(label("from"))
 		}
 		field("transition", arrival, note: advice(how))
+
+		presentationForm(path, entry)
+	}
+
+	// MARK: - presentation
+
+	/// The treatments on this placement: where the picture goes, how long it
+	/// stands there, and what is said beside it.
+	///
+	/// On the entry rather than in `overlays:` because that is where the file
+	/// puts them, and the file puts them there because a hold is a fact about
+	/// this use of the recording — see ``CuttrCompose/Presentation``.
+	private func presentationForm(_ path: [Int], _ entry: TimelineEntry) {
+		// A card has no picture to move aside, and a section is not a picture,
+		// it is a list of them.
+		switch entry.source {
+		case .card, .group: return
+		case .clip, .list, .query: break
+		}
+
+		func change(_ index: Int, _ edit: @escaping (inout Presentation) -> Void) {
+			var next = project
+			guard var target = next.entry(at: path),
+			      target.presentations.indices.contains(index) else { return }
+			edit(&target.presentations[index])
+			next.replaceEntry(at: path, with: target)
+			commit(next)
+		}
+
+		// The project's scenes and the two that come with the program, without
+		// saying `bullets` twice when the project has one of its own.
+		let known = Set(project.scenes.keys).union(Scene.builtInNames).sorted()
+
+		for (index, shown) in entry.presentations.enumerated() {
+			section(entry.presentations.count == 1
+				? "presentation" : "presentation \(index + 1)")
+
+			field("at", [
+				text(Timecode.string(shown.at), width: 96, placeholder: "00:12.000") { value in
+					guard let seconds = Timecode.parse(value) else { return }
+					change(index) { $0.at = max(0, seconds) }
+				},
+				small("remove") { [weak self] in
+					guard let self else { return }
+					var next = self.project
+					guard var target = next.entry(at: path) else { return }
+					target.presentations.remove(at: index)
+					next.replaceEntry(at: path, with: target)
+					self.commit(next)
+				},
+			], note: "on the take's clock, the same clock the clip's own marks are on — "
+				+ "so re-trimming the clip does not move it")
+
+			field("into", [
+				number(shown.into.x, width: 64) { value in change(index) { $0.into.x = value } },
+				number(shown.into.y, width: 64) { value in change(index) { $0.into.y = value } },
+				number(shown.into.width, width: 64) { value in
+					change(index) { $0.into.width = max(0, value) }
+				},
+				number(shown.into.height, width: 64) { value in
+					change(index) { $0.into.height = max(0, value) }
+				},
+				label("x, y, w, h"),
+			], note: "fractions of the frame, origin bottom left — the picture fits inside "
+				+ "this box and keeps its shape, so a box of the wrong aspect letterboxes")
+
+			field("side", [
+				small("left") { change(index) { $0.into = Presentation.Rectangle(
+					x: 0.04, y: 0.2, width: 0.44, height: 0.6) } },
+				small("right") { change(index) { $0.into = Presentation.Rectangle(
+					x: 0.52, y: 0.2, width: 0.44, height: 0.6) } },
+				small("whole frame") { change(index) { $0.into = .whole } },
+			], note: "the two anybody wants, and the way back — a scene lays itself out "
+				+ "in whichever side is left free")
+
+			field("hold", [
+				number(shown.hold, width: 68) { value in change(index) { $0.hold = max(0, value) } },
+				label("seconds, and the ramp"),
+				number(shown.ramp, width: 68) { value in change(index) { $0.ramp = max(0, value) } },
+			], note: "the programme gets longer by the hold and nothing of the recording is "
+				+ "skipped — its sound stops with the picture, so narration goes on the "
+				+ "separate recorder")
+
+			field("scene", [
+				combo(shown.scene, values: known, width: 180) { value in
+					change(index) { $0.scene = value.trimmingCharacters(in: .whitespaces) }
+				},
+				pop(Presentation.Reveal.allCases.map(\.rawValue),
+				    selected: Presentation.Reveal.allCases.firstIndex(of: shown.reveal) ?? 0) { pick in
+					change(index) { $0.reveal = Presentation.Reveal.allCases[pick] }
+				},
+			], note: "`bullets` and `boxes` come with the program and take the lines below; "
+				+ "a scene of your own by that name wins")
+
+			// The five the built-ins take. Shown for any scene, because an
+			// authored one fills `{{one}}` from exactly the same place.
+			for name in ["one", "two", "three", "four", "five"] {
+				field(name, [
+					text(shown.parameters[name] ?? "", width: 240,
+					     placeholder: name == "one" ? "the first line" : "") { value in
+						let said = value.trimmingCharacters(in: .whitespaces)
+						change(index) {
+							if said.isEmpty { $0.parameters.removeValue(forKey: name) }
+							else { $0.parameters[name] = said }
+						}
+					},
+				], note: name == "five"
+					? "only the lines given are drawn, and a gap closes up"
+					: nil)
+			}
+		}
+
+		if entry.presentations.isEmpty {
+			section("presentation")
+		}
+		field("", [small(entry.presentations.isEmpty ? "add a presentation" : "add another") {
+			[weak self] in
+			guard let self else { return }
+			var next = self.project
+			guard var target = next.entry(at: path) else { return }
+			// Four seconds beside the picture with nothing in it yet, which is
+			// what somebody who has just pressed this is about to fill in.
+			target.presentations.append(Presentation(
+				at: 0, into: Presentation.Rectangle(x: 0.04, y: 0.2, width: 0.44, height: 0.6),
+				hold: 4, scene: "bullets"))
+			next.replaceEntry(at: path, with: target)
+			self.commit(next)
+		}], note: entry.presentations.isEmpty
+			? "move the picture aside, stop it, and put the point on screen beside it"
+			: nil)
 	}
 
 	/// What each kind is for, said once, where it is chosen.
@@ -825,7 +955,18 @@ public final class PropertiesPanel: NSView {
 
 	private func replace(_ path: [Int], _ entry: TimelineEntry) {
 		var next = project
-		next.replaceEntry(at: path, with: entry)
+		// The forms above build a whole entry rather than editing one, because
+		// changing what plays changes which case it is. What that must not do
+		// is throw away the blocks written *inside* the entry: an overlay, a
+		// sound and a presentation are facts about this placement and have
+		// nothing to do with which clip it names or how it is trimmed.
+		var kept = entry
+		if let was = project.entry(at: path) {
+			if kept.overlays.isEmpty { kept.overlays = was.overlays }
+			if kept.sounds.isEmpty { kept.sounds = was.sounds }
+			if kept.presentations.isEmpty { kept.presentations = was.presentations }
+		}
+		next.replaceEntry(at: path, with: kept)
 		commit(next)
 	}
 

@@ -327,6 +327,30 @@ public final class ProgrammeStrip: NSView {
 			Theme.rule.setStroke()
 			NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5)).stroke()
 
+			// The holds: a wash over the block, with a line where the picture
+			// stops. A clip with a treatment is longer on the strip than its
+			// footage is, and without this the extra seconds are unaccounted
+			// for — the bar simply does not match the length anybody measured
+			// in the take.
+			//
+			// Asked of the clip only when there is something to ask about: this
+			// is a draw loop, and a programme with no treatments on it should
+			// not be building a list per clip per frame to be told so.
+			for stretch in clip.presentations.isEmpty ? [] : clip.playing
+			where stretch.isHeld {
+				let from = x(for: stretch.at), to = x(for: stretch.at + stretch.length)
+				let held = NSRect(x: from, y: rect.minY, width: max(to - from, 1),
+				                  height: rect.height).intersection(rect)
+				guard !held.isEmpty else { continue }
+				Theme.accent.withAlphaComponent(0.18).setFill()
+				held.fill()
+				Theme.accent.withAlphaComponent(0.55).setStroke()
+				let edge = NSBezierPath()
+				edge.move(to: NSPoint(x: held.minX + 0.5, y: held.minY))
+				edge.line(to: NSPoint(x: held.minX + 0.5, y: held.maxY))
+				edge.stroke()
+			}
+
 			// Slug on top, take underneath, and only what fits — a truncated
 			// identifier is worse than none.
 			let slug = clip.reference.slug
