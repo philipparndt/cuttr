@@ -81,9 +81,21 @@ of authored scene.
 
 ## In the app
 
-Select the timeline entry and the properties panel has a **presentation**
-section: the moment, the rectangle, `left` and `right` buttons for the two
-placements anybody wants, the hold and the ramp, the scene and its lines. The
-programme strip marks the hold on the clip, because a clip with a treatment is
-longer on the strip than its footage is and an unmarked bar would not match
+**A treatment is a row of its own.** In the programme tree it is filed under the
+clip it holds, beside the overlays and sounds written there — one clip with
+three treatments is one row with three under it, each saying when it happens,
+which way the picture goes and how long it stops. Select one and the properties
+panel is about that one: the moment and the hold, `left` and `right` buttons for
+the two placements anybody wants, the rectangle if you want to be exact, and the
+scene with its lines. Delete takes it off, the arrows move it past its
+neighbours, and the clip's own form has the button that makes a new one.
+
+**Space takes a look at it** — the whole gesture, from the picture starting to
+move to the moment it is back: the ramp out, the hold with its scene, and the
+ramp home. Not only the hold, because what you are usually checking is whether
+the travel reads right, and a look that began with the picture already aside
+would show you everything except the thing you were about to tune.
+
+The programme strip marks the hold on the clip, because a clip with a treatment
+is longer on the strip than its footage is and an unmarked bar would not match
 anything you could measure in the take.

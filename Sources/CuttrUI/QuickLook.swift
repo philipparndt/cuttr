@@ -30,6 +30,8 @@ public enum QuickLook {
 		case section(String, path: [Int])
 		case overlay(Origin)
 		case sound(Origin)
+		/// A presentation treatment: the nth one on the entry at this path.
+		case presentation(path: [Int], index: Int)
 	}
 
 	/// A stretch of the programme's clock. The only clock there is — see the
@@ -68,6 +70,11 @@ public enum QuickLook {
 	///   already previews a section by name, and two ways of playing the same
 	///   row that disagree about where it ends is worse than either of them.
 	///   The path is the fallback, for a section whose name resolved to nothing.
+	/// - A treatment is the whole gesture: the picture leaving, the hold, and the
+	///   picture coming back. Not just the hold, because what somebody wants to
+	///   see is whether the travel looks right, and a look that started with the
+	///   picture already aside would show them everything except the thing they
+	///   were about to tune.
 	/// - An overlay or a sound is the stretch it is on for, which is its own
 	///   business: one written inside a clip is that clip, one hung on two marks
 	///   is whatever lies between them, and either may be shorter or longer than
@@ -92,6 +99,16 @@ public enum QuickLook {
 		case .sound(let origin):
 			guard let played = resolved.sounds.first(where: { $0.origin == origin }) else { return nil }
 			return look(from: played.start, to: played.end, in: resolved)
+		case .presentation(let path, let index):
+			guard let clip = resolved.clips.first(where: { $0.entry == path }),
+			      clip.presentations.indices.contains(index) else { return nil }
+			let shown = clip.presentations[index]
+			// `at:` is on the take's clock, so where the gesture lands on the
+			// programme's is the clip's answer and not arithmetic here — every
+			// hold before this one has already made the programme longer.
+			let stops = clip.programmeTime(forTake: shown.at)
+			return look(from: max(0, stops - shown.ramp),
+			            to: stops + shown.hold + shown.ramp, in: resolved)
 		}
 	}
 
@@ -697,6 +714,10 @@ public final class QuickLookPanel: NSPanel {
 
 	/// For the tests: whether the look is running, and where it has got to.
 	var isPlayingForTesting: Bool { transport.isPlaying }
+	/// What the look calls what it is playing. Three treatments under one clip
+	/// are three looks, and a caption that said "presentation" three times
+	/// would not tell them apart.
+	var titleForTesting: String { caption.title }
 	var timeForTesting: Double { transport.currentTime }
 	/// For the tests: the overlay tree over the picture, and the item it is
 	/// synchronised to. Whether the tree is *there* is the whole of the bug this
