@@ -102,6 +102,13 @@ public enum Renderer {
 		/// dissolve is decided here, and guessing it from the clip's position
 		/// was wrong for any programme that mixes cuts and dissolves.
 		var clipLanes: [Int] = []
+		/// The frame a hold stands on, already fitted to the output, and the
+		/// stretch of programme it is shown for.
+		///
+		/// A picture rather than a stretch of track, because a composition has
+		/// no way to say "this frame, for six seconds" that survives being
+		/// exported — see the hold below.
+		var stills: [(range: CMTimeRange, image: CIImage)] = []
 
 		var lane = 0
 		for placement in resolved.programme {
@@ -116,10 +123,6 @@ public enum Renderer {
 			let videoTrack = videoTracks[lane]
 			let audioTrack = audioTracks.indices.contains(lane) ? audioTracks[lane] : nil
 			let at = CMTime(seconds: clip.start, preferredTimescale: scale)
-			let range = CMTimeRange(
-				start: CMTime(seconds: clip.clip.start, preferredTimescale: scale),
-				duration: CMTime(seconds: clip.duration, preferredTimescale: scale))
-
 			grades.append((clip.start, clip.end, clip.look))
 			// Linear amplitude, because that is what a mix takes. Decibels are
 			// what a person reads and what the file says.
@@ -138,10 +141,76 @@ public enum Renderer {
 				}
 			}
 
+			// One stretch when nothing is held, and a split with a frozen
+			// frame between for each hold. The clip asks for the split; here
+			// it is only laid down.
+			let stretches = clip.playing
+
 			if let videoURL = clip.videoURL {
 				let asset = AVURLAsset(url: videoURL)
 				if let source = try await asset.loadTracks(withMediaType: .video).first {
-					try? videoTrack.insertTimeRange(range, of: source, at: at)
+					// How much recording there is, for the filler a hold needs.
+					let sourceSpan = try await source.load(.timeRange)
+					for stretch in stretches {
+						let lands = CMTime(seconds: stretch.at, preferredTimescale: scale)
+						if stretch.isHeld {
+							// The picture is held by *drawing* one frame for
+							// the length of the hold, not by putting one in the
+							// track — see `stills` below. What goes in the
+							// track here is filler: the right number of
+							// seconds of something, so that the composition has
+							// an unbroken timeline and every downstream pass
+							// has an instruction to work from. None of it is
+							// ever seen.
+							//
+							// Two shorter ways were tried and both are wrong.
+							// One frame `scaleTimeRange`d to the hold renders
+							// correctly and then breaks the pass *after* it:
+							// the file comes out with the right duration and
+							// only the frames that were in the footage, spread
+							// out, and `AVVideoCompositionCoreAnimationTool`
+							// over an asset timed like that draws nothing —
+							// a programme with its hold and none of its
+							// captions. Laying the same frame down once per
+							// frame of the hold builds a correct composition of
+							// several hundred one-frame segments, and the
+							// export then loses two frames in three of them.
+							let mark = CMTime(seconds: stretch.from, preferredTimescale: scale)
+							let whole = CMTime(seconds: stretch.length, preferredTimescale: scale)
+							var filled = CMTime.zero
+							// A recording of no length has nothing to fill
+							// with, and the loop below would never end asking
+							// for some.
+							let hasFooting = sourceSpan.duration > .zero
+							while hasFooting && filled < whole {
+								let want = whole - filled
+								// As near the hold's own mark as the recording
+								// allows, and round again when the hold is
+								// longer than the whole recording. Which
+								// seconds these are is not a question anybody
+								// can see the answer to.
+								let from = max(sourceSpan.start, min(mark, sourceSpan.end - want))
+								let take = min(want, sourceSpan.end - from)
+								guard take > .zero else { break }
+								try? videoTrack.insertTimeRange(
+									CMTimeRange(start: from, duration: take),
+									of: source, at: lands + filled)
+								filled = filled + take
+							}
+							if let held = try? await still(
+								of: asset, at: stretch.from, size: size) {
+								stills.append((CMTimeRange(
+									start: lands,
+									duration: CMTime(seconds: stretch.length,
+									                 preferredTimescale: scale)), held))
+							}
+						} else {
+							try? videoTrack.insertTimeRange(CMTimeRange(
+								start: CMTime(seconds: stretch.from, preferredTimescale: scale),
+								duration: CMTime(seconds: stretch.take, preferredTimescale: scale)),
+								of: source, at: lands)
+						}
+					}
 					sawVideo = true
 					let natural = try await source.load(.naturalSize)
 					let transform = try await source.load(.preferredTransform)
@@ -151,34 +220,45 @@ public enum Renderer {
 				// The camera's own audio, but only when the take has no separate
 				// recorder. A take that has one has it because the camera's is
 				// not the one anybody wants to hear.
+				//
+				// A held stretch gets none of it: a frozen picture with the
+				// sound running on is the one thing that reads as a fault
+				// rather than as a deliberate stop.
 				if clip.audioURL == nil, let audioTrack,
 				   let source = try await asset.loadTracks(withMediaType: .audio).first {
-					try? audioTrack.insertTimeRange(range, of: source, at: at)
+					for stretch in stretches where !stretch.isHeld {
+						try? audioTrack.insertTimeRange(CMTimeRange(
+							start: CMTime(seconds: stretch.from, preferredTimescale: scale),
+							duration: CMTime(seconds: stretch.take, preferredTimescale: scale)),
+							of: source, at: CMTime(seconds: stretch.at, preferredTimescale: scale))
+					}
 				}
 			}
 
 			if let audioURL = clip.audioURL, let audioTrack {
 				let asset = AVURLAsset(url: audioURL)
 				if let source = try await asset.loadTracks(withMediaType: .audio).first {
-					// The clip's times are on the video's clock; the audio file
-					// has a clock of its own, and the take's offset is what
-					// relates them. Subtracting it here is the whole reason the
-					// alignment lives in the take rather than in the media.
-					let audioStart = clip.clip.start - clip.audioOffset
-					let lead = max(0, -audioStart)   // the audio starts after this clip does
-					let available = max(0, clip.duration - lead)
-					if available > 0 {
+					for stretch in stretches where !stretch.isHeld {
+						// The clip's times are on the video's clock; the audio
+						// file has a clock of its own, and the take's offset is
+						// what relates them. Subtracting it here is the whole
+						// reason the alignment lives in the take rather than in
+						// the media.
+						let audioStart = stretch.from - clip.audioOffset
+						let lead = max(0, -audioStart)   // the audio starts after this stretch does
+						let available = max(0, stretch.take - lead)
+						guard available > 0 else { continue }
 						let sourceRange = CMTimeRange(
 							start: CMTime(seconds: max(0, audioStart), preferredTimescale: scale),
 							duration: CMTime(seconds: available, preferredTimescale: scale))
 						try? audioTrack.insertTimeRange(
 							sourceRange, of: source,
-							at: at + CMTime(seconds: lead, preferredTimescale: scale))
+							at: CMTime(seconds: stretch.at + lead, preferredTimescale: scale))
 					}
 				}
 			}
 
-			cursor = at + range.duration
+			cursor = CMTime(seconds: clip.end, preferredTimescale: scale)
 		}
 
 		// The stretches, in the order they play — a shot from a track, or a
@@ -364,7 +444,11 @@ public enum Renderer {
 		// make a frame out of nothing. A project with no cards pays nothing for
 		// this — it is one array being empty.
 		let cards = !resolved.cards.isEmpty
-		if !graded, effects.isEmpty, !painted, !dissolves, !filmed, !cards {
+		// A treatment moves the picture into a rectangle, which is a frame that
+		// is not the frame that was shot — so neither of the cheap paths can
+		// serve it. One array being empty, as above.
+		let treated = resolved.clips.filter { !$0.presentations.isEmpty }
+		if !graded, effects.isEmpty, !painted, !dissolves, !filmed, !cards, treated.isEmpty {
 			let plainComposition = AVMutableVideoComposition(propertiesOf: composition)
 			declareColour(on: plainComposition)
 			plainComposition.renderSize = size
@@ -398,17 +482,28 @@ public enum Renderer {
 		// lifted this used to claim: an extra generation of chroma, and worth it
 		// for a dissolve rather than for a programme of straight cuts.
 		guard dissolves || cards else {
+			// Made once and captured, rather than rebuilt per frame: it is the
+			// same work for every frame, and the treated clips are now looked
+			// up in it.
+			let work = ProgrammeCompositor.Work(
+				size: size, project: resolved.project, baseURL: resolved.baseURL,
+				overlays: resolved.overlays,
+				effects: effects.map { ($0.overlay, $0.renderer) },
+				people: people, treated: treated, stills: stills)
 			let filtered = AVMutableVideoComposition(asset: composition) { request in
 				let time = request.compositionTime.seconds
 				let look = grades.last { time >= $0.start - 1e-6 && time < $0.end + 1e-6 }?.look ?? .none
-				var image = Grading.apply(look, to: request.sourceImage)
-				image = image.transformed(by: Grading.fit(image.extent, into: size))
-				image = Frame.overlays(over: image, at: time, size: size,
-				                       work: ProgrammeCompositor.Work(
-					                       size: size, project: resolved.project,
-					                       baseURL: resolved.baseURL, overlays: resolved.overlays,
-					                       effects: effects.map { ($0.overlay, $0.renderer) },
-					                       people: people))
+				// A held frame stands in for the filler in the track. Graded
+				// the same way, because a hold is part of the shot it stopped.
+				var image: CIImage
+				if let held = work.still(at: time) {
+					image = Grading.apply(look, to: held)
+				} else {
+					image = Grading.apply(look, to: request.sourceImage)
+					image = image.transformed(by: Grading.fit(image.extent, into: size))
+				}
+				image = Frame.picture(image, into: work.picture(at: time), size: size)
+				image = Frame.overlays(over: image, at: time, size: size, work: work)
 				// Unmanaged, and ``context()`` says why — which is not the reason
 				// this comment used to give. AVFoundation owns the buffer here,
 				// so the day management goes on it is the context's
@@ -431,7 +526,8 @@ public enum Renderer {
 		let session = ProgrammeCompositor.register(ProgrammeCompositor.Work(
 			size: size, project: resolved.project, baseURL: resolved.baseURL,
 			overlays: resolved.overlays,
-			effects: effects.map { ($0.overlay, $0.renderer) }, people: people))
+			effects: effects.map { ($0.overlay, $0.renderer) }, people: people,
+			treated: treated, stills: stills))
 
 		let videoComposition = AVMutableVideoComposition()
 		videoComposition.customVideoCompositorClass = ProgrammeCompositor.self
@@ -821,6 +917,27 @@ public enum Renderer {
 		let mix = AVMutableAudioMix()
 		mix.inputParameters = parameters
 		return mix
+	}
+
+	/// One frame of a recording, fitted to the output, for a hold to stand on.
+	///
+	/// `.zero` tolerance at both ends: the frame this returns is the frame the
+	/// programme was on when it stopped, and a generator left to its own
+	/// devices answers with the nearest keyframe — which on a long-GOP screen
+	/// recording can be a second and a half away.
+	private static func still(of asset: AVAsset, at seconds: Double,
+	                          size: CGSize) async throws -> CIImage? {
+		// The guard a card-only project needed: a generator over an asset with
+		// no video track raises an Objective-C exception rather than throwing.
+		guard try await !asset.loadTracks(withMediaType: .video).isEmpty else { return nil }
+		let generator = AVAssetImageGenerator(asset: asset)
+		generator.appliesPreferredTrackTransform = true
+		generator.requestedTimeToleranceBefore = .zero
+		generator.requestedTimeToleranceAfter = .zero
+		let (frame, _) = try await generator.image(
+			at: CMTime(seconds: seconds, preferredTimescale: 600))
+		let image = CIImage(cgImage: frame)
+		return image.transformed(by: Grading.fit(image.extent, into: size))
 	}
 
 	/// Draws the overlays over a file that has already been graded and fitted.

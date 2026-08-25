@@ -12,6 +12,39 @@ import Foundation
 /// where things go; it calls the same painters the rest of the program does.
 enum Frame {
 
+	/// The picture put into a rectangle of the frame, the rest of it black.
+	///
+	/// Fit rather than fill, so a box of the wrong shape letterboxes instead of
+	/// stretching a screen recording — see
+	/// ``Presentation/Rectangle/fitting(aspect:)``. The picture that arrives
+	/// here has already been fitted to the render size, so it fills the frame
+	/// and its aspect is the frame's.
+	///
+	/// The ground is black rather than transparent: what is behind the picture
+	/// at this point is nothing, and a scene drawn over it in the second pass
+	/// needs something to be over.
+	static func picture(_ image: CIImage, into box: Presentation.Rectangle,
+	                    size: CGSize) -> CIImage {
+		guard !box.isWhole, size.width > 0, size.height > 0 else { return image }
+		// The aspect the box has to hold, expressed in the same fractions the
+		// box is in: the frame is not square, so a square box in fractions is
+		// not a square box on screen.
+		let inside = box.fitting(aspect: 1)
+		let target = CGRect(
+			x: inside.x * size.width, y: inside.y * size.height,
+			width: inside.width * size.width, height: inside.height * size.height)
+		let scale = min(target.width / size.width, target.height / size.height)
+		let placed = image
+			.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+			.transformed(by: CGAffineTransform(
+				translationX: target.midX - size.width * scale / 2,
+				y: target.midY - size.height * scale / 2))
+		let ground = CIImage(color: .black)
+			.cropped(to: CGRect(origin: .zero, size: size))
+		return placed.composited(over: ground)
+			.cropped(to: CGRect(origin: .zero, size: size))
+	}
+
 	/// The overlays, in the order the file lists them.
 	///
 	/// **Order is authored, not decided here.** It used to be decided by kind —

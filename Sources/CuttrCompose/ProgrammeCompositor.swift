@@ -32,6 +32,32 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 		let overlays: [ResolvedOverlay]
 		let effects: [(overlay: ResolvedOverlay, renderer: EffectRenderer)]
 		let people: PersonMask?
+		/// The clips carrying a presentation treatment. Only those: a programme
+		/// with none of them looks nothing up and hands its frames back
+		/// untouched, exactly as it did before this feature existed.
+		var treated: [ResolvedClip] = []
+		/// The frame each hold stands on, and the stretch of programme it
+		/// stands there for. What is under it in the track is filler.
+		var stills: [(range: CMTimeRange, image: CIImage)] = []
+
+		/// The picture a hold is holding at this moment, if one is.
+		func still(at time: Double) -> CIImage? {
+			let when = CMTime(seconds: time, preferredTimescale: 600)
+			return stills.first { $0.range.containsTime(when) }?.image
+		}
+
+		/// Where the picture is at this moment of the programme.
+		///
+		/// The compositor's one question about a treatment, and the clip
+		/// answers it — see ``ResolvedClip/picture(atProgramme:)``. Nothing
+		/// here works out an eased fraction for itself.
+		func picture(at time: Double) -> Presentation.Rectangle {
+			for clip in treated where time >= clip.start && time <= clip.end {
+				let box = clip.picture(atProgramme: time)
+				if !box.isWhole { return box }
+			}
+			return .whole
+		}
 
 		/// Whether anything is being drawn into the frame at this moment.
 		///
@@ -41,6 +67,10 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 		/// encoder untouched. Asking the span here is how film mode would fail
 		/// to grade the frames it was meant to have graded before the clip.
 		func busy(at time: Double) -> Bool {
+			// A frame whose picture has been moved cannot be handed back as it
+			// came, whatever else is or is not on it — and neither can one that
+			// is being held, because what is in the track there is filler.
+			if !picture(at: time).isWhole || still(at: time) != nil { return true }
 			if effects.contains(where: { $0.overlay.timing.drawn(at: time) }) {
 				return true
 			}
@@ -142,7 +172,12 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 		// A card has no track and is painted instead. Everything after this
 		// point — the blend, the film, the overlays — cannot tell the
 		// difference, which is the point: a card is the picture underneath.
-		let incoming = source(instruction.incoming, look: instruction.incomingLook)
+		// A held frame stands in for whatever the track has here, which is
+		// filler put there to keep the timeline unbroken. The grade still
+		// applies: a hold is part of the shot it stopped, not a separate one.
+		let held = work.still(at: time).map { Grading.apply(instruction.incomingLook, to: $0) }
+		let incoming = held
+			?? source(instruction.incoming, look: instruction.incomingLook)
 			?? instruction.incomingFill?.image(size: size)
 		let outgoing = source(instruction.outgoing, look: instruction.outgoingLook)
 			?? instruction.outgoingFill?.image(size: size)
@@ -163,6 +198,10 @@ final class ProgrammeCompositor: NSObject, AVVideoCompositing {
 			return
 		}
 
+		// The picture is moved before anything is drawn over it: a scene
+		// playing beside a held recording is over the whole frame, and the
+		// recording is a rectangle within it.
+		image = Frame.picture(image, into: work.picture(at: time), size: size)
 		image = Frame.overlays(over: image, at: time, size: size, work: work)
 
 		guard let buffer = request.renderContext.newPixelBuffer() else {
