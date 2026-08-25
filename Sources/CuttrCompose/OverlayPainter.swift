@@ -48,7 +48,7 @@ public enum OverlayPainter {
 			              resolved: resolved, size: size, opacity: opacity, at: time)
 
 		case .scene(let name, let parameters):
-			guard let scene = project.scenes[name],
+			guard let scene = project.scene(named: name, with: parameters),
 			      let drawn = sceneImage(scene, with: parameters, project: project,
 			                             baseURL: baseURL, size: size,
 			                             at: time - resolved.start) else { return nil }

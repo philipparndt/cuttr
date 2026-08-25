@@ -383,6 +383,10 @@ public enum ProjectWriter {
 				out += "\(indent)  sounds:\n"
 				out += sounds(entry.sounds, indent: indent + "    ")
 			}
+			if !entry.presentations.isEmpty {
+				out += "\(indent)  presentations:\n"
+				out += presentations(entry.presentations, indent: indent + "    ")
+			}
 		}
 		return out
 	}
@@ -522,6 +526,47 @@ public enum ProjectWriter {
 			}
 			if sound.ducks != 0 {
 				out += "\(indent)  ducks: \(trim(sound.ducks))   # dB off the programme's own sound\n"
+			}
+		}
+		return out
+	}
+
+	/// The treatments on a placement.
+	///
+	/// `at:` first because when it happens is what somebody scans the block
+	/// for, then where the picture goes and how long it stays, then the scene
+	/// and what fills it. Only `at:` and `into:` and `scene:` are always
+	/// written; the rest are left out when they are what a treatment is
+	/// without them, so a plain one stays three lines.
+	///
+	/// The column the values line up in is the width of the widest key the
+	/// treatment actually has — `scene:` for nearly all of them, and `reveal:`
+	/// for one that spreads its lines across the hold. The same rule
+	/// ``cardEntry(_:_:_:label:)`` follows, and for the same reason: a column
+	/// wide enough for a key that is not there is a space on every line paying
+	/// for nothing.
+	private static func presentations(_ list: [Presentation], indent: String = "  ") -> String {
+		var out = ""
+		for (index, shown) in list.enumerated() {
+			if index > 0 { out += "\n" }
+			let column = shown.reveal == .together ? 7 : 8
+			func key(_ name: String) -> String {
+				(name + ":").padding(toLength: column, withPad: " ", startingAt: 0)
+			}
+			out += "\(indent)- \(key("at"))\(Timecode.string(shown.at))\n"
+			out += "\(indent)  \(key("into"))[" + [shown.into.x, shown.into.y,
+			                                        shown.into.width, shown.into.height]
+				.map(trim).joined(separator: ", ") + "]\n"
+			if shown.hold > 0 { out += "\(indent)  \(key("hold"))\(trim(shown.hold))\n" }
+			if shown.ramp != 0.6 { out += "\(indent)  \(key("ramp"))\(trim(shown.ramp))\n" }
+			out += "\(indent)  \(key("scene"))\(scalar(shown.scene))\n"
+			if !shown.parameters.isEmpty {
+				let pairs = shown.parameters.keys.sorted()
+					.map { "\(flow($0)): \(flow(shown.parameters[$0] ?? ""))" }
+				out += "\(indent)  \(key("with")){" + pairs.joined(separator: ", ") + "}\n"
+			}
+			if shown.reveal != .together {
+				out += "\(indent)  \(key("reveal"))\(shown.reveal.rawValue)\n"
 			}
 		}
 		return out

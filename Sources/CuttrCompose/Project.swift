@@ -185,6 +185,21 @@ public struct Project: Sendable, Equatable {
 		guard let name else { return TextStyle.lowerThird }
 		return styles[name] ?? TextStyle.builtIn[name] ?? TextStyle.lowerThird
 	}
+
+	/// A scene by name, with the parameters it is being used with.
+	///
+	/// The project's own first, then the two this program brings — the same
+	/// order ``style(named:)`` uses, and for the same reason: a project that
+	/// writes its own `bullets` gets its own `bullets`, and nothing has to be
+	/// renamed to escape a built-in.
+	///
+	/// The parameters are handed in because a built-in is *made* out of them:
+	/// `bullets` with three lines is a different scene from `bullets` with
+	/// five, where an authored one is the same scene with different words in
+	/// it.
+	public func scene(named name: String, with parameters: [String: String] = [:]) -> Scene? {
+		scenes[name] ?? Scene.builtIn(name, with: parameters)
+	}
 }
 
 struct UnknownProjectKeys: @unchecked Sendable {
@@ -221,6 +236,153 @@ public struct Output: Sendable, Equatable {
 	}
 
 	public var size: CGSize { CGSize(width: width, height: height) }
+}
+
+/// The picture moved aside, held, and something said while it is held.
+///
+/// **What it is for.** A screen recording explains what somebody did and not
+/// why. An explainer stops, moves the recording aside, puts the point on screen
+/// beside it, and carries on from where it stopped — and that last clause is the
+/// hard one, because it means the programme gets longer.
+public struct Presentation: Sendable, Equatable {
+
+	/// When it happens, **on the take's clock** — the same clock the clip's own
+	/// marks are on.
+	///
+	/// Not the programme's, and that is not a detail. A hold *changes* programme
+	/// times, so a treatment written in them would need the layout to know where
+	/// it is while the layout needed it to know how long the clip runs. The
+	/// take's clock is known before anything is laid out, and it is the clock
+	/// everything else in a take is on.
+	public var at: Double
+
+	/// Where the picture goes: `[x, y, width, height]` in fractions of the
+	/// frame, as everything else in this file that places something is.
+	///
+	/// One rectangle rather than a zoom and a side. Those are the same
+	/// information in two numbers that can disagree — "forty per cent on the
+	/// left" has to say what "on the left" means at forty per cent — and the
+	/// picture keeps its shape inside it either way.
+	public var into: Rectangle
+
+	/// How long the picture stands still, in seconds. The programme gets this
+	/// much longer; nothing of the recording is skipped.
+	public var hold: Double
+
+	/// How long the travel takes at each end, in seconds. Eased, because a
+	/// picture that arrives at a stop linearly reads as a cut to a still.
+	public var ramp: Double
+
+	/// The scene that plays while it is held, and what to fill it with.
+	public var scene: String
+	public var parameters: [String: String]
+
+	/// Whether the scene's snippets are all there at once or arrive across the
+	/// hold. Its own key rather than one more entry in `with:` because it is
+	/// the one parameter every built-in scene answers to, and a control in the
+	/// panel needs somewhere to be.
+	public var reveal: Reveal
+
+	public enum Reveal: String, Sendable, CaseIterable {
+		case together
+		case oneByOne = "one-by-one"
+	}
+
+	public init(at: Double, into: Rectangle, hold: Double, ramp: Double = 0.6,
+	            scene: String, parameters: [String: String] = [:],
+	            reveal: Reveal = .together) {
+		self.at = at
+		self.into = into
+		self.hold = max(0, hold)
+		self.ramp = max(0, ramp)
+		self.scene = scene
+		self.parameters = parameters
+		self.reveal = reveal
+	}
+
+	/// How long the whole gesture lasts: out, held, back.
+	public var span: Double { ramp + hold + ramp }
+
+	/// Where the picture is, `time` seconds into that gesture.
+	///
+	/// Eased at both ends with a smoothstep. A linear travel to a stop reads as
+	/// a cut to a still — the picture arrives at full speed and simply ceases —
+	/// and this is the one thing in the feature that has to look deliberate.
+	public func frame(at time: Double) -> Rectangle {
+		guard ramp > 0 else { return time < 0 || time > span ? .whole : into }
+		if time <= 0 || time >= span { return .whole }
+		if time < ramp { return Rectangle.between(.whole, into, Self.eased(time / ramp)) }
+		if time <= ramp + hold { return into }
+		return Rectangle.between(into, .whole, Self.eased((time - ramp - hold) / ramp))
+	}
+
+	/// Smoothstep. Slow away, quick across, slow into the stop.
+	static func eased(_ t: Double) -> Double {
+		let t = min(1, max(0, t))
+		return t * t * (3 - 2 * t)
+	}
+
+	/// A box in the frame, in fractions of it.
+	public struct Rectangle: Sendable, Equatable {
+		public var x: Double
+		public var y: Double
+		public var width: Double
+		public var height: Double
+
+		public init(x: Double, y: Double, width: Double, height: Double) {
+			self.x = x
+			self.y = y
+			self.width = max(0, width)
+			self.height = max(0, height)
+		}
+
+		/// The whole frame, which is where the picture is when nothing is
+		/// happening to it.
+		public static let whole = Rectangle(x: 0, y: 0, width: 1, height: 1)
+
+		public var isWhole: Bool { self == .whole }
+
+		/// The larger band of frame this box leaves empty, left or right.
+		///
+		/// What a built-in scene lays itself out in. Left and right only: a
+		/// picture pushed to one side is what this feature is for, and a band
+		/// above or below a full-width picture is not somewhere three sentences
+		/// go.
+		public var free: (x: Double, width: Double) {
+			let toTheLeft = max(0, x)
+			let toTheRight = max(0, 1 - (x + width))
+			return toTheLeft > toTheRight ? (0, toTheLeft) : (x + width, toTheRight)
+		}
+
+		/// Part of the way from one box to another.
+		public static func between(_ a: Rectangle, _ b: Rectangle, _ t: Double) -> Rectangle {
+			func mix(_ x: Double, _ y: Double) -> Double { x + (y - x) * t }
+			return Rectangle(x: mix(a.x, b.x), y: mix(a.y, b.y),
+			                 width: mix(a.width, b.width), height: mix(a.height, b.height))
+		}
+
+		/// The largest box of the given aspect that fits inside this one,
+		/// centred in it.
+		///
+		/// Fit rather than fill, so a rectangle of the wrong shape letterboxes
+		/// instead of stretching the picture. Somebody sketching a box in a
+		/// panel will draw the wrong aspect nearly every time, and a distorted
+		/// screen recording is worse than a margin.
+		public func fitting(aspect: Double) -> Rectangle {
+			guard aspect > 0, width > 0, height > 0 else { return self }
+			// Both sides are fractions of a frame that is not itself square, so
+			// the aspect handed in is already expressed in those fractions.
+			let mine = width / height
+			if mine > aspect {
+				let narrowed = height * aspect
+				return Rectangle(x: x + (width - narrowed) / 2, y: y,
+				                 width: narrowed, height: height)
+			}
+			let shortened = width / aspect
+			return Rectangle(x: x, y: y + (height - shortened) / 2,
+			                 width: width, height: shortened)
+		}
+	}
 }
 
 /// How loud the finished programme should be.
@@ -324,9 +486,17 @@ public struct TimelineEntry: Sendable, Equatable {
 	/// this entry is on. A sting on one shot rather than on every use of it.
 	public var sounds: [Sound]
 
+	/// The presentation treatments on *this* use of the recording.
+	///
+	/// Written inside the entry, beside the overlays and the sounds, and for the
+	/// same reason they are: a hold is a fact about this placement. The same
+	/// clip put on the programme twice should not stop in both.
+	public var presentations: [Presentation] = []
+
 	public static func == (a: TimelineEntry, b: TimelineEntry) -> Bool {
 		a.source == b.source && a.transition == b.transition && a.label == b.label
 			&& a.trim == b.trim && a.overlays == b.overlays && a.sounds == b.sounds
+			&& a.presentations == b.presentations
 	}
 
 	public init(

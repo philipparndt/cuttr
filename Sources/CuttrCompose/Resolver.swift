@@ -100,17 +100,118 @@ public struct ResolvedClip: Sendable {
 	/// What is drawn while the two shots overlap, with `seconds` already cut
 	/// down to the overlap that fitted.
 	public var blend: Transition = .cut
-	public var end: Double { start + clip.duration }
-	public var duration: Double { clip.duration }
+	/// The presentation treatments on this placement, in the order the file had
+	/// them and each one's `at:` on the take's clock — kept sorted, because the
+	/// mapping below walks them and expects to meet them in order.
+	///
+	/// A treatment with no hold moves the picture and gives the programme back
+	/// nothing, which is legal and costs the clock nothing.
+	public var presentations: [Presentation] = []
+
+	/// How much longer this clip is on the programme than it is on the take.
+	public var held: Double { presentations.reduce(0) { $0 + $1.hold } }
+
+	public var end: Double { start + duration }
+
+	/// **Not** the clip's own length any more. A held clip occupies its own
+	/// length plus every hold on it: nothing of the recording is skipped, the
+	/// picture merely stands still part-way through.
+	public var duration: Double { clip.duration + held }
 
 	/// A time on the programme's clock, expressed on this take's clock.
+	///
+	/// Piecewise, and this is the method the whole feature turns on. Walking
+	/// the holds in order: anything before the next one maps straight across;
+	/// anything inside one is the moment the hold began — the take's clock
+	/// stands still while the picture does; anything after it has that hold's
+	/// length taken off, and the walk carries on with the rest.
 	public func takeTime(forProgramme time: Double) -> Double {
-		clip.start + (time - start)
+		var remaining = time - start
+		for shown in presentations where shown.hold > 0 {
+			// How far into the clip this treatment is, on the take's clock.
+			// It is compared against `remaining`, which has already had every
+			// earlier hold taken off it — so the two are on the same clock by
+			// the time they meet, and neither has to know how many holds have
+			// gone by.
+			let begins = shown.at - clip.start
+			if remaining <= begins { break }
+			if remaining < begins + shown.hold { return clip.start + begins }
+			remaining -= shown.hold
+		}
+		return clip.start + remaining
 	}
 
-	/// The reverse.
+	/// The reverse: a time on the take's clock put back on the programme's, by
+	/// adding every hold that has already happened by then.
+	///
+	/// A take time that falls exactly on a hold maps to where the hold *begins*
+	/// — the first moment the picture is showing that frame — which is what
+	/// makes this the inverse of the method above.
 	public func programmeTime(forTake time: Double) -> Double {
-		start + (time - clip.start)
+		var out = start + (time - clip.start)
+		for shown in presentations where shown.hold > 0 {
+			guard shown.at < time else { break }
+			out += shown.hold
+		}
+		return out
+	}
+
+	/// One stretch of this clip as it plays: where it comes from in the take,
+	/// how much of the take that is, and where it lands on the programme.
+	public struct Playing: Sendable, Equatable {
+		public let from: Double
+		/// How much of the take this stretch plays. Nought for a held frame,
+		/// which plays one frame for however long the hold lasts.
+		public let take: Double
+		public let at: Double
+		public let length: Double
+		public var isHeld: Bool { take == 0 }
+	}
+
+	/// How this clip is actually laid down: one stretch when nothing is held,
+	/// and a split with a frozen stretch between for each hold.
+	///
+	/// The renderer's answer and the strip's, so neither has to work out where
+	/// a hold falls for itself.
+	public var playing: [Playing] {
+		var out: [Playing] = []
+		var from = clip.start
+		var at = start
+		for shown in presentations where shown.hold > 0 {
+			let mark = min(max(shown.at, clip.start), clip.end)
+			let run = mark - from
+			if run > 0 {
+				out.append(Playing(from: from, take: run, at: at, length: run))
+				at += run
+			}
+			out.append(Playing(from: mark, take: 0, at: at, length: shown.hold))
+			at += shown.hold
+			from = mark
+		}
+		let rest = clip.end - from
+		if rest > 0 { out.append(Playing(from: from, take: rest, at: at, length: rest)) }
+		return out
+	}
+
+	/// The rectangle the picture occupies at a moment of the **programme**,
+	/// and whether a treatment is on at all.
+	///
+	/// One place, so the compositor, the strip and the panel cannot disagree
+	/// about where the picture is. See ``Presentation/frame(at:)`` for the
+	/// easing; this method's job is only to find which treatment a programme
+	/// time is inside and hand it the time on its own terms.
+	public func picture(atProgramme time: Double) -> Presentation.Rectangle {
+		var passed: Double = 0
+		for shown in presentations {
+			// The treatment's span on the programme's clock: the ramp out, the
+			// hold, and the ramp back.
+			let begins = start + (shown.at - clip.start) + passed - shown.ramp
+			let ends = begins + shown.ramp + shown.hold + shown.ramp
+			if time < begins { break }
+			if time <= ends { return shown.frame(at: time - begins) }
+			passed += shown.hold
+		}
+		return .whole
 	}
 
 	/// This clip's level at a moment of the programme, in decibels: the flat
@@ -505,6 +606,9 @@ public enum Resolver {
 
 				let trim = entry.trim
 				let label = entry.label
+				// Sorted here, once, because both the mapping and the layout
+				// walk them in order and neither should have to wonder.
+				let treatments = entry.presentations.sorted { $0.at < $1.at }
 				// A list or a query is several clips, and an overlay written on
 				// that entry covers all of them: from where the first one
 				// started to where the last one ended.
@@ -552,9 +656,20 @@ public enum Resolver {
 						entry: path,
 						start: cursor,
 						transition: overlap,
-						blend: blend))
-					cursor += clip.duration
-					previousLength = clip.duration
+						blend: blend,
+						// `at:` is on the take's clock, the same clock the clip
+						// marks are on, so which clip of a list a treatment
+						// belongs to is a question the file already answers.
+						presentations: treatments.filter {
+							$0.at >= clip.start && $0.at <= clip.end
+						}))
+					// The programme is longer by the holds. Everything after
+					// this clip begins later, and `previousLength` — which is
+					// what a dissolve is allowed half of — is the length as
+					// played, not as recorded.
+					let played = clip.duration + clips[clips.count - 1].held
+					cursor += played
+					previousLength = played
 					name(label, from: placedAt, to: cursor, depth: depth)
 					laid = (min(laid?.start ?? placedAt, placedAt), cursor)
 				}
@@ -656,8 +771,21 @@ public enum Resolver {
 					guard high > low else { continue }
 					let inside = solved.samples.filter { $0.time >= low && $0.time <= high }
 					guard !inside.isEmpty else { continue }
-					let mapped: [(time: Double, point: CGPoint)] =
-						inside.map { (time: clip.programmeTime(forTake: $0.time), point: $0.point) }
+					var mapped: [(time: Double, point: CGPoint)] = []
+					for sample in inside {
+						let when = clip.programmeTime(forTake: sample.time)
+						// A hold between this sample and the last one: the
+						// picture was standing still for all of it, so the mark
+						// was too. Without this the path slides across the hold
+						// and the tracked face ends up where the recording
+						// would have been if it had never stopped — which is
+						// the drift the mapping exists to prevent.
+						if let previous = mapped.last,
+						   when - previous.time > (sample.time - clip.takeTime(forProgramme: previous.time)) + 1e-6 {
+							mapped.append((when - 1e-4, previous.point))
+						}
+						mapped.append((time: when, point: sample.point))
+					}
 					// Held at the last known position right up to the moment the
 					// next stretch begins, so a gap between two uses of the shot
 					// is a hold and a jump rather than a slide across the cut.
@@ -823,6 +951,58 @@ public enum Resolver {
 
 		for (index, overlay) in project.overlays.enumerated() {
 			try place(overlay, from: .project(index), covering: nil)
+		}
+
+		// And the treatments' scenes, which are ordinary scene overlays laid on
+		// the stretch the picture is held for.
+		//
+		// Made here rather than written in the file because they are not a
+		// second thing to keep in step: what the file says is `scene: bullets`
+		// on a treatment, and when that scene is on is decided entirely by the
+		// hold. Anything downstream — the layer pass, the painter, the preview
+		// — sees a scene overlay and treats it as one.
+		for clip in clips {
+			var passed: Double = 0
+			for shown in clip.presentations {
+				defer { passed += shown.hold }
+				guard shown.hold > 0, !shown.scene.isEmpty else { continue }
+				// What the scene cannot work out for itself: how long it is up,
+				// whether its lines arrive together, and which part of the
+				// frame the picture has left free. A built-in reads these; an
+				// authored scene ignores them, as it ignores any parameter it
+				// does not name.
+				var parameters = shown.parameters
+				parameters["hold"] = String(shown.hold)
+				parameters["reveal"] = shown.reveal.rawValue
+				let free = shown.into.free
+				parameters["column-x"] = String(free.x)
+				parameters["column-width"] = String(free.width)
+				guard project.scene(named: shown.scene, with: parameters) != nil else {
+					// Named and not rendered empty. A hold with nothing in it
+					// is six seconds of a still picture and no explanation of
+					// why, which is the worst way to find out a name is wrong.
+					warnings.append("Nothing is called `\(shown.scene)`, so the "
+						+ "presentation on `\(clip.reference)` holds the picture and "
+						+ "shows nothing.")
+					continue
+				}
+				let begins = clip.start + (shown.at - clip.clip.start) + passed
+				overlays.append(ResolvedOverlay(
+					overlay: Overlay(
+						kind: .scene(shown.scene, with: parameters),
+						appearances: [Overlay.Appearance(
+							.times(from: begins, to: begins + shown.hold))],
+						// The scene's own keys bring its parts in and take them
+						// out; an overlay slide over the top of that would be
+						// two animations arguing. It dissolves at the edges
+						// only because the hold has hard ends and a scene that
+						// vanishes with the picture's first frame of movement
+						// reads as a dropped frame.
+						arrival: .fade(over: 0.25),
+						departure: .fade(over: 0.25)),
+					origin: .entry(path: clip.entry, index: 0), appearance: 0,
+					start: begins, end: begins + shown.hold, path: nil))
+			}
 		}
 
 		// Spelled out rather than chained: the type checker gives up on the

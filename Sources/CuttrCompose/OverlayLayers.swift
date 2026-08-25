@@ -66,8 +66,8 @@ public enum OverlayLayers {
 		// buys is that the sequence has *one* implementation — the painter's,
 		// which the preview and the export then share exactly — and a peak memory
 		// that does not depend on how long the component is.
-		if case .scene(let name, _) = overlay.kind,
-		   project.scenes[name]?.hasFrames == true { return false }
+		if case .scene(let name, let parameters) = overlay.kind,
+		   project.scene(named: name, with: parameters)?.hasFrames == true { return false }
 		// Film mode, the aberration and the tape *are* the picture rather than
 		// something laid over it: they are applied in the frame pass with the
 		// effects, and a second pass that drew film mode as a layer would
@@ -139,7 +139,7 @@ public enum OverlayLayers {
 			// a programme covered everything after it, and a second card looked
 			// as though it had not been rendered at all. It had; it was
 			// underneath.
-			guard let scene = project.scenes[name] else { return placer }
+			guard let scene = project.scene(named: name, with: parameters) else { return placer }
 			let tree = sceneLayer(scene, with: parameters, project: project, baseURL: baseURL,
 			                      size: size, resolved: resolved, host: host)
 			tree.opacity = 0

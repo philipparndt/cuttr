@@ -168,14 +168,21 @@ public enum ProjectReader {
 					// of this entry", which is the point of writing it here.
 					let over = try list(m["overlays"]).compactMap(mapping).compactMap(readOverlay)
 					let under = try list(m["sounds"]).compactMap(mapping).compactMap(readSound)
+					// The treatments on this placement. Read here rather than
+					// at the top level because that is the only place they can
+					// mean anything: `at:` is on the clip's own clock.
+					let shown = try list(m["presentations"]).compactMap(mapping)
+						.compactMap(readPresentation)
 					if let group = (m["group"] as? String).flatMap(nonEmpty) {
 						out.append(TimelineEntry(
 							group: Slug.make(from: group),
 							entries: try readEntries(m["clips"]),
 							transition: transition, overlays: over, sounds: under))
 					} else if let query = (m["query"] as? String).flatMap(nonEmpty) {
-						out.append(try TimelineEntry(query: query, transition: transition,
-						                             overlays: over, sounds: under))
+						var made = try TimelineEntry(query: query, transition: transition,
+						                             overlays: over, sounds: under)
+						made.presentations = shown
+						out.append(made)
 					} else if let tag = (m["tag"] as? String).flatMap(nonEmpty) {
 						// `tag:` is sugar for a one-term query, and the
 						// commonest one — worth its own key so the simple case
@@ -190,13 +197,17 @@ public enum ProjectReader {
 						out.append(TimelineEntry(card: card, transition: transition,
 						                         label: label, overlays: over, sounds: under))
 					} else if let clips = m["clips"] as? [Any] {
-						out.append(TimelineEntry(
+						var made = TimelineEntry(
 							list: clips.compactMap { ($0 as? String).map(ClipReference.init) },
-							transition: transition, overlays: over, sounds: under))
+							transition: transition, overlays: over, sounds: under)
+						made.presentations = shown
+						out.append(made)
 					} else if let clip = (m["clip"] as? String).flatMap(nonEmpty) {
-						out.append(TimelineEntry(
+						var made = TimelineEntry(
 							clip: ClipReference(clip), transition: transition,
-							label: label, trim: trim, overlays: over, sounds: under))
+							label: label, trim: trim, overlays: over, sounds: under)
+						made.presentations = shown
+						out.append(made)
 					}
 				}
 			}
@@ -491,6 +502,29 @@ public enum ProjectReader {
 	///
 	/// The same reason ``readOverlay(_:)`` is a function: there are two places
 	/// a sound can be written and both have to understand the same keys.
+	/// One treatment. Anything without a `scene:` or a rectangle is not one and
+	/// is skipped rather than half-read: a treatment that holds the picture and
+	/// shows nothing is a pause somebody did not ask for.
+	private static func readPresentation(_ m: [String: Any]) throws -> Presentation? {
+		guard let scene = (m["scene"] as? String).flatMap(nonEmpty),
+		      let box = m["into"] as? [Any], box.count == 4 else { return nil }
+		let numbers = box.compactMap { number($0) }
+		guard numbers.count == 4 else { return nil }
+		var parameters: [String: String] = [:]
+		for (key, value) in mapping(m["with"]) ?? [:] {
+			if let said = value as? String { parameters[key] = said }
+		}
+		return Presentation(
+			at: try time(m["at"], key: "at") ?? 0,
+			into: Presentation.Rectangle(x: numbers[0], y: numbers[1],
+			                             width: numbers[2], height: numbers[3]),
+			hold: try time(m["hold"], key: "hold") ?? 0,
+			ramp: try time(m["ramp"], key: "ramp") ?? 0.6,
+			scene: scene, parameters: parameters,
+			reveal: (m["reveal"] as? String).flatMap(Presentation.Reveal.init(rawValue:))
+				?? .together)
+	}
+
 	static func readSound(_ m: [String: Any]) throws -> Sound? {
 		guard let file = (m["file"] as? String).flatMap(nonEmpty) else { return nil }
 		// A `when:` list is read as its first range. A second stretch of the
