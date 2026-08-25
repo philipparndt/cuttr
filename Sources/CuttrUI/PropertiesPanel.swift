@@ -290,6 +290,10 @@ public final class PropertiesPanel: NSView {
 		case .sound(let origin):
 			guard let sound = project.sound(at: origin) else { return }
 			soundForm(origin, sound)
+		case .presentation(let path, let index):
+			guard let entry = project.entry(at: path),
+			      entry.presentations.indices.contains(index) else { return }
+			presentationForm(path, index, entry.presentations[index])
 		case .overlay(let origin):
 			guard let overlay = project.overlay(at: origin) else { return }
 			overlayForm(origin, overlay)
@@ -378,6 +382,11 @@ public final class PropertiesPanel: NSView {
 		case .sound(let origin):
 			guard let sound = project.sound(at: origin) else { return ("project", nil, []) }
 			return (sound.file, .sound, carriedRelations(origin, anchor: nil, appearances: 1))
+		case .presentation(let path, let index):
+			guard let entry = project.entry(at: path),
+			      entry.presentations.indices.contains(index) else { return ("project", nil, []) }
+			return (presentationName(entry.presentations[index]), .presentation,
+			        presentationRelations(path, entry, entry.presentations[index]))
 		}
 	}
 
@@ -468,6 +477,35 @@ public final class PropertiesPanel: NSView {
 
 	/// The relationships an overlay or a sound has: what it is written inside,
 	/// what it follows, when it is on.
+	/// What a treatment is called at the head of the panel.
+	///
+	/// The scene and the moment, which is how somebody picked this row out of
+	/// three under one clip.
+	private func presentationName(_ shown: Presentation) -> String {
+		let name = shown.scene.isEmpty ? "presentation" : shown.scene
+		return "\(name) at \(Timecode.string(shown.at))"
+	}
+
+	/// What it depends on: the placement it holds, and where that lands.
+	private func presentationRelations(_ path: [Int], _ entry: TimelineEntry,
+	                                   _ shown: Presentation) -> [SubjectLine.Relation] {
+		var out: [SubjectLine.Relation] = [
+			SubjectLine.Relation("holds", entryName(entry), kind: entryKind(entry)) {
+				[weak self] in self?.onGoTo?(.entry(path))
+			},
+		]
+		if shown.hold > 0 {
+			out.append(SubjectLine.Relation(
+				"for", "\(TakeWriter.number(shown.hold, places: 1))s"))
+		}
+		if let moment = momentOfSelection {
+			out.append(SubjectLine.Relation("at", Timecode.string(moment)) {
+				[weak self] in self?.onScrub?(moment)
+			})
+		}
+		return out
+	}
+
 	private func carriedRelations(_ origin: Origin, anchor: String?,
 	                              appearances: Int) -> [SubjectLine.Relation] {
 		var out: [SubjectLine.Relation] = []
@@ -777,18 +815,19 @@ public final class PropertiesPanel: NSView {
 		}
 		field("transition", arrival, note: advice(how))
 
-		presentationForm(path, entry)
+		presentationsOnEntry(path, entry)
 	}
 
 	// MARK: - presentation
 
-	/// The treatments on this placement: where the picture goes, how long it
-	/// stands there, and what is said beside it.
+	/// Somewhere to add one, on the entry the treatments belong to.
 	///
-	/// On the entry rather than in `overlays:` because that is where the file
-	/// puts them, and the file puts them there because a hold is a fact about
-	/// this use of the recording — see ``CuttrCompose/Presentation``.
-	private func presentationForm(_ path: [Int], _ entry: TimelineEntry) {
+	/// Only the button. A treatment is a row of its own in the tree and is
+	/// edited when it is selected there — three of them listed one after
+	/// another on the entry's form was a column somebody had to count down to
+	/// find the second, and it left no way to say *which* one the panel was
+	/// about.
+	private func presentationsOnEntry(_ path: [Int], _ entry: TimelineEntry) {
 		// A card has no picture to move aside, and a section is not a picture,
 		// it is a list of them.
 		switch entry.source {
@@ -796,7 +835,34 @@ public final class PropertiesPanel: NSView {
 		case .clip, .list, .query: break
 		}
 
-		func change(_ index: Int, _ edit: @escaping (inout Presentation) -> Void) {
+		let count = entry.presentations.count
+		section("presentations")
+		field("", [small(count == 0 ? "add a presentation" : "add another") { [weak self] in
+			guard let self else { return }
+			var next = self.project
+			guard var target = next.entry(at: path) else { return }
+			// Four seconds beside the picture with nothing in it yet, which is
+			// what somebody who has just pressed this is about to fill in — and
+			// the new row is selected, because that is where they fill it in.
+			target.presentations.append(Presentation(
+				at: 0, into: Presentation.Rectangle(x: 0.04, y: 0.2, width: 0.44, height: 0.6),
+				hold: 4, scene: "bullets"))
+			next.replaceEntry(at: path, with: target)
+			self.commit(next)
+			self.onGoTo?(.presentation(path: path, index: target.presentations.count - 1))
+		}], note: count == 0
+			? "move the picture aside, stop it, and put the point on screen beside it"
+			: "\(count) on this one, each a row under it in the programme — "
+				+ "select one to edit it")
+	}
+
+	/// One treatment: where the picture goes, how long it stops, and what plays
+	/// beside it while it does.
+	///
+	/// Written inside the entry, because a hold is a fact about this use of the
+	/// recording — see ``CuttrCompose/Presentation``.
+	private func presentationForm(_ path: [Int], _ index: Int, _ shown: Presentation) {
+		func change(_ edit: @escaping (inout Presentation) -> Void) {
 			var next = project
 			guard var target = next.entry(at: path),
 			      target.presentations.indices.contains(index) else { return }
@@ -809,103 +875,74 @@ public final class PropertiesPanel: NSView {
 		// saying `bullets` twice when the project has one of its own.
 		let known = Set(project.scenes.keys).union(Scene.builtInNames).sorted()
 
-		for (index, shown) in entry.presentations.enumerated() {
-			section(entry.presentations.count == 1
-				? "presentation" : "presentation \(index + 1)")
+		section("when")
+		field("at", [
+			text(Timecode.string(shown.at), width: 96, placeholder: "00:12.000") { value in
+				guard let seconds = Timecode.parse(value) else { return }
+				change { $0.at = max(0, seconds) }
+			},
+		], note: "on the take's clock, the same clock the clip's own marks are on — "
+			+ "so re-trimming the clip does not move it")
 
-			field("at", [
-				text(Timecode.string(shown.at), width: 96, placeholder: "00:12.000") { value in
-					guard let seconds = Timecode.parse(value) else { return }
-					change(index) { $0.at = max(0, seconds) }
-				},
-				small("remove") { [weak self] in
-					guard let self else { return }
-					var next = self.project
-					guard var target = next.entry(at: path) else { return }
-					target.presentations.remove(at: index)
-					next.replaceEntry(at: path, with: target)
-					self.commit(next)
-				},
-			], note: "on the take's clock, the same clock the clip's own marks are on — "
-				+ "so re-trimming the clip does not move it")
+		field("hold", [
+			number(shown.hold, width: 68) { value in change { $0.hold = max(0, value) } },
+			label("seconds, and the ramp"),
+			number(shown.ramp, width: 68) { value in change { $0.ramp = max(0, value) } },
+		], note: "the programme gets longer by the hold and nothing of the recording is "
+			+ "skipped — its sound stops with the picture, so narration goes on the "
+			+ "separate recorder")
 
-			field("into", [
-				number(shown.into.x, width: 64) { value in change(index) { $0.into.x = value } },
-				number(shown.into.y, width: 64) { value in change(index) { $0.into.y = value } },
-				number(shown.into.width, width: 64) { value in
-					change(index) { $0.into.width = max(0, value) }
-				},
-				number(shown.into.height, width: 64) { value in
-					change(index) { $0.into.height = max(0, value) }
-				},
-				label("x, y, w, h"),
-			], note: "fractions of the frame, origin bottom left — the picture fits inside "
-				+ "this box and keeps its shape, so a box of the wrong aspect letterboxes")
+		section("where the picture goes")
+		field("side", [
+			small("left") { change { $0.into = Presentation.Rectangle(
+				x: 0.04, y: 0.2, width: 0.44, height: 0.6) } },
+			small("right") { change { $0.into = Presentation.Rectangle(
+				x: 0.52, y: 0.2, width: 0.44, height: 0.6) } },
+			small("whole frame") { change { $0.into = .whole } },
+		], note: "the two anybody wants, and the way back — a scene lays itself out "
+			+ "in whichever side is left free")
 
-			field("side", [
-				small("left") { change(index) { $0.into = Presentation.Rectangle(
-					x: 0.04, y: 0.2, width: 0.44, height: 0.6) } },
-				small("right") { change(index) { $0.into = Presentation.Rectangle(
-					x: 0.52, y: 0.2, width: 0.44, height: 0.6) } },
-				small("whole frame") { change(index) { $0.into = .whole } },
-			], note: "the two anybody wants, and the way back — a scene lays itself out "
-				+ "in whichever side is left free")
+		field("into", [
+			number(shown.into.x, width: 64) { value in change { $0.into.x = value } },
+			number(shown.into.y, width: 64) { value in change { $0.into.y = value } },
+			number(shown.into.width, width: 64) { value in
+				change { $0.into.width = max(0, value) }
+			},
+			number(shown.into.height, width: 64) { value in
+				change { $0.into.height = max(0, value) }
+			},
+		], note: "x, y, width, height — fractions of the frame, origin bottom left. The "
+			+ "picture fits inside this box and keeps its shape, so a box of the wrong "
+			+ "aspect letterboxes rather than stretching")
 
-			field("hold", [
-				number(shown.hold, width: 68) { value in change(index) { $0.hold = max(0, value) } },
-				label("seconds, and the ramp"),
-				number(shown.ramp, width: 68) { value in change(index) { $0.ramp = max(0, value) } },
-			], note: "the programme gets longer by the hold and nothing of the recording is "
-				+ "skipped — its sound stops with the picture, so narration goes on the "
-				+ "separate recorder")
+		section("what plays beside it")
+		field("scene", [
+			combo(shown.scene, values: known, width: 180) { value in
+				change { $0.scene = value.trimmingCharacters(in: .whitespaces) }
+			},
+			pop(Presentation.Reveal.allCases.map(\.rawValue),
+			    selected: Presentation.Reveal.allCases.firstIndex(of: shown.reveal) ?? 0) { pick in
+				change { $0.reveal = Presentation.Reveal.allCases[pick] }
+			},
+		], note: "`bullets` and `boxes` come with the program and take the lines below; "
+			+ "a scene of your own by that name wins")
 
-			field("scene", [
-				combo(shown.scene, values: known, width: 180) { value in
-					change(index) { $0.scene = value.trimmingCharacters(in: .whitespaces) }
+		// The five the built-ins take. Shown for any scene, because an authored
+		// one fills `{{one}}` from exactly the same place.
+		for name in ["one", "two", "three", "four", "five"] {
+			field(name, [
+				text(shown.parameters[name] ?? "", width: 240,
+				     placeholder: name == "one" ? "the first line" : "") { value in
+					let said = value.trimmingCharacters(in: .whitespaces)
+					change {
+						if said.isEmpty { $0.parameters.removeValue(forKey: name) }
+						else { $0.parameters[name] = said }
+					}
 				},
-				pop(Presentation.Reveal.allCases.map(\.rawValue),
-				    selected: Presentation.Reveal.allCases.firstIndex(of: shown.reveal) ?? 0) { pick in
-					change(index) { $0.reveal = Presentation.Reveal.allCases[pick] }
-				},
-			], note: "`bullets` and `boxes` come with the program and take the lines below; "
-				+ "a scene of your own by that name wins")
-
-			// The five the built-ins take. Shown for any scene, because an
-			// authored one fills `{{one}}` from exactly the same place.
-			for name in ["one", "two", "three", "four", "five"] {
-				field(name, [
-					text(shown.parameters[name] ?? "", width: 240,
-					     placeholder: name == "one" ? "the first line" : "") { value in
-						let said = value.trimmingCharacters(in: .whitespaces)
-						change(index) {
-							if said.isEmpty { $0.parameters.removeValue(forKey: name) }
-							else { $0.parameters[name] = said }
-						}
-					},
-				], note: name == "five"
-					? "only the lines given are drawn, and a gap closes up"
-					: nil)
-			}
+			], note: name == "five"
+				? "only the lines given are drawn, and a gap closes up"
+				: nil)
 		}
-
-		if entry.presentations.isEmpty {
-			section("presentation")
-		}
-		field("", [small(entry.presentations.isEmpty ? "add a presentation" : "add another") {
-			[weak self] in
-			guard let self else { return }
-			var next = self.project
-			guard var target = next.entry(at: path) else { return }
-			// Four seconds beside the picture with nothing in it yet, which is
-			// what somebody who has just pressed this is about to fill in.
-			target.presentations.append(Presentation(
-				at: 0, into: Presentation.Rectangle(x: 0.04, y: 0.2, width: 0.44, height: 0.6),
-				hold: 4, scene: "bullets"))
-			next.replaceEntry(at: path, with: target)
-			self.commit(next)
-		}], note: entry.presentations.isEmpty
-			? "move the picture aside, stop it, and put the point on screen beside it"
-			: nil)
 	}
 
 	/// What each kind is for, said once, where it is chosen.

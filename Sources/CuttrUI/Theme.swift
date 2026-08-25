@@ -209,7 +209,7 @@ public enum Theme {
 	public enum Kind {
 		case clip, query, list, section, card, sound, text, spinner, effect, scene,
 		     film, aberration, tape, bubble, frames,
-		     anchor, tag, take
+		     anchor, tag, take, presentation
 	}
 
 	public static func color(_ kind: Kind) -> NSColor {
@@ -232,6 +232,10 @@ public enum Theme {
 		// the picture was drawn, and the symbol says that.
 		case .frames, .scene: return base(.blue)
 		case .anchor: return base(.teal)
+		// A treatment is a thing done to the picture rather than a thing laid
+		// over it, and it is the only one that changes how long the programme
+		// is — so it takes the accent rather than a hue shared with an overlay.
+		case .presentation: return base(.blue)
 		// A card is the absence of footage, and neutral grey is what that
 		// looks like beside six hues that all mean "something was shot".
 		case .card: return NSColor(calibratedWhite: 0.62, alpha: 1)
@@ -273,6 +277,9 @@ public enum Theme {
 		case .anchor: name = "scope"
 		case .card: name = "rectangle.fill"
 		case .sound: name = "waveform"
+		// A rectangle inset in a rectangle: the picture moved into a corner of
+		// the frame, which is the whole of what a treatment does to it.
+		case .presentation: name = "rectangle.inset.bottomleft.filled"
 		}
 		guard let image = NSImage(systemSymbolName: name, accessibilityDescription: name) else {
 			return nil

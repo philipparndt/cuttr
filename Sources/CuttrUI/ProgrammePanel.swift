@@ -13,6 +13,13 @@ public enum ProjectSelection: Equatable {
 	case overlay(Origin)
 	/// A sound, on the same terms.
 	case sound(Origin)
+	/// A presentation treatment: the nth one written inside the entry at this
+	/// path.
+	///
+	/// A path and an index rather than an ``Origin``, because unlike an overlay
+	/// or a sound there is nowhere else for one to be written. A treatment is a
+	/// fact about a placement and the file has no top-level list of them.
+	case presentation(path: [Int], index: Int)
 }
 
 extension ProjectSelection {
@@ -38,6 +45,13 @@ extension ProjectSelection {
 			return resolved?.overlays.first(where: { $0.origin == origin })?.start
 		case .sound(let origin):
 			return resolved?.sounds.first(where: { $0.origin == origin })?.start
+		case .presentation(let path, let index):
+			// Where the hold begins on the programme's clock. Asked of the
+			// clip, because `at:` is on the take's and everything before it may
+			// have made the programme longer.
+			guard let clip = resolved?.clips.first(where: { $0.entry == path }),
+			      clip.presentations.indices.contains(index) else { return nil }
+			return clip.programmeTime(forTake: clip.presentations[index].at)
 		}
 	}
 }
@@ -146,17 +160,27 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	enum Carried: Equatable {
 		case overlay(Origin)
 		case sound(Origin)
+		/// And a presentation treatment, which is filed the same way and for
+		/// the same reason — it is written inside the entry, it is part of the
+		/// structure of the programme, and looking for it in a second list is
+		/// how somebody loses it.
+		case presentation(path: [Int], index: Int)
 
 		var selection: ProjectSelection {
 			switch self {
 			case .overlay(let origin): return .overlay(origin)
 			case .sound(let origin): return .sound(origin)
+			case .presentation(let path, let index):
+				return .presentation(path: path, index: index)
 			}
 		}
 
 		var home: Project.Home {
 			switch self {
 			case .overlay(let origin), .sound(let origin): return Project.home(of: origin)
+			// The entry it is written in, and there is nowhere else it could
+			// go: a treatment holds *this* placement.
+			case .presentation(let path, _): return path
 			}
 		}
 	}
@@ -683,6 +707,21 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		outline.selectRowIndexes([row], byExtendingSelection: false)
 	}
 
+	/// For the tests: what the tree says is selected, which is the question the
+	/// properties panel is answered with.
+	var selectionForTesting: ProjectSelection {
+		if let carried = selectedTreeCarried { return carried.selection }
+		if let path = selectedPath { return .entry(path) }
+		return .output
+	}
+
+	/// For the tests: the two buttons over the tree, without a button.
+	func moveSelectedForTesting(by offset: Int) {
+		if offset < 0 { moveSelectedUp() } else { moveSelectedDown() }
+	}
+
+	func duplicateSelectedForTesting() { duplicateSelected() }
+
 	private var selectedPath: [Int]? {
 		let node = outline.item(atRow: outline.selectedRow) as? Node
 		guard node?.overlay == nil, node?.isOverlayRoot == false else { return nil }
@@ -809,6 +848,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		switch carried {
 		case .overlay(let origin): next.removeOverlay(at: origin)
 		case .sound(let origin): next.removeSound(at: origin)
+		case .presentation(let path, let index):
+			guard let entry = next.entry(at: path),
+			      entry.presentations.indices.contains(index) else { return }
+			next.editEntry(at: path) { $0.presentations.remove(at: index) }
 		}
 		pending = .output
 		onChange?(next)
@@ -899,6 +942,16 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			      landing >= 0, landing < entry.sounds.count else { return }
 			next.editEntry(at: path) { $0.sounds.swapAt(index, landing) }
 			pending = .sound(.entry(path: path, index: landing))
+		case .presentation(let path, let index):
+			// Order matters here for a different reason than it does for an
+			// overlay: the treatments are walked in order by the clock, so
+			// moving one past another is moving *when* it happens, not what is
+			// drawn on top of what.
+			let landing = index + offset
+			guard let entry = project.entry(at: path),
+			      landing >= 0, landing < entry.presentations.count else { return }
+			next.editEntry(at: path) { $0.presentations.swapAt(index, landing) }
+			pending = .presentation(path: path, index: landing)
 		}
 		onChange?(next)
 	}
@@ -925,6 +978,12 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			let copy = entry.sounds[index]
 			next.editEntry(at: path) { $0.sounds.insert(copy, at: index + 1) }
 			pending = .sound(.entry(path: path, index: index + 1))
+		case .presentation(let path, let index):
+			guard let entry = project.entry(at: path),
+			      index < entry.presentations.count else { return }
+			let copy = entry.presentations[index]
+			next.editEntry(at: path) { $0.presentations.insert(copy, at: index + 1) }
+			pending = .presentation(path: path, index: index + 1)
 		}
 		onChange?(next)
 	}
@@ -1069,6 +1128,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			} else {
 				outline.deselectAll(nil)
 			}
+		case .presentation(let path, let index)
+			where project.entry(at: path)?.presentations.indices.contains(index) == true:
+			if let row = row(for: .presentation(path: path, index: index)) {
+				outline.selectRowIndexes([row], byExtendingSelection: false)
+			} else {
+				outline.deselectAll(nil)
+			}
 		case .overlay(let origin) where project.overlay(at: origin) != nil,
 		     .sound(let origin) where project.sound(at: origin) != nil:
 			// The tree is the only place it is shown, wherever it is written.
@@ -1096,8 +1162,16 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			if case .group(_, let inner) = entry.source {
 				children = tree(inner, at: path)
 			}
-			// What this entry carries, under it — the ones written inside it
-			// first, because those *are* part of the entry.
+			// The treatments first, before anything laid over the picture,
+			// because they are the one thing under here that changes how long
+			// the entry *is*. Always shown: the filters above hide what is
+			// drawn on top of the cut, and a hold is the cut.
+			children += entry.presentations.indices.map {
+				Node(path: path, entry: entry, children: [],
+				     carried: .presentation(path: path, index: $0))
+			}
+			// What else this entry carries, under it — the ones written inside
+			// it first, because those *are* part of the entry.
 			if showsOverlays {
 				children += entry.overlays.indices.map {
 					Node(path: path, entry: entry, children: [],
@@ -1222,6 +1296,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		switch carried {
 		case .overlay(let origin): return project.overlay(at: origin) != nil
 		case .sound(let origin): return project.sound(at: origin) != nil
+		case .presentation(let path, let index):
+			return project.entry(at: path)?.presentations.indices.contains(index) == true
 		}
 	}
 
@@ -1282,6 +1358,17 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			// the question the old filter existed to answer.
 			row.plays = node.isLoose && origin.projectIndex
 				.map { overlaysOver(selection).contains($0) } == true
+			row.needsDisplay = true
+			return row
+		}
+		if case .presentation(let path, let index) = node.carried,
+		   let entry = project.entry(at: path),
+		   entry.presentations.indices.contains(index) {
+			let shown = entry.presentations[index]
+			let row = (outlineView.makeView(withIdentifier: .init("treePresentation"), owner: self)
+				as? PresentationRow)
+				?? { let made = PresentationRow(); made.identifier = .init("treePresentation"); return made }()
+			row.presentation = shown
 			row.needsDisplay = true
 			return row
 		}
@@ -1388,6 +1475,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			pasteboardItem.setString(Self.written(node.carried!), forType: Self.carriedType)
 			pasteboardItem.setString(project.sound(at: origin)?.file ?? "", forType: .string)
 			return pasteboardItem
+		case .presentation:
+			// Not draggable. A treatment can only be written inside the entry
+			// it is on, so there is nowhere for a drag to take it — and a drag
+			// that always fails is worse than one that cannot be started.
+			return nil
 		case nil:
 			pasteboardItem.setString(node.path.map(String.init).joined(separator: "."),
 			                         forType: Self.entryType)
@@ -1470,6 +1562,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				return false
 			}
 			pending = .sound(landed)
+		case .presentation:
+			// Nowhere to go: see the drag above.
+			return false
 		}
 		onChange?(next)
 		return true
@@ -1483,6 +1578,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		switch carried {
 		case .overlay(let where_): kind = "o"; origin = where_
 		case .sound(let where_): kind = "s"; origin = where_
+		// Never written: a treatment is not put on the pasteboard, because
+		// there is nowhere to drop it.
+		case .presentation(let path, let index):
+			kind = "t"; origin = .entry(path: path, index: index)
 		}
 		switch origin {
 		case .project(let index): return "\(kind) p \(index)"
@@ -1786,6 +1885,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		case .entry(let path): row = self.row(for: path)
 		case .overlay(let origin): row = self.row(for: .overlay(origin))
 		case .sound(let origin): row = self.row(for: .sound(origin))
+		case .presentation(let path, let index):
+			row = self.row(for: .presentation(path: path, index: index))
 		}
 		guard let row else { return }
 		outline.selectRowIndexes([row], byExtendingSelection: false)
@@ -1940,6 +2041,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			switch node.carried {
 			case .overlay(let origin): return .overlay(origin)
 			case .sound(let origin): return .sound(origin)
+			case .presentation(let path, let index):
+				return .presentation(path: path, index: index)
 			case nil:
 				// A section carries its name, so that space and the right-click
 				// menu beside it agree about where that section ends.
@@ -1968,6 +2071,11 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			return project.overlay(at: origin).map { OverlayRow.name($0) } ?? "overlay"
 		case .sound(let origin):
 			return (project.sound(at: origin)?.file as NSString?)?.lastPathComponent ?? "sound"
+		case .presentation(let path, let index):
+			guard let entry = project.entry(at: path),
+			      entry.presentations.indices.contains(index) else { return "presentation" }
+			let scene = entry.presentations[index].scene
+			return scene.isEmpty ? "presentation" : scene
 		}
 	}
 
@@ -2215,6 +2323,43 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			if sound.gain != 0 { where_ += "   \(TakeWriter.number(sound.gain, places: 1)) dB" }
 			if sound.ducks != 0 { where_ += "   ducks \(TakeWriter.number(sound.ducks, places: 1))" }
 			(where_ as NSString).draw(
+				at: NSPoint(x: 26, y: bounds.midY - 14),
+				withAttributes: [.font: Theme.monoSmall, .foregroundColor: Theme.dimText])
+		}
+	}
+
+	/// One presentation treatment, drawn: which side the picture goes to, how
+	/// long it stops, and what plays beside it.
+	///
+	/// A row of its own rather than a line on the clip's, because there may be
+	/// three of them on one clip and each is a separate thing to select, move
+	/// and take off. What the row has to answer at a glance is *when* — a
+	/// treatment is a moment on the take's clock, and the commonest thing to be
+	/// looking for is which of the three is the one at twelve seconds.
+	fileprivate final class PresentationRow: NSTableCellView {
+		var presentation = Presentation(at: 0, into: .whole, hold: 0, scene: "")
+
+		override func draw(_ dirtyRect: NSRect) {
+			if let image = Theme.symbol(.presentation, size: 13) {
+				Theme.draw(image, in: NSRect(x: 3, y: bounds.height / 2 - 8, width: 20, height: 16))
+			}
+			let title = "\(Timecode.string(presentation.at))   \(presentation.scene)"
+			(title as NSString).draw(
+				at: NSPoint(x: 26, y: bounds.midY + 1),
+				withAttributes: [.font: Theme.bodyStrong, .foregroundColor: Theme.text])
+
+			// Which way the picture goes, in the words somebody chose it with,
+			// rather than four fractions nobody reads down a column.
+			let free = presentation.into.free
+			var said = presentation.into.isWhole ? "full frame"
+				: (free.x > 0 ? "picture left" : "picture right")
+			said += presentation.hold > 0
+				? ", holds \(TakeWriter.number(presentation.hold, places: 1))s"
+				: ", no hold"
+			if presentation.reveal != .together { said += ", one by one" }
+			let lines = Scene.snippets(in: presentation.parameters).count
+			if lines > 0 { said += "   \(lines) line\(lines == 1 ? "" : "s")" }
+			(said as NSString).draw(
 				at: NSPoint(x: 26, y: bounds.midY - 14),
 				withAttributes: [.font: Theme.monoSmall, .foregroundColor: Theme.dimText])
 		}

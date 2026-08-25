@@ -105,7 +105,7 @@ extension Scene {
 	/// A file that says `one:` and `three:` gets two lines and no space kept
 	/// for the missing one — the names are how they are ordered, not where they
 	/// sit.
-	static func snippets(in parameters: [String: String]) -> [String] {
+	public static func snippets(in parameters: [String: String]) -> [String] {
 		["one", "two", "three", "four", "five"].compactMap {
 			guard let said = parameters[$0], !said.isEmpty else { return nil }
 			return said

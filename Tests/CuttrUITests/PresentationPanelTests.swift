@@ -11,14 +11,14 @@ import Testing
 /// event walks up to `NSResponder` and beeps on the machine running the tests.
 @MainActor @Suite struct PresentationPanelTests {
 
-	private func panel(_ project: Project) -> (PropertiesPanel, Project) {
+	private func panel(_ project: Project,
+	                  _ selection: ProjectSelection = .entry([0])) -> (PropertiesPanel, Project) {
 		_ = NSApplication.shared
 		let panel = PropertiesPanel()
 		let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 1400),
 		                      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
 		window.contentView = panel
-		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(),
-		             selection: .entry([0]))
+		panel.reload(project, vocabulary: ComposeDocument.Vocabulary(), selection: selection)
 		panel.layoutSubtreeIfNeeded()
 		return (panel, project)
 	}
@@ -48,21 +48,38 @@ import Testing
 
 	/// The button that is there when there is nothing yet, and what it makes: a
 	/// treatment somebody can see the effect of before they have typed a word.
-	@Test func addingOneMakesATreatmentWorthLookingAt() {
+	///
+	/// And it goes to the new row, because that is where it is filled in — the
+	/// entry's own form has the button and nothing else.
+	@Test func addingOneMakesATreatmentWorthLookingAtAndGoesToIt() {
 		var project = Project(timeline: [TimelineEntry(clip: ClipReference("install"))])
 		let (panel, _) = self.panel(project)
 		panel.onChange = { project = $0 }
+		var went: ProjectSelection?
+		panel.onGoTo = { went = $0 }
 
 		press(button("add a presentation", in: panel))
 		let made = try? #require(project.timeline.first?.presentations.first)
 		#expect(made?.hold == 4)
 		#expect(made?.scene == "bullets")
 		#expect(made?.into.isWhole == false)
+		#expect(went == .presentation(path: [0], index: 0))
+	}
+
+	/// The entry's form has the button and none of the treatment's own fields:
+	/// three of them listed under one clip was a column somebody had to count
+	/// down, and it left no way to say which one the panel was about.
+	@Test func theEntryFormOffersOnlyTheButton() {
+		let (panel, _) = self.panel(withOne())
+		#expect(button("add another", in: panel) != nil)
+		let fields = find(NSTextField.self, in: panel).filter(\.isEditable)
+		#expect(!fields.contains { $0.stringValue == "00:12.000" })
+		#expect(!fields.contains { $0.stringValue == "Download it" })
 	}
 
 	@Test func theTreatmentIsShownAndEdited() {
 		var project = withOne()
-		let (panel, _) = self.panel(project)
+		let (panel, _) = self.panel(project, .presentation(path: [0], index: 0))
 		panel.onChange = { project = $0 }
 
 		let fields = find(NSTextField.self, in: panel).filter(\.isEditable)
@@ -82,7 +99,7 @@ import Testing
 	/// how somebody decides which half of the frame a screen recording goes in.
 	@Test func theSideButtonsMoveThePicture() {
 		var project = withOne()
-		let (panel, _) = self.panel(project)
+		let (panel, _) = self.panel(project, .presentation(path: [0], index: 0))
 		panel.onChange = { project = $0 }
 
 		press(button("right", in: panel))
@@ -90,13 +107,13 @@ import Testing
 		#expect(project.timeline[0].presentations[0].into.free.x == 0)
 	}
 
-	@Test func removingOneTakesItAway() {
-		var project = withOne()
-		let (panel, _) = self.panel(project)
-		panel.onChange = { project = $0 }
-
-		press(button("remove", in: panel))
-		#expect(project.timeline[0].presentations.isEmpty)
+	/// The head of the panel says which of them this is and what it holds, so
+	/// that three rows under one clip are three different things on screen and
+	/// not three copies of the word "presentation".
+	@Test func theHeadNamesTheOneItIsAbout() {
+		let (panel, _) = self.panel(withOne(), .presentation(path: [0], index: 0))
+		let words = find(NSTextField.self, in: panel).filter { !$0.isEditable }.map(\.stringValue)
+		#expect(words.contains { $0.contains("bullets") && $0.contains("00:12.000") })
 	}
 
 	/// The bug this would otherwise have: every form in the panel builds a
