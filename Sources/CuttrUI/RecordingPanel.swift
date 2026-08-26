@@ -27,7 +27,9 @@ public final class RecordingPanel: NSView {
 		case ready
 		/// The permission is missing, or is there and cannot be used yet.
 		case needsConsent(Consent)
-		case noBrowser
+		/// Nothing installed to record with. The sentence is the sitter's, so it
+		/// names what to install rather than saying something is missing.
+		case nothing(String)
 		/// The browser is opening and the window is being waited for.
 		case opening
 		case recording
@@ -59,12 +61,18 @@ public final class RecordingPanel: NSView {
 	/// The row the popup is on, hidden when there is nothing to choose — a menu
 	/// with one item in it is a control that looks broken.
 	private var stockRow: NSGridRow?
+	private var pageRows: [NSGridRow] = []
+	private var terminalRows: [NSGridRow] = []
 	private let name = NSTextField()
 	private let url = NSTextField()
 	private let width = NSTextField()
 	private let height = NSTextField()
 	private let browser = NSPopUpButton()
 	private let chrome = NSPopUpButton()
+	private let sizes = NSPopUpButton()
+	private let directory = NSTextField()
+	private let commands = NSTextField()
+	private let theme = NSTextField()
 	private let record = NSButton()
 	private let settings = NSButton()
 	private let clock = NSTextField(labelWithString: "")
@@ -85,7 +93,10 @@ public final class RecordingPanel: NSView {
 
 	private func build() {
 		for (field, placeholder) in [(name, "install-demo"),
-		                             (url, "https://example.com/download")] {
+		                             (url, "https://example.com/download"),
+		                             (directory, "~/dev/cuttr"),
+		                             (commands, "make build, make test"),
+		                             (theme, "the palette to record in")] {
 			field.placeholderString = placeholder
 			field.font = Theme.body
 			field.target = self
@@ -97,8 +108,13 @@ public final class RecordingPanel: NSView {
 			field.action = #selector(typed)
 			field.widthAnchor.constraint(equalToConstant: 72).isActive = true
 		}
-		browser.addItem(withTitle: "whichever is installed")
-		for kind in Recording.Browser.allCases { browser.addItem(withTitle: kind.described) }
+		browser.addItem(withTitle: "a page, in whichever browser is installed")
+		for kind in Recording.Browser.allCases {
+			browser.addItem(withTitle: "a page, in \(kind.described)")
+		}
+		for kind in Recording.Terminal.allCases {
+			browser.addItem(withTitle: "a terminal, in \(kind.described)")
+		}
 		browser.target = self
 		browser.action = #selector(typed)
 
@@ -126,19 +142,36 @@ public final class RecordingPanel: NSView {
 		stock.target = self
 		stock.action = #selector(chose)
 
+		// The sizes anybody actually picks, by the name they call them. Typing
+		// 1280 and 720 into two boxes is what somebody does when nothing has
+		// offered them 720p, and it is also how a recording comes to be 1208
+		// wide because a digit went missing.
+		for size in RecordingPanel.stock { sizes.addItem(withTitle: size.described) }
+		sizes.addItem(withTitle: "custom")
+		sizes.target = self
+		sizes.action = #selector(sized)
+
 		let form = NSGridView(views: [
 			[label("record"), stock],
 			[label("as"), name],
+			[label("what"), browser],
 			[label("url"), url],
-			[label("size"), row([width, label("×"), height, label("the recording, chrome and all")])],
-			[label("browser"), browser],
+			[label("in"), directory],
+			[label("run"), commands],
+			[label("theme"), theme],
+			[label("size"), row([sizes, width, label("×"), height])],
 			[label("shows"), chrome],
 		])
 		form.rowSpacing = 8
 		form.columnSpacing = 10
 		form.column(at: 0).xPlacement = .trailing
 		stockRow = form.row(at: 0)
+		// The rows that belong to one kind of recording and not the other. A
+		// `chrome:` on a terminal is a control for a thing that is not there.
+		pageRows = [form.row(at: 3), form.row(at: 8)]
+		terminalRows = [form.row(at: 4), form.row(at: 5), form.row(at: 6)]
 		listStated()
+		showWhat()
 
 		let buttons = row([record, settings, clock])
 		let stack = NSStackView(views: [form, says, buttons])
@@ -175,11 +208,35 @@ public final class RecordingPanel: NSView {
 	private func fill() {
 		name.stringValue = recording.name
 		url.stringValue = recording.url
+		directory.stringValue = recording.directory ?? ""
+		commands.stringValue = recording.run.joined(separator: ", ")
+		theme.stringValue = recording.theme ?? ""
 		width.stringValue = String(recording.width)
 		height.stringValue = String(recording.height)
-		browser.selectItem(at: recording.browser
-			.flatMap { Recording.Browser.allCases.firstIndex(of: $0).map { $0 + 1 } } ?? 0)
+		showSize()
+		browser.selectItem(at: whichOne)
 		chrome.selectItem(at: recording.chrome == .bar ? 0 : 1)
+		showWhat()
+	}
+
+	/// Which row of the `what` popup this recording is: the browsers first,
+	/// then the terminals.
+	private var whichOne: Int {
+		if let terminal = recording.terminal,
+		   let at = Recording.Terminal.allCases.firstIndex(of: terminal) {
+			return 1 + Recording.Browser.allCases.count + at
+		}
+		return recording.browser
+			.flatMap { Recording.Browser.allCases.firstIndex(of: $0).map { $0 + 1 } } ?? 0
+	}
+
+	/// Only the fields that belong to what is being recorded. A `chrome:` on a
+	/// terminal is a control for a thing that is not there, and a URL on one is
+	/// a question with no answer.
+	private func showWhat() {
+		let terminal = recording.recordsATerminal
+		for row in pageRows { row.isHidden = terminal }
+		for row in terminalRows { row.isHidden = !terminal }
 	}
 
 	/// The project's own, and a way to start from nothing.
@@ -201,15 +258,74 @@ public final class RecordingPanel: NSView {
 	@objc private func typed() {
 		var next = Recording(
 			name: Slug.make(from: name.stringValue.isEmpty ? "screencast" : name.stringValue),
-			url: url.stringValue.trimmingCharacters(in: .whitespaces),
 			width: Int(width.stringValue) ?? recording.width,
 			height: Int(height.stringValue) ?? recording.height,
 			chrome: chrome.indexOfSelectedItem == 0 ? .bar : Recording.Chrome.none)
+		// One list, browsers then terminals, because "what am I recording" is
+		// one question and answering it in two controls means answering it
+		// twice.
 		let picked = browser.indexOfSelectedItem - 1
-		next.browser = picked >= 0 && picked < Recording.Browser.allCases.count
-			? Recording.Browser.allCases[picked] : nil
+		let browsers = Recording.Browser.allCases.count
+		if picked >= browsers {
+			let at = picked - browsers
+			next.terminal = at < Recording.Terminal.allCases.count
+				? Recording.Terminal.allCases[at] : .ghostty
+			next.directory = nonEmpty(directory.stringValue)
+			next.run = commands.stringValue
+				.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+				.filter { !$0.isEmpty }
+		} else {
+			next.url = url.stringValue.trimmingCharacters(in: .whitespaces)
+			next.browser = picked >= 0 ? Recording.Browser.allCases[picked] : nil
+		}
+		next.theme = nonEmpty(theme.stringValue)
 		recording = next
 		show()
+	}
+
+	/// The frames a screencast is nearly always made at.
+	///
+	/// Named rather than numbered, because "1080p" is what somebody has in mind
+	/// and `1920 × 1080` is what they then have to type twice without a
+	/// mistake. The list is short on purpose: these are the sizes a film gets
+	/// rendered at, and anything else is `custom`.
+	struct Stock {
+		let described: String
+		let width: Int
+		let height: Int
+	}
+
+	static let stock: [Stock] = [
+		Stock(described: "720p — 1280 × 720", width: 1280, height: 720),
+		Stock(described: "1080p — 1920 × 1080", width: 1920, height: 1080),
+		Stock(described: "1440p — 2560 × 1440", width: 2560, height: 1440),
+		Stock(described: "4K — 3840 × 2160", width: 3840, height: 2160),
+		// Not a broadcast size, and here because it is the one somebody wants
+		// for a treatment: a picture that is going to be held in a corner of a
+		// 1080p frame does not need to be recorded at 1080p.
+		Stock(described: "half 1080p — 960 × 540", width: 960, height: 540),
+	]
+
+	@objc private func sized() {
+		let picked = sizes.indexOfSelectedItem
+		guard picked >= 0, picked < RecordingPanel.stock.count else { return }
+		let chosen = RecordingPanel.stock[picked]
+		width.stringValue = String(chosen.width)
+		height.stringValue = String(chosen.height)
+		typed()
+	}
+
+	/// Which of the stock sizes this is, or `custom`.
+	private func showSize() {
+		let at = RecordingPanel.stock.firstIndex {
+			$0.width == recording.width && $0.height == recording.height
+		}
+		sizes.selectItem(at: at ?? RecordingPanel.stock.count)
+	}
+
+	private func nonEmpty(_ text: String) -> String? {
+		let trimmed = text.trimmingCharacters(in: .whitespaces)
+		return trimmed.isEmpty ? nil : trimmed
 	}
 
 	@objc private func pressed() {
@@ -228,7 +344,7 @@ public final class RecordingPanel: NSView {
 		switch state {
 		case .ready:
 			record.title = "Record"
-			record.isEnabled = !recording.url.isEmpty
+			record.isEnabled = recording.recordsATerminal || !recording.url.isEmpty
 			says.stringValue = advice
 			says.textColor = Theme.dimText
 		case .needsConsent(let consent):
@@ -237,10 +353,10 @@ public final class RecordingPanel: NSView {
 			settings.isHidden = false
 			says.stringValue = consent.explanation ?? ""
 			says.textColor = Theme.playhead
-		case .noBrowser:
+		case .nothing(let said):
 			record.title = "Record"
 			record.isEnabled = false
-			says.stringValue = Browser.missing
+			says.stringValue = said
 			says.textColor = Theme.playhead
 		case .opening:
 			record.title = "Stop"
@@ -255,7 +371,7 @@ public final class RecordingPanel: NSView {
 			says.textColor = Theme.dimText
 		case .refused(let why):
 			record.title = "Record"
-			record.isEnabled = !recording.url.isEmpty
+			record.isEnabled = recording.recordsATerminal || !recording.url.isEmpty
 			says.stringValue = why
 			says.textColor = Theme.playhead
 		case .made(let at):
@@ -281,6 +397,13 @@ public final class RecordingPanel: NSView {
 		if recording.chrome == .bar, !recording.url.isEmpty {
 			out += " The address bar is in the film, so this URL will be readable in it."
 		}
+		// **What cuttr cannot clean**, said before the recording rather than
+		// found in it. Only the thing being recorded knows: a browser with a
+		// fresh profile answers nothing, and a terminal answers that the
+		// person's own startup files still run.
+		if let theirs = Sitters.find(for: recording)?.whatIsStillTheirs {
+			out += " " + theirs
+		}
 		return out
 	}
 
@@ -299,6 +422,13 @@ public final class RecordingPanel: NSView {
 	var recordTitleForTesting: String { record.title }
 	var canRecordForTesting: Bool { record.isEnabled }
 	var offersSettingsForTesting: Bool { !settings.isHidden }
+	var sizeNameForTesting: String { sizes.titleOfSelectedItem ?? "" }
+
+	func chooseSizeForTesting(_ index: Int) {
+		sizes.selectItem(at: index)
+		sized()
+	}
+
 	var statedNamesForTesting: [String] {
 		stockRow?.isHidden == false ? stock.itemTitles : []
 	}

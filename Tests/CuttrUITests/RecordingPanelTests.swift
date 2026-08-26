@@ -47,11 +47,40 @@ import Testing
 		#expect(panel.saysForTesting.lowercased().contains("again"))
 	}
 
-	@Test func noBrowserNamesWhatToInstall() {
+	@Test func nothingToDriveNamesWhatToInstall() {
 		let panel = self.panel()
-		panel.show(.noBrowser)
+		panel.show(.nothing(Browser.missing))
 		#expect(!panel.canRecordForTesting)
 		#expect(panel.saysForTesting.contains("Google Chrome"))
+	}
+
+	/// A terminal recording fills in different fields and needs no URL: the
+	/// panel follows what is being recorded rather than asking for both.
+	@Test func aTerminalRecordingNeedsNoUrl() {
+		let panel = self.panel()
+		panel.recording = Recording(name: "the-build", terminal: .ghostty,
+		                            directory: "~/dev/cuttr", run: ["make build"])
+		panel.show(.ready)
+		#expect(panel.canRecordForTesting, "a terminal was waiting for a URL")
+	}
+
+	/// **What cuttr cannot clean, said before the recording rather than found
+	/// in it.** A browser with a fresh profile has nothing to say; a terminal
+	/// reads the person's own startup files and cannot be stopped from doing
+	/// so.
+	@Test func whatIsStillTheirsIsSaidForATerminal() {
+		let panel = self.panel()
+		panel.typeForTesting(url: "https://example.com")
+		#expect(!panel.saysForTesting.contains("startup files"))
+
+		panel.recording = Recording(name: "the-build", terminal: .ghostty)
+		panel.show(.ready)
+		// Only where the terminal is actually installed — the sentence comes
+		// from the thing being recorded, and there is nothing to ask when it is
+		// not there.
+		if Sitters.find(for: panel.recording) != nil {
+			#expect(panel.saysForTesting.contains("startup files"))
+		}
 	}
 
 	/// While it runs the button is the way out of it.
@@ -129,6 +158,33 @@ import Testing
 	@Test func aProjectWithNoRecordingsIsNotOfferedAList() {
 		let panel = self.panel()
 		#expect(panel.statedNamesForTesting.isEmpty)
+	}
+
+	/// **The sizes anybody actually picks, by the name they call them.** Typing
+	/// 1280 and 720 into two boxes is what somebody does when nothing has
+	/// offered them 720p — and it is also how a recording comes to be 1208 wide
+	/// because a digit went missing.
+	@Test func theSizesAreOfferedByName() {
+		let panel = self.panel()
+		panel.typeForTesting(url: "https://example.com")
+		// 1280×720 is what a new recording is, so the popup already says so.
+		#expect(panel.sizeNameForTesting.contains("720p"))
+
+		panel.chooseSizeForTesting(1)
+		#expect(panel.recording.width == 1920)
+		#expect(panel.recording.height == 1080)
+		#expect(panel.sizeNameForTesting.contains("1080p"))
+	}
+
+	/// And a size that is none of them is `custom` rather than the nearest one,
+	/// which would be the panel claiming somebody chose something they did not.
+	@Test func anOddSizeIsCustom() {
+		let panel = self.panel()
+		var odd = panel.recording
+		odd.width = 1111
+		odd.height = 654
+		panel.recording = odd
+		#expect(panel.sizeNameForTesting == "custom")
 	}
 
 	/// What the fields say is what gets recorded.
