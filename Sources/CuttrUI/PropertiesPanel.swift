@@ -893,14 +893,42 @@ public final class PropertiesPanel: NSView {
 			+ "separate recorder")
 
 		section("where the picture goes")
+		// The picture of it first, before any number. `into:` is four
+		// fractions, and the first question anybody asked of them was whether
+		// the rectangle is where the *text* goes and the picture fills the
+		// rest — it is the other way round, and one glance at this says so
+		// where a paragraph does not.
+		let placer = PicturePlacer()
+		placer.aspect = project.output.size
+		placer.picture = shown.into
+		placer.sceneName = shown.scene
+		// The recording as it was just before the treatment takes hold, which
+		// is the frame somebody is deciding where to put.
+		if let poster, let moment = momentOfSelection {
+			let asked = generation
+			poster(max(0, moment - shown.ramp - 0.05)) { [weak self, weak placer] image in
+				guard let self, self.generation == asked else { return }
+				placer?.poster = image
+			}
+		}
+		// Written on the way up only. The placer draws itself from the drag
+		// while the mouse is down, so the live picture costs nothing — and
+		// writing every step would rebuild this form under the cursor and put a
+		// hundred entries in the Edit menu for one gesture.
+		placer.onChange = { box, commit in
+			guard commit else { return }
+			change { $0.into = box }
+		}
+		full(placer)
+
 		field("side", [
 			small("left") { change { $0.into = Presentation.Rectangle(
 				x: 0.04, y: 0.2, width: 0.44, height: 0.6) } },
 			small("right") { change { $0.into = Presentation.Rectangle(
 				x: 0.52, y: 0.2, width: 0.44, height: 0.6) } },
 			small("whole frame") { change { $0.into = .whole } },
-		], note: "the two anybody wants, and the way back — a scene lays itself out "
-			+ "in whichever side is left free")
+		], note: "where the recording goes. The scene fills the other side, which is "
+			+ "the shaded half above")
 
 		field("into", [
 			number(shown.into.x, width: 64) { value in change { $0.into.x = value } },
@@ -911,9 +939,10 @@ public final class PropertiesPanel: NSView {
 			number(shown.into.height, width: 64) { value in
 				change { $0.into.height = max(0, value) }
 			},
-		], note: "x, y, width, height — fractions of the frame, origin bottom left. The "
-			+ "picture fits inside this box and keeps its shape, so a box of the wrong "
-			+ "aspect letterboxes rather than stretching")
+		], note: "x, y, width, height — fractions of the frame, origin bottom left. This "
+			+ "is where **the recording** goes, not the words: the scene lays itself out "
+			+ "in whichever side is left free. The picture fits inside the box and keeps "
+			+ "its shape, so a box of the wrong aspect letterboxes rather than stretching")
 
 		section("what plays beside it")
 		field("scene", [

@@ -28,7 +28,7 @@ needs made by a third.
 | | |
 |---|---|
 | `at:` | when it happens, **on the take's clock** |
-| `into:` | where the picture goes: `[x, y, width, height]` in fractions of the frame, origin bottom left |
+| `into:` | where **the recording** goes: `[x, y, width, height]` in fractions of the frame, origin bottom left |
 | `hold:` | how long the picture stands still, in seconds |
 | `ramp:` | how long the travel takes at each end, in seconds — `0.6` unless you say otherwise |
 | `scene:` | what plays while it is held |
@@ -55,6 +55,12 @@ stop. So anything said over a hold goes on the separate recorder, which is what
 `audio:` in a take file is for and why alignment lives there rather than in the
 project. Music and sound written in `sounds:` are unaffected: they are on the
 programme's clock and play straight through.
+
+**`into:` is the recording, not the words.** This is the one thing everybody
+reads backwards. The rectangle is where the *picture* goes; the scene lays itself
+out in whichever side is left free. Nothing says how wide the words are, because
+nothing needs to: give the picture a home and the rest of the frame is the
+scene's.
 
 **Fit, not fill.** The picture keeps its shape inside `into:`, so a rectangle of
 the wrong aspect letterboxes rather than stretching the recording. Sketch the box
@@ -85,9 +91,11 @@ of authored scene.
 clip it holds, beside the overlays and sounds written there — one clip with
 three treatments is one row with three under it, each saying when it happens,
 which way the picture goes and how long it stops. Select one and the properties
-panel is about that one: the moment and the hold, `left` and `right` buttons for
-the two placements anybody wants, the rectangle if you want to be exact, and the
-scene with its lines. Delete takes it off, the arrows move it past its
+panel is about that one: the moment and the hold, a picture of the frame with the
+recording in it and the free side shaded and named for the scene that will fill
+it — drag the box to move it, its corners to resize it — `left` and `right`
+buttons for the two placements anybody wants, the four fractions if you want to
+be exact, and the scene with its lines. Delete takes it off, the arrows move it past its
 neighbours, and the clip's own form has the button that makes a new one.
 
 **Space takes a look at it** — the whole gesture, from the picture starting to
