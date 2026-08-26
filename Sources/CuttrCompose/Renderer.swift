@@ -659,15 +659,65 @@ public enum Renderer {
 	/// Nothing ever looks at the pixels — the compositor paints the card's own
 	/// fill over them — so the only thing that matters about this file is that
 	/// it exists and has a frame in it.
-	private static func carrier(
+	/// One folder per launch for the black movies cards are carried on.
+	///
+	/// **Per launch, and that is the point.** These were kept under fixed names
+	/// in the temporary directory and reused by every later run, which made a
+	/// bad one permanent: a render of a card-only programme failed with `Cannot
+	/// Decode` every time, for ever, because of a file written by a process
+	/// that no longer existed. It cost an afternoon to find, and the thing that
+	/// made it so expensive is that nothing in the failure mentions a cached
+	/// file, or a card, or a name anybody could have deleted.
+	///
+	/// The one on this machine read as a perfectly good two-second h.264 movie
+	/// to every tool that looked at it — same codec, profile, level, pixel
+	/// format, frame count and duration as a fresh one, and `AVAssetReader`
+	/// read samples out of it happily. Only the exporter refused it. So a check
+	/// before use cannot be trusted to tell a good one from a bad one, and the
+	/// answer is to stop keeping them: within a run the cache still saves the
+	/// work, and no run inherits another's.
+	private static let carrierFolder: URL = {
+		let folder = FileManager.default.temporaryDirectory
+			.appendingPathComponent("cuttr-cards-\(UUID().uuidString)", isDirectory: true)
+		try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+		return folder
+	}()
+
+	/// Where the carrier for this shape and length is kept, for this run.
+	///
+	/// Internal so the tests can put a bad one there, which is the whole of
+	/// what went wrong: see ``carrier(size:seconds:framesPerSecond:)``.
+	static func carrierURL(size: CGSize, frames: Int, rate: Double) -> URL {
+		carrierFolder.appendingPathComponent(
+			"\(Int(size.width))x\(Int(size.height))-\(frames)@\(Int(rate)).mov")
+	}
+
+	static func carrier(
 		size: CGSize, seconds: Double, framesPerSecond: Double
 	) async throws -> (asset: AVURLAsset, track: AVAssetTrack)? {
 		let rate = max(1, framesPerSecond.rounded())
 		let frames = max(1, Int((seconds * rate).rounded(.up)))
-		let url = FileManager.default.temporaryDirectory.appendingPathComponent(
-			"cuttr-card-\(Int(size.width))x\(Int(size.height))-\(frames)@\(Int(rate)).mov")
-		if !FileManager.default.fileExists(atPath: url.path) {
-			let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+		let url = carrierURL(size: size, frames: frames, rate: rate)
+		// Kept between renders, because writing it again for every card of the
+		// same shape is a second of black nobody sees — and *checked* before it
+		// is used, because a file that merely exists is not a file that plays.
+		//
+		// This is a bug that was here, and it was permanent: the carrier was
+		// written straight to its final name, so a render killed part way
+		// through — or two of them racing, or a disk that filled — left a
+		// half-written movie behind, and every later render of that shape and
+		// length picked it up and failed with `Cannot Decode`. Forever, with
+		// nothing on screen to say which file was at fault or that a file was
+		// involved at all. It cost an afternoon to find, on a project made of
+		// nothing but title cards.
+		if await !plays(url, frames: frames, rate: rate) {
+			// Written under a name nobody looks for and moved into place when
+			// it is whole, so a process that dies mid-write leaves a stray
+			// temporary file rather than a poisoned one.
+			let building = url.deletingLastPathComponent().appendingPathComponent(
+				".\(url.lastPathComponent).\(UUID().uuidString)")
+			defer { try? FileManager.default.removeItem(at: building) }
+			let writer = try AVAssetWriter(outputURL: building, fileType: .mov)
 			let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
 				AVVideoCodecKey: AVVideoCodecType.h264,
 				AVVideoWidthKey: Int(size.width),
@@ -711,6 +761,12 @@ public enum Renderer {
 			writer.endSession(atSourceTime: CMTime(
 				value: CMTimeValue(frames), timescale: CMTimeScale(rate)))
 			await writer.finishWriting()
+			guard writer.status == .completed else { return nil }
+			// Into place in one step. Two processes doing this at once both end
+			// up with a whole file, which is the other half of why it is done
+			// this way round.
+			try? FileManager.default.removeItem(at: url)
+			try FileManager.default.moveItem(at: building, to: url)
 		}
 		// The asset comes back with the track, because a track holds its asset
 		// *weakly*: handing back the track alone let the asset go the moment
@@ -718,6 +774,29 @@ public enum Renderer {
 		let asset = AVURLAsset(url: url)
 		guard let track = try await asset.loadTracks(withMediaType: .video).first else { return nil }
 		return (asset, track)
+	}
+
+	/// Whether the file at this path is a carrier that will actually play.
+	///
+	/// Not "does it exist". The one that went wrong read as a perfectly good
+	/// two-second h.264 movie to every tool that looked at its headers and was
+	/// refused by the decoder — so what is asked here is the question the
+	/// exporter will ask: can its samples be read?
+	private static func plays(_ url: URL, frames: Int, rate: Double) async -> Bool {
+		guard FileManager.default.fileExists(atPath: url.path) else { return false }
+		let asset = AVURLAsset(url: url)
+		guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+		      let span = try? await track.load(.timeRange) else { return false }
+		let wanted = CMTime(value: CMTimeValue(frames), timescale: CMTimeScale(rate))
+		guard abs(span.duration.seconds - wanted.seconds) < 1.0 / rate else { return false }
+		// And read a sample out of it, which is the part a header cannot fake.
+		guard let reader = try? AVAssetReader(asset: asset) else { return false }
+		let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+		guard reader.canAdd(output) else { return false }
+		reader.add(output)
+		guard reader.startReading() else { return false }
+		defer { reader.cancelReading() }
+		return output.copyNextSampleBuffer() != nil
 	}
 
 	/// The mix: what each lane is set to, moment by moment.
