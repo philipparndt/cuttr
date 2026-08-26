@@ -104,6 +104,13 @@ public final class PropertiesPanel: NSView {
 	/// and built again, both are lost precisely when a drag has just happened,
 	/// which is the one moment they matter.
 	private var keptPicture: FramePreview?
+	/// The same, for the treatment's picture of where the recording goes.
+	///
+	/// Kept for exactly the reason above and one more: the frame it fetched
+	/// costs a decode, and a view thrown away and built again on every drag
+	/// asks for it again — so the picture went black, came back, and jumped
+	/// while somebody was trying to line the box up against it.
+	private var keptPlacer: PicturePlacer?
 	/// The bigger picture, while one is open. Kept because it is a window and a
 	/// window that is let go of takes what is in it with it.
 	private var placing: PlacingPanel?
@@ -267,6 +274,7 @@ public final class PropertiesPanel: NSView {
 			stripZoom = nil
 			selectedKey = 0
 			keptPicture = nil
+			keptPlacer = nil
 			placing?.close()
 		}
 		mine = false
@@ -898,13 +906,18 @@ public final class PropertiesPanel: NSView {
 		// the rectangle is where the *text* goes and the picture fills the
 		// rest — it is the other way round, and one glance at this says so
 		// where a paragraph does not.
-		let placer = PicturePlacer()
+		// The same view as last time where the selection has not changed, so a
+		// drag does not black the picture out and fetch it again.
+		let placer = keptPlacer ?? PicturePlacer()
+		keptPlacer = placer
 		placer.aspect = project.output.size
 		placer.picture = shown.into
 		placer.sceneName = shown.scene
 		// The recording as it was just before the treatment takes hold, which
-		// is the frame somebody is deciding where to put.
-		if let poster, let moment = momentOfSelection {
+		// is the frame somebody is deciding where to put. Asked for once: it is
+		// the same frame however the box moves, and re-fetching it on every
+		// drag is a decode per gesture for a picture already on screen.
+		if placer.poster == nil, let poster, let moment = momentOfSelection {
 			let asked = generation
 			poster(max(0, moment - shown.ramp - 0.05)) { [weak self, weak placer] image in
 				guard let self, self.generation == asked else { return }

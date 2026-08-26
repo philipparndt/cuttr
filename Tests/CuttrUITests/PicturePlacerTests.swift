@@ -160,7 +160,14 @@ import Testing
 		placer.mouseDragged(with: try event(.leftMouseDragged, moved, in: window))
 		#expect(placer.boxForTesting.x > 0.1, "the picture is not following the drag")
 		placer.mouseUp(with: try event(.leftMouseUp, moved, in: window))
-		// Back to what it was given, because the form is what holds the value.
-		#expect(placer.boxForTesting.x == 0.1)
+		// **Still where the drag left it.** The form writes on the way up and
+		// hands a new value back a turn of the run loop later; letting go of
+		// the drag here drew the old box for exactly that turn, which is a
+		// picture that jumps back and then forward again under somebody's hand.
+		#expect(placer.boxForTesting.x > 0.1, "it jumped back when the mouse came up")
+
+		// And it lets go the moment the document says otherwise.
+		placer.picture = Presentation.Rectangle(x: 0.3, y: 0.2, width: 0.4, height: 0.5)
+		#expect(placer.boxForTesting.x == 0.3)
 	}
 }

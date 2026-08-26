@@ -23,7 +23,17 @@ public final class PicturePlacer: NSView {
 	/// The shape of the render, so the box is the shape of the output.
 	public var aspect = CGSize(width: 16, height: 9) { didSet { needsDisplay = true } }
 	/// Where the picture goes, in fractions of the frame.
-	public var picture = Presentation.Rectangle.whole { didSet { needsDisplay = true } }
+	///
+	/// Setting it ends whatever a drag was showing. That order matters: the
+	/// drag's own value stands until the document says otherwise, so the box
+	/// does not flick back to where it was for the frame between letting go and
+	/// the form being rebuilt.
+	public var picture = Presentation.Rectangle.whole {
+		didSet {
+			dragged = nil
+			needsDisplay = true
+		}
+	}
 	/// A frame of the recording, if one could be had — drawn inside the box, at
 	/// the size and shape it will actually be.
 	public var poster: NSImage? { didSet { needsDisplay = true } }
@@ -214,7 +224,11 @@ public final class PicturePlacer: NSView {
 		guard grab != nil else { return }
 		apply(event, commit: true)
 		grab = nil
-		dragged = nil
+		// `dragged` is deliberately left standing. It is let go of when the
+		// document hands back a new ``picture``, which is a turn of the run
+		// loop later — and clearing it here drew the old box for exactly that
+		// turn, which is a picture that jumps back and then forward again
+		// under somebody's hand.
 		needsDisplay = true
 	}
 
@@ -258,7 +272,7 @@ public final class PicturePlacer: NSView {
 			box.width = (box.width * 100).rounded() / 100
 			box.height = (box.height * 100).rounded() / 100
 		}
-		dragged = commit ? nil : box
+		dragged = box
 		needsDisplay = true
 		onChange?(box, commit)
 	}
