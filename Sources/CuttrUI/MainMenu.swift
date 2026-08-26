@@ -223,6 +223,7 @@ enum MainMenu {
 		// because it is the end of the process.
 		view.addItem(command("Levels", #selector(ComposeWindowController.showLevels(_:)), "4"))
 		view.addItem(command("Preview", #selector(ComposeWindowController.showPreview(_:)), "5"))
+		view.addItem(command("Record", #selector(ComposeWindowController.showRecord(_:)), "6"))
 		view.addItem(command("Full-Screen Preview",
 		                     #selector(ComposeWindowController.toggleFullScreenPreview(_:)),
 		                     "f", [.command, .control]))

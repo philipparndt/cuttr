@@ -46,7 +46,10 @@ public final class ComposeWindowController: DocumentEditor,
 	/// somebody works *in* comes before the page they watch. Preview is last
 	/// because it is the end of the process, and a new page inserted above it
 	/// would otherwise push the number somebody has in their fingers.
-	public enum Mode: Int { case project, edit, text, levels, preview }
+	/// Record is last even though recording comes *first* in the work, and the
+	/// rule above is why: the raw value is the ⌘ number, and putting a new page
+	/// above Preview would move a number somebody already has in their fingers.
+	public enum Mode: Int, CaseIterable { case project, edit, text, levels, preview, record }
 	private var mode: Mode = .edit
 	/// Whether the window is showing the picture and nothing else.
 	private var presenting = false
@@ -91,6 +94,8 @@ public final class ComposeWindowController: DocumentEditor,
 		Rail.Item("Levels", "slider.horizontal.3",
 		          "Every take's level, seen and heard against the others (\u{2318}4)"),
 		Rail.Item("Play", "play.rectangle", "What it comes to, played (\u{2318}5)"),
+		Rail.Item("Record", "record.circle",
+		          "Record a screencast into this project (\u{2318}6)"),
 	])
 	/// The project itself: what it renders to, and what it is called.
 	///
@@ -104,6 +109,10 @@ public final class ComposeWindowController: DocumentEditor,
 	/// programme, because the whole of it is a comparison across takes and a
 	/// comparison needs the width of a window — see ``LevelsPage``.
 	private let levels = LevelsPage(frame: .roomToLayOutIn)
+	/// Where a screencast is made. A page rather than a sheet, because
+	/// recording is one of the things this window is for and its settings are
+	/// worth leaving on screen while the browser is open beside them.
+	private let record = RecordPage(frame: .roomToLayOutIn)
 	private let renderButton = NSButton()
 	/// The two controls that belong to the picture, over the picture: the anchor
 	/// markers, and the way to give the picture the screen. Neither is true of
@@ -299,7 +308,7 @@ public final class ComposeWindowController: DocumentEditor,
 		// In the rail's order, because `Mode`'s raw value is the index of both.
 		for (identifier, view) in [("project", projectPage()), ("edit", editing),
 		                          ("text", source), ("levels", levels),
-		                          ("preview", split)] as [(String, NSView)] {
+		                          ("preview", split), ("record", record)] as [(String, NSView)] {
 			let item = NSTabViewItem(identifier: identifier)
 			item.view = view
 			modes.addTabViewItem(item)
@@ -966,6 +975,7 @@ public final class ComposeWindowController: DocumentEditor,
 			guard let self else { return done(nil) }
 			self.poster(at: time, then: done)
 		}
+		record.onRecorded = { [weak self] media in self?.tookARecording(media) }
 		materialTree.onInsert = { [weak self] reference in self?.inspector.insert(reference: reference) }
 
 		// The same arrangement as the cutting window, for the same reason: the
@@ -1323,6 +1333,16 @@ public final class ComposeWindowController: DocumentEditor,
 		if mode == .text { source.show(sourceText) }
 		if mode == .project { reloadProjectPage() }
 		if mode == .levels { levels.reload(from: composeDocument) }
+		if mode == .record {
+			record.project = composeDocument.baseURL
+			record.stated = composeDocument.project.recordings
+			record.appeared()
+		} else {
+			// Leaving the page stops whatever it was recording and closes what
+			// cuttr opened: a browser left running with cuttr's profile in it is
+			// a window nobody owns.
+			record.left()
+		}
 		// Nothing plays behind a view that is not the picture: a project window
 		// left on the editor should not keep decoding.
 		if mode != .preview { transport.pause() }
@@ -1347,6 +1367,7 @@ public final class ComposeWindowController: DocumentEditor,
 	@objc public func showText(_ sender: Any?) { show(.text) }
 	@objc public func showPreview(_ sender: Any?) { show(.preview) }
 	@objc public func showLevels(_ sender: Any?) { show(.levels) }
+	@objc public func showRecord(_ sender: Any?) { show(.record) }
 
 	/// The picture, and nothing else.
 	///
@@ -1572,23 +1593,18 @@ public final class ComposeWindowController: DocumentEditor,
 	/// the project's own folder, and the take is written into its `takes/`. A
 	/// project that is nowhere has nowhere to put any of it.
 	@objc public func recordScreencast(_ sender: Any?) {
-		guard ensureSaved(), let baseURL = composeDocument.baseURL else { return }
-		// The one the project already states, if it states one — so a recording
-		// that was written down is made again rather than typed again.
-		RecordingSheet.present(
-			over: inspector, project: baseURL,
-			stated: composeDocument.project.recordings) { [weak self] media in
-				guard let self else { return }
-				// A recording arrives as material rather than as a file to
-				// import, and that is one line here: the take it wrote is added
-				// to the project, which is what the material tree lists.
-				let take = baseURL.appendingPathComponent("takes")
-					.appendingPathComponent(media.deletingPathExtension().lastPathComponent)
-					.appendingPathExtension("cuttr")
-				if self.composeDocument.addTake(take) {
-					self.say("recorded \(media.lastPathComponent)")
-				}
-			}
+		guard ensureSaved() else { return }
+		show(.record)
+	}
+
+	/// The take a recording wrote, added to the project — which is what puts it
+	/// in the material tree.
+	private func tookARecording(_ media: URL) {
+		guard let baseURL = composeDocument.baseURL else { return }
+		let take = baseURL.appendingPathComponent("takes")
+			.appendingPathComponent(media.deletingPathExtension().lastPathComponent)
+			.appendingPathExtension("cuttr")
+		if composeDocument.addTake(take) { say("recorded \(media.lastPathComponent)") }
 	}
 
 	// MARK: - Saving

@@ -354,7 +354,8 @@ import Testing
 		window.setContentSize(NSSize(width: 1400, height: 900))
 		window.layoutIfNeeded()
 
-		#expect(controller.railForTesting.countForTesting == 5)
+		#expect(controller.railForTesting.countForTesting
+			== ComposeWindowController.Mode.allCases.count)
 		#expect(ComposeWindowController.Mode.levels.rawValue == 3)
 		controller.show(.levels)
 		window.layoutIfNeeded()

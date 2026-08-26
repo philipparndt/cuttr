@@ -1431,9 +1431,14 @@ import Testing
 	}
 
 	/// It is the first thing in the rail, and going there shows it.
+	///
+	/// The count is every page there is: the rail's order *is* the ⌘ number and
+	/// the tab index, so a page added anywhere but the end moves a number
+	/// somebody already has in their fingers.
 	@Test func theProjectIsTheFirstPlaceInTheRail() {
 		let (controller, window) = opened()
-		#expect(controller.railForTesting.countForTesting == 5)
+		#expect(controller.railForTesting.countForTesting
+			== ComposeWindowController.Mode.allCases.count)
 		#expect(ComposeWindowController.Mode.project.rawValue == 0)
 
 		controller.show(.project)
