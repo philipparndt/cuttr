@@ -698,19 +698,22 @@ public enum Renderer {
 		let rate = max(1, framesPerSecond.rounded())
 		let frames = max(1, Int((seconds * rate).rounded(.up)))
 		let url = carrierURL(size: size, frames: frames, rate: rate)
-		// Kept between renders, because writing it again for every card of the
-		// same shape is a second of black nobody sees — and *checked* before it
-		// is used, because a file that merely exists is not a file that plays.
+		// Kept for the run, because writing it again for every card of the same
+		// shape is a second of black nobody sees, and a preview rebuilds on
+		// every edit.
 		//
-		// This is a bug that was here, and it was permanent: the carrier was
-		// written straight to its final name, so a render killed part way
-		// through — or two of them racing, or a disk that filled — left a
-		// half-written movie behind, and every later render of that shape and
-		// length picked it up and failed with `Cannot Decode`. Forever, with
-		// nothing on screen to say which file was at fault or that a file was
-		// involved at all. It cost an afternoon to find, on a project made of
-		// nothing but title cards.
-		if await !plays(url, frames: frames, rate: rate) {
+		// Existence is enough *because* the folder is this launch's: the only
+		// process that has ever written there is this one, and it does so by
+		// moving a whole file into place.
+		//
+		// There was a check here that opened the file and read a sample out of
+		// it, to catch a carrier that was there and would not play. It had to
+		// go: a synchronous `AVAssetReader` on the way into every build stalled
+		// the window for about a second on every edit — a worse bug than the one
+		// it was guarding, and one somebody feels rather than reads about. The
+		// per-launch folder is what makes the check unnecessary; keeping both
+		// was paying for the same guarantee twice.
+		if !FileManager.default.fileExists(atPath: url.path) {
 			// Written under a name nobody looks for and moved into place when
 			// it is whole, so a process that dies mid-write leaves a stray
 			// temporary file rather than a poisoned one.
@@ -776,28 +779,6 @@ public enum Renderer {
 		return (asset, track)
 	}
 
-	/// Whether the file at this path is a carrier that will actually play.
-	///
-	/// Not "does it exist". The one that went wrong read as a perfectly good
-	/// two-second h.264 movie to every tool that looked at its headers and was
-	/// refused by the decoder — so what is asked here is the question the
-	/// exporter will ask: can its samples be read?
-	private static func plays(_ url: URL, frames: Int, rate: Double) async -> Bool {
-		guard FileManager.default.fileExists(atPath: url.path) else { return false }
-		let asset = AVURLAsset(url: url)
-		guard let track = try? await asset.loadTracks(withMediaType: .video).first,
-		      let span = try? await track.load(.timeRange) else { return false }
-		let wanted = CMTime(value: CMTimeValue(frames), timescale: CMTimeScale(rate))
-		guard abs(span.duration.seconds - wanted.seconds) < 1.0 / rate else { return false }
-		// And read a sample out of it, which is the part a header cannot fake.
-		guard let reader = try? AVAssetReader(asset: asset) else { return false }
-		let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
-		guard reader.canAdd(output) else { return false }
-		reader.add(output)
-		guard reader.startReading() else { return false }
-		defer { reader.cancelReading() }
-		return output.copyNextSampleBuffer() != nil
-	}
 
 	/// The mix: what each lane is set to, moment by moment.
 	///

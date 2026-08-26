@@ -32,34 +32,34 @@ import Testing
 		#expect(FileManager.default.fileExists(atPath: at.path))
 	}
 
-	/// **The one that matters.** A file that is there and cannot be played is
-	/// written again rather than used.
-	@Test func aBrokenCarrierIsWrittenAgainRatherThanUsed() async throws {
-		let at = url(0.6)
-		try? FileManager.default.removeItem(at: at)
-		// A whole one first, so what is being tested is the *replacing* of a
-		// bad one and not the writing of a missing one.
-		_ = try await Renderer.carrier(size: size, seconds: 0.6, framesPerSecond: 25)
-		let whole = try #require(try? Data(contentsOf: at))
-		#expect(whole.count > 0)
+	/// **The one that matters.** The folder is this launch's, so nothing another
+	/// process left behind is ever consulted.
+	///
+	/// The bug was a carrier kept under a fixed name in the temporary directory
+	/// and reused by every later run. A file left there by a render that did not
+	/// finish made every later render of that shape fail with `Cannot Decode`,
+	/// for ever, with nothing in the failure naming a cached file. Putting a
+	/// bad one where the old name was must now do nothing at all.
+	@Test func nothingFromAnotherRunIsConsulted() async throws {
+		let old = FileManager.default.temporaryDirectory
+			.appendingPathComponent("cuttr-card-480x270-15@25.mov")
+		try Data("not a movie at all".utf8).write(to: old)
+		defer { try? FileManager.default.removeItem(at: old) }
 
-		// And now a half-written one, which is what a killed render leaves.
-		try whole.prefix(whole.count / 3).write(to: at)
 		let made = try await Renderer.carrier(size: size, seconds: 0.6, framesPerSecond: 25)
-		let track = try #require(made?.track, "a broken carrier was handed back")
+		let track = try #require(made?.track, "a carrier from another run was used")
 		#expect(abs(try await track.load(.timeRange).duration.seconds - 0.6) < 0.05)
-		// Rewritten, not patched: the file on disk is a whole movie again.
-		let now = try #require(try? Data(contentsOf: at))
-		#expect(now.count > whole.count / 2)
+		// And what it wrote is not where the old one was.
+		#expect(url(0.6).path != old.path)
 	}
 
-	/// Nothing at all where a carrier should be is a file that is written, not
-	/// an error — that half always worked and must go on working.
-	@Test func rubbishWhereACarrierShouldBeIsReplaced() async throws {
-		let at = url(0.5)
-		try Data("not a movie at all".utf8).write(to: at)
-		let made = try await Renderer.carrier(size: size, seconds: 0.5, framesPerSecond: 25)
-		#expect(made?.track != nil)
+	/// The folder is named for this launch and nothing else is in it, which is
+	/// the whole of why existence is enough to trust.
+	@Test func theFolderBelongsToThisRun() {
+		let at = url(0.6).deletingLastPathComponent()
+		#expect(at.lastPathComponent.hasPrefix("cuttr-cards-"))
+		#expect(at.lastPathComponent.count > "cuttr-cards-".count + 30,
+		        "the folder is not unique to this launch")
 	}
 
 	/// While it is being written it is under a name nothing looks for, so a
