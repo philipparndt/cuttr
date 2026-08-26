@@ -23,14 +23,43 @@ whether or not it is running at the time.
 
 ### Requirement: A named window at a named size
 
-cuttr SHALL open the browser at a stated URL with the window's *content* at a
-stated size, and SHALL refuse rather than approximate when the size cannot be
+cuttr SHALL open the browser at a stated URL and SHALL record a picture of the
+stated size, and SHALL refuse rather than approximate when that size cannot be
 had — a recording that is 8 points off is a recording that has to be cropped.
+
+The stated size is the size of the **recording**: the window as captured,
+including whatever browser chrome is shown. It is not the page's size, which is
+that minus the chrome.
 
 #### Scenario: The frame is the size that was asked for
 - **WHEN** a recording asks for 1280×720
-- **THEN** the captured frames are 1280×720, and not the window's outer size or
-  the nearest the window manager felt like
+- **THEN** the captured frames are 1280×720, whatever the browser's chrome costs
+  the page inside them
+
+### Requirement: The browser's own chrome is shown, and can be hidden
+
+cuttr SHALL show the browser's address bar by default, because a screencast that
+does not say where it is has to say it in words instead. A recording SHALL be
+able to ask for a bare window, with no tab strip and no address bar, for the
+films that are about the page rather than about the browser.
+
+Whichever is chosen, the window SHALL carry no bookmarks bar, no extension
+buttons and no account avatar — those come from a profile, and the profile is
+cuttr's.
+
+#### Scenario: Where you are is in the frame
+- **WHEN** a recording is made with nothing said about the chrome
+- **THEN** the address bar is in the film, showing the URL, and there is no
+  bookmarks bar, extension button or account avatar beside it
+
+#### Scenario: A film about the page
+- **WHEN** a recording asks for no chrome
+- **THEN** the whole of the frame is the page
+
+#### Scenario: What the URL gives away
+- **WHEN** somebody is about to record a URL with the address bar shown
+- **THEN** cuttr says once, where the URL is typed, that the URL will be
+  readable in the finished film
 
 #### Scenario: A size the screen cannot hold
 - **WHEN** a recording asks for a window larger than the display

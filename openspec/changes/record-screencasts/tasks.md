@@ -1,7 +1,7 @@
 ## 1. The recording in the file
 
-- [ ] 1.1 Add `Recording` — `as`, `url`, `size`, `browser`, and whether the
-      browser's own chrome is shown — and `Project.recordings`.
+- [ ] 1.1 Add `Recording` — `as`, `url`, `size`, `browser`, `chrome` — and
+      `Project.recordings`. `size` is the recording's own size, chrome and all.
 - [ ] 1.2 `ProjectFile` reads a `recordings:` block and carries unknown keys
       through; `ProjectWriter` writes it, and writes nothing when there are none.
 - [ ] 1.3 Test: round-trips byte for byte, a project with none writes no block,
@@ -31,13 +31,16 @@
 
 - [ ] 4.1 Find Chrome, then Chromium, then Edge; refuse by name when there is
       none.
-- [ ] 4.2 Launch with `--user-data-dir` inside the project, at the asked-for
-      window size, at the URL, with the first-run and default-browser prompts off.
-- [ ] 4.3 Wait for the window to exist and be on screen before capture starts,
+- [ ] 4.2 Launch with `--user-data-dir` inside the project, at the URL, with the
+      first-run and default-browser prompts off, and with the address bar shown —
+      `--app=` only when the recording asks for a bare window.
+- [ ] 4.3 Size the window so that the *captured picture* is what was asked for,
+      whatever the chrome costs, and refuse when it cannot be had.
+- [ ] 4.4 Wait for the window to exist and be on screen before capture starts,
       and raise it.
-- [ ] 4.4 Close it on the way out of every path — stopped, failed, or quit.
-- [ ] 4.5 Test the command line that is built, the browser search order, and that
-      the profile lands inside the project.
+- [ ] 4.5 Close it on the way out of every path — stopped, failed, or quit.
+- [ ] 4.6 Test the command line that is built for both kinds of window, the
+      browser search order, and that the profile lands inside the project.
 
 ## 5. What comes out
 
@@ -54,8 +57,9 @@
       while it runs.
 - [ ] 6.2 The recordings the project already states are listed and can be made
       again with one press.
-- [ ] 6.3 Say the two things that go wrong before they go wrong: the permission,
-      and how much disk a minute costs.
+- [ ] 6.3 Say the three things that go wrong before they go wrong: the
+      permission, how much disk a minute costs, and that the URL is readable in
+      the film.
 - [ ] 6.4 Test the panel's states without a screen: idle, waiting for consent,
       recording, and stopped.
 

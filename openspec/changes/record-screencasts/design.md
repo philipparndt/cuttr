@@ -1,13 +1,15 @@
 ## Context
 
     ┌──────────────────────────────┐
-    │  ⦿ ⦿ ⦿                       │   a browser cuttr started, with
-    │ ┌──────────────────────────┐ │   its own profile and no bookmarks
+    │ ⦿ ⦿ ⦿  ┌────────────┐        │   a browser cuttr started, with
+    │ ┌──────┴────────────┴──────┐ │   its own profile and no bookmarks
+    │ │ ← → ⟳  example.com/…     │ │   ← the address bar is in the film,
+    │ ├──────────────────────────┤ │     because a screencast that does
+    │ │                          │ │     not say where it is is a
+    │ │   the page being shown   │ │     screencast of an anonymous box
     │ │                          │ │
-    │ │   the page being shown   │ │   ← ScreenCaptureKit captures
-    │ │                          │ │     this window, not the screen
-    │ └──────────────────────────┘ │
-    └──────────────────────────────┘
+    │ └──────────────────────────┘ │   ScreenCaptureKit captures this
+    └──────────────────────────────┘   window, not the screen
                   ↓
        install-demo.mov  +  takes/install-demo.cuttr
 
@@ -59,14 +61,15 @@ type stays type instead of becoming a photograph of type.
 ### The browser is a subprocess with `--user-data-dir`
 
     Chrome --user-data-dir=<project>/.cuttr/browser/<profile>
-           --window-size=1280,720 --app=<url>
-           --no-first-run --no-default-browser-check
+           --window-size=1280,720 --no-first-run
+           --no-default-browser-check --hide-crash-restore-bubble
+           <url>
 
 `--user-data-dir` is the whole of the isolation, and it is a supported flag
 rather than a trick: a fresh directory is a fresh browser, with no bookmarks, no
-extensions, no history and no account. `--app=` opens without tabs or an address
-bar, which is what a screencast of a *page* wants; a recording that wants the
-chrome can say so.
+extensions, no history and no account.
+
+Note what is *not* there: `--app=`. See below.
 
 Kept inside the project's `.cuttr/` rather than in a shared place, so that a page
 needing a cookie accepted or a login done keeps it for that project and does not
@@ -76,13 +79,47 @@ leak between them.
 it afterwards would close their tabs. A tool that touches somebody's own browser
 session to make a film is a tool nobody runs twice.
 
-### `--window-size` is the content size, and it is checked
+### The address bar is in the film
 
-Chrome's `--window-size` sets the *content* size, which is the number somebody
-means. It is checked rather than trusted: the captured frame's size is compared
-against what was asked for, and a mismatch refuses before recording rather than
-producing something that has to be cropped — and cropping a screen recording
-throws away the resolution that made it readable.
+`--app=<url>` opens a window with no tab strip and no address bar, and it was the
+obvious choice: fewest pixels that are not the page. It is the wrong one.
+
+A screencast is somebody being shown how to do a thing, and *where you are* is
+half of that. "Go to the downloads page" is a sentence about an address bar. A
+recording that opens on an anonymous white box has to say in words what the
+browser was already saying in the frame, and the viewer has no way to follow
+along in their own browser. It is also the difference between a film of a web
+application and a film of a rectangle: the chrome is what makes it legibly a
+browser at all.
+
+The fresh profile is what makes this affordable. An ordinary window here is not
+the usual crowded one — no bookmarks bar, no extension buttons, no profile
+avatar, no account, one tab — so what is left above the page is the back and
+forward buttons, a reload, and the URL. That is the part worth having.
+
+`chrome: none` hides it, for the recordings that are about the page and not
+about the browser. The default is on, because the case that wants it is the
+commoner one and the one somebody would not think to ask for.
+
+**What is now in the frame that was not before**: the URL. A demonstration
+against `localhost:3000`, or a staging host with somebody's name in it, is
+readable in the finished film. Said in the panel, once, where the URL is typed.
+
+### `size:` is the size of the recording
+
+The picture that is captured, which is the window — chrome and all — and
+therefore the picture that lands in the take and has to fit the output's frame.
+Not the page's size, which with the address bar shown is that minus the chrome.
+
+One number, and no ambiguity about which of two things it names. It is checked
+rather than trusted: the captured frame's size is compared against what was asked
+for, and a mismatch refuses before recording rather than producing something that
+has to be cropped — and cropping a screen recording throws away the resolution
+that made it readable.
+
+A recording that needs the *page* at an exact size — a layout with breakpoints in
+it — is a different number and can be a different key. It is not this one, and
+guessing which was meant is how a feature grows a setting nobody can explain.
 
 ### A recording writes a take, and never overwrites one
 
@@ -118,9 +155,13 @@ answer: a file that looks like a recording and is not.
 - **Recordings are large.** A minute at 1280×720 is tens of megabytes. → Beside
   the project like all footage, gitignored like all footage, and said in the
   panel before the first one is made.
-- **`--app=` hides the address bar**, which some screencasts want to show. → A
-  key for it, defaulting to the bare window, because the commoner case is a
-  recording of a page rather than of a browser.
+- **The address bar puts the URL in the film.** A localhost port or a staging
+  host with somebody's name in it is readable in the finished screencast. → Said
+  in the panel where the URL is typed, and `chrome: none` is one word away.
+- **The chrome's height is Chrome's**, and it changes between versions — so the
+  page gets a slightly different number of pixels on a different machine. That
+  is fine for a screencast and fatal for a layout test, which is the second
+  reason `size:` names the recording rather than the page.
 - **A browser left running** if cuttr dies mid-recording. → The subprocess is
   killed on the way out of every path including the crash handler, and a stray
   profile directory is harmless.

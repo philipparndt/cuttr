@@ -10,8 +10,9 @@ rather than remembering what somebody did.
 recordings:
   - as:      install-demo
     url:     https://example.com/download
-    size:    1280x720
+    size:    1280x720      # the recording, chrome and all
     browser: chrome
+    chrome:  bar           # or `none` for a bare window
 ```
 
 #### Scenario: The same recording, a month later

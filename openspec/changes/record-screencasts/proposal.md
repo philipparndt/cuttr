@@ -20,12 +20,19 @@ one that would look the same twice.
 ## What Changes
 
 - **A recording lives in the project**, as a block that says what to record:
-  the URL, the size, and which browser profile. It is written down, so the same
-  recording can be made again next month with one number changed.
+  the URL, the size, whether the browser's own chrome is shown, and which
+  profile. It is written down, so the same recording can be made again next
+  month with one number changed.
 - **cuttr launches its own browser.** A Chrome (or Chromium/Edge) started with
   `--user-data-dir` pointing inside the project's own folder: no bookmarks, no
   extensions, no signed-in account, no notifications, and a window opened at
   exactly the size asked for rather than resized afterwards.
+- **The address bar is in the film.** A screencast is somebody being shown how to
+  do a thing, and where you are is half of that — "go to the downloads page" is a
+  sentence about an address bar. The fresh profile is what makes that affordable:
+  what is left above the page is back, forward, reload and the URL, with no
+  bookmarks bar, extension buttons or account avatar. `chrome: none` hides it for
+  the recordings that are about the page rather than the browser.
 - **cuttr records that window**, through `ScreenCaptureKit`, which captures one
   window rather than a region of the screen — so nothing that passes in front of
   it is in the film and the pixels are the window's own.
