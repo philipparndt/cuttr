@@ -82,14 +82,9 @@ public final class WindowRecorder: NSObject, @unchecked Sendable {
 		} catch {
 			throw Trouble.cannotWrite(error.localizedDescription)
 		}
-		// HEVC for the same reason the renderer prefers it: a screencast is
-		// flat colour and sharp edges, which is where h.264 spends its
-		// bit-rate badly and shows it as rings around type.
-		input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-			AVVideoCodecKey: AVVideoCodecType.hevc,
-			AVVideoWidthKey: Int(size.width),
-			AVVideoHeightKey: Int(size.height),
-		])
+		input = AVAssetWriterInput(
+			mediaType: .video,
+			outputSettings: Self.settings(size: size, framesPerSecond: framesPerSecond))
 		input.expectsMediaDataInRealTime = true
 		super.init()
 		guard writer.canAdd(input) else {
@@ -97,6 +92,53 @@ public final class WindowRecorder: NSObject, @unchecked Sendable {
 		}
 		writer.add(input)
 		try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+	}
+
+	/// How a screencast is encoded.
+	///
+	/// A screen recording is not footage and compresses nothing like it. It is
+	/// flat colour, hard edges and long stretches where nothing moves at all —
+	/// which is where h.264 spends its bit-rate worst, as rings around type, and
+	/// where HEVC's larger blocks and better intra prediction earn their keep.
+	/// So HEVC, always, on every Mac that can run this program.
+	///
+	/// **The bit-rate is per pixel rather than a number.** A screencast at
+	/// 2560×1440 is four times the pixels of one at 1280×720 and wants four
+	/// times the bits; one figure would be starvation at the top and waste at
+	/// the bottom. A twelfth of a bit per pixel per frame is what text at rest
+	/// costs — measured on the kind of thing this records, a browser showing a
+	/// page — and it is a ceiling rather than a target: the encoder spends less
+	/// than that on the seconds when nothing moves, which is most of them.
+	///
+	/// Two more things do more for the size than the bit-rate does:
+	///
+	/// - **Frames that are the same are not written at all.** A capture hands
+	///   out a frame whether or not anything changed, and marks the ones that
+	///   are not new; those are dropped where they arrive. A page somebody is
+	///   reading costs nothing per second.
+	/// - **Keyframes every four seconds** rather than every one. A keyframe is
+	///   a whole picture and a screencast is mostly one picture, so they are
+	///   the largest single thing in the file — and four seconds is still close
+	///   enough for the editor to scrub without decoding half the recording.
+	static func settings(size: CGSize, framesPerSecond: Double) -> [String: Any] {
+		let pixels = Double(max(1, Int(size.width) * Int(size.height)))
+		let rate = max(1, framesPerSecond)
+		let bits = Int(pixels * rate / 12)
+		return [
+			AVVideoCodecKey: AVVideoCodecType.hevc,
+			AVVideoWidthKey: Int(size.width),
+			AVVideoHeightKey: Int(size.height),
+			AVVideoCompressionPropertiesKey: [
+				AVVideoAverageBitRateKey: bits,
+				// A ceiling and not a floor: the seconds where nothing moves
+				// should cost nothing, and a constant rate would fill them with
+				// bits nobody can see.
+				AVVideoAllowFrameReorderingKey: true,
+				AVVideoExpectedSourceFrameRateKey: Int(rate),
+				AVVideoMaxKeyFrameIntervalDurationKey: 4.0,
+				AVVideoQualityKey: 0.9,
+			] as [String: Any],
+		]
 	}
 
 	// MARK: - Running

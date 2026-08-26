@@ -85,6 +85,14 @@ import Testing
 		let panel = self.panel()
 		panel.typeForTesting(url: "https://example.com")
 		#expect(panel.saysForTesting.contains("MB a minute"))
+		// Worked out from the size rather than typed, so it cannot drift from
+		// what the encoder actually does.
+		var big = panel.recording
+		big.width = 2560
+		big.height = 1440
+		panel.recording = big
+		panel.show(.ready)
+		#expect(!panel.saysForTesting.contains("Under 0 MB"))
 	}
 
 	/// A refusal keeps its own sentence rather than being turned into a

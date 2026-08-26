@@ -270,8 +270,14 @@ public final class RecordingPanel: NSView {
 	/// The two things worth knowing before the first recording, and only where
 	/// they apply.
 	private var advice: String {
-		var out = "About 40 MB a minute at this size — recordings land beside the "
-			+ "project like any other footage."
+		// Worked out rather than a number typed here, so the panel and the
+		// encoder cannot come to disagree. It is a ceiling: the seconds where
+		// nothing moves cost nothing, and most of them do not move.
+		let pixels = Double(recording.width * recording.height) * 4   // at 2×
+		let megabytes = pixels * 30 / 12 * 60 / 8 / 1_000_000
+		var out = "Under \(Int(megabytes.rounded())) MB a minute at this size, and "
+			+ "usually far less — recordings land beside the project like any other "
+			+ "footage."
 		if recording.chrome == .bar, !recording.url.isEmpty {
 			out += " The address bar is in the film, so this URL will be readable in it."
 		}

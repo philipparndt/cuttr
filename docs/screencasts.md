@@ -86,5 +86,24 @@ got.
 
 ## What it costs
 
-About 40 MB a minute at 1280×720. Recordings land beside the project like all
-footage and are gitignored like all footage.
+Under 15 MB a minute at 1280×720, and usually far less. Recordings land beside
+the project like all footage and are gitignored like all footage.
+
+A screen recording is not footage and compresses nothing like it: flat colour,
+hard edges, and long stretches where nothing moves at all. Three things follow
+from that, and together they matter more than any single setting.
+
+**HEVC, always.** h.264 spends its bit-rate worst on exactly what a screencast is
+made of, and shows it as rings around type.
+
+**Frames that are the same are not written.** A capture hands out a frame whether
+or not anything changed and marks the ones that are not new; those are dropped
+where they arrive. A page somebody is reading costs nothing per second.
+
+**Keyframes every four seconds, not every one.** A keyframe is a whole picture
+and a screencast is mostly one picture, so they are the largest single thing in
+the file — and four seconds is still close enough to scrub without decoding half
+the recording.
+
+The bit-rate itself is a twelfth of a bit per pixel per frame, which is what text
+at rest costs, and it is a ceiling rather than a target.
