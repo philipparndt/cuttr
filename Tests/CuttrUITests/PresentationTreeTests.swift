@@ -111,17 +111,140 @@ import Testing
 			== ["bullets", "bullets", "boxes", "the-catch"])
 	}
 
-	/// A treatment can only be written inside the entry it is on, so there is
-	/// nowhere for a drag to take it — and a drag that always fails is worse
-	/// than one that cannot be started.
-	@Test func aTreatmentIsNotDragged() {
+	// MARK: - Moving one between clips
+
+	private func twoClips() -> Project {
+		var first = TimelineEntry(clip: ClipReference("install"))
+		first.presentations = [made(4, "bullets"), made(11, "boxes")]
+		return Project(timeline: [first, TimelineEntry(clip: ClipReference("outro")),
+		                          TimelineEntry(card: Card(duration: 4))])
+	}
+
+	/// Dragged onto another clip, a treatment goes with it — that is the whole
+	/// of what a drag between rows means here, and it is the same question an
+	/// overlay's drag asks.
+	@Test func aTreatmentIsDraggedOntoAnotherClip() {
+		let panel = self.panel(twoClips())
+		var written: Project?
+		panel.onChange = { written = $0 }
+
+		#expect(panel.rehome(.presentation(path: [0], index: 0), onto: [1]))
+		#expect(written?.timeline[0].presentations.map(\.scene) == ["boxes"])
+		#expect(written?.timeline[1].presentations.map(\.scene) == ["bullets"])
+	}
+
+	/// With ⌥ it is copied instead, and the one it came from keeps it.
+	@Test func optionDraggingCopiesIt() {
+		let panel = self.panel(twoClips())
+		var written: Project?
+		panel.onChange = { written = $0 }
+
+		#expect(panel.rehome(.presentation(path: [0], index: 0), onto: [1], copying: true))
+		#expect(written?.timeline[0].presentations.map(\.scene) == ["bullets", "boxes"])
+		#expect(written?.timeline[1].presentations.map(\.scene) == ["bullets"])
+	}
+
+	/// A card has no picture to move aside and the top-level list has no
+	/// treatments in it, so neither is a place to drop one. Refused rather than
+	/// landed somewhere it cannot be written.
+	@Test func thereArePlacesATreatmentCannotGo() {
+		let panel = self.panel(twoClips())
+		var written: Project?
+		panel.onChange = { written = $0 }
+
+		#expect(!panel.rehome(.presentation(path: [0], index: 0), onto: [2]), "onto a card")
+		#expect(!panel.rehome(.presentation(path: [0], index: 0), onto: nil), "onto the heading")
+		// And onto the clip it is already on, which would be a move to itself.
+		#expect(!panel.rehome(.presentation(path: [0], index: 0), onto: [0]))
+		#expect(written == nil, "something was written for a refused drop")
+	}
+
+	/// It goes on the pasteboard as a drag, and carries its own lines as text
+	/// so that dragging one into the project file lands something readable.
+	@Test func aTreatmentIsPutOnThePasteboard() throws {
 		let panel = self.panel(project())
 		let outline = panel.outlineForTesting
-		let item = try? #require(outline.item(atRow: 1))
-		#expect(panel.outlineView(outline, pasteboardWriterForItem: item as Any) == nil)
-		// The clip above it still is.
-		let clip = try? #require(outline.item(atRow: 0))
-		#expect(panel.outlineView(outline, pasteboardWriterForItem: clip as Any) != nil)
+		let item = try #require(outline.item(atRow: 1))
+		let written = try #require(
+			panel.outlineView(outline, pasteboardWriterForItem: item) as? NSPasteboardItem)
+		#expect(written.string(forType: .string)?.contains("scene: bullets") == true)
+	}
+
+	// MARK: - Copy and paste
+
+	/// ⌘C on a treatment copies the treatment, not the clip it is filed under.
+	///
+	/// The row's own `path` is the entry it belongs to, so asking for entries
+	/// would have copied a shot somebody never pointed at.
+	@Test func copyingATreatmentCopiesTheTreatment() {
+		let panel = self.panel(project())
+		panel.selectRow(2)
+		let board = NSPasteboard(name: .init("cuttr-treatment-copy"))
+		#expect(panel.write(board))
+		let text = board.string(forType: .string) ?? ""
+		#expect(text.contains("presentations:"))
+		#expect(text.contains("scene: boxes"))
+		#expect(!text.contains("clip:"), "the clip came with it")
+	}
+
+	/// And pasting puts it on whatever is selected — as the file writes it and
+	/// reads it back, so a copy carries everything a treatment has.
+	@Test func pastingPutsItOnTheSelectedClip() {
+		let source = self.panel(project())
+		source.selectRow(2)
+		let board = NSPasteboard(name: .init("cuttr-treatment-paste"))
+		#expect(source.write(board))
+
+		let panel = self.panel(twoClips())
+		var written: Project?
+		panel.onChange = { written = $0 }
+		panel.selectRow(3)   // the second clip
+		#expect(panel.canPaste(from: board))
+		#expect(panel.paste(from: board))
+		let landed = written?.timeline[1].presentations
+		#expect(landed?.count == 1)
+		#expect(landed?.first?.scene == "boxes")
+		#expect(landed?.first?.hold == 4)
+		#expect(landed?.first?.parameters["one"] == "a line")
+	}
+
+	/// A card cannot take one, and Paste says so by being grey rather than by
+	/// doing nothing when it is pressed.
+	@Test func pastingOntoACardIsRefused() {
+		let source = self.panel(project())
+		source.selectRow(1)
+		let board = NSPasteboard(name: .init("cuttr-treatment-card"))
+		#expect(source.write(board))
+
+		let panel = self.panel(twoClips())
+		panel.selectRow(4)   // the card
+		#expect(!panel.canPaste(from: board))
+		#expect(!panel.paste(from: board))
+	}
+
+	// MARK: - Adding one
+
+	/// The Add menu makes one on whatever is selected, so a treatment can be
+	/// had without going to the properties panel first.
+	@Test func theAddMenuMakesOne() {
+		let panel = self.panel(twoClips())
+		var written: Project?
+		panel.onChange = { written = $0 }
+		panel.selectRow(3)   // the second clip, which has none
+		panel.addPresentationForTesting()
+		#expect(written?.timeline[1].presentations.count == 1)
+		#expect(written?.timeline[1].presentations.first?.scene == "bullets")
+	}
+
+	/// Selected on a treatment, adding puts the new one on the same clip —
+	/// beside it, which is what "add" means when a sibling is selected.
+	@Test func addingBesideOneStaysOnTheSameClip() {
+		let panel = self.panel(project())
+		var written: Project?
+		panel.onChange = { written = $0 }
+		panel.selectRow(2)
+		panel.addPresentationForTesting()
+		#expect(written?.timeline[0].presentations.count == 4)
 	}
 
 	// MARK: - A look at one

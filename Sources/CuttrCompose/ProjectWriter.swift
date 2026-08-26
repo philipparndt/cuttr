@@ -323,6 +323,12 @@ public enum ProjectWriter {
 		"timeline:\n" + entries([entry], indent: "  ")
 	}
 
+	/// The treatments, as they are written inside an entry — at the indent
+	/// they have there, so the text can be put back where it came from.
+	public static func fragment(for treatments: [Presentation]) -> String {
+		"presentations:\n" + presentations(treatments, indent: "  ")
+	}
+
 	public static func fragment(for overlay: Overlay) -> String {
 		"overlays:\n" + overlays([overlay])
 	}

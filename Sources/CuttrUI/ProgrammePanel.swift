@@ -149,6 +149,14 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// carries it as the file writes it. See ``write(_:)``.
 	static let entriesType = NSPasteboard.PasteboardType("de.rnd7.cuttr.entries")
 
+	/// Presentation treatments, as the file writes them.
+	///
+	/// A type of its own rather than a whole entry with them inside it, because
+	/// the two mean different things when pasted: an entry becomes another
+	/// entry, and a treatment goes *onto* whatever is selected. A copied clip
+	/// that happens to carry treatments must stay a copied clip.
+	static let treatmentsType = NSPasteboard.PasteboardType("de.rnd7.cuttr.presentations")
+
 	// MARK: - Tree
 
 	/// What a row that is not a timeline entry holds.
@@ -395,7 +403,15 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			("VHS tape", "tv.badge.wifi", .tape, #selector(addTape)),
 		]
 		if includingEntries {
-			out += [nil, ("Sound", "speaker.wave.2", Theme.Kind.sound, #selector(addSound))]
+			out += [
+				nil,
+				("Sound", "speaker.wave.2", Theme.Kind.sound, #selector(addSound)),
+				// Last, and after a rule, because it is the one addition that
+				// is not laid *over* the picture: it moves the picture and
+				// makes the programme longer.
+				("Presentation", "rectangle.inset.bottomleft.filled",
+				 .presentation, #selector(addPresentation)),
+			]
 		}
 		return out
 	}
@@ -722,6 +738,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 
 	func duplicateSelectedForTesting() { duplicateSelected() }
 
+	/// For the tests: the Add menu's presentation item, without a menu.
+	func addPresentationForTesting() { addPresentation() }
+
 	private var selectedPath: [Int]? {
 		let node = outline.item(atRow: outline.selectedRow) as? Node
 		guard node?.overlay == nil, node?.isOverlayRoot == false else { return nil }
@@ -893,6 +912,31 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// Where the selection should land once the project comes back through
 	/// ``reload(_:vocabulary:)`` — an edit changes the paths under it.
 	private var pending: ProjectSelection?
+
+	/// A treatment on whatever entry is selected — or on the entry the selected
+	/// row is filed under, so that adding one while a caption is selected puts
+	/// it on the clip they are both on.
+	///
+	/// Refused where there is no picture to move: a card is already still and
+	/// a section is a list of things rather than one of them.
+	@objc private func addPresentation() {
+		guard let path = homeForAdding, let entry = project.entry(at: path) else { return }
+		switch entry.source {
+		case .card, .group: return
+		case .clip, .list, .query: break
+		}
+		var next = project
+		// Four seconds beside the picture with nothing in it yet, and at the
+		// head of the clip, which is where somebody who has just asked for one
+		// will drag it from.
+		next.editEntry(at: path) {
+			$0.presentations.append(Presentation(
+				at: 0, into: Presentation.Rectangle(x: 0.04, y: 0.2, width: 0.44, height: 0.6),
+				hold: 4, scene: "bullets"))
+		}
+		pending = .presentation(path: path, index: entry.presentations.count)
+		onChange?(next)
+	}
 
 	@objc private func addSound() {
 		let home = homeForAdding
@@ -1475,11 +1519,19 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			pasteboardItem.setString(Self.written(node.carried!), forType: Self.carriedType)
 			pasteboardItem.setString(project.sound(at: origin)?.file ?? "", forType: .string)
 			return pasteboardItem
-		case .presentation:
-			// Not draggable. A treatment can only be written inside the entry
-			// it is on, so there is nowhere for a drag to take it — and a drag
-			// that always fails is worse than one that cannot be started.
-			return nil
+		case .presentation(let path, let index):
+			// Where a treatment can go is the same question an overlay's drag
+			// asks — which entry does this belong to — and the answer for a
+			// treatment is any entry that puts a picture on the programme. It
+			// carries its text as well, so a drag out of this tree and into the
+			// project file lands the lines somebody can read.
+			pasteboardItem.setString(Self.written(node.carried!), forType: Self.carriedType)
+			let treatments = project.entry(at: path)?.presentations ?? []
+			pasteboardItem.setString(
+				treatments.indices.contains(index)
+					? ProjectWriter.fragment(for: [treatments[index]]) : "",
+				forType: .string)
+			return pasteboardItem
 		case nil:
 			pasteboardItem.setString(node.path.map(String.init).joined(separator: "."),
 			                         forType: Self.entryType)
@@ -1505,6 +1557,15 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				                        dropChildIndex: NSOutlineViewDropOnItemIndex)
 			} else {
 				outlineView.setDropItem(node, dropChildIndex: NSOutlineViewDropOnItemIndex)
+			}
+			// A treatment goes on an entry that has a picture, and the heading
+			// at the end is not one — there is no top-level list of them.
+			if case .presentation? = Self.carried(
+				info.draggingPasteboard.string(forType: Self.carriedType) ?? "") {
+				guard !node.isOverlayRoot,
+				      project.entry(at: node.carried?.home ?? node.path)?.carriesPictures == true
+				else { return [] }
+				return Self.copies(info.draggingSourceOperationMask) ? .copy : .move
 			}
 			return .move
 		}
@@ -1535,7 +1596,8 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 		if let written = info.draggingPasteboard.string(forType: Self.carriedType),
 		   let carried = Self.carried(written) {
 			let node = item as? Node
-			return rehome(carried, onto: node?.isOverlayRoot == true ? nil : node?.path)
+			return rehome(carried, onto: node?.isOverlayRoot == true ? nil : node?.path,
+			              copying: Self.copies(info.draggingSourceOperationMask))
 		}
 		return dropItems(from: info.draggingPasteboard, into: (item as? Node)?.path ?? [],
 		                 at: index, copying: Self.copies(info.draggingSourceOperationMask))
@@ -1549,7 +1611,7 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// move has to preserve is when the thing is on and that is not something a
 	/// table view can be asked about.
 	@discardableResult
-	func rehome(_ carried: Carried, onto path: [Int]?) -> Bool {
+	func rehome(_ carried: Carried, onto path: [Int]?, copying: Bool = false) -> Bool {
 		var next = project
 		switch carried {
 		case .overlay(let origin):
@@ -1562,9 +1624,23 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				return false
 			}
 			pending = .sound(landed)
-		case .presentation:
-			// Nowhere to go: see the drag above.
-			return false
+		case .presentation(let from, let index):
+			// A treatment has no top-level list to go home to, so the heading
+			// at the end is not a place for one — the drop is refused rather
+			// than landing it somewhere it cannot be written.
+			guard let path, let was = next.entry(at: from),
+			      was.presentations.indices.contains(index),
+			      let landing = next.entry(at: path), landing.carriesPictures
+			else { return false }
+			guard path != from else { return false }
+			let moved = was.presentations[index]
+			if !copying { next.editEntry(at: from) { $0.presentations.remove(at: index) } }
+			var at = 0
+			next.editEntry(at: path) {
+				at = $0.presentations.count
+				$0.presentations.append(moved)
+			}
+			pending = .presentation(path: path, index: at)
 		}
 		onChange?(next)
 		return true
@@ -1600,7 +1676,13 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			guard parts.count == 4 else { return nil }
 			origin = .entry(path: parts[3].split(separator: ".").compactMap { Int($0) }, index: index)
 		}
-		return parts[0] == "o" ? .overlay(origin) : .sound(origin)
+		switch parts[0] {
+		case "o": return .overlay(origin)
+		case "s": return .sound(origin)
+		default:
+			guard case .entry(let path, let index) = origin else { return nil }
+			return .presentation(path: path, index: index)
+		}
 	}
 
 	/// What a drop does, without an `NSDraggingInfo` to make one.
@@ -1692,6 +1774,19 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// meant to be able to read.
 	@discardableResult
 	func write(_ board: NSPasteboard) -> Bool {
+		// The treatments first, because a treatment row's `path` is the entry it
+		// is filed under — so asking for entries would copy the clip somebody
+		// had a treatment selected on, which they never pointed at.
+		let treatments = selectedTreatments
+		if !treatments.isEmpty {
+			board.clearContents()
+			let text = ProjectWriter.fragment(for: treatments)
+			let item = NSPasteboardItem()
+			item.setString(text, forType: Self.treatmentsType)
+			item.setString(text, forType: .string)
+			board.writeObjects([item])
+			return true
+		}
 		let entries = Project.outermost(selectedEntryPaths).compactMap { project.entry(at: $0) }
 		guard !entries.isEmpty else { return false }
 		board.clearContents()
@@ -1720,6 +1815,18 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// never heard the name keeps it.
 	@discardableResult
 	func paste(from board: NSPasteboard) -> Bool {
+		// Onto the entry the selection is on, which for a treatment row is the
+		// entry it is filed under — pasting a treatment while another one is
+		// selected puts it beside that one, on the same clip.
+		let treatments = Self.treatments(on: board)
+		if !treatments.isEmpty, let path = homeForAdding,
+		   let entry = project.entry(at: path), entry.carriesPictures {
+			var next = project
+			next.editEntry(at: path) { $0.presentations += treatments }
+			pending = .presentation(path: path, index: entry.presentations.count)
+			onChange?(next)
+			return true
+		}
 		let entries = Self.entries(on: board)
 		guard !entries.isEmpty else { return false }
 		let target = additionTarget
@@ -1738,7 +1845,42 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// Whether there is anything on the pasteboard to paste. Asked by the menu,
 	/// so that Paste is grey when it would do nothing rather than doing nothing
 	/// when it is pressed.
-	func canPaste(from board: NSPasteboard) -> Bool { !Self.entries(on: board).isEmpty }
+	func canPaste(from board: NSPasteboard) -> Bool {
+		if !Self.treatments(on: board).isEmpty {
+			return project.entry(at: homeForAdding ?? [])?.carriesPictures == true
+		}
+		return !Self.entries(on: board).isEmpty
+	}
+
+	/// The treatments selected in the tree, in the order they are written.
+	private var selectedTreatments: [Presentation] {
+		outline.selectedRowIndexes.compactMap { row -> Presentation? in
+			guard let node = outline.item(atRow: row) as? Node,
+			      case .presentation(let path, let index)? = node.carried,
+			      let entry = project.entry(at: path),
+			      entry.presentations.indices.contains(index) else { return nil }
+			return entry.presentations[index]
+		}
+	}
+
+	/// The treatments a pasteboard holds, read with the reader the file uses.
+	///
+	/// Wrapped in the smallest timeline that can carry them, because a
+	/// `presentations:` block only means anything inside an entry — the same
+	/// trick the entries above use, and for the same reason: one reader, not a
+	/// second decoder to keep in step with the writer.
+	private static func treatments(on board: NSPasteboard) -> [Presentation] {
+		(board.pasteboardItems ?? []).flatMap { item -> [Presentation] in
+			guard let text = item.string(forType: Self.treatmentsType)
+				?? item.string(forType: .string),
+				text.contains("presentations:") else { return [] }
+			let indented = text.split(separator: "\n", omittingEmptySubsequences: false)
+				.map { "    " + $0 }.joined(separator: "\n")
+			let project = try? ProjectReader.read(
+				"timeline:\n  - clip: pasted\n" + indented)
+			return project?.timeline.first?.presentations ?? []
+		}
+	}
 
 	/// One entry as the file writes it, without the `timeline:` line above it —
 	/// so several of them can be pasted into a file's timeline as they stand.
@@ -2154,7 +2296,9 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	public func validateMenuItem(_ item: NSMenuItem) -> Bool {
 		switch item.action {
 		case #selector(copy(_:)):
-			return !selectedEntryPaths.isEmpty
+			return !selectedEntryPaths.isEmpty || !selectedTreatments.isEmpty
+		case #selector(addPresentation):
+			return project.entry(at: homeForAdding ?? [])?.carriesPictures == true
 		case #selector(paste(_:)):
 			return canPaste(from: .general)
 		default:

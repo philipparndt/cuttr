@@ -493,6 +493,18 @@ public struct TimelineEntry: Sendable, Equatable {
 	/// clip put on the programme twice should not stop in both.
 	public var presentations: [Presentation] = []
 
+	/// Whether this entry puts a picture on the programme that could be moved
+	/// aside and held.
+	///
+	/// A card is already still, and a section is a list of placements rather
+	/// than one of them — a treatment on either would have nothing to hold.
+	public var carriesPictures: Bool {
+		switch source {
+		case .clip, .list, .query: return true
+		case .card, .group: return false
+		}
+	}
+
 	public static func == (a: TimelineEntry, b: TimelineEntry) -> Bool {
 		a.source == b.source && a.transition == b.transition && a.label == b.label
 			&& a.trim == b.trim && a.overlays == b.overlays && a.sounds == b.sounds
