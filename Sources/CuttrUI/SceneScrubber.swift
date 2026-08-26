@@ -31,6 +31,14 @@ public final class SceneScrubber: NSView {
 	private let markSize: CGFloat = 9
 
 	private var dragging: (part: Int, key: Int)?
+	/// Where a key being dragged has got to, drawn beside its mark.
+	///
+	/// The key itself does not move until the mouse comes up — the keys are
+	/// kept in order and reordering them under the cursor is how a drag comes
+	/// to be moving a different key from the one that was grabbed. So the mark
+	/// stays put and the time it will land on is written down instead, which
+	/// is the part somebody is actually choosing.
+	private var landing: (part: Int, key: Int, time: Double)?
 
 	public override var isFlipped: Bool { true }
 
@@ -122,6 +130,8 @@ public final class SceneScrubber: NSView {
 			}
 		}
 
+		if let landing { draw(landing) }
+
 		let at = x(playhead).rounded() + 0.5
 		Theme.playhead.setStroke()
 		let line = NSBezierPath()
@@ -177,13 +187,69 @@ public final class SceneScrubber: NSView {
 		onScrub?(at)
 	}
 
+	/// For the tests: where a dragged key would land, and where a mark is.
+	var landingForTesting: Double? { landing?.time }
+
+	func markForTesting(part: Int, key: Int) -> NSPoint {
+		guard part < scene.parts.count, key < scene.parts[part].keys.count else { return .zero }
+		return NSPoint(x: x(scene.parts[part].keys[key].t),
+		               y: lane(part) + laneHeight / 2)
+	}
+
 	public override func mouseDragged(with event: NSEvent) {
 		let at = time(convert(event.locationInWindow, from: nil).x)
 		guard let dragging else {
 			onScrub?(at)
 			return
 		}
+		landing = (dragging.part, dragging.key, at)
+		needsDisplay = true
 		onMoveKey?(dragging.part, dragging.key, at, false)
+	}
+
+	/// The time a dragged key will land on, on a plate beside where it will
+	/// land — with a line back to the mark it came from, so a key dragged a
+	/// long way is still attached to something.
+	private func draw(_ landing: (part: Int, key: Int, time: Double)) {
+		guard landing.part < scene.parts.count,
+		      landing.key < scene.parts[landing.part].keys.count else { return }
+		let top = lane(landing.part)
+		let middle = top + laneHeight / 2
+		let from = x(scene.parts[landing.part].keys[landing.key].t)
+		let to = x(landing.time)
+
+		Theme.accent.withAlphaComponent(0.5).setStroke()
+		let thread = NSBezierPath()
+		thread.move(to: NSPoint(x: from, y: middle))
+		thread.line(to: NSPoint(x: to, y: middle))
+		thread.setLineDash([2, 3], count: 2, phase: 0)
+		thread.stroke()
+
+		let ghost = NSBezierPath()
+		ghost.move(to: NSPoint(x: to, y: middle - markSize / 2))
+		ghost.line(to: NSPoint(x: to + markSize / 2, y: middle))
+		ghost.line(to: NSPoint(x: to, y: middle + markSize / 2))
+		ghost.line(to: NSPoint(x: to - markSize / 2, y: middle))
+		ghost.close()
+		Theme.accent.setStroke()
+		ghost.lineWidth = 1
+		ghost.stroke()
+
+		let words = String(format: "%.2fs", max(0, landing.time))
+		let attributes: [NSAttributedString.Key: Any] = [
+			.font: Theme.monoSmall, .foregroundColor: Theme.text,
+		]
+		let size = (words as NSString).size(withAttributes: attributes)
+		var plate = NSRect(x: to - size.width / 2 - 4, y: top - size.height - 3,
+		                   width: size.width + 8, height: size.height + 3)
+		plate.origin.x = min(max(plate.minX, 2), bounds.width - plate.width - 2)
+		plate.origin.y = max(plate.minY, rulerHeight + 1)
+		Theme.cardHigh.withAlphaComponent(0.92).setFill()
+		NSBezierPath(roundedRect: plate, xRadius: 3, yRadius: 3).fill()
+		Theme.accent.withAlphaComponent(0.6).setStroke()
+		NSBezierPath(roundedRect: plate.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3).stroke()
+		(words as NSString).draw(at: NSPoint(x: plate.minX + 4, y: plate.minY + 1),
+		                        withAttributes: attributes)
 	}
 
 	public override func mouseUp(with event: NSEvent) {
@@ -191,5 +257,7 @@ public final class SceneScrubber: NSView {
 		let at = time(convert(event.locationInWindow, from: nil).x)
 		onMoveKey?(dragging.part, dragging.key, at, true)
 		self.dragging = nil
+		landing = nil
+		needsDisplay = true
 	}
 }

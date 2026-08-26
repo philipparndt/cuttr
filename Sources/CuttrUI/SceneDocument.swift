@@ -153,6 +153,24 @@ public final class SceneDocument {
 		drag(next, actionName: "Move Part", commit: commit)
 	}
 
+	/// The same, for a part that has a size of its own: a shape, an image, a
+	/// bar, a sequence.
+	///
+	/// Two numbers at once for the same reason a move is — one drag is one
+	/// undo step — and its own method rather than `set(.width,…)` twice,
+	/// because two calls would insert the key twice and leave a history where
+	/// undoing a resize halves it.
+	public func resize(_ part: Int, width: Double, height: Double, commit: Bool) {
+		guard part < scene.parts.count else { return }
+		var next = scene
+		let (keys, index) = next.parts[part].inserting(keyAt: playhead)
+		next.parts[part].keys = keys
+		next.parts[part].keys[index][.width] = width
+		next.parts[part].keys[index][.height] = height
+		selectedKey = index
+		drag(next, actionName: "Resize Part", commit: commit)
+	}
+
 	/// Names a shape kind at the playhead, which is what makes a morph.
 	public func setShape(_ kind: Scene.ShapeKind, on part: Int) {
 		guard part < scene.parts.count else { return }
@@ -200,7 +218,11 @@ public final class SceneDocument {
 		case .text:
 			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1, scale: 1, rotation: 0)
 		case .shape:
-			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1, width: 0.4, height: 0.01)
+			// A block, not a hairline. A rule is a shape squashed flat and
+			// squashing one is a drag; making a block out of a hairline is
+			// hunting for a handle seven points tall that is sitting on top of
+			// the one below it. The commoner starting point wins.
+			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1, width: 0.3, height: 0.18)
 		case .image:
 			key = Scene.Key(t: 0, x: 0.5, y: 0.5, opacity: 1, width: 0.2, height: 0.2)
 		case .frames, .component:

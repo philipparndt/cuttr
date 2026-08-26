@@ -138,6 +138,9 @@ public final class SceneWindowController: DocumentEditor, NSMenuItemValidation {
 		stage.onMove = { [weak self] part, x, y, commit in
 			self?.sceneDocument.move(part, x: x, y: y, commit: commit)
 		}
+		stage.onResize = { [weak self] part, width, height, commit in
+			self?.sceneDocument.resize(part, width: width, height: height, commit: commit)
+		}
 		stage.onScale = { [weak self] part, scale, commit in
 			self?.sceneDocument.set(.scale, to: scale, on: part,
 			                        actionName: "Scale Part", commit: commit)

@@ -1,5 +1,6 @@
 import AppKit
 import CuttrCompose
+import CuttrKit
 
 /// The scene, drawn at the moment the playhead is at, with handles on whatever
 /// is selected.
@@ -33,15 +34,34 @@ public final class SceneStage: NSView {
 	public var onScale: ((Int, Double, Bool) -> Void)?
 	/// Degrees, anticlockwise.
 	public var onRotate: ((Int, Double, Bool) -> Void)?
+	/// A part whose size is its own — a shape, an image, a bar, a sequence —
+	/// dragged by a corner: its width and height, in fractions of the frame.
+	///
+	/// Separate from ``onScale`` because they are different facts. `scale:` is
+	/// a multiplier on whatever the part measures, which is the only thing a
+	/// title can be given; a rectangle *has* a width and a height, and being
+	/// able only to multiply them both at once is what made a shape impossible
+	/// to draw with the mouse.
+	public var onResize: ((Int, Double, Double, Bool) -> Void)?
 
 	private enum Grab {
 		case body(CGPoint)
 		/// Which corner, and how far it was from the middle when it was grabbed.
 		case scale(start: Double, reach: Double)
 		case turn(start: Double, angle: Double)
+		/// Which corner is being pulled, for a part that has a size of its own.
+		case size(corner: CGPoint)
 	}
 
 	private var grab: Grab?
+	/// What the drag has come to, drawn beside the part while the mouse is
+	/// down.
+	///
+	/// A drag on this stage writes numbers into the file, and until now the
+	/// only way to find out which numbers was to let go and read the inspector.
+	/// That is the wrong order: the value is being *chosen* during the drag,
+	/// and a snap that fired — or did not — is invisible without it.
+	private var saying: String?
 	private var placements: [ScenePlacement] = []
 	/// How big a handle is, in points on screen.
 	private let handleSize: CGFloat = 7
@@ -57,6 +77,21 @@ public final class SceneStage: NSView {
 	@available(*, unavailable) required init?(coder: NSCoder) { nil }
 
 	public override var acceptsFirstResponder: Bool { true }
+
+	/// Whether this part's size is its own, or something measured from what is
+	/// in it.
+	///
+	/// A shape, an image, a bar and a frame sequence are given a `width:` and a
+	/// `height:` on the key, so a corner handle can set them. A title's box is
+	/// whatever the words came out at and a spinner says how big it is itself;
+	/// for those the corner multiplies instead, which is all `scale:` ever was.
+	private func hasItsOwnSize(_ part: Int) -> Bool {
+		guard part < scene.parts.count else { return false }
+		switch scene.parts[part].content {
+		case .shape, .image, .bar, .frames, .component: return true
+		case .text, .roll, .spinner, .background: return false
+		}
+	}
 
 	// MARK: - Where the picture is
 
@@ -130,6 +165,34 @@ public final class SceneStage: NSView {
 		guard let selected, let placement = placements.first(where: { $0.part == selected })
 		else { return }
 		drawHandles(for: placement)
+		if let saying { draw(saying, beside: placement) }
+	}
+
+	/// The number the drag has come to, on a plate under the part.
+	///
+	/// Under rather than at the cursor: the cursor is already on the handle it
+	/// is pulling, and a label that follows it covers the corner somebody is
+	/// trying to line up. Kept inside the picture, because a value that has
+	/// been dragged off the frame is exactly when it is worth reading.
+	private func draw(_ words: String, beside placement: ScenePlacement) {
+		let attributes: [NSAttributedString.Key: Any] = [
+			.font: Theme.monoSmall, .foregroundColor: Theme.text,
+		]
+		let size = (words as NSString).size(withAttributes: attributes)
+		let bottom = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+			.map { onScreen(placement.corner($0.0, $0.1)).y }.min() ?? picture.midY
+		var plate = NSRect(x: onScreen(placement.centre).x - size.width / 2 - 5,
+		                   y: bottom - size.height - 12,
+		                   width: size.width + 10, height: size.height + 4)
+		plate.origin.x = min(max(plate.minX, picture.minX + 2), picture.maxX - plate.width - 2)
+		plate.origin.y = min(max(plate.minY, picture.minY + 2), picture.maxY - plate.height - 2)
+
+		Theme.cardHigh.withAlphaComponent(0.92).setFill()
+		NSBezierPath(roundedRect: plate, xRadius: 3, yRadius: 3).fill()
+		Theme.accent.withAlphaComponent(0.6).setStroke()
+		NSBezierPath(roundedRect: plate.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3).stroke()
+		(words as NSString).draw(at: NSPoint(x: plate.minX + 5, y: plate.minY + 2),
+		                        withAttributes: attributes)
 	}
 
 	private func drawChequers(in rect: NSRect) {
@@ -214,8 +277,12 @@ public final class SceneStage: NSView {
 			}
 			for corner in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
 				guard hit(point, onScreen(placement.corner(corner.0, corner.1))) else { continue }
-				let reach = distance(frame, placement.centre)
-				grab = .scale(start: placement.scale, reach: max(reach, 0.0001))
+				if hasItsOwnSize(selected) {
+					grab = .size(corner: CGPoint(x: corner.0, y: corner.1))
+				} else {
+					let reach = distance(frame, placement.centre)
+					grab = .scale(start: placement.scale, reach: max(reach, 0.0001))
+				}
 				return
 			}
 		}
@@ -239,6 +306,8 @@ public final class SceneStage: NSView {
 		guard grab != nil else { return }
 		apply(event, commit: true)
 		grab = nil
+		saying = nil
+		needsDisplay = true
 	}
 
 	private func apply(_ event: NSEvent, commit: Bool) {
@@ -258,12 +327,45 @@ public final class SceneStage: NSView {
 				x = snapped(x)
 				y = snapped(y)
 			}
+			say("\(number(x)), \(number(y))", commit)
 			onMove?(selected, x, y, commit)
+
+		case .size(let corner):
+			// The corner is pulled and the middle stays put, so the box grows
+			// and shrinks about where it is. A part is *placed* by its middle
+			// here — that is what `x:` and `y:` mean — so anchoring the
+			// opposite corner instead would move the part as a side effect of
+			// resizing it, and write two more numbers nobody asked to change.
+			let local = turnedBack(frame, about: placement)
+			let scale = max(placement.scale, 0.0001)
+			var width = abs(local.x) * 2 / scale / max(outputSize.width, 1)
+			var height = abs(local.y) * 2 / scale / max(outputSize.height, 1)
+			// Shift keeps the shape it already had, which is what somebody
+			// wants when they are only making a logo bigger.
+			if event.modifierFlags.contains(.shift) {
+				let was = CGSize(width: max(placement.size.width, 1),
+				                 height: max(placement.size.height, 1))
+				let by = max(width * outputSize.width / was.width,
+				             height * outputSize.height / was.height)
+				width = was.width * by / max(outputSize.width, 1)
+				height = was.height * by / max(outputSize.height, 1)
+			}
+			if !free {
+				width = (width * 1000).rounded() / 1000
+				height = (height * 1000).rounded() / 1000
+			}
+			// Never nothing: a part dragged to no size at all vanishes, and
+			// what vanishes cannot be grabbed to bring it back.
+			width = max(0.002, width)
+			height = max(0.002, height)
+			say("\(number(width)) × \(number(height))", commit)
+			onResize?(selected, width, height, commit)
 
 		case .scale(let start, let reach):
 			let now = distance(frame, placement.centre)
 			var scale = start * now / reach
 			if !free { scale = (scale * 100).rounded() / 100 }
+			say("×\(number(max(0.01, scale)))", commit)
 			onScale?(selected, max(0.01, scale), commit)
 
 		case .turn(let start, let held):
@@ -275,8 +377,32 @@ public final class SceneStage: NSView {
 			if !free, abs(rotation.truncatingRemainder(dividingBy: 15)) < 3 {
 				rotation = (rotation / 15).rounded() * 15
 			}
+			say("\(Int(rotation))°", commit)
 			onRotate?(selected, rotation, commit)
 		}
+	}
+
+	/// A point in the frame's pixels, in the part's own unturned coordinates
+	/// with the middle at nought.
+	private func turnedBack(_ point: CGPoint, about placement: ScenePlacement) -> CGPoint {
+		let radians = -placement.rotation * .pi / 180
+		let dx = point.x - placement.centre.x, dy = point.y - placement.centre.y
+		return CGPoint(x: dx * cos(radians) - dy * sin(radians),
+		               y: dx * sin(radians) + dy * cos(radians))
+	}
+
+	/// What the drag has come to. Cleared on the way up: the number belongs to
+	/// the gesture, and one left on the stage afterwards is a label about
+	/// something that is no longer happening.
+	private func say(_ words: String, _ commit: Bool) {
+		saying = commit ? nil : words
+		needsDisplay = true
+	}
+
+	/// Three places, and no more: a scene is written in fractions of the frame,
+	/// and the fourth digit of one is below what a pixel can show.
+	private func number(_ value: Double) -> String {
+		TakeWriter.number(value, places: 3)
 	}
 
 	/// Within three points of a landmark, in the frame's own units.
@@ -299,6 +425,9 @@ public final class SceneStage: NSView {
 	private func angle(of point: CGPoint, about placement: ScenePlacement) -> Double {
 		Double(atan2(point.y - placement.centre.y, point.x - placement.centre.x))
 	}
+
+	/// For the tests: what the stage is saying about the drag in progress.
+	var sayingForTesting: String? { saying }
 
 	public override func resetCursorRects() {
 		super.resetCursorRects()
