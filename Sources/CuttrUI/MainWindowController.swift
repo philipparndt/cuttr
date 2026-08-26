@@ -2090,7 +2090,19 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 		panel.allowsMultipleSelection = false
 		panel.message = video ? "Choose the video" : "Choose the audio recording"
 		guard panel.runModal() == .OK, let url = panel.url else { return }
-		takeDocument.setMedia(video: video ? url : nil, audio: video ? nil : url)
+		// Refused here rather than after it is in the take. Every open panel in
+		// this program offers `.movie`, and macOS says a `.webm` is one — see
+		// ``CuttrKit/Unreadable``.
+		Task { @MainActor [weak self] in
+			guard let self else { return }
+			do {
+				_ = try await MediaProbe.probe(url)
+			} catch {
+				self.report(error)
+				return
+			}
+			self.takeDocument.setMedia(video: video ? url : nil, audio: video ? nil : url)
+		}
 	}
 
 	/// Files dropped on the window, sorted into the two slots by what they are.

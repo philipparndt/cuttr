@@ -1570,8 +1570,27 @@ public final class ComposeWindowController: DocumentEditor,
 			if type.conforms(to: .movie) || type.conforms(to: .video) { video = video ?? url }
 			else if type.conforms(to: .audio) { audio = audio ?? url }
 		}
+		// Asked before a take is written, because a take pointing at something
+		// that will not open is worse than no take: it is in the tree, it is in
+		// the project file, and everything about it looks ordinary until
+		// somebody tries to cut it. See ``CuttrKit/Unreadable``.
+		Task { @MainActor [weak self] in
+			guard let self else { return }
+			for url in [video, audio].compactMap({ $0 }) {
+				do {
+					_ = try await MediaProbe.probe(url)
+				} catch {
+					self.report(error)
+					return
+				}
+			}
+			self.makeTake(video: video, audio: audio, named: video ?? first)
+		}
+	}
+
+	private func makeTake(video: URL?, audio: URL?, named: URL) {
 		guard let place = composeDocument.placeForNewTake(
-			named: (video ?? first).deletingPathExtension().lastPathComponent) else { return }
+			named: named.deletingPathExtension().lastPathComponent) else { return }
 
 		let document = TakeDocument()
 		document.setMedia(video: video, audio: audio)
