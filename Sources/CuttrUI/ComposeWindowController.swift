@@ -1565,6 +1565,32 @@ public final class ComposeWindowController: DocumentEditor,
 		onOpenTake?(place, false)
 	}
 
+	/// Record a screencast into this project.
+	///
+	/// The project has to be saved first, and that is not a formality: a
+	/// recording lands *beside* the project file, the browser's profile lives in
+	/// the project's own folder, and the take is written into its `takes/`. A
+	/// project that is nowhere has nowhere to put any of it.
+	@objc public func recordScreencast(_ sender: Any?) {
+		guard ensureSaved(), let baseURL = composeDocument.baseURL else { return }
+		// The one the project already states, if it states one — so a recording
+		// that was written down is made again rather than typed again.
+		RecordingSheet.present(
+			over: inspector, project: baseURL,
+			stated: composeDocument.project.recordings) { [weak self] media in
+				guard let self else { return }
+				// A recording arrives as material rather than as a file to
+				// import, and that is one line here: the take it wrote is added
+				// to the project, which is what the material tree lists.
+				let take = baseURL.appendingPathComponent("takes")
+					.appendingPathComponent(media.deletingPathExtension().lastPathComponent)
+					.appendingPathExtension("cuttr")
+				if self.composeDocument.addTake(take) {
+					self.say("recorded \(media.lastPathComponent)")
+				}
+			}
+	}
+
 	// MARK: - Saving
 
 	/// ⌘S. A project edited in this window is written as it is changed, so this

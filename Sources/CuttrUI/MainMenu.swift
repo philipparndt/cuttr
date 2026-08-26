@@ -59,6 +59,13 @@ enum MainMenu {
 		                     #selector(ComposeWindowController.addTake(_:)), "a", [.command, .shift]))
 		file.addItem(command("New Take in Project…",
 		                     #selector(ComposeWindowController.newTake(_:)), "t", [.command, .shift]))
+		// Making a recording rather than adding one somebody else made. Beside
+		// the two above because it is the same question — where does the next
+		// piece of material come from — and it is the only answer that does not
+		// begin with a file somebody already has.
+		file.addItem(command("Record Screencast…",
+		                     #selector(ComposeWindowController.recordScreencast(_:)),
+		                     "r", [.command, .shift]))
 		// With the other two ways of putting material into a project, because
 		// that is what it is: what arrives is a take like any other.
 		file.addItem(command("Find a Meme…",

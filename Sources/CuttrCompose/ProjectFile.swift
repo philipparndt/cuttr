@@ -67,6 +67,38 @@ public enum ProjectReader {
 			folders.append(Project.Folder(name: name, takes: stringList(m["takes"])))
 		}
 
+		// The screencasts this project makes for itself. Anything without a name
+		// or a URL is not one and is skipped rather than half-read: a recording
+		// with nowhere to go would open a browser on nothing.
+		var recordings: [Recording] = []
+		for entry in (root.removeValue(forKey: "recordings") as? [Any]) ?? [] {
+			guard let m = mapping(entry),
+			      let name = nonEmpty((m["as"] as? String) ?? ""),
+			      let url = nonEmpty((m["url"] as? String) ?? "") else { continue }
+			var made = Recording(name: Slug.make(from: name), url: url)
+			if let size = m["size"] as? String {
+				let parts = size.lowercased().split(separator: "x")
+				guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]),
+				      w > 0, h > 0 else {
+					throw ProjectError.badValue(key: "size", value: size)
+				}
+				made.width = w
+				made.height = h
+			}
+			made.browser = (m["browser"] as? String).flatMap(Recording.Browser.init(rawValue:))
+			made.chrome = (m["chrome"] as? String)
+				.flatMap(Recording.Chrome.init(rawValue:)) ?? .bar
+			// Whatever this version has never heard of, kept so it is still
+			// there after a save — a file from a later version must survive
+			// being opened by an older one.
+			var rest = m
+			for known in ["as", "url", "size", "browser", "chrome"] {
+				rest.removeValue(forKey: known)
+			}
+			made.unknownKeys = rest
+			recordings.append(made)
+		}
+
 		var output = Output()
 		if let m = root.removeValue(forKey: "output").flatMap(mapping) {
 			// `1920x1080`, because that is how a frame size is written down.
@@ -243,6 +275,7 @@ public enum ProjectReader {
 		                      overlays: overlays, sounds: sounds, styles: styles,
 		                      profiles: profiles, scenes: scenes, unknownKeys: root)
 		project.folders = folders
+		project.recordings = recordings
 		// The two things the parse above cannot see: what somebody wrote in the
 		// margins, and the order they wrote their named blocks in. Both are
 		// facts about the text, so both are read from the text.

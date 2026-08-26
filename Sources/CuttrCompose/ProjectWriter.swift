@@ -249,6 +249,42 @@ public enum ProjectWriter {
 			out += "\n"
 		}
 
+		// What this project records for itself, above the output it renders to:
+		// a screencast is made before it is cut, and the file reads in the order
+		// the work happens.
+		//
+		// Only what a recording is *not* without it. A 1280×720 window in
+		// whichever browser is installed, with the address bar showing, is the
+		// common case and writes three lines.
+		if !project.recordings.isEmpty {
+			out += "recordings:\n"
+			for (index, recording) in project.recordings.enumerated() {
+				if index > 0 { out += "\n" }
+				out += "  - as:      \(scalar(recording.name))\n"
+				out += "    url:     \(scalar(recording.url))\n"
+				if recording.width != 1280 || recording.height != 720 {
+					out += "    size:    \(recording.width)x\(recording.height)\n"
+				}
+				if let browser = recording.browser {
+					out += "    browser: \(browser.rawValue)\n"
+				}
+				if recording.chrome != .bar {
+					out += "    chrome:  \(recording.chrome.rawValue)\n"
+				}
+				// And whatever a later version wrote that this one does not
+				// understand, last and in a settled order, so that opening a
+				// newer file in an older cuttr and saving it does not throw
+				// away what it could not read.
+				for key in recording.unknownKeys.keys.sorted() {
+					let written = (try? Yams.dump(object: [key: recording.unknownKeys[key]!])) ?? ""
+					for line in written.split(separator: "\n", omittingEmptySubsequences: true) {
+						out += "    \(line)\n"
+					}
+				}
+			}
+			out += "\n"
+		}
+
 		out += "output:\n"
 		out += "  size: \(project.output.width)x\(project.output.height)\n"
 		out += "  fps:  \(trim(project.output.framesPerSecond))\n"

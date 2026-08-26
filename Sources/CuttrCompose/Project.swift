@@ -64,6 +64,10 @@ public struct Project: Sendable, Equatable {
 	/// two it did not touch.
 	public var styles: [String: TextStyle]
 
+	/// What this project records for itself: a URL, a size, and a browser to
+	/// show it in. See ``Recording``.
+	public var recordings: [Recording] = []
+
 	var unknown: UnknownProjectKeys
 
 	/// The prose the file carried: the block at the top saying what this
@@ -116,7 +120,7 @@ public struct Project: Sendable, Equatable {
 			&& a.timeline == b.timeline
 			&& a.overlays == b.overlays && a.sounds == b.sounds
 			&& a.styles == b.styles && a.profiles == b.profiles
-			&& a.scenes == b.scenes
+			&& a.scenes == b.scenes && a.recordings == b.recordings
 	}
 
 	// MARK: - Arranging the takes
@@ -382,6 +386,104 @@ public struct Presentation: Sendable, Equatable {
 			return Rectangle(x: x, y: y + (height - shortened) / 2,
 			                 width: width, height: shortened)
 		}
+	}
+}
+
+/// A screencast this project makes for itself: a page, at a size, in a browser
+/// that is cuttr's rather than anybody's.
+///
+/// **Why it is written down.** Every other recording cuttr has ever seen came
+/// from somewhere else and arrived as a fact. A screencast is the one kind that
+/// can be *made again* — the page has changed, the copy is wrong, the window
+/// was the wrong size — and making it again should be reading a file rather
+/// than remembering what somebody did six weeks ago.
+public struct Recording: Sendable, Equatable {
+
+	/// What it is called. The take is called this too: one name, and the
+	/// material tree already knows how to show it.
+	public var name: String
+	public var url: String
+
+	/// The size of the **recording** — the window as captured, chrome and all,
+	/// which is what lands in the take and has to fit the output's frame.
+	///
+	/// Not the page's size, which is this minus whatever the browser's chrome
+	/// costs. One number, and no ambiguity about which of two things it names:
+	/// a recording that needs the page at an exact size is a different number
+	/// and can be a different key, and guessing which was meant is how a
+	/// feature grows a setting nobody can explain.
+	public var width: Int
+	public var height: Int
+
+	/// Which browser to drive, or nothing for whichever is installed.
+	public var browser: Browser?
+
+	/// Whether the browser's own chrome is in the film.
+	public var chrome: Chrome
+
+	/// Compared on what it *says*. Two recordings that differ only in a key
+	/// neither of them understands are the same recording as far as this
+	/// program is concerned, and making that a difference would mean a file
+	/// from a later version reading as edited the moment it was opened.
+	public static func == (a: Recording, b: Recording) -> Bool {
+		a.name == b.name && a.url == b.url && a.width == b.width
+			&& a.height == b.height && a.browser == b.browser && a.chrome == b.chrome
+	}
+
+	public enum Browser: String, Sendable, CaseIterable {
+		case chrome, chromium, edge
+
+		/// Where each one lives, in the order they are looked for.
+		public var application: String {
+			switch self {
+			case .chrome: return "/Applications/Google Chrome.app"
+			case .chromium: return "/Applications/Chromium.app"
+			case .edge: return "/Applications/Microsoft Edge.app"
+			}
+		}
+
+		public var described: String {
+			switch self {
+			case .chrome: return "Google Chrome"
+			case .chromium: return "Chromium"
+			case .edge: return "Microsoft Edge"
+			}
+		}
+	}
+
+	/// What is above the page.
+	public enum Chrome: String, Sendable, CaseIterable {
+		/// Back, forward, reload and the address bar. The default, because a
+		/// screencast that does not say where it is has to say it in words
+		/// instead — "go to the downloads page" is a sentence about an address
+		/// bar.
+		case bar
+		/// Nothing: the whole frame is the page, for the films that are about
+		/// what is on the page rather than about the browser.
+		case none
+	}
+
+	/// Anything this version has never heard of, kept so that a file written by
+	/// a later one survives being opened and saved by this one — the same
+	/// promise the rest of the format makes, and it has to be made per entry
+	/// because a recording is written in a list.
+	var unknown = UnknownProjectKeys(storage: [:])
+
+	public var unknownKeys: [String: Any] {
+		get { unknown.storage }
+		set { unknown = UnknownProjectKeys(storage: newValue) }
+	}
+
+	public var size: CGSize { CGSize(width: width, height: height) }
+
+	public init(name: String, url: String, width: Int = 1280, height: Int = 720,
+	            browser: Browser? = nil, chrome: Chrome = .bar) {
+		self.name = name
+		self.url = url
+		self.width = max(1, width)
+		self.height = max(1, height)
+		self.browser = browser
+		self.chrome = chrome
 	}
 }
 

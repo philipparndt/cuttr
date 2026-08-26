@@ -32,7 +32,7 @@ project beside it.
 | `frames/remotion.cuttrproj` | the same overlay fed by Remotion: an animated chart and a route that draws itself — **run `tools/remotion/render.sh chart` and `route` first** |
 
 | `components/chart.cuttrproj` | `component:` — a React chart, baked to frames in the browser macOS already has, with nothing installed |
-| `presentation/explainer.cuttrproj` | `presentations:` — the picture moved aside and held while a scene plays beside it, with `bullets`, `boxes` and a scene of the project's own — **run `cuttr-render examples/presentation/screencast.cuttrproj` first** |
+| `presentation/explainer.cuttrproj` | `presentations:` — the picture moved aside and held while a scene plays beside it, with `bullets`, `boxes` and a scene of the project's own; and `recordings:`, which says how the footage would be made for real — **run `cuttr-render examples/presentation/screencast.cuttrproj` first** |
 
 One of them bakes before it renders. `components/chart.cuttrproj` draws its
 component into `.cuttr/components/walks/` the first time — a few seconds — and

@@ -37,6 +37,14 @@
 	     it. -->
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>cuttr transcribes a take on this Mac, so you can cut it by selecting the words. Nothing is uploaded.</string>
+	<!-- Recording a screencast. macOS grants screen recording in System
+	     Settings rather than in a prompt, so this string is what somebody reads
+	     in the list there beside cuttr's name — which is the one place they
+	     will be deciding whether to allow it, possibly weeks after the app
+	     asked. It says what is recorded, which is one window rather than their
+	     screen. -->
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>cuttr records the browser window it opened for you, so a screencast can be made without anything else on your screen appearing in it.</string>
 	<!-- The cut list. Declared so that a double-click opens it here and so
 	     that the open panel can filter to it; it is UTF-8 YAML, and the
 	     conformance says so rather than pretending it is opaque. -->

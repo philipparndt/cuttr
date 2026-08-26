@@ -29,6 +29,7 @@ let package = Package(
 		.library(name: "CuttrUI", targets: ["CuttrUI"]),
 		.library(name: "CuttrKit", targets: ["CuttrKit"]),
 		.library(name: "CuttrCompose", targets: ["CuttrCompose"]),
+		.library(name: "CuttrRecord", targets: ["CuttrRecord"]),
 		// The renderer without a window: rendering a project is minutes of
 		// encoding, and the machine doing it does not need a screen.
 		.executable(name: "cuttr-render", targets: ["cuttr-render"]),
@@ -67,6 +68,23 @@ let package = Package(
 			resources: [.copy("Runtime")],
 			swiftSettings: [.swiftLanguageMode(.v5)]
 		),
+		// Making a recording rather than reading one: a browser cuttr drives and
+		// a window it captures.
+		//
+		// Its own target because it is the one part of the program that starts
+		// somebody else's process and asks the system for permission. Nothing
+		// in the cutting window should have to link ScreenCaptureKit to draw a
+		// waveform, and nothing here should be reachable from the renderer.
+		.target(
+			name: "CuttrRecord",
+			dependencies: ["CuttrKit", "CuttrCompose"],
+			swiftSettings: [.swiftLanguageMode(.v5)]
+		),
+		.testTarget(
+			name: "CuttrRecordTests",
+			dependencies: ["CuttrRecord"],
+			swiftSettings: [.swiftLanguageMode(.v5)]
+		),
 		.executableTarget(
 			name: "cuttr-render",
 			dependencies: ["CuttrCompose"],
@@ -84,7 +102,7 @@ let package = Package(
 		// dependency graph a second time.
 		.target(
 			name: "CuttrUI",
-			dependencies: ["CuttrKit", "CuttrCompose"],
+			dependencies: ["CuttrKit", "CuttrCompose", "CuttrRecord"],
 			swiftSettings: [.swiftLanguageMode(.v5)]
 		),
 		// Four lines: make an application, give it the delegate, run it.

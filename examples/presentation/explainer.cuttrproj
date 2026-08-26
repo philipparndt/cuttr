@@ -38,6 +38,25 @@ cuttr-project: 1
 
 takes: [screencast.cuttr]
 
+# How the footage would be recorded for real.
+#
+# `File → Record Screencast…` reads this: it opens a browser of cuttr's own —
+# its own profile, so none of your bookmarks, extensions or accounts are in the
+# frame — at this size, showing this URL, and records that *window* rather than a
+# rectangle of the screen. What lands beside this file is a `.mov` and a take for
+# it. See `docs/screencasts.md`.
+#
+# It is written down rather than done once, so the same recording can be made
+# again in a month with one line changed.
+#
+# `screencast.cuttrproj` beside this file draws a stand-in browser out of scene
+# parts, and stays: an example in this repository has to render on a machine
+# with nothing installed and no permission granted, and a real recording needs
+# Chrome, a URL that still exists, and somebody at the keyboard.
+recordings:
+  - as:  install-demo
+    url: https://example.com/download
+
 output:
   size: 1280x720
   fps:  25
