@@ -924,13 +924,19 @@ public enum ProjectReader {
 		if let hex = (value as? String).flatMap(RGBA.init(hex:)) {
 			return Scene.Background(from: hex)
 		}
-		guard let fields = mapping(value),
-		      let from = (fields["from"] as? String).flatMap(RGBA.init(hex:))
+		guard let fields = mapping(value) else { return nil }
+		let image = (fields["image"] as? String).flatMap(nonEmpty)
+		// A background made only of a picture says nothing about colour, and
+		// what is behind a picture that covers the frame is not a decision
+		// anybody has to make. Black, which is what a frame is without one.
+		guard let from = (fields["from"] as? String).flatMap(RGBA.init(hex:))
+			?? (image == nil ? nil : .black)
 		else { return nil }
 		return Scene.Background(
 			from: from,
 			to: (fields["to"] as? String).flatMap(RGBA.init(hex:)),
-			angle: number(fields["angle"]) ?? 90)
+			angle: number(fields["angle"]) ?? 90,
+			image: image)
 	}
 
 	private static func transition(_ value: Any?, key: String) throws -> Overlay.Transition? {

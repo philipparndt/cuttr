@@ -1422,6 +1422,22 @@ public enum OverlayLayers {
 					layer = flat
 					ink = (flat, "backgroundColor")
 				}
+				// The picture over the fill, so a PNG with transparency in it
+				// sits on the colour. Filled and clipped rather than fitted: a
+				// background is the ground, and ground with a margin round it
+				// is not ground.
+				if let file = background.image, !file.isEmpty {
+					let url = URL(fileURLWithPath: file, relativeTo: baseURL)
+					if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+					   let image = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+						let picture = CALayer()
+						picture.frame = CGRect(origin: .zero, size: size)
+						picture.contents = image
+						picture.contentsGravity = .resizeAspectFill
+						picture.masksToBounds = true
+						layer.addSublayer(picture)
+					}
+				}
 			}
 
 			layer.frame = CGRect(origin: .zero, size: natural)

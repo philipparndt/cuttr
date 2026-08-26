@@ -398,7 +398,16 @@ public final class SceneWindowController: DocumentEditor, NSMenuItemValidation {
 		} else {
 			path = url.path
 		}
-		sceneDocument.setContent(.image(path), on: part, actionName: "Choose Picture")
+		// Which part it is decides what the path becomes: an image part *is*
+		// the picture, and a background has one over its fill.
+		switch sceneDocument.scene.parts[safeIndex: part]?.content {
+		case .background(var background):
+			background.image = path
+			sceneDocument.setContent(.background(background), on: part,
+			                         actionName: "Choose Picture")
+		default:
+			sceneDocument.setContent(.image(path), on: part, actionName: "Choose Picture")
+		}
 	}
 
 	/// The project changed elsewhere — the file was edited, or the project
@@ -505,4 +514,10 @@ public final class SceneWindowController: DocumentEditor, NSMenuItemValidation {
 		playing = nil
 	}
 
+}
+
+private extension Array {
+	subscript(safeIndex index: Int) -> Element? {
+		index >= 0 && index < count ? self[index] : nil
+	}
 }

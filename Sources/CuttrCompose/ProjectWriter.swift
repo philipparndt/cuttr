@@ -70,11 +70,20 @@ public enum ProjectWriter {
 				case .background(let background):
 					// A flat colour stays the one word it was written as; the
 					// ramp says all three things or none of them.
+					// One word for a flat colour, and the flow form the moment
+					// there is anything else to say — a ramp, or a picture. A
+					// background nobody has given a picture writes exactly what
+					// it always wrote.
+					var said: [String] = ["from: \(scalar(background.from.hex))"]
 					if let to = background.to {
-						out += "      - background: {from: \(scalar(background.from.hex))"
-							+ ", to: \(scalar(to.hex)), angle: \(trim(background.angle))}\n"
-					} else {
+						said.append("to: \(scalar(to.hex))")
+						said.append("angle: \(trim(background.angle))")
+					}
+					if let image = background.image { said.append("image: \(scalar(image))") }
+					if said.count == 1 {
 						out += "      - background: \(scalar(background.from.hex))\n"
+					} else {
+						out += "      - background: {" + said.joined(separator: ", ") + "}\n"
 					}
 				}
 				out += "        keys:\n"

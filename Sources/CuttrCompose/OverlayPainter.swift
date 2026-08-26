@@ -361,7 +361,8 @@ public enum OverlayPainter {
 			// A background is the frame, so it is not moved, scaled or turned:
 			// its keys say when it is there and how solid, and nothing else.
 			if case .background(let background) = part.content {
-				paint(background.at(elapsed, keys: keys), in: context, size: size)
+				paint(background.at(elapsed, keys: keys), in: context, size: size,
+				      baseURL: baseURL)
 				context.restoreGState()
 				continue
 			}
@@ -525,8 +526,9 @@ public enum OverlayPainter {
 	/// Given the background as it is at this moment — both stops and the angle,
 	/// with the keys already applied by ``Scene/Background/at(_:keys:)``.
 	private static func paint(
-		_ background: Scene.Background, in context: CGContext, size: CGSize
+		_ background: Scene.Background, in context: CGContext, size: CGSize, baseURL: URL
 	) {
+		defer { paint(background.image, in: context, size: size, baseURL: baseURL) }
 		let from = background.from
 		guard let to = background.to else {
 			context.setFillColor(CGColor(srgbRed: from.r, green: from.g, blue: from.b, alpha: from.a))
@@ -545,6 +547,36 @@ public enum OverlayPainter {
 		// are the nearest stop rather than nothing at all.
 		context.drawLinearGradient(gradient, start: ends.start, end: ends.end,
 		                           options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+	}
+
+	/// A background's picture, filling the frame.
+	///
+	/// Filled and not fitted, and centred where it overflows: a background is
+	/// the ground, and ground with a margin round it is not ground. Drawn over
+	/// whatever fill the background already laid down, so a picture with
+	/// transparency in it sits on the colour.
+	///
+	/// A path that names nothing is nothing, not an error. A background whose
+	/// picture has been moved keeps its colours and says so by looking wrong in
+	/// one obvious way rather than by refusing to render the film.
+	private static func paint(
+		_ file: String?, in context: CGContext, size: CGSize, baseURL: URL
+	) {
+		guard let file, !file.isEmpty else { return }
+		let url = URL(fileURLWithPath: file, relativeTo: baseURL)
+		guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+		      let picture = CGImageSourceCreateImageAtIndex(source, 0, nil),
+		      picture.width > 0, picture.height > 0 else { return }
+		let fill = max(size.width / CGFloat(picture.width),
+		               size.height / CGFloat(picture.height))
+		let drawn = CGSize(width: CGFloat(picture.width) * fill,
+		                   height: CGFloat(picture.height) * fill)
+		context.saveGState()
+		context.clip(to: CGRect(origin: .zero, size: size))
+		context.draw(picture, in: CGRect(
+			x: (size.width - drawn.width) / 2, y: (size.height - drawn.height) / 2,
+			width: drawn.width, height: drawn.height))
+		context.restoreGState()
 	}
 
 	/// In and out, as the keyframes would have it — a fade fades, and anything

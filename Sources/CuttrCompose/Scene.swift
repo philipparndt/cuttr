@@ -123,11 +123,25 @@ public struct Scene: Sendable, Equatable {
 		/// Degrees anticlockwise from left-to-right, so `90` runs up the frame
 		/// and `0` runs across it. The same convention as ``Key/rotation``.
 		public var angle: Double
+		/// A picture beside the project, filling the frame — a photograph, a
+		/// texture, a still somebody drew somewhere else.
+		///
+		/// Over the fill rather than instead of it, so a PNG with transparency
+		/// in it sits on the colour and a picture of the wrong shape has
+		/// something behind the edges it does not reach. A background that is
+		/// *only* a picture is one whose colours nobody set, which costs one
+		/// word in the file and no rule here.
+		///
+		/// Filled to the frame, not fitted: a background is the ground, and
+		/// ground with a margin round it is not ground. The overflow is
+		/// centred, which is the only place it can go without asking.
+		public var image: String?
 
-		public init(from: RGBA, to: RGBA? = nil, angle: Double = 90) {
+		public init(from: RGBA, to: RGBA? = nil, angle: Double = 90, image: String? = nil) {
 			self.from = from
 			self.to = to
 			self.angle = angle
+			self.image = image
 		}
 
 		/// Where the ramp starts and ends, in unit coordinates of the frame.
@@ -166,7 +180,7 @@ public struct Scene: Sendable, Equatable {
 		public func at(_ time: Double, keys: [Key]) -> Background {
 			guard Scene.movesTheGradient(keys) else {
 				let now = Scene.state(of: keys, at: time)
-				return Background(from: now?.color ?? from, to: to, angle: angle)
+				return Background(from: now?.color ?? from, to: to, angle: angle, image: image)
 			}
 			// Resolved against the part *before* interpolating, not after: a
 			// flat fill is two stops of the same colour, so a background that
@@ -181,9 +195,13 @@ public struct Scene: Sendable, Equatable {
 				return out
 			}
 			guard let now = Scene.state(of: resolved, at: time) else {
-				return Background(from: from, to: to, angle: angle)
+				return Background(from: from, to: to, angle: angle, image: image)
 			}
-			return Background(from: now.color ?? from, to: now.to, angle: now.angle ?? angle)
+			// The picture is carried through rather than interpolated: it is a
+			// fact about the part, not about the moment. A key can tint what is
+			// behind it and cannot swap it for another photograph.
+			return Background(from: now.color ?? from, to: now.to,
+			                  angle: now.angle ?? angle, image: image)
 		}
 	}
 

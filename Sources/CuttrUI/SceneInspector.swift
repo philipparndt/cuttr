@@ -374,6 +374,18 @@ public final class SceneInspector: NSView {
 				self?.onContent?(.background(next))
 			}], note: "degrees; 90 runs up the frame, 0 across it. A key can state this "
 				+ "too, and between two keys it turns the short way round.")
+			field("image", [
+				text(background.image ?? "", width: 150,
+				     placeholder: "backdrop.png") { [weak self] value in
+					var next = background
+					let said = value.trimmingCharacters(in: .whitespaces)
+					next.image = said.isEmpty ? nil : said
+					self?.onContent?(.background(next))
+				},
+				small("Choose…") { [weak self] in self?.onChooseImage?() },
+			], note: "a picture beside the project, filled to the frame and drawn over the "
+				+ "colours above — so a PNG with transparency in it sits on the ramp. "
+				+ "Empty for no picture.")
 		}
 	}
 
