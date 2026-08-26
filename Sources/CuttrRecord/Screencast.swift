@@ -19,7 +19,9 @@ public final class Screencast {
 
 	public enum Trouble: Error, Equatable {
 		case noConsent(Consent)
-		case noBrowser
+		/// Nothing installed to record. The sentence is the sitter's, so it
+		/// names what to install rather than saying that something is missing.
+		case nothingToDrive(String)
 		case didNotOpen
 		case wrongSize(got: CGSize, wanted: CGSize)
 		case cannotWrite(String)
@@ -28,8 +30,8 @@ public final class Screencast {
 			switch self {
 			case .noConsent(let consent):
 				return consent.explanation ?? "cuttr cannot record the screen."
-			case .noBrowser:
-				return Browser.missing
+			case .nothingToDrive(let said):
+				return said
 			case .didNotOpen:
 				return "The browser did not open a window to record."
 			case .wrongSize(let got, let wanted):
@@ -47,7 +49,7 @@ public final class Screencast {
 	/// written, and where the browser's profile lives.
 	public let project: URL
 
-	private var browser: Process?
+	private var opened: NSRunningApplication?
 	private var recorder: WindowRecorder?
 
 	public init(recording: Recording, project: URL) {
@@ -65,7 +67,9 @@ public final class Screencast {
 	public func start() async throws {
 		let consent = await ConsentCheck.ask()
 		guard consent.canRecord else { throw Trouble.noConsent(consent) }
-		guard let found = Browser.find(recording.browser) else { throw Trouble.noBrowser }
+		guard let sitter = Sitters.find(for: recording) else {
+			throw Trouble.nothingToDrive(Sitters.missing(for: recording))
+		}
 
 		let wanted = recording.size
 		// Asked for, measured, and asked again with the difference put right.
@@ -79,17 +83,30 @@ public final class Screencast {
 		// rather than a wrong recording.
 		var asking = wanted
 		var window: SCWindow?
-		for attempt in 0..<2 {
-			try await open(found, asking: asking)
-			guard let opened = try await windowOfBrowser() else { throw Trouble.didNotOpen }
-			let got = opened.frame.size
+		// Three rounds rather than two. A browser lands on the second, because
+		// its chrome is a fixed number of points; a terminal is sized in whole
+		// cells and needs one more to settle on the right number of them.
+		for attempt in 0..<3 {
+			do {
+				opened = try await sitter.open(recording, in: project, asking: asking)
+			} catch let trouble as Trouble {
+				throw trouble
+			} catch {
+				throw Trouble.nothingToDrive(
+					"\(sitter.described) would not open: \(error.localizedDescription)")
+			}
+			guard let found = try await windowOfTheApplication() else {
+				throw Trouble.didNotOpen
+			}
+			let got = found.frame.size
+			// Within a point, because a window is measured in points and a
+			// recording is not going to notice half of one.
 			if abs(got.width - wanted.width) < 1, abs(got.height - wanted.height) < 1 {
-				window = opened
+				window = found
 				break
 			}
-			guard attempt == 0 else { throw Trouble.wrongSize(got: got, wanted: wanted) }
-			asking = CGSize(width: asking.width + (wanted.width - got.width),
-			                height: asking.height + (wanted.height - got.height))
+			guard attempt < 2 else { throw Trouble.wrongSize(got: got, wanted: wanted) }
+			asking = sitter.next(asking: asking, wanted: wanted, got: got)
 			close()
 		}
 		guard let window else { throw Trouble.didNotOpen }
@@ -136,37 +153,32 @@ public final class Screencast {
 		return media
 	}
 
-	/// Closes the browser cuttr started, and only that one.
+	/// Closes what cuttr started, and only that.
+	///
+	/// `terminate()` is a *request* and an application may argue with it — so a
+	/// terminal that does not go quietly is forced, after a moment. One cuttr
+	/// opened has nothing to save.
 	public func close() {
-		browser?.terminate()
-		browser = nil
+		guard let application = opened else { return }
+		opened = nil
+		application.terminate()
+		let deadline = DispatchTime.now() + .milliseconds(1500)
+		DispatchQueue.main.asyncAfter(deadline: deadline) {
+			guard !application.isTerminated else { return }
+			application.forceTerminate()
+		}
 	}
 
 	// MARK: - The parts
 
-	private func open(_ found: Browser, asking: CGSize) async throws {
-		let profile = Browser.profile(for: recording, in: project)
-		try? FileManager.default.createDirectory(
-			at: profile, withIntermediateDirectories: true)
-		let task = Process()
-		task.executableURL = found.executable
-		task.arguments = found.arguments(for: recording, profile: profile, content: asking)
-		do {
-			try task.run()
-		} catch {
-			throw Trouble.noBrowser
-		}
-		browser = task
-	}
-
-	/// The window the browser cuttr started has opened.
+	/// The window the application cuttr started has opened.
 	///
 	/// Matched by process, not by title: a title is the page's and changes
 	/// while the page loads, and there is no reason to guess when the process
 	/// is known. Waited for, because a browser takes a moment to put a window
 	/// on screen and asking too early answers nothing.
-	private func windowOfBrowser() async throws -> SCWindow? {
-		guard let pid = browser?.processIdentifier else { return nil }
+	private func windowOfTheApplication() async throws -> SCWindow? {
+		guard let pid = opened?.processIdentifier else { return nil }
 		for _ in 0..<40 {
 			let content = try? await SCShareableContent.excludingDesktopWindows(
 				false, onScreenWindowsOnly: true)

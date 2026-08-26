@@ -73,9 +73,26 @@ public enum ProjectReader {
 		var recordings: [Recording] = []
 		for entry in (root.removeValue(forKey: "recordings") as? [Any]) ?? [] {
 			guard let m = mapping(entry),
-			      let name = nonEmpty((m["as"] as? String) ?? ""),
-			      let url = nonEmpty((m["url"] as? String) ?? "") else { continue }
-			var made = Recording(name: Slug.make(from: name), url: url)
+			      let name = nonEmpty((m["as"] as? String) ?? "") else { continue }
+			let url = nonEmpty((m["url"] as? String) ?? "")
+			let terminal = (m["terminal"] as? String)
+				.flatMap(Recording.Terminal.init(rawValue:))
+			// One thing is recorded, and which one is said by which key is
+			// there. Both is a mistake in the file and is said so: picking one
+			// would be this program deciding what somebody meant, and the two
+			// answers look nothing alike.
+			guard url == nil || terminal == nil else {
+				throw ProjectError.badValue(
+					key: "recordings",
+					value: "`\(name)` says both a url and a terminal — a recording is one or "
+						+ "the other")
+			}
+			guard url != nil || terminal != nil else { continue }
+			var made = Recording(name: Slug.make(from: name), url: url ?? "")
+			made.terminal = terminal
+			made.directory = (m["in"] as? String).flatMap(nonEmpty)
+			made.run = stringList(m["run"])
+			made.theme = (m["theme"] as? String).flatMap(nonEmpty)
 			if let size = m["size"] as? String {
 				let parts = size.lowercased().split(separator: "x")
 				guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]),
@@ -92,7 +109,7 @@ public enum ProjectReader {
 			// there after a save — a file from a later version must survive
 			// being opened by an older one.
 			var rest = m
-			for known in ["as", "url", "size", "browser", "chrome"] {
+			for known in ["as", "url", "size", "browser", "chrome", "terminal", "in", "run", "theme"] {
 				rest.removeValue(forKey: known)
 			}
 			made.unknownKeys = rest

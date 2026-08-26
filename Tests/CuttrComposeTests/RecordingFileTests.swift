@@ -58,11 +58,11 @@ import Testing
 		let written = ProjectWriter.write(project)
 		#expect(written.contains("""
 		recordings:
-		  - as:      install-demo
-		    url:     https://example.com/download
+		  - as:       install-demo
+		    url:      https://example.com/download
 
 		"""))
-		#expect(!written.contains("size:    1280x720"))
+		#expect(!written.contains("size:     1280x720"))
 		#expect(!written.contains("chrome:"))
 		#expect(!written.contains("browser:"))
 	}
@@ -84,8 +84,8 @@ import Testing
 		let back = try ProjectReader.read(written)
 		#expect(back == project)
 		#expect(ProjectWriter.write(back) == written)
-		#expect(written.contains("    browser: chrome\n"))
-		#expect(written.contains("    chrome:  none\n"))
+		#expect(written.contains("    browser:  chrome\n"))
+		#expect(written.contains("    chrome:   none\n"))
 	}
 
 	/// The rule every block here follows: a project that has none of this writes
@@ -124,6 +124,77 @@ import Testing
 			timeline: [one]
 			""")
 		}
+	}
+
+	// MARK: - Terminals
+
+	@Test func aTerminalRecordingIsRead() throws {
+		let project = try ProjectReader.read("""
+		recordings:
+		  - as:       the-build
+		    terminal: ghostty
+		    in:       ~/dev/cuttr
+		    run:      [make build, make test]
+		timeline: [one]
+		""")
+		let made = try #require(project.recordings.first)
+		#expect(made.terminal == .ghostty)
+		#expect(made.directory == "~/dev/cuttr")
+		#expect(made.run == ["make build", "make test"])
+		#expect(made.recordsATerminal)
+		#expect(made.url.isEmpty)
+	}
+
+	/// **A recording records one thing.** Both is a mistake in the file and is
+	/// said so: picking one would be this program deciding what somebody meant,
+	/// and the two answers look nothing alike.
+	@Test func aRecordingThatIsTwoThingsIsRefusedByName() {
+		#expect(throws: (any Error).self) {
+			try ProjectReader.read("""
+			recordings:
+			  - as:       muddle
+			    url:      https://example.com
+			    terminal: ghostty
+			timeline: [one]
+			""")
+		}
+	}
+
+	/// And a terminal's block carries none of a browser's keys — a `chrome:`
+	/// on a terminal recording would be a line about a thing that is not there.
+	@Test func aTerminalRecordingRoundTripsWithoutBrowserKeys() throws {
+		let project = try ProjectReader.read("""
+		recordings:
+		  - as:       the-build
+		    terminal: abydos
+		    in:       ~/dev/cuttr
+		    run:      [make build]
+		    size:     1600x900
+		timeline: [one]
+		""")
+		let written = ProjectWriter.write(project)
+		#expect(!written.contains("chrome:"))
+		#expect(!written.contains("url:"))
+		#expect(written.contains("    terminal: abydos\n"))
+		#expect(written.contains("    run:      [make build]\n"))
+		let back = try ProjectReader.read(written)
+		#expect(back == project)
+		#expect(ProjectWriter.write(back) == written)
+	}
+
+	/// A terminal recording with nothing to run is a terminal at a prompt, and
+	/// writes no `run:` line.
+	@Test func aTerminalWithNothingToRunSaysNothing() throws {
+		let project = try ProjectReader.read("""
+		recordings:
+		  - as:       a-look-around
+		    terminal: terminal
+		timeline: [one]
+		""")
+		#expect(project.recordings.first?.run.isEmpty == true)
+		let written = ProjectWriter.write(project)
+		#expect(!written.contains("run:"))
+		#expect(!written.contains("in:"))
 	}
 
 	/// A file written by a later version survives being opened and saved by

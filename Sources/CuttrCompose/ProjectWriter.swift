@@ -260,16 +260,33 @@ public enum ProjectWriter {
 			out += "recordings:\n"
 			for (index, recording) in project.recordings.enumerated() {
 				if index > 0 { out += "\n" }
-				out += "  - as:      \(scalar(recording.name))\n"
-				out += "    url:     \(scalar(recording.url))\n"
+				out += "  - as:       \(scalar(recording.name))\n"
+				// A page or a terminal, and only the keys that belong to
+				// whichever it is: a terminal recording with a `chrome:` on it
+				// would be a line about a thing that is not there.
+				if let terminal = recording.terminal {
+					out += "    terminal: \(terminal.rawValue)\n"
+					if let directory = recording.directory {
+						out += "    in:       \(scalar(directory))\n"
+					}
+					if !recording.run.isEmpty {
+						out += "    run:      ["
+							+ recording.run.map(scalar).joined(separator: ", ") + "]\n"
+					}
+					if let theme = recording.theme {
+						out += "    theme:    \(scalar(theme))\n"
+					}
+				} else {
+					out += "    url:      \(scalar(recording.url))\n"
+				}
 				if recording.width != 1280 || recording.height != 720 {
-					out += "    size:    \(recording.width)x\(recording.height)\n"
+					out += "    size:     \(recording.width)x\(recording.height)\n"
 				}
-				if let browser = recording.browser {
-					out += "    browser: \(browser.rawValue)\n"
+				if let browser = recording.browser, recording.terminal == nil {
+					out += "    browser:  \(browser.rawValue)\n"
 				}
-				if recording.chrome != .bar {
-					out += "    chrome:  \(recording.chrome.rawValue)\n"
+				if recording.chrome != .bar, recording.terminal == nil {
+					out += "    chrome:   \(recording.chrome.rawValue)\n"
 				}
 				// And whatever a later version wrote that this one does not
 				// understand, last and in a settled order, so that opening a

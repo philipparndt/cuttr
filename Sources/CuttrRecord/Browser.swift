@@ -1,3 +1,4 @@
+import AppKit
 import CuttrCompose
 import Foundation
 
@@ -15,7 +16,8 @@ import Foundation
 /// no extensions, no history and no account. Kept inside the project rather than
 /// somewhere shared, so a page that needed a cookie accepted or a login done
 /// keeps it for that project and does not leak between them.
-public struct Browser: Sendable {
+@MainActor
+public struct Browser: Sitter {
 
 	/// Which browser, and where it is.
 	public let kind: Recording.Browser
@@ -26,20 +28,29 @@ public struct Browser: Sendable {
 		self.application = application
 	}
 
-	/// The binary inside the bundle. Started directly rather than through
-	/// `open`, because a recording has to be able to close the browser it
-	/// opened and `open` hands back no process to close.
-	public var executable: URL {
-		application.appendingPathComponent("Contents/MacOS")
-			.appendingPathComponent(Self.binary(for: kind))
-	}
+	public var described: String { kind.described }
 
-	static func binary(for kind: Recording.Browser) -> String {
-		switch kind {
-		case .chrome: return "Google Chrome"
-		case .chromium: return "Chromium"
-		case .edge: return "Microsoft Edge"
-		}
+	/// Nothing. A fresh profile is a fresh browser, and that is the whole
+	/// difference between this and a terminal — see ``Shell/stillTheirs``.
+	public var whatIsStillTheirs: String? { nil }
+
+	/// Opened as an application rather than by running the binary inside the
+	/// bundle.
+	///
+	/// It was the binary, and that worked. It stopped being worth keeping the
+	/// moment a terminal had to be opened too: Ghostty refuses to be started
+	/// from the command line on macOS and says so, and two ways of opening an
+	/// application — one of which only works for some of them — is one more
+	/// than is worth maintaining. `NSWorkspace.openApplication` hands back the
+	/// instance, which is what the closing and the window-finding both needed.
+	public func open(_ recording: Recording, in project: URL,
+	                 asking: CGSize) async throws -> NSRunningApplication {
+		let profile = Browser.profile(for: recording, in: project)
+		try? FileManager.default.createDirectory(
+			at: profile, withIntermediateDirectories: true)
+		return try await launch(
+			application,
+			arguments: arguments(for: recording, profile: profile, content: asking))
 	}
 
 	/// The first of the browsers cuttr drives that is installed, or the one
@@ -60,7 +71,7 @@ public struct Browser: Sendable {
 	}
 
 	/// What to say when there is none.
-	public static var missing: String {
+	public nonisolated static var missing: String {
 		"No browser to record. cuttr drives "
 			+ Recording.Browser.allCases.map(\.described).joined(separator: ", ")
 			+ " — install one of them."

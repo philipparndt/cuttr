@@ -402,7 +402,38 @@ public struct Recording: Sendable, Equatable {
 	/// What it is called. The take is called this too: one name, and the
 	/// material tree already knows how to show it.
 	public var name: String
+
+	/// The page to record, when this records a page.
+	///
+	/// A recording records one thing, and which one is said by which key is
+	/// there rather than by a `kind:` naming what the other keys already say.
+	/// A recording with both is refused by name when the file is read.
 	public var url: String
+
+	/// The terminal to record, when this records a terminal.
+	public var terminal: Terminal?
+
+	/// Where the shell starts, so the prompt does not open on wherever
+	/// somebody happened to be.
+	public var directory: String?
+
+	/// What to run when it opens, in the order written — so a screencast can
+	/// begin with the state it is about rather than with somebody typing their
+	/// way to it.
+	public var run: [String] = []
+
+	/// The palette to record in.
+	///
+	/// The same argument as the browser's fresh profile, and the terminals say
+	/// it themselves: a capture should not depend on whoever's settings the
+	/// machine happens to have. A screencast made on a laptop set to a light
+	/// theme and one made on a desktop set to a dark one are two different
+	/// films of the same thing.
+	///
+	/// Whatever the terminal calls its themes; nothing here has a list, because
+	/// the list belongs to whichever terminal is installed and would be wrong
+	/// the week after it was written down.
+	public var theme: String?
 
 	/// The size of the **recording** — the window as captured, chrome and all,
 	/// which is what lands in the take and has to fit the output's frame.
@@ -428,6 +459,40 @@ public struct Recording: Sendable, Equatable {
 	public static func == (a: Recording, b: Recording) -> Bool {
 		a.name == b.name && a.url == b.url && a.width == b.width
 			&& a.height == b.height && a.browser == b.browser && a.chrome == b.chrome
+			&& a.terminal == b.terminal && a.directory == b.directory && a.run == b.run
+			&& a.theme == b.theme
+	}
+
+	/// Whether this records a terminal rather than a page.
+	public var recordsATerminal: Bool { terminal != nil }
+
+	/// The terminals cuttr drives.
+	///
+	/// Three, named. Not iTerm, Warp, Alacritty or Kitty: each drives
+	/// differently, and adding one without a reason to choose it is how a list
+	/// like this becomes a list of things nobody has tried.
+	public enum Terminal: String, Sendable, CaseIterable {
+		/// The one every Mac has, and the one a viewer is most likely to
+		/// recognise. It costs a second permission — see `CuttrRecord`.
+		case terminal
+		case ghostty
+		case abydos
+
+		public var application: String {
+			switch self {
+			case .terminal: return "/System/Applications/Utilities/Terminal.app"
+			case .ghostty: return "/Applications/Ghostty.app"
+			case .abydos: return "/Applications/Abydos.app"
+			}
+		}
+
+		public var described: String {
+			switch self {
+			case .terminal: return "Terminal"
+			case .ghostty: return "Ghostty"
+			case .abydos: return "Abydos"
+			}
+		}
 	}
 
 	public enum Browser: String, Sendable, CaseIterable {
@@ -476,10 +541,16 @@ public struct Recording: Sendable, Equatable {
 
 	public var size: CGSize { CGSize(width: width, height: height) }
 
-	public init(name: String, url: String, width: Int = 1280, height: Int = 720,
-	            browser: Browser? = nil, chrome: Chrome = .bar) {
+	public init(name: String, url: String = "", width: Int = 1280, height: Int = 720,
+	            browser: Browser? = nil, chrome: Chrome = .bar,
+	            terminal: Terminal? = nil, directory: String? = nil, run: [String] = [],
+	            theme: String? = nil) {
 		self.name = name
 		self.url = url
+		self.terminal = terminal
+		self.directory = directory
+		self.run = run
+		self.theme = theme
 		self.width = max(1, width)
 		self.height = max(1, height)
 		self.browser = browser

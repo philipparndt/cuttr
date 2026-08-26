@@ -118,7 +118,13 @@ import Testing
 	/// Every refusal says which of the things that can be wrong is wrong, by
 	/// name, because "recording failed" is a sentence nobody can act on.
 	@Test func everyRefusalSaysWhatToDo() {
-		#expect(Screencast.Trouble.noBrowser.described.contains("Google Chrome"))
+		#expect(Screencast.Trouble.nothingToDrive(Browser.missing).described
+			.contains("Google Chrome"))
+		// And the sentence belongs to whatever was being recorded: somebody who
+		// uses Ghostty should not be told about Chrome.
+		let terminal = Recording(name: "the-build", terminal: .ghostty)
+		#expect(Sitters.missing(for: terminal).contains("Ghostty"))
+		#expect(!Sitters.missing(for: terminal).contains("Chrome"))
 		#expect(Screencast.Trouble.noConsent(.refused).described.contains("Screen Recording"))
 		let sized = Screencast.Trouble.wrongSize(
 			got: CGSize(width: 1280, height: 788), wanted: CGSize(width: 1280, height: 720))

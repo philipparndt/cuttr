@@ -10,7 +10,7 @@ import Testing
 /// Nothing here launches anything. Whether Chrome is installed on the machine
 /// running the tests is not a fact this suite is allowed to depend on, so the
 /// search is asked of a file manager that says what the test wants it to say.
-@Suite struct BrowserTests {
+@MainActor @Suite struct BrowserTests {
 
 	/// A file manager that has exactly the applications the test says.
 	private final class Installed: FileManager, @unchecked Sendable {

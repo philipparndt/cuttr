@@ -1,4 +1,4 @@
-# Screencasts — recording the browser
+# Screencasts — recording a browser or a terminal
 
 Everything else cuttr does begins with a recording it did not make. A screencast
 is the exception, and the reason to make it here rather than with a screen
@@ -44,6 +44,65 @@ Nothing else on your screen is recorded. That is worth saying twice, because the
 permission macOS asks for is called Screen Recording and sounds much broader than
 what happens.
 
+## Terminals
+
+Half of what anybody demonstrates on a Mac happens in a terminal. cuttr drives
+three: **Terminal**, **Ghostty** and **Abydos**. It opens one of its own, starts
+the shell where you tell it to, runs what you ask, and closes it afterwards.
+
+```
+recordings:
+  - as:       the-build
+    terminal: ghostty      # or terminal, abydos
+    in:       ~/dev/cuttr  # where the shell starts
+    run:      [make build, make test]
+    theme:    midnight     # the palette to record in
+    size:     1280x720
+```
+
+`run:` runs when the window opens, in the order written, and the shell stays
+afterwards — a terminal that exits the moment the command finishes is a recording
+that ends before anybody has read the output.
+
+`theme:` is worth setting for the same reason the browser gets a fresh profile: a
+screencast made on a laptop set to a light theme and one made on a desktop set to
+a dark one are two different films of the same thing. Ghostty and Abydos take a
+theme name; Terminal takes one of its settings sets.
+
+### What is still yours
+
+This is the one place cuttr cannot do for a terminal what it does for a browser.
+A browser gets a profile directory of its own and the frame is genuinely cuttr's.
+A shell has no such thing: **your own startup files still run**, so an alias, a
+version manager's banner or a prompt that draws itself will be in the film.
+
+What cuttr does do: starts in the directory you name, sets a plain `$ ` prompt,
+and opens a window with no scrollback — so the frame does not open on the last
+thing you were doing. What it will not do is start a shell without your setup,
+because that is not the shell you use, and a screencast of a shell nobody has is
+a lie in the other direction.
+
+The panel says this before the first recording rather than leaving you to find it
+in the finished piece.
+
+### Terminal costs a second permission
+
+Driving Terminal means AppleScript, which macOS gates behind its own consent — a
+different dialogue, about a different application, at a different moment from the
+screen recording one. It is asked for only when a recording actually names
+Terminal; if you record in Ghostty or Abydos you are never asked.
+
+Terminal is supported anyway, because it is the one every Mac has and the one a
+viewer is most likely to recognise.
+
+### Sizes
+
+A terminal is sized in columns and rows, and how wide a column is depends on the
+font it is set to. You still say pixels: cuttr asks for a number of cells,
+measures the window it got, and asks again with the difference — so nothing you
+type has to know anything about fonts. It refuses rather than approximating if it
+cannot land on the size.
+
 ## No sound
 
 A screencast records no audio, and that is deliberate. Narration goes on the
@@ -80,9 +139,9 @@ desktop and writes a film of nothing — so cuttr checks before opening anything
 and says what is missing. If you grant it while cuttr is running, quit and open
 it again: macOS decides what a process may do when it launches.
 
-**No browser.** cuttr drives Google Chrome, Chromium or Microsoft Edge, in that
-order, and installs none of them. A browser is a thing the machine has or has not
-got.
+**Nothing to record with.** cuttr drives Google Chrome, Chromium or Microsoft Edge, in that
+order, and installs none of them — nor any of the three terminals. A browser is a
+thing the machine has or has not got.
 
 ## What it costs
 

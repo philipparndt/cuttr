@@ -45,6 +45,13 @@
 	     screen. -->
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>cuttr records the browser window it opened for you, so a screencast can be made without anything else on your screen appearing in it.</string>
+	<!-- Driving Terminal for a screencast. AppleScript automation is a second
+	     permission of a different kind from screen recording — a different
+	     dialogue, about a different application, at a different moment — and it
+	     is asked for only when a recording actually names Terminal. Somebody
+	     who records in Ghostty is never asked. -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>cuttr opens a Terminal window and sizes it for a screencast. It does not read or change anything else.</string>
 	<!-- The cut list. Declared so that a double-click opens it here and so
 	     that the open panel can filter to it; it is UTF-8 YAML, and the
 	     conformance says so rather than pretending it is opaque. -->
