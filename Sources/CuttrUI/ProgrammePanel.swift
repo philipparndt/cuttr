@@ -2311,6 +2311,10 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 	/// One entry, drawn: what kind of thing it is, what it names, and how it
 	/// arrives.
 	final class EntryRow: NSTableCellView {
+
+		/// Where the section's length was drawn, for the tests. `nil` when
+		/// there was none to draw.
+		private(set) var lengthDrawnAt: NSRect?
 		var entry = TimelineEntry(clip: ClipReference(""))
 		var count = 0
 		/// How long a section runs, when the row is one. Nought seconds is a
@@ -2357,13 +2361,32 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 				.size(withAttributes: [.font: Theme.bodyStrong]).width + 10
 
 			if case .group = entry.source {
-				x = note("\(count) entr\(count == 1 ? "y" : "ies")", at: x) + 10
-				// How long it runs, beside how much is in it. A section is the
-				// unit somebody plans a film in, and five entries does not say
-				// whether that is thirty seconds or four minutes.
+				// How long it runs, against the right edge — because it is the
+				// thing a section row is for and it must not be the thing that
+				// falls off.
+				//
+				// It was drawn *after* the count, left to right, at whatever x
+				// the name had got to. `note` draws where it is told and does
+				// not look at the width, so a section with a long name pushed
+				// the length past the edge of the row and it simply was not
+				// there. Nothing said so: the row looked ordinary, and the one
+				// number somebody opened it for was missing.
+				var room = bounds.width - 8
 				if let length, length > 0 {
-					x = note(Timecode.string(length), at: x) + 10
+					let said = Timecode.string(length)
+					room = note(said, rightOf: room) - 10
+					// Where it landed, for the test that this is *on* the row.
+					// "It is drawn" and "it can be seen" were different things
+					// here, and only one of them was being checked.
+					lengthDrawnAt = NSRect(x: room + 10, y: 0, width: width(of: said),
+					                       height: bounds.height)
+				} else {
+					lengthDrawnAt = nil
 				}
+				// And the count in what is left, or not at all. Of the two, the
+				// length is the one that cannot be counted by looking.
+				let said = "\(count) entr\(count == 1 ? "y" : "ies")"
+				if width(of: said) < room - x { x = note(said, at: x) + 10 }
 			}
 			// A card's own colour, drawn. The row says `card 00:04.000`, which
 			// is how long it is and nothing about what anybody will see.
@@ -2433,6 +2456,20 @@ public final class ProgrammePanel: NSView, NSOutlineViewDataSource, NSOutlineVie
 			]
 			(text as NSString).draw(at: NSPoint(x: x, y: bounds.height / 2 - 6), withAttributes: attributes)
 			return x + (text as NSString).size(withAttributes: attributes).width
+		}
+
+		/// The same, ending at `rightOf` rather than starting at a point.
+		/// Returns where it begins, which is where anything to its left has to
+		/// stop.
+		@discardableResult
+		private func note(_ text: String, rightOf edge: CGFloat,
+		                  colour: NSColor = Theme.dimText) -> CGFloat {
+			let at = edge - width(of: text)
+			return note(text, at: at, colour: colour) - width(of: text)
+		}
+
+		private func width(of text: String) -> CGFloat {
+			(text as NSString).size(withAttributes: [.font: Theme.monoSmall]).width
 		}
 	}
 
