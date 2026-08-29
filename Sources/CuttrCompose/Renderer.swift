@@ -149,8 +149,24 @@ public enum Renderer {
 			if let videoURL = clip.videoURL {
 				let asset = AVURLAsset(url: videoURL)
 				if let source = try await asset.loadTracks(withMediaType: .video).first {
-					// How much recording there is, for the filler a hold needs.
-					let sourceSpan = try await source.load(.timeRange)
+					// How much recording there is, for the filler a hold needs
+					// — and *only* then.
+					//
+					// This was asked for every clip, and asked with a bare `try`:
+					// one recording whose track would not answer took the whole
+					// build down, and what somebody saw was a preview that did
+					// nothing, a play button that did nothing and a look that
+					// did nothing, with an AVFoundation code in the corner. A
+					// programme with no holds in it does not need this at all,
+					// and a programme with one should lose the hold rather than
+					// the film.
+					var sourceSpan = CMTimeRange(start: .zero, duration: .zero)
+					if stretches.contains(where: \.isHeld) {
+						sourceSpan = (try? await source.load(.timeRange))
+							?? CMTimeRange(start: .zero,
+							               duration: CMTime(seconds: clip.clip.end,
+							                                preferredTimescale: scale))
+					}
 					for stretch in stretches {
 						let lands = CMTime(seconds: stretch.at, preferredTimescale: scale)
 						if stretch.isHeld {
