@@ -807,6 +807,17 @@ public enum ProjectReader {
 			}
 			typed.blink = read
 		}
+		// `click: true` is the usual level; a number is how much of it.
+		if let click = fields["click"] {
+			if let wanted = click as? Bool {
+				typed.click = wanted ? 1 : 0
+			} else {
+				guard let read = number(click), read >= 0 else {
+					throw ProjectError.badValue(key: "click", value: describe(click))
+				}
+				typed.click = read
+			}
+		}
 		return typed
 	}
 
@@ -1034,6 +1045,25 @@ public enum ProjectReader {
 			image: image)
 	}
 
+	/// A drop, if it is being asked for at an end that can have one.
+	///
+	/// Refused on `out:` rather than read as something else. A caption cannot
+	/// leave by falling *in* from above, and the alternative — quietly taking
+	/// it as a slide off the top — is the kind of silent substitution this
+	/// format refuses everywhere else: the file would say one thing and the
+	/// render would show another, with nothing anywhere to say so.
+	private static func dropped(
+		key: String, over: Double, dust: Double
+	) throws -> Overlay.Transition {
+		guard key != "out" else {
+			throw ProjectError.badValue(
+				key: key,
+				value: "drop — a drop is how something arrives. For leaving, "
+					+ "say `{slide: down, over: …}` or `{fade: true, over: …}`.")
+		}
+		return .drop(over: over, dust: max(0, dust))
+	}
+
 	private static func transition(_ value: Any?, key: String) throws -> Overlay.Transition? {
 		guard let value else { return nil }
 		if let text = value as? String {
@@ -1041,6 +1071,7 @@ public enum ProjectReader {
 			case "cut", "none": return .cut
 			case "fade": return .fade(over: 0.4)
 			case "fall": return .fall(over: 1.5)
+			case "drop": return try dropped(key: key, over: 0.7, dust: 1)
 			case "left", "right", "up", "down":
 				return .slide(Overlay.Transition.Edge(rawValue: text.lowercased()) ?? .left, over: 0.4)
 			default: throw ProjectError.badValue(key: key, value: text)
@@ -1050,6 +1081,15 @@ public enum ProjectReader {
 		let over = number(m["over"]) ?? number(m["fade"]) ?? 0.4
 		if let edge = (m["slide"] as? String).flatMap(Overlay.Transition.Edge.init(rawValue:)) {
 			return .slide(edge, over: over)
+		}
+		// `{drop: true, over: 0.7, dust: 1}`. A shorter default than a slide,
+		// because it is falling rather than travelling and a slow drop is not
+		// a drop.
+		if let asked = m["drop"] {
+			if let wanted = asked as? Bool, !wanted { return .cut }
+			let seconds = number(asked) ?? number(m["over"]) ?? 0.7
+			return try dropped(key: key, over: seconds > 0 ? seconds : 0.7,
+			                   dust: number(m["dust"]) ?? 1)
 		}
 		// `{fade: false}` is somebody saying *no* fade, and it used to read as a
 		// fade of the default length — the value was noticed and never looked

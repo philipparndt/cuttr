@@ -330,6 +330,19 @@ public struct Overlay: Sendable, Equatable {
 		/// leave the frame on its own. A shower of confetti that fades out is a
 		/// shower somebody switched off; one that falls out is one that ran out.
 		case fall(over: Double)
+		/// In from above under gravity, landing hard enough to knock up dust.
+		///
+		/// A slide from the top with three things a slide does not have: it
+		/// accelerates rather than easing, so it arrives fast; it hits at
+		/// ``Dropping/lands`` and rattles for the rest of the movement rather
+		/// than stopping dead; and it throws ``Dust`` along the foot of the
+		/// words at the moment it lands. `dust` is how much of that, and 0 is
+		/// a landing with none.
+		///
+		/// **An arrival only.** A caption cannot leave by falling *in*, and
+		/// `out: {drop: …}` is refused rather than quietly read as something
+		/// else — see ``ProjectFile``.
+		case drop(over: Double, dust: Double)
 
 		public enum Edge: String, Sendable, CaseIterable {
 			case left, right, up, down
@@ -390,6 +403,7 @@ public struct Overlay: Sendable, Equatable {
 			case .fade(let over): return over
 			case .slide(_, let over): return over
 			case .fall(let over): return over
+			case .drop(let over, _): return over
 			}
 		}
 	}

@@ -1675,6 +1675,37 @@ public final class PropertiesPanel: NSView {
 			+ "− and + about the selected range, Z frames it and F puts the whole "
 			+ "stretch back. I and O set its in and out from the playhead.")
 
+		// **An overlay written inside a timeline entry with no range of its own.**
+		// It covers that entry, which is the commonest and best way to write one
+		// — it follows the clip through every re-cut. But there is nothing in
+		// `appearances` for the rows below to be about, so before this the panel
+		// showed the strip and then nothing at all, and there was no way from
+		// here to say "only the middle of this shot" without editing the file.
+		// Picking a stretch is what puts a range there for those rows to edit.
+		if overlay.appearances.isEmpty {
+			if case .entry(let path, _) = origin, let resolved,
+			   let clip = resolved.clips.first(where: { $0.entry == path }) {
+				let length = max(0, clip.end - clip.start)
+				field("range", [pop(["the whole clip", "a stretch of it"], selected: 0) {
+					[weak self] pick in
+					guard pick == 1 else { return }
+					self?.editOverlay(origin) { overlay in
+						// Half of it, in the middle, rather than the whole:
+						// picked "a stretch" and given back the whole clip, the
+						// control looks as though it did nothing.
+						overlay.appearances = [Overlay.Appearance(.within(
+							.clip(clip.reference),
+							from: length * 0.25, to: length * 0.75))]
+					}
+				}], note: "written inside `\(clip.clip.slug)`, so with no range of its own "
+					+ "it is on for the whole of that clip and follows it wherever the clip "
+					+ "goes. A stretch is written as `within:` that clip, which follows it "
+					+ "too — unlike programme times, which do not.")
+			} else {
+				remark("This one is on for the whole of what it is written on.")
+			}
+		}
+
 		// One range at a time: the strip above is the list, and what is under it
 		// is whichever range is selected there. Every range laid out at once was
 		// four identical rows of controls with no way to tell which of them the
@@ -1868,7 +1899,7 @@ public final class PropertiesPanel: NSView {
 			self?.editOverlay(origin) { $0.arrival = transition }
 		}, sits: { [weak self] placement in
 			self?.editOverlay(origin) { $0.arrivalPlacement = placement }
-		}, canFall: false)
+		}, canFall: false, canDrop: !isEffect)
 		transitionRow("departure", overlay.departure, at: overlay.departurePlacement,
 		              usually: .before, { [weak self] transition in
 			self?.editOverlay(origin) { $0.departure = transition }
@@ -1922,22 +1953,28 @@ public final class PropertiesPanel: NSView {
 	                           usually: Overlay.Transition.Placement,
 	                           _ set: @escaping (Overlay.Transition) -> Void,
 	                           sits: @escaping (Overlay.Transition.Placement) -> Void,
-	                           canFall: Bool = false) {
+	                           canFall: Bool = false, canDrop: Bool = false) {
 		// "Fall" is offered for effects only: a caption cannot run out, and a
-		// spinner has nothing to run out of.
-		let kinds = canFall ? ["cut", "fade", "slide", "fall"] : ["cut", "fade", "slide"]
+		// spinner has nothing to run out of. "Drop" is the other way round —
+		// an effect has no plate to land on, and it is an arrival either way,
+		// so the departure row never shows it.
+		var kinds = ["cut", "fade", "slide"]
+		if canFall { kinds.append("fall") }
+		if canDrop { kinds.append("drop") }
 		let current: Int
 		switch transition {
 		case .cut: current = 0
 		case .fade: current = 1
 		case .slide: current = 2
 		case .fall: current = 3
+		case .drop: current = kinds.firstIndex(of: "drop") ?? 0
 		}
 		var controls: [NSView] = [pop(kinds, selected: min(current, kinds.count - 1)) { pick in
-			switch pick {
-			case 0: set(.cut)
-			case 1: set(.fade(over: max(0.1, transition.duration)))
-			case 2: set(.slide(.left, over: max(0.1, transition.duration)))
+			switch kinds[pick] {
+			case "cut": set(.cut)
+			case "fade": set(.fade(over: max(0.1, transition.duration)))
+			case "slide": set(.slide(.left, over: max(0.1, transition.duration)))
+			case "drop": set(.drop(over: max(0.3, transition.duration), dust: 1))
 			default: set(.fall(over: max(0.4, transition.duration)))
 			}
 		}]
@@ -1947,12 +1984,20 @@ public final class PropertiesPanel: NSView {
 				pick in set(.slide(Overlay.Transition.Edge.allCases[pick], over: over))
 			})
 		}
+		// How much dust it knocks up, beside the drop it belongs to.
+		if case .drop(let over, let dust) = transition {
+			controls.append(label("dust"))
+			controls.append(number(dust, width: 60) { value in
+				set(.drop(over: over, dust: max(0, value)))
+			})
+		}
 		if current != 0 {
 			controls.append(number(transition.duration, width: 60) { value in
 				switch transition {
 				case .fade: set(.fade(over: max(0, value)))
 				case .slide(let edge, _): set(.slide(edge, over: max(0, value)))
 				case .fall: set(.fall(over: max(0, value)))
+				case .drop(_, let dust): set(.drop(over: max(0, value), dust: dust))
 				case .cut: break
 				}
 			})

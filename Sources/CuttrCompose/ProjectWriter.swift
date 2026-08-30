@@ -26,6 +26,9 @@ public enum ProjectWriter {
 		if typed.steady != 1 { said.append("steady: \(trim(typed.steady))") }
 		if let caret = typed.caret { said.append("caret: \(scalar(caret.hex))") }
 		if typed.blink != Scene.Typing().blink { said.append("blink: \(trim(typed.blink))") }
+		if typed.click > 0 {
+			said.append(typed.click == 1 ? "click: true" : "click: \(trim(typed.click))")
+		}
 		return said.isEmpty ? "true" : "{" + said.joined(separator: ", ") + "}"
 	}
 
@@ -876,6 +879,11 @@ public enum ProjectWriter {
 		case .fall(let over): return "{fall: true, over: \(trim(over))\(sits)}"
 		case .slide(let edge, let over):
 			return "{slide: \(edge.rawValue), over: \(trim(over))\(sits)}"
+		case .drop(let over, let dust):
+			// The dust left out when it is the usual amount, so a file that
+			// said `{drop: true, over: 0.7}` comes back saying that.
+			let cloud = dust == 1 ? "" : ", dust: \(trim(dust))"
+			return "{drop: true, over: \(trim(over))\(cloud)\(sits)}"
 		}
 	}
 

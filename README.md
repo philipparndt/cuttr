@@ -417,6 +417,55 @@ animations are taken from inside the span, so two overlays whose spans meet
 cross at the boundary — the first slides out to the right exactly as the second
 slides in from the left, with nothing to keep in step by hand.
 
+**`within:` puts one on part of a clip.** An overlay bound to a clip is on for
+the whole of it; `within:` names the clip and two times *measured from where
+that clip starts*, so it is on for a stretch of it:
+
+```yaml
+  - clip: liam-alt-zerbrechlich
+    overlays:
+      - effect:  confetti
+        within:  liam-alt-zerbrechlich
+        from:    00:01.200
+        to:      00:04.400
+```
+
+Reach for this rather than plain `from:`/`to:` whenever the range belongs to a
+shot. Programme times are on the programme's own clock and do not survive
+anything upstream changing length — the clip moves and the range does not, so
+what was over one shot ends up over the shot before it. An overlay written
+inside a timeline entry *with* programme times is the one way this can go
+quietly wrong, so the resolver says so rather than letting it pass.
+
+In the window, "when it is on" offers **the whole clip**, **a stretch of it**,
+and **programme times**, in that order of preference.
+
+**`in: {drop: …}` lands a caption.** It falls in from above under gravity —
+accelerating rather than easing, which is the difference between a drop and
+something being lowered on a wire — hits part way through the movement, rattles
+to a stop, and knocks up a cloud of dust along the foot of the words:
+
+```yaml
+  - text:  Wie sieht Oma aus?
+    style: lower-third-centre
+    group: wie-sieht-oma-aus
+    in:    {drop: true, over: 0.7, dust: 1}
+    out:   {slide: right, over: 1}
+```
+
+`dust:` is how much of it, against the usual: `0` for a landing with no cloud,
+`2` for twice as much. The cloud is thrown from where the words *land*, so it
+stays on the floor while they are still rattling above it, and it is worked out
+from the words themselves — a long caption throws a long cloud without being
+told to, and the same caption throws the same cloud in every render.
+
+The impact shakes the caption and nothing else. The picture underneath is not
+touched, which is what lets a drop go over any shot without disturbing whatever
+else is on screen at that moment.
+
+**A drop is an arrival.** `out: {drop: …}` is refused rather than quietly read
+as a slide off the top: a caption cannot leave by falling in.
+
 **`at:` says where a movement sits against the mark.** `in:` and `out:` say how
 an overlay arrives and leaves, `over:` says how long that takes, and `at:` says
 where that length goes:
@@ -556,6 +605,12 @@ so is the easing. `typed: true` on its own is the whole of it for most lines.
   beside it — placed by the same glyph measurement that decides the reveal, so
   it cannot fall out of step. It holds still while characters are landing and
   blinks either side of that, `blink:` seconds to the cycle.
+- **`click:`** gives each character a short mechanical click — `true` for the
+  usual level, a number for more or less of it. The clicks are *synthesised*,
+  so there is no sound file to find and lose, and they are mixed at the same
+  moments the characters land: an uneven `steady:` is heard as well as seen,
+  because there is one list of moments and not two. They arrive on the sound
+  lanes as an ordinary sound, so the mix treats them like anything else.
 
 **Why this is a part and not a rectangle over one.** The way to type a word
 before was to draw the whole line, lay a shape the colour of the card over it,

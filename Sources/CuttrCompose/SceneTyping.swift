@@ -66,10 +66,22 @@ public extension Scene {
 		/// thing moving in a picture where something is already moving.
 		public var blink: Double
 
-		public init(steady: Double = 1, caret: RGBA? = nil, blink: Double = 1.06) {
+		/// How loud a click each character makes, from 0 for a line that types
+		/// in silence to 1 for the usual level.
+		///
+		/// Synthesised rather than played from a file — see ``TypingSound`` for
+		/// why — and mixed at the moments the characters actually land, which
+		/// are the moments ``moments(of:keys:)`` gives the picture. So an
+		/// uneven ``steady`` is heard as well as seen, and the two cannot drift
+		/// apart, because there is only one list of moments.
+		public var click: Double
+
+		public init(steady: Double = 1, caret: RGBA? = nil, blink: Double = 1.06,
+		            click: Double = 0) {
 			self.steady = steady
 			self.caret = caret
 			self.blink = blink
+			self.click = click
 		}
 	}
 }

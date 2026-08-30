@@ -240,7 +240,14 @@ public enum OverlayLayers {
 		placer.add(opacity(resolved, host: host), forKey: "opacity")
 		placer.add(shown(resolved, host: host), forKey: "shown")
 
-		if let slide = slide(resolved, contentSize: contentSize, frame: size, host: host) {
+		if case .drop = resolved.overlay.arrival {
+			mover.add(dropAnimation(resolved, contentSize: contentSize, frame: size, host: host),
+			          forKey: "slide")
+			// On the placer and not the mover: the dust stays on the floor
+			// while the words rattle above it, so it must not be carried by the
+			// movement that is doing the rattling.
+			dust(resolved, contentSize: contentSize, frame: size, host: host, on: placer)
+		} else if let slide = slide(resolved, contentSize: contentSize, frame: size, host: host) {
 			mover.add(slide, forKey: "slide")
 		}
 		return placer
@@ -408,6 +415,160 @@ public enum OverlayLayers {
 		animation.fillMode = .both
 		animation.isRemovedOnCompletion = false
 		return animation
+	}
+
+	/// A caption falling in: the same start as a slide from the top, on a
+	/// curve a slide does not have.
+	///
+	/// **Sampled rather than eased**, because there is no timing function for
+	/// this shape. Core Animation's curves are cubic béziers between two
+	/// values; a fall that accelerates, hits, and then bounces twice is not one
+	/// of those and cannot be spelled as one. So the curve is asked for at a
+	/// fixed rate and handed over as points — the same curve ``Dropping`` gives
+	/// the painter, at the same moments, so the two paths cannot disagree about
+	/// where the words are.
+	///
+	/// Fifty a second, which is above any frame rate this renders at and cheap
+	/// at these lengths: a two-second arrival is a hundred points. Linear
+	/// between them, because the shape is already in the samples and easing
+	/// them again would round off the one moment that matters — the landing.
+	private static func dropAnimation(
+		_ resolved: ResolvedOverlay, contentSize: CGSize, frame: CGSize, host: Host
+	) -> CAKeyframeAnimation {
+		let timing = resolved.timing
+		let fell = frame.height + contentSize.height
+		let judder = frame.height * 0.018
+		let arrival = max(0.0001, timing.arriveTo - timing.arriveFrom)
+		let steps = max(2, min(400, Int((arrival * 50).rounded())))
+
+		var values: [NSValue] = []
+		var times: [NSNumber] = []
+		// Held off the top for however long the drawn window runs before the
+		// fall begins, so a drop placed `before` its mark waits up there rather
+		// than sliding in early.
+		if timing.drawnFrom < timing.arriveFrom {
+			values.append(NSValue(point: NSPoint(x: 0, y: fell)))
+			times.append(NSNumber(value: timing.fraction(at: timing.drawnFrom)))
+		}
+		for step in 0...steps {
+			let fraction = Double(step) / Double(steps)
+			let at = timing.arriveFrom + fraction * arrival
+			values.append(NSValue(point: NSPoint(
+				x: 0, y: Dropping.lift(at: fraction, fell: fell, judder: judder))))
+			times.append(NSNumber(value: timing.fraction(at: at)))
+		}
+		// And then wherever the departure takes it, which is a drop's one
+		// borrowing from a slide: leaving is still leaving.
+		if case .slide(let edge, _) = resolved.overlay.departure {
+			let away: NSPoint
+			switch edge {
+			case .left: away = NSPoint(x: -(frame.width + contentSize.width), y: 0)
+			case .right: away = NSPoint(x: frame.width + contentSize.width, y: 0)
+			case .up: away = NSPoint(x: 0, y: frame.height + contentSize.height)
+			case .down: away = NSPoint(x: 0, y: -(frame.height + contentSize.height))
+			}
+			values.append(NSValue(point: .zero))
+			times.append(NSNumber(value: timing.fraction(at: timing.departFrom)))
+			values.append(NSValue(point: away))
+			times.append(NSNumber(value: 1))
+		}
+
+		let animation = CAKeyframeAnimation(keyPath: "transform.translation")
+		animation.values = values
+		animation.keyTimes = times
+		animation.calculationMode = .linear
+		animation.beginTime = host.beginTime(timing.drawnFrom)
+		animation.duration = timing.drawnSpan
+		animation.fillMode = .both
+		animation.isRemovedOnCompletion = false
+		return animation
+	}
+
+	/// The cloud, as one layer per puff.
+	///
+	/// A layer each rather than one layer redrawn, because Core Animation is
+	/// being handed a tree and then left alone — there is nothing to call back
+	/// into on the way through an export. Each puff is the same soft disc
+	/// ``DustDisc`` gives the painter, moved, grown and thinned by keyframes
+	/// sampled off the same ``Dust`` the painter asks.
+	private static func dust(
+		_ resolved: ResolvedOverlay, contentSize: CGSize, frame: CGSize, host: Host, on placer: CALayer
+	) {
+		guard case .drop(let over, let amount) = resolved.overlay.arrival, amount > 0,
+		      let disc = DustDisc.image
+		else { return }
+		let timing = resolved.timing
+		let cloud = Dust(amount: amount)
+		let seed = Dropping.seed(from: resolved.overlay.described)
+		let landed = timing.arriveFrom + over * Dropping.lands
+
+		// The placer's own coordinates are the plate's, and the plate lands at
+		// home — so the foot of the words is the bottom of these bounds.
+		let foot = CGRect(origin: .zero, size: contentSize)
+
+		// Sampled once for the whole cloud, then read across: every puff is on
+		// the same list of moments, so they are one animation's worth of key
+		// times repeated rather than each having to be worked out again.
+		let steps = 44
+		var moments: [Double] = []
+		for step in 0...steps {
+			moments.append(Double(step) / Double(steps) * Dust.settles)
+		}
+		let frames = moments.map { cloud.puffs($0, foot: foot, frame: frame, seed: seed) }
+		guard let widest = frames.map(\.count).max(), widest > 0 else { return }
+
+		func key(_ path: String, _ values: [Any], on target: CALayer) {
+			let animation = CAKeyframeAnimation(keyPath: path)
+			animation.values = values
+			animation.keyTimes = moments.map {
+				NSNumber(value: timing.fraction(at: landed + $0))
+			}
+			animation.calculationMode = .linear
+			animation.beginTime = host.beginTime(timing.drawnFrom)
+			animation.duration = timing.drawnSpan
+			animation.fillMode = .both
+			animation.isRemovedOnCompletion = false
+			target.add(animation, forKey: path)
+		}
+
+		// One puff is one index through every sampled moment. A moment where
+		// it has not been born yet, or is already gone, is drawn at nothing —
+		// which is what `alpha` already says, so there is no second rule about
+		// when a puff exists.
+		for index in 0..<widest {
+			let puff = CALayer()
+			puff.contents = disc
+			puff.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+			puff.opacity = 0
+			puff.bounds = CGRect(x: 0, y: 0, width: 1, height: 1)
+			puff.position = .zero
+			placer.addSublayer(puff)
+
+			var positions: [NSValue] = []
+			var sizes: [NSValue] = []
+			var alphas: [Double] = []
+			for shot in frames {
+				if index < shot.count {
+					let it = shot[index]
+					positions.append(NSValue(point: NSPoint(x: it.centre.x, y: it.centre.y)))
+					sizes.append(NSValue(rect: CGRect(x: 0, y: 0,
+					                                  width: it.radius * 2, height: it.radius * 2)))
+					alphas.append(max(0, min(1, it.alpha)))
+				} else {
+					// Not in the air at this moment. Held where it last was and
+					// invisible, rather than snapping to the origin — a layer
+					// animated to nought opacity is gone either way, but a
+					// position that jumps is a position that can be seen to
+					// jump if the opacity is ever wrong.
+					positions.append(positions.last ?? NSValue(point: .zero))
+					sizes.append(sizes.last ?? NSValue(rect: CGRect(x: 0, y: 0, width: 1, height: 1)))
+					alphas.append(0)
+				}
+			}
+			key("position", positions, on: puff)
+			key("bounds", sizes, on: puff)
+			key("opacity", alphas, on: puff)
+		}
 	}
 
 	/// Following the anchor: the solved path, as keyframes on `position`.

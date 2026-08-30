@@ -405,7 +405,12 @@ public enum Renderer {
 		// appears when two of them are on at once, because a track can only
 		// play one thing at a time.
 		var soundLanes: [(track: AVMutableCompositionTrack, sounds: [ResolvedSound])] = []
-		for sound in resolved.sounds {
+		// A typed line's clicks come in here as an ordinary sound, so they get
+		// the lane allocation and the mix every other sound gets rather than a
+		// second arrangement of their own. Sorted in with the rest, because the
+		// lane allocator above looks at what it laid last.
+		let withClicks = (resolved.sounds + typingClicks(resolved)).sorted { $0.start < $1.start }
+		for sound in withClicks {
 			let asset = AVURLAsset(url: sound.url)
 			guard let source = (try? await asset.loadTracks(withMediaType: .audio))?.first
 			else { continue }
@@ -876,6 +881,50 @@ public enum Renderer {
 	/// of levels across it would be audible as a swell on the wrong side of the
 	/// edit. A ramp across a dissolve because there the picture is mixing too,
 	/// and a hard audio cut in the middle of one is the thing everybody hears.
+	/// The clicks every typed line in the programme makes.
+	///
+	/// Worked out here rather than in the resolver because it writes files, and
+	/// resolving is meant to be arithmetic on what the project says. What comes
+	/// back is an ordinary ``ResolvedSound`` per line, which is what lets the
+	/// lane allocation and the mix below treat it as one more sound.
+	///
+	/// The moments are the scene's own — `resolved.start` is where the scene's
+	/// clock begins, which is the same offset ``Frame`` subtracts before asking
+	/// a scene what it looks like — so a click lands on the frame its character
+	/// does.
+	static func typingClicks(_ resolved: ResolvedProject) -> [ResolvedSound] {
+		var out: [ResolvedSound] = []
+		for shown in resolved.overlays {
+			guard case .scene(let name, let parameters) = shown.overlay.kind,
+			      let scene = resolved.project.scene(named: name, with: parameters)
+			else { continue }
+			for part in scene.parts {
+				guard case .text(let text, _, _, let typed) = part.content,
+				      let typed, typed.click > 0
+				else { continue }
+				let words = Scene.fill(text, with: parameters)
+				// One per character that lands, and not the moment the part
+				// starts — which `moments` reports as the count it opens on,
+				// and which is nothing being typed.
+				let landings = typed.moments(of: words, keys: part.keys)
+					.filter { $0.shown > 0 }
+					.map(\.t)
+				guard !landings.isEmpty,
+				      let url = TypingSound.file(
+						clicking: landings, level: min(1, typed.click),
+						into: TypingSound.folder)
+				else { continue }
+				let last = (landings.last ?? 0) + 0.25
+				out.append(ResolvedSound(
+					sound: Sound(file: url.path, span: nil, gain: 0,
+					             arrival: .cut, departure: .cut, ducks: 0),
+					origin: shown.origin, url: url,
+					start: shown.start, end: min(shown.end, shown.start + last)))
+			}
+		}
+		return out
+	}
+
 	private static func audioMix(
 		_ tracks: [(lane: Int, track: AVMutableCompositionTrack)],
 		levels: [(track: Int, at: CMTime, volume: Float)],

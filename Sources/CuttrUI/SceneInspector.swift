@@ -165,12 +165,21 @@ public final class SceneInspector: NSView {
 
 	// MARK: - What the part is
 
+	/// One field of a typed line changed, with the rest of it kept.
+	///
+	/// A method rather than a closure inside the row so that the rows can go on
+	/// capturing `self` weakly, which every other control here does.
+	private func retype(
+		_ words: String, _ style: String?, _ tracking: Double, _ typed: Scene.Typing?,
+		_ change: (inout Scene.Typing) -> Void
+	) {
+		var typing = typed ?? Scene.Typing()
+		change(&typing)
+		onContent?(.text(words, style: style, tracking: tracking, typed: typing))
+	}
+
 	private func content(of subject: Scene.Part, at index: Int) {
 		switch subject.content {
-		// `typed` has no row of its own and is carried through every edit
-		// here. It is a rhythm and a caret rather than a number in a box, so
-		// the file is where it is written; what this must not do is drop it
-		// because somebody corrected a typo in the words.
 		case .text(let words, let style, let tracking, let typed):
 			field("text", [text(words, width: 190, placeholder: "{{title}}") { [weak self] value in
 				self?.onContent?(.text(value, style: style, tracking: tracking, typed: typed))
@@ -183,6 +192,42 @@ public final class SceneInspector: NSView {
 			field("tracking", [number(tracking, width: 66) { [weak self] value in
 				self?.onContent?(.text(words, style: style, tracking: value, typed: typed))
 			}], note: "space between the letters, as a fraction of the type size")
+
+			// Typed: on or off, and then the three things worth saying about a
+			// line that types. How far it has got is not here — that is
+			// `progress` on a key, like everything else that moves, and the
+			// keys have their own rows below.
+			field("typed", [check("a character at a time", on: typed != nil) {
+				[weak self] on in
+				self?.onContent?(.text(words, style: style, tracking: tracking,
+				                       typed: on ? Scene.Typing() : nil))
+			}], note: typed == nil
+				? "off: the line is drawn whole"
+				: "how far it has got is `progress` on a key, so the rhythm is keyed "
+					+ "like everything else that moves")
+			if let typed {
+				field("steady", [number(typed.steady, width: 66) { [weak self] value in
+					self?.retype(words, style, tracking, typed) { $0.steady = max(0, min(1, value)) }
+				}], note: "1 is a machine, lower is a hand — most characters near even, "
+					+ "a few long, and a wider gap at a space")
+				field("caret", [check("show one", on: typed.caret != nil) { [weak self] on in
+					self?.retype(words, style, tracking, typed) { $0.caret = on ? RGBA(hex: "#4bd5ee") : nil }
+				}] + (typed.caret.map { ink in
+					[colour(ink) { [weak self] picked in
+						self?.retype(words, style, tracking, typed) { $0.caret = picked }
+					}]
+				} ?? []), note: "drawn by this part, at the insertion point the reveal "
+					+ "stops at, so it cannot fall out of step")
+				field("click", [check("a click a character", on: typed.click > 0) {
+					[weak self] on in
+					self?.retype(words, style, tracking, typed) { $0.click = on ? 0.7 : 0 }
+				}] + (typed.click > 0
+					? [number(typed.click, width: 66) { [weak self] value in
+						self?.retype(words, style, tracking, typed) { $0.click = max(0, value) }
+					}]
+					: []), note: "synthesised, and mixed at the moments the characters "
+						+ "land — so an uneven `steady` is heard as well as seen")
+			}
 
 		case .roll(let roll):
 			// The typography, and not the names. A block is a role and a list of

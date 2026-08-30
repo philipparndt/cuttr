@@ -169,15 +169,56 @@ public enum OverlayPainter {
 			follow = home
 		}
 		let slide = slide(resolved, plate: plate, frame: size, at: time)
-		let origin = CGPoint(x: follow.x - anchor.x * plate.width + slide.x,
-		                     y: follow.y - anchor.y * plate.height + slide.y)
+		let home = CGPoint(x: follow.x - anchor.x * plate.width,
+		                   y: follow.y - anchor.y * plate.height)
+		let origin = CGPoint(x: home.x + slide.x, y: home.y + slide.y)
 
 		let drawn = CIImage(cgImage: image)
-		return faded(drawn
+		let placed = faded(drawn
 			.transformed(by: CGAffineTransform(
 				scaleX: plate.width / drawn.extent.width,
 				y: plate.height / drawn.extent.height))
 			.transformed(by: CGAffineTransform(translationX: origin.x, y: origin.y)), by: opacity)
+
+		// The dust is thrown from where the words *land*, not from where they
+		// are now: it stays on the floor while they rattle above it.
+		guard let cloud = dust(resolved, foot: CGRect(origin: home, size: plate),
+		                       frame: size, at: time) else { return placed }
+		return cloud.composited(over: placed)
+	}
+
+	/// The cloud a dropped caption knocks up, or `nil` when there is none to
+	/// draw — which is every frame of every overlay that does not drop, and
+	/// every frame of one that does outside the second after it lands.
+	private static func dust(
+		_ resolved: ResolvedOverlay, foot: CGRect, frame: CGSize, at time: Double
+	) -> CIImage? {
+		guard case .drop(let over, let amount) = resolved.overlay.arrival, amount > 0
+		else { return nil }
+		let landed = resolved.timing.arriveFrom + over * Dropping.lands
+		let since = time - landed
+		guard since >= 0, since < Dust.settles else { return nil }
+
+		let puffs = Dust(amount: amount).puffs(
+			since, foot: foot, frame: frame,
+			seed: Dropping.seed(from: resolved.overlay.described))
+		guard !puffs.isEmpty, let disc = DustDisc.image else { return nil }
+
+		guard let context = CGContext(
+			data: nil, width: Int(frame.width), height: Int(frame.height),
+			bitsPerComponent: 8, bytesPerRow: 0,
+			space: CGColorSpace(name: CGColorSpace.sRGB)!,
+			bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+		else { return nil }
+		// Drawn over one another rather than added: dust does not get brighter
+		// where two puffs of it overlap, it gets thicker.
+		for puff in puffs {
+			context.setAlpha(CGFloat(max(0, min(1, puff.alpha))))
+			context.draw(disc, in: CGRect(x: puff.centre.x - puff.radius,
+			                              y: puff.centre.y - puff.radius,
+			                              width: puff.radius * 2, height: puff.radius * 2))
+		}
+		return context.makeImage().map { CIImage(cgImage: $0) }
 	}
 
 	// MARK: - A spinner
@@ -629,6 +670,10 @@ public enum OverlayPainter {
 		let timing = resolved.timing
 
 		func offscreen(_ transition: Overlay.Transition) -> CGPoint {
+			// A drop comes from exactly where a slide from the top does. What
+			// differs is the curve it travels on and what happens when it gets
+			// there, not where it starts.
+			if case .drop = transition { return CGPoint(x: 0, y: frame.height + plate.height) }
 			guard case .slide(let edge, _) = transition else { return .zero }
 			switch edge {
 			case .left: return CGPoint(x: -(frame.width + plate.width), y: 0)
@@ -636,6 +681,15 @@ public enum OverlayPainter {
 			case .up: return CGPoint(x: 0, y: frame.height + plate.height)
 			case .down: return CGPoint(x: 0, y: -(frame.height + plate.height))
 			}
+		}
+
+		// A drop keeps moving after it has arrived — it hits partway through
+		// and rattles for the rest — so it is asked for over the whole of the
+		// arrival rather than only up to `arriveTo`.
+		if case .drop = resolved.overlay.arrival, time < timing.arriveTo {
+			let fell = frame.height + plate.height
+			return CGPoint(x: 0, y: Dropping.lift(at: timing.arriving(at: time),
+			                                      fell: fell, judder: frame.height * 0.018))
 		}
 
 		if time < timing.arriveTo {
