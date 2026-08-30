@@ -1,7 +1,32 @@
 # cuttr 0.11.2
 
-A crash, two things the window would not say out loud, a timeline that would not
-move, and a take whose name has a space in it.
+A line that types itself, a crash, two things the window would not say out loud,
+a timeline that would not move, and a take whose name has a space in it.
+
+## A text part can be typed
+
+    - text:  Jahrelang war die Sendung abgesetzt...
+      style: intro-typewriter
+      typed: {steady: 0.55, caret: "#4bd5ee"}
+      keys:
+        - {t: 0,    progress: 0}
+        - {t: 0.52, progress: 0, ease: linear}
+        - {t: 4,    progress: 1, ease: linear}
+
+`progress` is how much of the line has been typed, so the rhythm is keyed like
+everything else that moves: the pause before it starts is a key, and so is the
+easing. `typed: true` on its own is the whole of it for most lines. `steady:`
+runs from 1 for a machine to 0 for a hand — arithmetic on the text rather than a
+random number, so a line types the same way in every render — and `caret:` is a
+colour, drawn by the part itself from the same glyph measurement that decides the
+reveal, so it cannot fall out of step.
+
+The way to do this before was to draw the whole line and step a rectangle the
+colour of the card across it, which asks the file for two things it cannot be
+held to: a colour that survives compositing, and the author's own arithmetic
+about how wide a letter is. Here the reveal is cut at a glyph boundary CoreText
+gives for that exact string in that exact face, so a proportional face types as
+well as a monospaced one. See the README.
 
 ## Ducking a dissolve took the window with it
 
