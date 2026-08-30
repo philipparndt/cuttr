@@ -391,8 +391,10 @@ leaves every project still correct. That is what the slug is for.
 | | |
 |---|---|
 | `- intro` | one clip |
+| `- Mia 1/intro` | one clip, said which take when two share a slug |
 | `- clips: [a, b, c]` | several, in the order written |
 | `- query: "#b-roll and not #reject"` | every clip the query selects |
+| `- query: "\"Mia 1\"/#b-roll"` | a take whose name has a space in it, quoted |
 | `- tag: b-roll` | sugar for `query: "#b-roll"` |
 | `- group: name` + `clips:` | a named section; they nest |
 | `- card: 00:04.000` | time with no take behind it |

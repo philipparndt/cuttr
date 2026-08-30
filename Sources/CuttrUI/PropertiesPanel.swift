@@ -727,7 +727,8 @@ public final class PropertiesPanel: NSView {
 					return
 				}
 				self.replace(path, replacement)
-			}], note: "#tag, take/#tag, take/*, with and / or / not between them")
+			}], note: "#tag, take/#tag, take/*, with and / or / not between them; "
+				+ "quote a take whose name has a space in it")
 
 		case .card(let card):
 			// Everything a card has is here, because a card is a length and a

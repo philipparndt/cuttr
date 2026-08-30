@@ -38,7 +38,36 @@ public enum ResolveError: LocalizedError {
 		case .unknownGroup(let name):
 			return "No section called `@\(name)` on this timeline."
 		case .emptyQuery(let source):
-			return "`\(source)` matches no clips. Check the tag \u{2014} tags are lower-case and hyphenated."
+			// The old message said "check the tag" whatever the query was,
+			// which sent somebody hunting through a take's tags for a query
+			// that never mentioned one. Say the thing that is actually wrong
+			// with *this* query — and the commonest thing wrong with one is
+			// that a take name has a space in it and the language read the
+			// halves as two terms.
+			let terms = QueryParser.tokenize(source)
+			let operators = ["and", "or", "not", "&", "|", "!"]
+			if terms.count > 1, !source.contains("\""), !source.contains("'"),
+			   !terms.contains(where: { operators.contains($0.lowercased()) }) {
+				var hint = "quote the take's name so the space stops separating two terms"
+				// The repair, written out. Everything up to the first slash is
+				// the name that needs quoting, and saying so with this
+				// project's own words in it beats saying it in the abstract.
+				if let slash = source.firstIndex(of: "/") {
+					let take = source[source.startIndex ..< slash]
+					let rest = source[source.index(after: slash)...]
+					hint = "write it as `\"\(take)\"/\(rest)`"
+				}
+				return "`\(source)` matches no clips: a space separates two terms here, so this "
+					+ "asks for a clip that answers all \(terms.count) of them at once. If it is "
+					+ "one take whose name has a space in it, \(hint) \u{2014} or make the entry "
+					+ "a clip rather than a query, which needs no quoting."
+			}
+			if source.contains("#") {
+				return "`\(source)` matches no clips. Check the tag \u{2014} tags are lower-case "
+					+ "and hyphenated."
+			}
+			return "`\(source)` matches no clips. A bare word is a clip's slug, not a tag: "
+				+ "write `#\(source)` if a tag is what was meant."
 		case .noReference(let slug):
 			return "`match: {reference: \(slug)}` names a clip that is not on this timeline, "
 				+ "or whose take has not been analysed."

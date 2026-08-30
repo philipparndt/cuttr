@@ -15,6 +15,7 @@ import Foundation
 ///     #b-roll                every clip tagged b-roll
 ///     take-01/#interview     …in that take only
 ///     take-01/*              every clip in that take
+///     "Mia 1"/#interview     …in a take whose name has a space in it
 ///     intro                  the clip with that slug
 ///     #b-roll and not #reject
 ///     #a-roll or #b-roll
@@ -22,6 +23,13 @@ import Foundation
 /// Juxtaposition is `and`, so `#interview #keep` reads the way somebody would
 /// write it. There is no ordering in the language on purpose: the order comes
 /// from the clips themselves, which is what ``CuttrKit/Clip/order`` is for.
+///
+/// A take is named by its file name, and file names have spaces in them — but
+/// a space is how this language separates two terms, so `Mia 1/#interview` is
+/// two terms and matches nothing. Quote the name and it is one term again.
+/// Most people meet this the other way round, by dragging a clip out of such a
+/// take, and that path no longer produces a query at all — see
+/// ``CuttrCompose/ClipReference/init(reference:)``.
 public indirect enum ClipQuery: Sendable, Equatable {
 	case tag(take: String?, String)
 	case slug(take: String?, String)
@@ -74,20 +82,41 @@ public enum QueryParser {
 
 	/// Everything is one token except the operators and the brackets, so an
 	/// atom keeps its `/`, `#` and `*` and is picked apart afterwards.
+	///
+	/// Quotes suppress every one of those rules for as long as they are open,
+	/// which is the only way to name a take called `Mia 1` in a language whose
+	/// separator is the space. They are taken off here rather than in ``atom``,
+	/// so that by the time anything is picked apart a quoted name is an
+	/// ordinary run of characters and nothing downstream has to know.
 	static func tokenize(_ text: String) -> [String] {
 		var tokens: [String] = []
 		var current = ""
+		// Non-nil while inside quotes, holding the mark that will close them —
+		// so a name may contain the other kind without escaping it.
+		var quote: Character?
+		// Set by the quotes themselves: `""` is an empty take name, which is
+		// not the same as no token at all, and `current` alone cannot tell
+		// those apart.
+		var quoted = false
 		for character in text {
-			if character == "(" || character == ")" {
-				if !current.isEmpty { tokens.append(current); current = "" }
+			if let open = quote {
+				if character == open { quote = nil } else { current.append(character) }
+			} else if character == "\"" || character == "'" {
+				quote = character
+				quoted = true
+			} else if character == "(" || character == ")" {
+				if !current.isEmpty || quoted { tokens.append(current); current = ""; quoted = false }
 				tokens.append(String(character))
 			} else if character.isWhitespace {
-				if !current.isEmpty { tokens.append(current); current = "" }
+				if !current.isEmpty || quoted { tokens.append(current); current = ""; quoted = false }
 			} else {
 				current.append(character)
 			}
 		}
-		if !current.isEmpty { tokens.append(current) }
+		// An unclosed quote runs to the end of the line rather than throwing:
+		// the term it makes is the one somebody was in the middle of typing,
+		// and refusing to read it would empty the field they are typing into.
+		if !current.isEmpty || quoted { tokens.append(current) }
 		return tokens
 	}
 

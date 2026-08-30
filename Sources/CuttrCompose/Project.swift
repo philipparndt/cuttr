@@ -740,14 +740,28 @@ public struct TimelineEntry: Sendable, Equatable {
 	/// is a section. One rule, used by the reader and by the panel, so that what
 	/// somebody types in a field and what they type in the file mean the same
 	/// thing — which is most of what the panel is for.
+	///
+	/// A clip is recognised by *being* one rather than a query by looking like
+	/// one — see ``ClipReference/init(reference:)``. The rule used to be that
+	/// anything with a space in it was a query, which quietly broke every take
+	/// whose name has a space: dragging one clip out of `Mia 1` wrote
+	/// `query: Mia 1/that-clip`, the query language split it at the space, and
+	/// it came to mean "the clip `mia`, and the clip `that-clip` in a take
+	/// called `1`" — nothing, in every project. The file was then saved that
+	/// way, so the mistake outlived the drag.
 	public init(text: String, transition: Transition = .cut) throws {
 		let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 		if trimmed.hasPrefix("@") {
 			self.init(group: Slug.make(from: String(trimmed.dropFirst())), entries: [], transition: transition)
-		} else if trimmed.contains("#") || trimmed.contains("*") || trimmed.contains(" ") {
-			try self.init(query: trimmed, transition: transition)
-		} else {
+		} else if let reference = ClipReference(reference: trimmed) {
+			self.init(clip: reference, transition: transition)
+		} else if trimmed.isEmpty {
+			// Nothing at all is a clip with no name, which is what it was
+			// before this and says so plainly: `No clip called ``.` The query
+			// parser would refuse it, which is true but less use.
 			self.init(clip: ClipReference(trimmed), transition: transition)
+		} else {
+			try self.init(query: trimmed, transition: transition)
 		}
 	}
 
@@ -807,6 +821,25 @@ public struct ClipReference: Sendable, Equatable, CustomStringConvertible {
 			self.take = nil
 			self.slug = text
 		}
+	}
+
+	/// The reference this text is, or nothing when it is not one.
+	///
+	/// This is the rule that tells a reference from a query, and it is stated
+	/// from the reference's side on purpose. A reference is a slug, optionally
+	/// with a take in front of it: the slug is an identifier and has to look
+	/// like one, while the take is a file name and may say anything at all,
+	/// spaces included. So `Mia 1/that-clip` is a reference and `#b-roll`,
+	/// `Mia 1/*` and `intro or outro` are not — none of them ends in a slug.
+	///
+	/// Asking what a query looks like instead is what went wrong before:
+	/// every mark the query language uses can also appear in somebody's take
+	/// name, and a heuristic over those turned a perfectly good reference into
+	/// a query that could never match. There is nothing a slug can be mistaken
+	/// for.
+	public init?(reference text: String) {
+		self.init(text)
+		guard Slug.isValid(slug), take != "" else { return nil }
 	}
 
 	public var description: String { take.map { "\($0)/\(slug)" } ?? slug }
