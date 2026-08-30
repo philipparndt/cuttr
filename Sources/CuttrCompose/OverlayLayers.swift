@@ -514,8 +514,18 @@ public enum OverlayLayers {
 		for step in 0...steps {
 			moments.append(Double(step) / Double(steps) * Dust.settles)
 		}
-		let frames = moments.map { cloud.puffs($0, foot: foot, frame: frame, seed: seed) }
-		guard let widest = frames.map(\.count).max(), widest > 0 else { return }
+		// Kept by the puff's own number rather than by where it came in the
+		// list: what is in the air is a different set at every moment, and a
+		// layer that reads position 3 of each of them is following whichever
+		// puff happens to be third — a different one each time a puff ahead of
+		// it settles.
+		let frames = moments.map { moment in
+			Dictionary(uniqueKeysWithValues: cloud
+				.puffs(moment, foot: foot, frame: frame, seed: seed)
+				.map { ($0.index, $0) })
+		}
+		let flying = frames.reduce(into: Set<Int>()) { $0.formUnion($1.keys) }.sorted()
+		guard !flying.isEmpty else { return }
 
 		func key(_ path: String, _ values: [Any], on target: CALayer) {
 			let animation = CAKeyframeAnimation(keyPath: path)
@@ -535,7 +545,10 @@ public enum OverlayLayers {
 		// it has not been born yet, or is already gone, is drawn at nothing —
 		// which is what `alpha` already says, so there is no second rule about
 		// when a puff exists.
-		for index in 0..<widest {
+		for index in flying {
+			let shots = frames.map { $0[index] }
+			guard var resting = shots.compactMap({ $0 }).first else { continue }
+
 			let puff = CALayer()
 			puff.contents = disc
 			puff.anchorPoint = CGPoint(x: 0.5, y: 0.5)
@@ -547,23 +560,19 @@ public enum OverlayLayers {
 			var positions: [NSValue] = []
 			var sizes: [NSValue] = []
 			var alphas: [Double] = []
-			for shot in frames {
-				if index < shot.count {
-					let it = shot[index]
-					positions.append(NSValue(point: NSPoint(x: it.centre.x, y: it.centre.y)))
-					sizes.append(NSValue(rect: CGRect(x: 0, y: 0,
-					                                  width: it.radius * 2, height: it.radius * 2)))
-					alphas.append(max(0, min(1, it.alpha)))
-				} else {
-					// Not in the air at this moment. Held where it last was and
-					// invisible, rather than snapping to the origin — a layer
-					// animated to nought opacity is gone either way, but a
-					// position that jumps is a position that can be seen to
-					// jump if the opacity is ever wrong.
-					positions.append(positions.last ?? NSValue(point: .zero))
-					sizes.append(sizes.last ?? NSValue(rect: CGRect(x: 0, y: 0, width: 1, height: 1)))
-					alphas.append(0)
-				}
+			for shot in shots {
+				// Waiting where it will be thrown from before it is in the
+				// air, and left where it stopped after: `resting` is the last
+				// place it was, or the first if it has not been anywhere yet.
+				// Nought opacity hides it either way, but a layer parked at the
+				// origin has to cross the frame to be born — and it crosses it
+				// over the very moment it is fading in, which is a streak.
+				if let it = shot { resting = it }
+				let it = shot ?? resting
+				positions.append(NSValue(point: NSPoint(x: it.centre.x, y: it.centre.y)))
+				sizes.append(NSValue(rect: CGRect(x: 0, y: 0,
+				                                  width: it.radius * 2, height: it.radius * 2)))
+				alphas.append(shot == nil ? 0 : max(0, min(1, it.alpha)))
 			}
 			key("position", positions, on: puff)
 			key("bounds", sizes, on: puff)

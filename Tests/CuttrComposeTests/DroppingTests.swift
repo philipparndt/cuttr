@@ -104,6 +104,37 @@ import Testing
 		#expect(Dropping.seed(from: "Wie sieht Oma aus?") != Dropping.seed(from: "Wie sieht Opa aus?"))
 	}
 
+	/// A puff is the same puff from one moment to the next.
+	///
+	/// The list is only what is in the air, so it shortens as the cloud settles
+	/// — and a puff settling used to shift every puff behind it down a place.
+	/// A caller that draws the whole list each frame never notices; the layer
+	/// path gives each puff something of its own to move, so it followed one
+	/// puff and then, from one frame to the next, its neighbour. The cloud
+	/// flickered as it thinned, which is what was reported.
+	@Test func aPuffKeepsItsPlaceAsTheCloudThins() {
+		let dust = Dust(amount: 1)
+		let step = 0.02
+		var thinned = false
+		var at = step
+		while at + step < Dust.settles {
+			func cloud(_ moment: Double) -> [Int: Dust.Puff] {
+				Dictionary(uniqueKeysWithValues: dust
+					.puffs(moment, foot: foot, frame: frame, seed: 7).map { ($0.index, $0) })
+			}
+			let now = cloud(at), next = cloud(at + step)
+			if next.count < now.count { thinned = true }
+			for (index, was) in now {
+				guard let then = next[index] else { continue }
+				let moved = hypot(then.centre.x - was.centre.x, then.centre.y - was.centre.y)
+				#expect(moved < Double(frame.height) * 0.06,
+				        "puff \(index) jumped \(Int(moved)) points in \(step)s at \(at)")
+			}
+			at += step
+		}
+		#expect(thinned, "the cloud never thins, so this proves nothing")
+	}
+
 	/// `dust: 0` is a landing with no cloud at all.
 	@Test func noDustMeansNoDust() {
 		#expect(Dust(amount: 0).count == 0)
@@ -300,6 +331,18 @@ import Testing
 		// The dust: a layer per puff, each with the soft disc on it.
 		let puffs = all.filter { $0.contents != nil && $0.animation(forKey: "bounds") != nil }
 		#expect(puffs.count >= 20, "only \(puffs.count) puffs of dust")
+
+		// And each of them moves as one puff does: a layer whose keyframes step
+		// from where one puff was to where another one is draws a cloud that
+		// flickers as it thins.
+		for puff in puffs {
+			let moving = try #require(puff.animation(forKey: "position") as? CAKeyframeAnimation)
+			let points = try #require(moving.values as? [NSValue]).map(\.pointValue)
+			for (before, after) in zip(points, points.dropFirst()) {
+				let moved = hypot(after.x - before.x, after.y - before.y)
+				#expect(moved < frame.height * 0.08, "a puff jumps \(Int(moved)) points")
+			}
+		}
 
 		// Not under the layer that is moving, or the cloud would rattle with
 		// the words instead of lying on the floor.

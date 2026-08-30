@@ -78,6 +78,16 @@ public struct Dust: Sendable, Equatable {
 
 	/// One puff, where it is now.
 	public struct Puff: Sendable, Equatable {
+		/// Which of the cloud's puffs this is.
+		///
+		/// **A puff has to be recognisable from one moment to the next.** The
+		/// list is only what is in the air, so it is a different length at
+		/// every moment — and one puff reaching the end of its life shifts
+		/// every puff after it down a place. A caller drawing the whole list
+		/// each frame never notices; one that gives each puff something of its
+		/// own to move, as the layer path does, follows one puff and then
+		/// suddenly its neighbour, which is a cloud that jumps as it thins.
+		public let index: Int
 		public let centre: CGPoint
 		public let radius: Double
 		public let alpha: Double
@@ -113,7 +123,7 @@ public struct Dust: Sendable, Equatable {
 		// frame's height, so a cloud looks the same at any output size.
 		let gravity = Double(frame.height) * 0.32
 
-		for _ in 0..<count {
+		for index in 0..<count {
 			// Where along the foot of the words it comes from, and therefore
 			// which way it goes: dust thrown at the left end goes left.
 			let along: Double = random.value(0...1)
@@ -158,7 +168,8 @@ public struct Dust: Sendable, Equatable {
 			// switched off.
 			let radius: Double = born * (1 + 3.2 * through)
 			let alpha: Double = 0.72 * thickness * min(1, age / 0.05) * left * sqrt(left)
-			out.append(Puff(centre: CGPoint(x: x, y: y), radius: radius, alpha: alpha))
+			out.append(Puff(index: index, centre: CGPoint(x: x, y: y),
+			                radius: radius, alpha: alpha))
 		}
 		return out
 	}
