@@ -7,6 +7,10 @@ import Foundation
 public enum RenderError: LocalizedError {
 	case noVideo
 	case noTracks(URL)
+	/// A recording a clip names that this machine cannot read — gone, or on a
+	/// card nobody has plugged in. The whole path, because the point of saying
+	/// it is that somebody goes and finds the file.
+	case missingRecording(URL)
 	case exportFailed(String)
 	case cannotWrite(URL)
 
@@ -16,6 +20,10 @@ public enum RenderError: LocalizedError {
 			return "None of the clips on this timeline have a video track."
 		case .noTracks(let url):
 			return "\(url.lastPathComponent) has no tracks this can read."
+		case .missingRecording(let url):
+			return "\(url.path) cannot be read, so the clips that play it have no "
+				+ "picture. A render of a programme with a hole in it is not what "
+				+ "anybody meant to ask for, so this stops here."
 		case .exportFailed(let message):
 			return "The export failed: \(message)"
 		case .cannotWrite(let url):
@@ -102,6 +110,14 @@ public enum Renderer {
 		/// dissolve is decided here, and guessing it from the clip's position
 		/// was wrong for any programme that mixes cuts and dissolves.
 		var clipLanes: [Int] = []
+		/// The stretches whose recording would not load, and the file each of
+		/// them names.
+		///
+		/// A preview plays these as a pink card saying so; an export refuses by
+		/// name. The two hosts want opposite things from the same fact: the
+		/// window is where somebody is *finding out* that a file is missing,
+		/// and a file with a hole in it is not something to discover afterwards.
+		var missing: [(range: CMTimeRange, url: URL)] = []
 		/// The frame a hold stands on, already fitted to the output, and the
 		/// stretch of programme it is shown for.
 		///
@@ -148,7 +164,38 @@ public enum Renderer {
 
 			if let videoURL = clip.videoURL {
 				let asset = AVURLAsset(url: videoURL)
-				if let source = try await asset.loadTracks(withMediaType: .video).first {
+				// `try?`, and the resolver is what says so.
+				//
+				// A recording that is not on this machine — a project cloned
+				// without its media, a card reader unplugged — threw out of
+				// here and took the build with it, and what somebody saw was
+				// "The operation could not be completed" and no preview at all,
+				// for a programme of a hundred and twenty clips of which one
+				// was missing. The file is named beside the picture when the
+				// project resolves; here it costs its own clip and nothing
+				// else.
+				let tracks = try? await asset.loadTracks(withMediaType: .video)
+				if tracks?.isEmpty ?? true {
+					guard host == .preview else {
+						// A file that is there and will not decode is a
+						// different thing to look into than one that is not
+						// there at all, and the difference is worth the two
+						// lines it costs to say.
+						throw FileManager.default.fileExists(atPath: videoURL.path)
+							? RenderError.noTracks(videoURL)
+							: RenderError.missingRecording(videoURL)
+					}
+					let range = CMTimeRange(
+						start: at, duration: CMTime(seconds: clip.duration,
+						                            preferredTimescale: scale))
+					missing.append((range, videoURL))
+					stills.append((range, missingPicture(videoURL, size: size)))
+					// Over the whole frame rather than inside the last shot's
+					// rectangle: what is being said is about the programme, not
+					// about a picture that is not there to be fitted.
+					pictures.append((at, size))
+				}
+				if let source = tracks?.first {
 					// How much recording there is, for the filler a hold needs
 					// — and *only* then.
 					//
@@ -241,7 +288,7 @@ public enum Renderer {
 				// sound running on is the one thing that reads as a fault
 				// rather than as a deliberate stop.
 				if clip.audioURL == nil, let audioTrack,
-				   let source = try await asset.loadTracks(withMediaType: .audio).first {
+				   let source = (try? await asset.loadTracks(withMediaType: .audio))?.first {
 					for stretch in stretches where !stretch.isHeld {
 						try? audioTrack.insertTimeRange(CMTimeRange(
 							start: CMTime(seconds: stretch.from, preferredTimescale: scale),
@@ -253,7 +300,7 @@ public enum Renderer {
 
 			if let audioURL = clip.audioURL, let audioTrack {
 				let asset = AVURLAsset(url: audioURL)
-				if let source = try await asset.loadTracks(withMediaType: .audio).first {
+				if let source = (try? await asset.loadTracks(withMediaType: .audio))?.first {
 					for stretch in stretches where !stretch.isHeld {
 						// The clip's times are on the video's clock; the audio
 						// file has a clock of its own, and the take's offset is
@@ -313,15 +360,24 @@ public enum Renderer {
 		// fill over the top and nothing else in the render knows it is there.
 		// A track of its own because the lanes belong to the shots, and a card
 		// that dissolves into one would otherwise be laid across it.
+		//
+		// A shot whose recording is missing wants exactly the same thing, for
+		// exactly the same reason: its lane is empty there, and a stretch of
+		// composition with nothing in any track is a stretch the compositor is
+		// never asked about — so the card saying the file is missing would
+		// never be drawn.
 		var stretches: [(start: Double, end: Double)] = []
-		for card in resolved.cards {
+		let carried = (resolved.cards.map { (start: $0.start, end: $0.end) }
+			+ missing.map { (start: $0.range.start.seconds, end: $0.range.end.seconds) })
+			.sorted { $0.start < $1.start }
+		for span in carried {
 			// Merged, because two cards with a dissolve between them overlap,
 			// and one carrier serves both: what is under a card is never seen,
 			// so where one ends and the next begins is nothing.
-			if let last = stretches.last, card.start <= last.end + 1e-6 {
-				stretches[stretches.count - 1].end = max(last.end, card.end)
+			if let last = stretches.last, span.start <= last.end + 1e-6 {
+				stretches[stretches.count - 1].end = max(last.end, span.end)
 			} else {
-				stretches.append((card.start, card.end))
+				stretches.append(span)
 			}
 		}
 		if let longest = stretches.map({ $0.end - $0.start }).max(),
@@ -416,7 +472,9 @@ public enum Renderer {
 
 		// A card is a picture with no footage in it, so a programme made only of
 		// cards is a programme.
-		guard sawVideo || !resolved.cards.isEmpty else { throw RenderError.noVideo }
+		guard sawVideo || !resolved.cards.isEmpty || !missing.isEmpty else {
+			throw RenderError.noVideo
+		}
 
 		let overlays = OverlayLayers.build(resolved, size: size, host: host)
 
@@ -460,11 +518,19 @@ public enum Renderer {
 		// make a frame out of nothing. A project with no cards pays nothing for
 		// this — it is one array being empty.
 		let cards = !resolved.cards.isEmpty
+		// A shot whose recording is missing is a card in the only way that
+		// matters here: there is no source frame, and what plays instead has to
+		// be made rather than filtered. The cheap paths hand back what the
+		// track has, which where a recording is missing is nothing at all —
+		// so the card saying which file it was would never be drawn, and what
+		// somebody would see is the black stretch this was meant to replace.
+		let holes = !missing.isEmpty
 		// A treatment moves the picture into a rectangle, which is a frame that
 		// is not the frame that was shot — so neither of the cheap paths can
 		// serve it. One array being empty, as above.
 		let treated = resolved.clips.filter { !$0.presentations.isEmpty }
-		if !graded, effects.isEmpty, !painted, !dissolves, !filmed, !cards, treated.isEmpty {
+		if !graded, effects.isEmpty, !painted, !dissolves, !filmed, !cards, !holes,
+		   treated.isEmpty {
 			let plainComposition = AVMutableVideoComposition(propertiesOf: composition)
 			declareColour(on: plainComposition)
 			plainComposition.renderSize = size
@@ -497,7 +563,7 @@ public enum Renderer {
 		// three quarters of a level *darker* on the mean, not the three per cent
 		// lifted this used to claim: an extra generation of chroma, and worth it
 		// for a dissolve rather than for a programme of straight cuts.
-		guard dissolves || cards else {
+		guard dissolves || cards || holes else {
 			// Made once and captured, rather than rebuilt per frame: it is the
 			// same work for every frame, and the treated clips are now looked
 			// up in it.
@@ -1074,6 +1140,43 @@ public enum Renderer {
 		let mix = AVMutableAudioMix()
 		mix.inputParameters = parameters
 		return mix
+	}
+
+	/// What a stretch with no recording behind it plays instead: pink, and the
+	/// name of the file that is not there.
+	///
+	/// Pink because nothing in a programme is this colour by accident. Black
+	/// would be a shot of a dark room, a dropped frame, or a fade — three
+	/// things somebody would look for a fault in before thinking of the card
+	/// reader they never plugged in. And it says *which* file, because the
+	/// question a hole in a programme asks is always "which one".
+	static func missingPicture(_ url: URL, size: CGSize) -> CIImage {
+		let frame = CGRect(origin: .zero, size: size)
+		var image = CIImage(color: CIColor(red: 0.93, green: 0.16, blue: 0.53))
+			.cropped(to: frame)
+		let lines = [(text: "missing media", size: 0.07, at: 0.56),
+		             (text: url.lastPathComponent, size: 0.032, at: 0.44)]
+		for line in lines {
+			let style = TextStyle(
+				font: "Helvetica Neue Bold", size: line.size, color: .white,
+				background: RGBA(r: 0, g: 0, b: 0, a: 0), padding: 0, cornerRadius: 0,
+				position: CGPoint(x: 0.5, y: line.at), alignment: .centre)
+			let (layer, plate) = OverlayLayers.textLayer(line.text, style: style, size: size)
+			guard let contents = layer.contents,
+			      CFGetTypeID(contents as CFTypeRef) == CGImage.typeID
+			else { continue }
+			// swiftlint:disable:next force_cast
+			let drawn = CIImage(cgImage: contents as! CGImage)
+			guard drawn.extent.width > 0, drawn.extent.height > 0 else { continue }
+			image = drawn
+				.transformed(by: CGAffineTransform(scaleX: plate.width / drawn.extent.width,
+				                                   y: plate.height / drawn.extent.height))
+				.transformed(by: CGAffineTransform(
+					translationX: (size.width - plate.width) / 2,
+					y: size.height * line.at - plate.height / 2))
+				.composited(over: image)
+		}
+		return image
 	}
 
 	/// One frame of a recording, fitted to the output, for a hold to stand on.

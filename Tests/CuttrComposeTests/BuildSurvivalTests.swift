@@ -104,6 +104,74 @@ import Testing
 		_ = try await Renderer.build(resolved, host: .preview)
 	}
 
+	/// **The report.** A project whose media is not on this machine — cloned
+	/// without it, or with one card still unread — used to resolve perfectly
+	/// and then die in the build on AVFoundation's own account of it: "The
+	/// operation could not be completed", and no preview of the hundred and
+	/// nineteen clips that *were* there.
+	///
+	/// Now the resolver names the file, and the shot that cannot play plays as
+	/// a pink card saying so — in a preview. An export is the other half of
+	/// this and is below.
+	@Test func aRecordingThatIsNotThereIsNamedAndPlaysAsPink() async throws {
+		let at = try await fixture()
+		defer { try? FileManager.default.removeItem(at: at) }
+		try TakeWriter.write(Take(video: "../gone.mov", clips: [
+			Clip(slug: "hole", start: 0, end: 2),
+		])).write(to: at.appendingPathComponent("takes/gone.cuttr"),
+		          atomically: true, encoding: .utf8)
+		let project = try ProjectReader.read(Self.withAHole)
+		let resolved = try Resolver.resolve(project, baseURL: at)
+		// Named where somebody can act on it, and once however many placements
+		// play it.
+		#expect(resolved.warnings.contains { $0.contains("gone.mov") },
+		        "nothing said which recording is missing: \(resolved.warnings)")
+		#expect(resolved.warnings.count == 1)
+
+		let built = try await Renderer.build(resolved, host: .preview)
+		#expect(abs(resolved.duration - 6) < 0.01)
+		let generator = AVAssetImageGenerator(asset: built.composition)
+		generator.videoComposition = built.videoComposition
+		generator.requestedTimeToleranceBefore = .zero
+		generator.requestedTimeToleranceAfter = .zero
+		// A corner of the frame rather than the middle of it, which is where
+		// the words are.
+		let image = try await generator.image(
+			at: CMTime(seconds: 3, preferredTimescale: 600)).image
+		var bytes = [UInt8](repeating: 0, count: 4)
+		let context = try #require(CGContext(
+			data: &bytes, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+			space: CGColorSpaceCreateDeviceRGB(),
+			bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+		context.draw(image, in: CGRect(x: -20, y: -20,
+		                               width: image.width, height: image.height))
+		let (red, green, blue) = (Double(bytes[0]) / 255, Double(bytes[1]) / 255,
+		                          Double(bytes[2]) / 255)
+		#expect(red > 0.6 && green < 0.45 && blue > green,
+		        "the hole is not pink: \(red), \(green), \(blue)")
+	}
+
+	/// And an export refuses, naming the file. A render is minutes of encoding
+	/// and then a file to hand somebody: a hole in it is not something to find
+	/// out about afterwards, and "there is a pink card at 00:02" is not what
+	/// anybody meant to ask for.
+	@Test func anExportRefusesAndNamesTheRecording() async throws {
+		let at = try await fixture()
+		defer { try? FileManager.default.removeItem(at: at) }
+		try TakeWriter.write(Take(video: "../gone.mov", clips: [
+			Clip(slug: "hole", start: 0, end: 2),
+		])).write(to: at.appendingPathComponent("takes/gone.cuttr"),
+		          atomically: true, encoding: .utf8)
+		let resolved = try Resolver.resolve(try ProjectReader.read(Self.withAHole), baseURL: at)
+		do {
+			_ = try await Renderer.build(resolved, host: .export)
+			Issue.record("the export built a programme with a hole in it")
+		} catch let error as RenderError {
+			#expect(error.localizedDescription.contains("gone.mov"),
+			        "it did not say which file: \(error.localizedDescription)")
+		}
+	}
+
 	/// A treatment still builds, which is the other half: making the load
 	/// conditional must not stop a hold from getting its filler.
 	@Test func aProgrammeWithAHoldStillBuilds() async throws {
@@ -128,4 +196,11 @@ import Testing
 		#expect(abs(track.timeRange.duration.seconds - 6) < 0.1,
 		        "the hold lost its filler: \(track.timeRange.duration.seconds)")
 	}
+
+	/// A shot, a shot whose recording is not there, and a shot.
+	private static let withAHole = """
+	takes: [takes/take.cuttr, takes/gone.cuttr]
+	output: {size: 640x360, fps: 25}
+	timeline: [one, hole, one]
+	"""
 }

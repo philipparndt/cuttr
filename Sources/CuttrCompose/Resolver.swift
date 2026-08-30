@@ -675,6 +675,27 @@ public enum Resolver {
 					guard video != nil || audio != nil else {
 						throw ResolveError.missingMedia(ClipReference(take: entry.name, slug: entry.clip.slug))
 					}
+					// A recording the take names and this machine has not got.
+					//
+					// Said here and not thrown: a project cloned without its
+					// media, or with one card still unread, is a hundred and
+					// twenty clips of which one cannot play, and refusing the
+					// lot of them is not what anybody wants looking at it. What
+					// used to happen is worse than either — it resolved
+					// perfectly, and the build then died on AVFoundation's own
+					// account of it, which is "The operation could not be
+					// completed" and no preview.
+					//
+					// Once per file rather than once per clip: one missing take
+					// is used by twenty placements and would say so twenty
+					// times.
+					for gone in [video, audio].compactMap({ $0 })
+					where !FileManager.default.fileExists(atPath: gone.path) {
+						let said = "The recording `\(gone.lastPathComponent)`, which "
+							+ "`\(entry.name)` names, is not there — its clips play as "
+							+ "nothing."
+						if !warnings.contains(said) { warnings.append(said) }
+					}
 					clips.append(ResolvedClip(
 						reference: ClipReference(take: entry.name, slug: entry.clip.slug),
 						takeName: entry.name,
