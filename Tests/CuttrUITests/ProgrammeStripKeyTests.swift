@@ -241,6 +241,114 @@ import Testing
 		#expect(shown.end - shown.start < 6)
 	}
 
+	// MARK: - Zooming is about the playhead
+
+	/// A press is not a click: what somebody is looking at is the frame they are
+	/// on, and zooming in is how they ask to see more of *that*. Zooming about
+	/// the middle of the view instead walks the playhead off the edge, and then
+	/// the strip is showing a part of the programme nobody asked for.
+	@Test func zoomingFromAButtonHoldsThePlayheadStill() throws {
+		let (strip, _) = try programme()
+		strip.playhead = 8
+		let before = strip.fractionForTesting(of: 8)
+		strip.press(.in)
+		#expect(abs(strip.fractionForTesting(of: 8) - before) < 0.02,
+		        "the playhead moved on the track: \(strip.fractionForTesting(of: 8))")
+		let shown = strip.shownForTesting
+		#expect(shown.start <= 8 && shown.end >= 8, "it zoomed away from the playhead")
+	}
+
+	/// Twice over, because one press landing near enough is not the same as the
+	/// playhead staying put — the old anchor was wrong by a little each time.
+	@Test func theKeysHoldItStillToo() throws {
+		let (strip, _) = try programme()
+		strip.playhead = 2.5
+		strip.keyDown(with: key("=", code: 24))
+		strip.keyDown(with: key("=", code: 24))
+		let shown = strip.shownForTesting
+		#expect(shown.start <= 2.5 && shown.end >= 2.5,
+		        "2.5 is not on screen any more: \(shown)")
+	}
+
+	/// And when the playhead is not on screen, the middle is still the answer:
+	/// anchoring on something invisible jumps the strip somewhere nobody asked
+	/// to be.
+	@Test func aPlayheadThatIsNotShownFallsBackToTheMiddle() throws {
+		let (strip, _) = try programme()
+		strip.playhead = 0
+		strip.zoomForTesting(by: 0.25, atFraction: 1)      // the far end
+		let before = strip.shownForTesting
+		#expect(before.start > 1, "the test needs the playhead off screen")
+		strip.press(.in)
+		let shown = strip.shownForTesting
+		#expect(shown.start >= before.start && shown.end <= before.end,
+		        "it jumped somewhere else entirely: \(shown)")
+	}
+
+	// MARK: - Panning
+
+	/// There was no way to pan but a sideways swipe: no thumb, no gutter,
+	/// nothing to say the programme continued past either edge. On a mouse
+	/// without a sideways wheel a zoom was a one-way door.
+	@Test func thereIsNoThumbUntilThereIsSomewhereToGo() throws {
+		let (strip, _) = try programme()
+		#expect(strip.scrollbarThumbForTesting == nil)
+		strip.zoomForTesting(by: 0.25, atFraction: 0.5)
+		let thumb = try #require(strip.scrollbarThumbForTesting)
+		#expect(thumb.width < strip.scrollbarTrackForTesting.width)
+	}
+
+	@Test func draggingTheThumbMovesWhatIsShown() throws {
+		let (strip, _) = try programme()
+		strip.playhead = 5
+		strip.zoomForTesting(by: 0.25, atFraction: 0.5)
+		strip.drawForTesting()
+		let before = strip.shownForTesting
+		let thumb = try #require(strip.scrollbarThumbForTesting)
+		var scrubbed: Double?
+		strip.onScrub = { scrubbed = $0 }
+
+		func click(_ type: NSEvent.EventType, _ x: CGFloat) -> NSEvent {
+			NSEvent.mouseEvent(
+				with: type, location: strip.convert(NSPoint(x: x, y: thumb.midY), to: nil),
+				modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+				eventNumber: 0, clickCount: 1, pressure: 1)!
+		}
+		strip.mouseDown(with: click(.leftMouseDown, thumb.midX))
+		strip.mouseDragged(with: click(.leftMouseDragged, thumb.midX + 60))
+		strip.mouseUp(with: click(.leftMouseUp, thumb.midX + 60))
+
+		let after = strip.shownForTesting
+		#expect(after.start > before.start, "the strip did not move: \(after)")
+		#expect(abs((after.end - after.start) - (before.end - before.start)) < 1e-6,
+		        "panning changed the zoom")
+		// A click on the scrollbar is about where the strip is looking, not
+		// about where the playhead should go.
+		#expect(scrubbed == nil, "it moved the playhead as well")
+	}
+
+	/// The whole rail works, not just the thumb: clicking it takes the thumb
+	/// there, so it is a way of getting somewhere rather than a decoration with
+	/// one small part that answers.
+	@Test func clickingTheRailTakesTheThumbThere() throws {
+		let (strip, _) = try programme()
+		strip.zoomForTesting(by: 0.2, atFraction: 0)
+		strip.drawForTesting()
+		let rail = strip.scrollbarTrackForTesting
+		strip.mouseDown(with: NSEvent.mouseEvent(
+			with: .leftMouseDown,
+			location: strip.convert(NSPoint(x: rail.maxX - 4, y: rail.midY), to: nil),
+			modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+			eventNumber: 0, clickCount: 1, pressure: 1)!)
+		strip.mouseUp(with: NSEvent.mouseEvent(
+			with: .leftMouseUp,
+			location: strip.convert(NSPoint(x: rail.maxX - 4, y: rail.midY), to: nil),
+			modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+			eventNumber: 0, clickCount: 1, pressure: 1)!)
+		let shown = strip.shownForTesting
+		#expect(shown.end > 9.5, "the far end of the rail is the far end of it: \(shown)")
+	}
+
 	/// A zoom cannot show anything that is not on the programme.
 	@Test func aZoomStaysInsideTheProgramme() throws {
 		let (strip, resolved) = try programme()

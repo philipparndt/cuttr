@@ -54,6 +54,8 @@ public final class ProgrammeStrip: NSView {
 	/// click that edits the file is bad enough; a click that edits the file
 	/// while somebody is only trying to look at something is worse.
 	private var grabbedAt: (start: Double, end: Double)?
+	/// Where in the thumb it was taken hold of, while it is being dragged.
+	private var sliding: CGFloat?
 
 	private let clipRowHeight: CGFloat = 34
 	/// Tall enough to be grabbed. A bar somebody is meant to drag has to be
@@ -63,6 +65,14 @@ public final class ProgrammeStrip: NSView {
 	private let grabSlop: CGFloat = 5
 	private let groupRowHeight: CGFloat = 15
 	private let rulerHeight: CGFloat = 16
+	/// The scrollbar's band, under the ruler and over the lanes.
+	///
+	/// Reserved always rather than appearing with the zoom: a strip that grows
+	/// a row when somebody zooms moves every bar in it down by six points at
+	/// the moment they are aiming at one.
+	private let scrollbarHeight: CGFloat = 7
+	/// Where the lanes start — under the ruler and its scrollbar.
+	private var lanesTop: CGFloat { rulerHeight + scrollbarHeight }
 
 	public override var isFlipped: Bool { true }
 	public override var acceptsFirstResponder: Bool { true }
@@ -206,8 +216,26 @@ public final class ProgrammeStrip: NSView {
 		guard flags.contains(.option) || flags.contains(.command) else {
 			// Sideways is a pan, but only while there is somewhere to pan to,
 			// so the gesture falls through when the whole thing is shown.
-			if abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY), aimed().isZoomed {
-				pan(byPoints: event.scrollingDeltaX)
+			//
+			// With shift, a plain wheel is sideways too — which is the whole of
+			// what a mouse without one can do, and macOS's own answer to the
+			// same problem everywhere else.
+			let sideways: CGFloat
+			if flags.contains(.shift),
+			   abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) {
+				sideways = event.scrollingDeltaY
+			} else if abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
+				sideways = event.scrollingDeltaX
+			} else {
+				sideways = 0
+			}
+			if sideways != 0, aimed().isZoomed {
+				// Away from the pointer's travel: a swipe to the right shows
+				// what is to the *left*, which is what every scroll view on
+				// this machine does and what the properties column's own strip
+				// already did. This one had the sign the other way round, so
+				// the two strips disagreed about which way a swipe goes.
+				pan(byPoints: -sideways)
 				return
 			}
 			super.scrollWheel(with: event)
@@ -223,8 +251,12 @@ public final class ProgrammeStrip: NSView {
 
 	private func zoom(by factor: Double, at locationInWindow: NSPoint) {
 		let point = convert(locationInWindow, from: nil)
+		zoom(by: factor, aboutFraction: (point.x - gutter) / track)
+	}
+
+	private func zoom(by factor: Double, aboutFraction fraction: CGFloat) {
 		var window = aimed()
-		window.zoom(by: factor, aboutFraction: (point.x - gutter) / track)
+		window.zoom(by: factor, aboutFraction: fraction)
 		viewed = window
 		onZoom?(viewed.zoomed)
 		needsDisplay = true
@@ -280,6 +312,7 @@ public final class ProgrammeStrip: NSView {
 		}
 
 		drawRuler()
+		drawScrollbar()
 
 		// The sections, above the clips, one row per depth. This is the shape
 		// of the programme — the thing an overlay is hung on — and seeing it is
@@ -290,11 +323,11 @@ public final class ProgrammeStrip: NSView {
 
 		let depths = (resolved.groups.map(\.depth).max() ?? -1) + 1
 		if depths > 0 {
-			lanes.append(("sections", rulerHeight, CGFloat(depths) * groupRowHeight))
+			lanes.append(("sections", lanesTop, CGFloat(depths) * groupRowHeight))
 		}
 		for group in resolved.groups {
 			let a = x(for: group.start), b = x(for: group.end)
-			let y = rulerHeight + CGFloat(group.depth) * groupRowHeight
+			let y = lanesTop + CGFloat(group.depth) * groupRowHeight
 			let rect = NSRect(x: a, y: y + 1, width: max(b - a - 1, 2), height: groupRowHeight - 2)
 			NSColor(calibratedWhite: 1, alpha: 0.07).setFill()
 			rect.fill()
@@ -314,7 +347,7 @@ public final class ProgrammeStrip: NSView {
 		// grammar as the cutting timeline: the colour is a stripe on the block,
 		// not the block, or a strip of forty shots is forty coloured rectangles
 		// and the slugs on them cannot be read.
-		let top = rulerHeight + groupsHeight
+		let top = lanesTop + groupsHeight
 		lanes.append(("programme", top, clipRowHeight))
 		for clip in resolved.clips {
 			let a = x(for: clip.start), b = x(for: clip.end)
@@ -519,7 +552,7 @@ public final class ProgrammeStrip: NSView {
 	/// reason.
 	private func drawLaneNames(_ lanes: [(String, CGFloat, CGFloat)]) {
 		Theme.background.setFill()
-		NSRect(x: 0, y: rulerHeight, width: gutter, height: bounds.height - rulerHeight).fill()
+		NSRect(x: 0, y: lanesTop, width: gutter, height: bounds.height - lanesTop).fill()
 		Theme.rule.withAlphaComponent(0.6).setFill()
 		NSRect(x: gutter - 1, y: 0, width: 1, height: bounds.height).fill()
 
@@ -534,11 +567,69 @@ public final class ProgrammeStrip: NSView {
 				withAttributes: attributes)
 			// A hairline between the lanes, so a name is plainly about the band
 			// beside it rather than about the whole strip.
-			if top > rulerHeight + 1 {
+			if top > lanesTop + 1 {
 				Theme.rule.withAlphaComponent(0.4).setFill()
 				NSRect(x: 6, y: top.rounded(), width: bounds.width - 6, height: 1).fill()
 			}
 		}
+	}
+
+	// MARK: - Panning
+
+	/// The band the thumb slides in.
+	private func scrollbarTrack() -> NSRect {
+		NSRect(x: gutter, y: rulerHeight, width: track, height: scrollbarHeight)
+	}
+
+	/// Where the thumb is, or nothing while the whole programme is shown.
+	///
+	/// Drawn for the same reason the zoom buttons are drawn. Panning was a
+	/// sideways swipe and nothing else: no thumb, no gutter, nothing to say the
+	/// programme continued past either edge — so on a mouse with no sideways
+	/// wheel, a zoom was a one-way door, and on a trackpad it was a gesture
+	/// somebody had to already know. It also answers the question a zoomed
+	/// strip always raises, which is *where in the programme am I*.
+	private func scrollbarThumb() -> NSRect? {
+		let shown = aimed().shown
+		let whole = duration
+		let span = shown.end - shown.start
+		guard aimed().isZoomed, whole > span, span > 0 else { return nil }
+		let rail = scrollbarTrack()
+		let width = max(28, rail.width * CGFloat(span / whole))
+		let travel = max(0, rail.width - width)
+		let along = CGFloat((shown.start - 0) / (whole - span))
+		return NSRect(x: rail.minX + travel * min(max(0, along), 1),
+		              y: rail.minY + 1, width: width, height: rail.height - 3)
+	}
+
+	private func drawScrollbar() {
+		Theme.panel.setFill()
+		NSRect(x: 0, y: rulerHeight, width: bounds.width, height: scrollbarHeight).fill()
+		guard let thumb = scrollbarThumb() else { return }
+		let rail = scrollbarTrack()
+		Theme.rule.withAlphaComponent(0.35).setFill()
+		NSBezierPath(roundedRect: NSRect(x: rail.minX, y: rail.minY + 1,
+		                                 width: rail.width, height: rail.height - 3),
+		             xRadius: 2, yRadius: 2).fill()
+		(sliding == nil ? Theme.dimText : Theme.text).withAlphaComponent(0.75).setFill()
+		NSBezierPath(roundedRect: thumb, xRadius: 2, yRadius: 2).fill()
+	}
+
+	/// Puts the thumb's left edge here, and the view with it.
+	private func slide(thumbTo x: CGFloat) {
+		var window = aimed()
+		let shown = window.shown
+		let span = shown.end - shown.start
+		let whole = duration
+		guard let thumb = scrollbarThumb(), whole > span else { return }
+		let travel = scrollbarTrack().width - thumb.width
+		guard travel > 0 else { return }
+		let along = Double(min(max(0, (x - gutter) / travel), 1))
+		let start = along * (whole - span)
+		window.zoomed = (start, start + span)
+		viewed = window
+		onZoom?(viewed.zoomed)
+		needsDisplay = true
 	}
 
 	private func drawRuler() {
@@ -671,17 +762,25 @@ public final class ProgrammeStrip: NSView {
 		reveal(from: bar.start, to: bar.end)
 	}
 
-	private func zoomIn() { zoom(by: 1 / 1.6, at: middleOfTrack()) }
-	private func zoomOut() { zoom(by: 1.6, at: middleOfTrack()) }
+	private func zoomIn() { zoom(by: 1 / 1.6, aboutFraction: fractionOfPlayhead()) }
+	private func zoomOut() { zoom(by: 1.6, aboutFraction: fractionOfPlayhead()) }
+
+	/// Where the playhead is on the track, for a zoom that came from a key or a
+	/// button rather than from a pointer.
+	///
+	/// The middle of the view is the wrong anchor for a press: what somebody is
+	/// looking at is the frame they are on, and zooming in is how they ask to
+	/// see more of *that*. Zooming about the middle instead walks the playhead
+	/// off the edge in two presses, and then the strip is showing a part of the
+	/// programme nobody asked for. The same reasoning, and the same fallback,
+	/// as the properties column's strip and its selected range.
+	private func fractionOfPlayhead() -> CGFloat {
+		let fraction = aimed().fraction(of: playhead)
+		return (fraction >= 0 && fraction <= 1) ? fraction : 0.5
+	}
 
 	/// Whether there is an overlay chosen for `i` and `o` to be about.
 	public var hasSelectedOverlay: Bool { selectedBar() != nil }
-
-	/// The middle of what is shown, in window coordinates, for a zoom that came
-	/// from the keyboard rather than from a pointer.
-	private func middleOfTrack() -> NSPoint {
-		convert(NSPoint(x: gutter + track / 2, y: bounds.midY), to: nil)
-	}
 
 	private func selectedBar() -> (origin: Origin, appearance: Int,
 	                               start: Double, end: Double)? {
@@ -769,9 +868,13 @@ public final class ProgrammeStrip: NSView {
 		return NSPoint(x: rect.midX, y: rect.midY)
 	}
 	var shownForTesting: (start: Double, end: Double) { aimed().shown }
+	func fractionForTesting(of time: Double) -> CGFloat { aimed().fraction(of: time) }
 	func timeForTesting(atFraction fraction: CGFloat) -> Double {
 		aimed().time(atFraction: fraction)
 	}
+
+	var scrollbarThumbForTesting: NSRect? { scrollbarThumb() }
+	var scrollbarTrackForTesting: NSRect { scrollbarTrack() }
 
 	func zoomForTesting(by factor: Double, atFraction fraction: CGFloat) {
 		var window = aimed()
@@ -787,6 +890,19 @@ public final class ProgrammeStrip: NSView {
 		// otherwise move the playhead.
 		if let (button, _) = buttonRects().first(where: { $0.1.insetBy(dx: -2, dy: -2).contains(point) }) {
 			press(button)
+			return
+		}
+
+		// Then the scrollbar, which is over the top of the lanes for the same
+		// reason: a click there is about where the strip is looking, not about
+		// where the playhead should go.
+		if let thumb = scrollbarThumb(),
+		   scrollbarTrack().insetBy(dx: 0, dy: -2).contains(point) {
+			// Anywhere but the thumb takes the thumb there, so the whole rail
+			// is a way of getting somewhere rather than a decoration with one
+			// small part that works.
+			sliding = thumb.contains(point) ? point.x - thumb.minX : thumb.width / 2
+			slide(thumbTo: point.x - (sliding ?? 0))
 			return
 		}
 
@@ -824,7 +940,12 @@ public final class ProgrammeStrip: NSView {
 	}
 
 	public override func mouseDragged(with event: NSEvent) {
-		let at = time(forX: convert(event.locationInWindow, from: nil).x)
+		let point = convert(event.locationInWindow, from: nil)
+		if let grab = sliding {
+			slide(thumbTo: point.x - grab)
+			return
+		}
+		let at = time(forX: point.x)
 		guard var moving = dragging else {
 			onScrub?(at)
 			return
@@ -854,6 +975,11 @@ public final class ProgrammeStrip: NSView {
 	}
 
 	public override func mouseUp(with event: NSEvent) {
+		if sliding != nil {
+			sliding = nil
+			needsDisplay = true
+			return
+		}
 		guard let moving = dragging else { return }
 		let began = grabbedAt
 		dragging = nil
