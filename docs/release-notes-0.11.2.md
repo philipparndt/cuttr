@@ -1,7 +1,7 @@
 # cuttr 0.11.2
 
-A crash, two things the window would not say out loud, and a take whose name has
-a space in it.
+A crash, two things the window would not say out loud, a timeline that would not
+move, and a take whose name has a space in it.
 
 ## Ducking a dissolve took the window with it
 
@@ -52,6 +52,22 @@ The same fact is now told three times, each to the person who can act on it:
   then a file to hand somebody; a hole in it is not something to find out about
   afterwards. A file that is there and will not decode says *that* instead, which
   is a different thing to go and look into.
+
+## The programme strip zooms where you are looking
+
+`+` and `−` — and the buttons beside them — zoomed about the middle of the view,
+which is nothing. What somebody is looking at is the frame they are on, so two
+presses walked the playhead off the edge and left the strip showing a part of the
+programme nobody had asked for. It anchors on the playhead now, and falls back to
+the middle when the playhead is not on screen.
+
+And then the strip could not be moved. Panning was a sideways swipe and nothing
+else — no thumb, no rail, nothing to say the programme continued past either
+edge — so on a mouse without a sideways wheel a zoom was a one-way door. There is
+a scrollbar under the ruler now: drag it, or click anywhere on the rail to take
+it there. Shift with a plain wheel pans too. The swipe itself also went the wrong
+way, against every scroll view on the platform and against this program's own
+other strip, which is fixed.
 
 ## What the window says can be copied
 
