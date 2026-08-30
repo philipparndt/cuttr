@@ -134,7 +134,7 @@ import Testing
 		#expect(Scene.snippets(in: ["one": "a", "two": "", "three": "c"]) == ["a", "c"])
 		let two = try made("bullets", ["one": "a", "three": "c"])
 		#expect(two.parts.count == 2)
-		#expect(two.parts.allSatisfy { if case .text(let said, _, _) = $0.content {
+		#expect(two.parts.allSatisfy { if case .text(let said, _, _, _) = $0.content {
 			return said.hasPrefix("•  ")
 		} else { return false } })
 		let three = try made("bullets", ["one": "a", "two": "b", "three": "c"])

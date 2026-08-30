@@ -518,6 +518,42 @@ public enum OverlayLayers {
 		typeset(text, style: style, size: size, tracking: tracking).plate
 	}
 
+	/// How far into the plate the first `characters` characters reach, and the
+	/// caret's box standing at that point — both in the plate's own
+	/// coordinates, unscaled, with the origin at its bottom left.
+	///
+	/// The one measurement the typed part is built on, and the reason it needs
+	/// no arithmetic in the project file: `CTLineGetOffsetForStringIndex` is
+	/// asked where a glyph boundary is in *this* string, in *this* face, at
+	/// *this* size, so a proportional face types as well as a monospaced one
+	/// and a rounding in somebody's head cannot put the edge through a letter.
+	///
+	/// Both render paths ask this, so the clip and the caret are in the same
+	/// place in each of them — which is the same argument `SpinnerLook` makes
+	/// for the spinner, and the reason this is here beside `typeset` rather
+	/// than being worked out twice.
+	static func reach(
+		_ text: String, style: TextStyle, size: CGSize, tracking: Double = 0,
+		after characters: Int
+	) -> (edge: CGFloat, caret: CGRect) {
+		let (line, plate, descent, scale) = typeset(text, style: style, size: size,
+		                                            tracking: tracking)
+		let padding = style.padding * size.height
+		let showing = max(0, min(text.count, characters))
+		let index = text.prefix(showing).utf16.count
+		let offset = CTLineGetOffsetForStringIndex(line, CFIndex(index), nil) / scale
+		let edge = padding + offset
+
+		// The caret sits on the baseline, which is one descent above the
+		// padding — the same place `textLayer` puts it before drawing. Its
+		// proportions are the type's, so a caret is the right size for its
+		// line without the file being asked how big a caret should be.
+		let point = style.size * size.height
+		let box = CGRect(x: edge, y: padding + descent / scale - 0.08 * point,
+		                 width: max(1.5, 0.12 * point), height: 0.85 * point)
+		return (min(edge, plate.width), box)
+	}
+
 	static func textLayer(
 		_ text: String, style: TextStyle, size: CGSize,
 		tracking: Double = 0, ink: RGBA? = nil
@@ -1235,23 +1271,45 @@ public enum OverlayLayers {
 			let morphing = Set(keys.compactMap(\.shape)).count > 1
 			/// Whether any key says how far this has got.
 			let determinate = part.keys.contains { $0.progress != nil }
+			/// A typed line's parts, kept until the span and the keys are in
+			/// hand: the reveal and the caret are both stepped animations, and
+			/// there is nothing to step them over until then.
+			var typing: (typed: Scene.Typing, words: String, style: TextStyle,
+			             tracking: Double, plate: CALayer, holder: CALayer)?
 			var natural = CGSize(
 				width: (first.width ?? 0.2) * size.width,
 				height: (first.height ?? 0.02) * size.height)
 			switch part.content {
-			case .text(let text, let styleName, let tracking):
+			case .text(let text, let styleName, let tracking, let typed):
 				let style = project.style(named: styleName)
 				let words = Scene.fill(text, with: parameters)
+				let plate: CALayer
 				if coloured {
 					let built = tintable(words, style: style, size: size, tracking: tracking,
 					                     ink: first.color ?? style.color)
-					layer = built.layer
+					plate = built.layer
 					natural = built.size
 					ink = (built.ink, "backgroundColor")
 				} else {
 					let built = textLayer(words, style: style, size: size, tracking: tracking)
-					layer = built.0
+					plate = built.0
 					natural = built.1
+				}
+				if let typed {
+					// The words go inside a holder so that the caret can be a
+					// sibling of them rather than a child. A mask applies to a
+					// layer *and its sublayers*, and the caret stands at the
+					// insertion point — which is by definition the one place
+					// the reveal has not reached, so a caret under the same
+					// mask is a caret that is never drawn.
+					let holder = CALayer()
+					holder.frame = CGRect(origin: .zero, size: natural)
+					plate.frame = CGRect(origin: .zero, size: natural)
+					holder.addSublayer(plate)
+					typing = (typed, words, style, tracking, plate, holder)
+					layer = holder
+				} else {
+					layer = plate
 				}
 			case .roll(let column):
 				// One layer per line inside a holder the size of the whole
@@ -1469,6 +1527,15 @@ public enum OverlayLayers {
 			}
 			animate("opacity", keys.map { $0.opacity ?? 1 })
 
+			// A typed line: the reveal, and the caret standing at the end of
+			// it. Both are *stepped* — a character is there or it is not, and
+			// so is a caret — which is why they are built here rather than
+			// going through `animate` above with the rest of the keys.
+			if let typing {
+				typewriter(typing, keys: keys, size: size, span: span,
+				           resolved: resolved, host: host)
+			}
+
 			// A background is the frame. Moving it, scaling it or turning it
 			// would show what is behind it at the edges, which is the one thing
 			// a background must never do — so it is placed and left alone.
@@ -1534,7 +1601,7 @@ public enum OverlayLayers {
 			if coloured, let ink {
 				let fallback: RGBA
 				switch part.content {
-				case .text(_, let styleName, _): fallback = project.style(named: styleName).color
+				case .text(_, let styleName, _, _): fallback = project.style(named: styleName).color
 				case .shape(let fill, _, _): fallback = fill
 				case .bar(let bar): fallback = bar.fill
 				case .spinner(let spinner): fallback = spinner.color
@@ -1642,6 +1709,109 @@ public enum OverlayLayers {
 	/// animated. Cutting the same bitmap into a mask keeps the glyphs identical
 	/// to the ones the painter draws, and moves the colour out where Core
 	/// Animation can get at it.
+	/// The reveal and the caret of a typed line, as stepped animations.
+	///
+	/// **Everything here is `.discrete`.** A character is on screen or it is
+	/// not, and interpolating between two states of a thing that has no
+	/// in-between is exactly the bug this part exists to remove: a mask slid
+	/// from one letter to the next is caught halfway across a glyph on the
+	/// frames in between, which is what "typing" looked like before and what it
+	/// is described as when somebody watches it — the letters fading in from
+	/// the left instead of appearing.
+	///
+	/// The moments come from ``Scene/Typing/moments(of:keys:)``, which inverts
+	/// the easing to find the instant the progress curve crosses each character
+	/// rather than the nearest frame. So this path steps at the same instant
+	/// the painter's `shown` flips, at any frame rate, without either of them
+	/// being told what the frame rate is.
+	private static func typewriter(
+		_ typing: (typed: Scene.Typing, words: String, style: TextStyle,
+		           tracking: Double, plate: CALayer, holder: CALayer),
+		keys: [Scene.Key], size: CGSize, span: Double,
+		resolved: ResolvedOverlay, host: Host
+	) {
+		let natural = typing.holder.bounds.size
+		func reached(_ shown: Int) -> (edge: CGFloat, caret: CGRect) {
+			reach(typing.words, style: typing.style, size: size,
+			      tracking: typing.tracking, after: shown)
+		}
+
+		// Every moment either of the two changes: a character landing, and the
+		// caret turning over. One list for both, so a caret that blinks does
+		// not need a second animation whose key times have to line up with
+		// this one's.
+		let landings = typing.typed.moments(of: typing.words, keys: keys)
+		var moments = Set(landings.map(\.t))
+		let start = keys.first?.t ?? 0
+		if typing.typed.caret != nil, typing.typed.blink > 0 {
+			var beat = start
+			while beat <= span {
+				moments.insert(beat)
+				beat += typing.typed.blink / 2
+			}
+		}
+		let times = moments.sorted()
+		guard let opening = times.first else { return }
+
+		/// One value per moment, held from each to the next.
+		func stepped(_ path: String, on target: CALayer, _ values: [Any]) {
+			guard values.count > 1 else { return }
+			let animation = CAKeyframeAnimation(keyPath: path)
+			animation.values = values
+			// One more key time than values — see `framesLayer`, where the
+			// same rule is written out and a test holds it.
+			animation.keyTimes = times.enumerated().map { index, moment in
+				NSNumber(value: index == 0 ? 0 : min(1, max(0, moment / span)))
+			} + [1]
+			animation.calculationMode = .discrete
+			animation.beginTime = host.beginTime(resolved.start)
+			animation.duration = span
+			animation.fillMode = .both
+			animation.isRemovedOnCompletion = false
+			target.add(animation, forKey: path)
+		}
+
+		/// How many characters are showing at a moment, on the painter's own
+		/// terms: the progress the keys give, put through the same `shown`.
+		/// Asked here rather than read off `landings` so that the two paths
+		/// cannot answer differently.
+		func showing(at moment: Double) -> Int {
+			typing.typed.shown(of: typing.words,
+			                   at: Scene.state(of: keys, at: moment)?.progress)
+		}
+
+		// The reveal. A mask the height of the plate whose width steps to the
+		// next glyph boundary — the boundary CoreText gives for this string in
+		// this face, not a letter width somebody worked out.
+		let cover = CALayer()
+		cover.backgroundColor = cgColor(.white)
+		cover.anchorPoint = CGPoint(x: 0, y: 0.5)
+		cover.position = CGPoint(x: 0, y: natural.height / 2)
+		cover.bounds = CGRect(x: 0, y: 0, width: reached(showing(at: opening)).edge,
+		                      height: natural.height)
+		typing.plate.mask = cover
+		stepped("bounds", on: cover, times.map { moment in
+			NSValue(rect: CGRect(x: 0, y: 0, width: reached(showing(at: moment)).edge,
+			                     height: natural.height))
+		})
+
+		guard let ink = typing.typed.caret else { return }
+		let caret = CALayer()
+		caret.backgroundColor = cgColor(ink)
+		caret.anchorPoint = CGPoint(x: 0, y: 0)
+		let box = reached(showing(at: opening)).caret
+		caret.bounds = CGRect(origin: .zero, size: box.size)
+		caret.position = box.origin
+		caret.opacity = typing.typed.lit(at: opening, of: typing.words, keys: keys) ? 1 : 0
+		typing.holder.addSublayer(caret)
+		stepped("position", on: caret, times.map { moment in
+			NSValue(point: reached(showing(at: moment)).caret.origin)
+		})
+		stepped("opacity", on: caret, times.map { moment in
+			typing.typed.lit(at: moment, of: typing.words, keys: keys) ? 1.0 : 0.0
+		})
+	}
+
 	private static func tintable(
 		_ text: String, style: TextStyle, size: CGSize, tracking: Double, ink: RGBA
 	) -> (layer: CALayer, size: CGSize, ink: CALayer) {

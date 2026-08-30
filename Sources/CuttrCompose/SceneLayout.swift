@@ -90,7 +90,7 @@ public enum SceneLayout {
 			}
 			let box: CGSize
 			switch part.content {
-			case .text(let text, let styleName, let tracking):
+			case .text(let text, let styleName, let tracking, _):
 				let style = project.style(named: styleName)
 				box = OverlayLayers.textLayer(Scene.fill(text, with: parameters),
 				                              style: style, size: size, tracking: tracking).1

@@ -43,7 +43,13 @@ public struct Scene: Sendable, Equatable {
 			/// that a caption never does, so it lives on the part rather than
 			/// on the style. Positive opens it up, which is what a word set in
 			/// capitals across a title needs; negative closes it.
-			case text(String, style: String?, tracking: Double = 0)
+			///
+			/// `typed` makes it arrive a character at a time; see
+			/// ``Scene/Typing``. It is on the part rather than in the style
+			/// because it is a thing this line does, not a way this line is
+			/// set — the same style sets the lines around it that do not type.
+			case text(String, style: String?, tracking: Double = 0,
+			          typed: Typing? = nil)
 			/// A rectangle, which with a small height is a rule and with equal
 			/// sides is a block. Rounded by `corner`.
 			///

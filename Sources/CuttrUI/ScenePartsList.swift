@@ -145,7 +145,7 @@ public final class ScenePartsList: NSView, NSTableViewDataSource, NSTableViewDel
 		let kind: Theme.Kind
 		let title: String
 		switch part.content {
-		case .text(let text, let style, _):
+		case .text(let text, let style, _, _):
 			kind = .text
 			title = text.isEmpty ? "(no words)" : text + (style.map { "  ·  \($0)" } ?? "")
 		case .shape(let fill, _, let shape):

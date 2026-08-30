@@ -488,7 +488,7 @@ Four kinds of part:
 
 | written | what it is |
 | --- | --- |
-| `- text: "{{title}}"` | words, in a named `style:`, optionally `tracking:` |
+| `- text: "{{title}}"` | words, in a named `style:`, optionally `tracking:` and `typed:` |
 | `- shape: "#ffffff"` | a shape — `kind:` rectangle, ellipse, triangle, diamond, star or hexagon |
 | `- image: logo.png` | a file beside the project, fitted in its box |
 | `- background: "#101418"` | the whole frame — or `{from:, to:, angle:}` for a ramp |
@@ -522,13 +522,53 @@ Four of those are what make a scene do things rather than sit there:
 - **`progress:`** is how full a bar is, nought to one — and a spinner given one
   stops going round and fills a ring to that fraction instead. A bar filling
   over three seconds is `progress: 0` at one key and `progress: 1` at another,
-  and it gets the easing that key already carries for nothing.
+  and it gets the easing that key already carries for nothing. It is also how
+  far a **typed** line has got: see below.
 - **`shape:`** names a kind, and naming a different one from the key before
   **morphs** between them across that interval. Both outlines are cut into the
   same number of points at the same angles round the middle and matched up in
   order, which is honest about what it can do: the shape stays closed and
   convincing throughout, and no corner of either end survives exactly except
   where the angles happen to land on one.
+
+A text part can be **typed**, a character at a time:
+
+```yaml
+- text:  Jahrelang war die Sendung abgesetzt...
+  style: intro-typewriter
+  typed: {steady: 0.55, caret: "#4bd5ee"}
+  keys:
+    - {t: 0,    progress: 0}
+    - {t: 0.52, progress: 0, ease: linear}
+    - {t: 4,    progress: 1, ease: linear}
+```
+
+`progress` is how much of the line has been typed, which is why the rhythm is
+keyed like everything else that moves — the pause before it starts is a key, and
+so is the easing. `typed: true` on its own is the whole of it for most lines.
+
+- **`steady:`** is how evenly the characters land, 1 for a machine down to 0 for
+  a hand. Below 1 most characters stay near their proper share, a few run long,
+  and the gap at a space is wider than the gap inside a word. It is *arithmetic
+  on the text*, not a random number, so a line types the same way on every
+  machine and in every render.
+- **`caret:`** is a colour, and the caret is drawn by the part rather than
+  beside it — placed by the same glyph measurement that decides the reveal, so
+  it cannot fall out of step. It holds still while characters are landing and
+  blinks either side of that, `blink:` seconds to the cycle.
+
+**Why this is a part and not a rectangle over one.** The way to type a word
+before was to draw the whole line, lay a shape the colour of the card over it,
+and step the shape right by one letter at a time. That asks the file for two
+things it cannot be held to: a colour, which is composited and comes back a
+shade off so the "invisible" rectangle is on screen; and the author's own
+arithmetic about how wide a letter is, which is why it was only ever done in a
+monospaced face and why the edge lands halfway through a glyph the moment a
+number is a rounding out. A half-covered letter on one frame in every letter is
+what "the characters fade in from the left" looks like. Here the reveal is a
+clip at a glyph boundary CoreText gives for the exact string in the exact face,
+stepped rather than slid, so a proportional face types as well as a monospaced
+one and a line of any length is two keys.
 
 There is a **window for making one**: the scenes are listed in the library
 beside the programme, and double-clicking one opens it — or Compose ▸ Edit

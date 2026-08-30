@@ -167,17 +167,21 @@ public final class SceneInspector: NSView {
 
 	private func content(of subject: Scene.Part, at index: Int) {
 		switch subject.content {
-		case .text(let words, let style, let tracking):
+		// `typed` has no row of its own and is carried through every edit
+		// here. It is a rhythm and a caret rather than a number in a box, so
+		// the file is where it is written; what this must not do is drop it
+		// because somebody corrected a typo in the words.
+		case .text(let words, let style, let tracking, let typed):
 			field("text", [text(words, width: 190, placeholder: "{{title}}") { [weak self] value in
-				self?.onContent?(.text(value, style: style, tracking: tracking))
+				self?.onContent?(.text(value, style: style, tracking: tracking, typed: typed))
 			}], note: "`{{name}}` is filled in by the overlay that uses this scene")
 			field("style", [combo(style ?? "", values: styleNames, width: 150) { [weak self] value in
 				let chosen = value.trimmingCharacters(in: .whitespaces)
 				self?.onContent?(.text(words, style: chosen.isEmpty ? nil : chosen,
-				                       tracking: tracking))
+				                       tracking: tracking, typed: typed))
 			}])
 			field("tracking", [number(tracking, width: 66) { [weak self] value in
-				self?.onContent?(.text(words, style: style, tracking: value))
+				self?.onContent?(.text(words, style: style, tracking: value, typed: typed))
 			}], note: "space between the letters, as a fraction of the type size")
 
 		case .roll(let roll):

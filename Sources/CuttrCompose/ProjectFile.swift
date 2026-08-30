@@ -766,6 +766,50 @@ public enum ProjectReader {
 		return number(value)
 	}
 
+	/// `typed:` on a text part — a line that arrives a character at a time.
+	///
+	/// `typed: true` is the plain machine, which is the whole of it for most
+	/// lines. The mapping form is for the two things worth saying beyond that:
+	/// how even the rhythm is, and whether there is a caret.
+	///
+	///     typed: true
+	///     typed: {steady: 0.55, caret: "#4bd5ee"}
+	///
+	/// `typed: false` is read and means no typing, so that turning it off is an
+	/// edit to one word rather than the deletion of a line.
+	private static func readTyping(_ value: Any?) throws -> Scene.Typing? {
+		guard let value else { return nil }
+		if let on = value as? Bool { return on ? Scene.Typing() : nil }
+		guard let fields = mapping(value) else {
+			throw ProjectError.badValue(key: "typed", value: describe(value))
+		}
+		var typed = Scene.Typing()
+		if let steady = fields["steady"] {
+			guard let read = number(steady) else {
+				throw ProjectError.badValue(key: "steady", value: describe(steady))
+			}
+			typed.steady = max(0, min(1, read))
+		}
+		// `none` rather than a missing key, so that a caret can be taken off a
+		// line without the reader having to guess whether it was ever meant.
+		if let caret = fields["caret"], !(caret is NSNull) {
+			let written = (caret as? String) ?? ""
+			if written != "none" {
+				guard let ink = RGBA(hex: written) else {
+					throw ProjectError.badValue(key: "caret", value: describe(caret))
+				}
+				typed.caret = ink
+			}
+		}
+		if let blink = fields["blink"] {
+			guard let read = number(blink), read >= 0 else {
+				throw ProjectError.badValue(key: "blink", value: describe(blink))
+			}
+			typed.blink = read
+		}
+		return typed
+	}
+
 	private static func readPart(_ value: Any) throws -> Scene.Part {
 		guard let fields = mapping(value) else {
 			throw ProjectError.badValue(key: "parts", value: describe(value))
@@ -773,7 +817,8 @@ public enum ProjectReader {
 		let content: Scene.Part.Content
 		if let text = fields["text"] as? String {
 			content = .text(text, style: (fields["style"] as? String).flatMap(nonEmpty),
-			                tracking: number(fields["tracking"]) ?? 0)
+			                tracking: number(fields["tracking"]) ?? 0,
+			                typed: try readTyping(fields["typed"]))
 		} else if let shape = fields["shape"] {
 			guard let fill = (shape as? String).flatMap(RGBA.init(hex:)) else {
 				throw ProjectError.badValue(key: "shape", value: describe(shape))

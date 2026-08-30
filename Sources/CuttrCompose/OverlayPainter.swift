@@ -373,13 +373,38 @@ public enum OverlayPainter {
 			context.scaleBy(x: CGFloat(key.scale ?? 1), y: CGFloat(key.scale ?? 1))
 
 			switch part.content {
-			case .text(let text, let styleName, let tracking):
+			case .text(let text, let styleName, let tracking, let typed):
 				let style = project.style(named: styleName)
-				if let plate = plate(Scene.fill(text, with: parameters), style: style, size: size,
+				let words = Scene.fill(text, with: parameters)
+				if let plate = plate(words, style: style, size: size,
 				                     tracking: tracking, ink: key.color) {
-					context.draw(plate.image, in: CGRect(
-						x: -plate.size.width / 2, y: -plate.size.height / 2,
-						width: plate.size.width, height: plate.size.height))
+					let box = CGRect(x: -plate.size.width / 2, y: -plate.size.height / 2,
+					                 width: plate.size.width, height: plate.size.height)
+					if let typed {
+						// The whole line is drawn and then cut off at a glyph
+						// boundary, rather than the showing characters being
+						// set on their own. Setting a prefix would re-typeset
+						// on every frame — kerning and the plate's width both
+						// change — so a centred line would crawl sideways as it
+						// was typed. Clipped, every letter is where it will
+						// still be when the line is finished.
+						let showing = typed.shown(of: words, at: key.progress)
+						let (edge, caret) = OverlayLayers.reach(
+							words, style: style, size: size, tracking: tracking,
+							after: showing)
+						context.saveGState()
+						context.clip(to: CGRect(x: box.minX, y: box.minY,
+						                        width: edge, height: box.height))
+						context.draw(plate.image, in: box)
+						context.restoreGState()
+						if let ink = typed.caret,
+						   typed.lit(at: elapsed, of: words, keys: keys) {
+							context.setFillColor(cg(ink))
+							context.fill(caret.offsetBy(dx: box.minX, dy: box.minY))
+						}
+					} else {
+						context.draw(plate.image, in: box)
+					}
 				}
 			case .roll(let roll):
 				// One plate per line, each at the offset the layout gives it —

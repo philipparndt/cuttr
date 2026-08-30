@@ -15,6 +15,20 @@ public enum ProjectWriter {
 	///
 	/// Written in the order the parts are in, and each key on one line, because
 	/// a keyframe is a row of numbers and a row of numbers belongs on a line.
+	/// `typed:` as it was written: the bare word when nothing has been changed
+	/// from the plain machine, and a flow mapping of only what has.
+	///
+	/// Written the short way when it can be so that a file which said
+	/// `typed: true` comes back out saying `typed: true`, rather than being
+	/// expanded into the defaults it already had.
+	private static func typing(_ typed: Scene.Typing) -> String {
+		var said: [String] = []
+		if typed.steady != 1 { said.append("steady: \(trim(typed.steady))") }
+		if let caret = typed.caret { said.append("caret: \(scalar(caret.hex))") }
+		if typed.blink != Scene.Typing().blink { said.append("blink: \(trim(typed.blink))") }
+		return said.isEmpty ? "true" : "{" + said.joined(separator: ", ") + "}"
+	}
+
 	private static func scenes(_ scenes: [String: Scene], order: [String]?) -> String {
 		guard !scenes.isEmpty else { return "" }
 		var out = "\nscenes:\n"
@@ -24,10 +38,11 @@ public enum ProjectWriter {
 			out += "    parts:\n"
 			for part in scene.parts {
 				switch part.content {
-				case .text(let text, let style, let tracking):
+				case .text(let text, let style, let tracking, let typed):
 					out += "      - text:  \(scalar(text))\n"
 					if let style { out += "        style: \(scalar(style))\n" }
 					if tracking != 0 { out += "        tracking: \(trim(tracking))\n" }
+					if let typed { out += "        typed: \(typing(typed))\n" }
 				case .shape(let fill, let corner, let kind):
 					out += "      - shape: \(scalar(fill.hex))\n"
 					// Left out when it is a rectangle, which is what a shape
