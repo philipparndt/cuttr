@@ -78,6 +78,26 @@ import Testing
 		#expect(toasts(in: window).isEmpty)
 	}
 
+	/// And right-clicking one takes the words rather than putting it away. A
+	/// refusal is often the exact sentence a report should quote, and one that
+	/// cannot be copied reaches the report from memory.
+	///
+	/// The pasteboard itself is left alone here: this runs on somebody's own
+	/// machine while they are working, and a test that helps itself to the
+	/// clipboard is a test that throws away what they had on it.
+	@Test func oneCanBeCopied() {
+		let window = window()
+		let presenter = ToastPresenter(window: window)
+		presenter.show(Toast(.refusal, "save the project first"))
+		let view = try? #require(toasts(in: window).first)
+		let click = NSEvent.mouseEvent(
+			with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+			windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+		let menu = click.flatMap { view?.menu(for: $0) }
+		#expect(menu?.items.contains { $0.title == "Copy" } == true,
+		        "a toast offers nothing to copy it with")
+	}
+
 	/// A window going away takes its toasts with it: one hanging over a window
 	/// that has closed outlives what it was about.
 	@Test func clearingTakesThemAll() {
@@ -121,5 +141,23 @@ import Testing
 		let controller = try window()
 		controller.shareProject(nil)
 		#expect(!controller.saidForTesting.isEmpty)
+	}
+
+	/// The line under the title bar is where a project's own troubles are said
+	/// — a component that is not there, a decoder's own words — and it is one
+	/// line that truncates. So it can be taken: selectable like text, and a
+	/// right-click that copies the whole of it however little of it fits.
+	@Test func theProblemLineCanBeCopied() throws {
+		let controller = try window()
+		let window = try #require(controller.windowForTesting)
+		func walk(_ view: NSView) -> [NSTextField] {
+			(view as? NSTextField).map { [$0] } ?? view.subviews.flatMap(walk)
+		}
+		let labels = window.contentView.map(walk) ?? []
+		let problem = labels.first { field in
+			field.menu?.items.contains { $0.title == "Copy Message" } == true
+		}
+		#expect(problem != nil, "nothing in the window offers to copy what it says")
+		#expect(problem?.isSelectable == true)
 	}
 }

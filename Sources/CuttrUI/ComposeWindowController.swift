@@ -195,6 +195,18 @@ public final class ComposeWindowController: DocumentEditor,
 		problemLabel.textColor = NSColor(calibratedRed: 0.95, green: 0.5, blue: 0.5, alpha: 1)
 		problemLabel.lineBreakMode = .byTruncatingTail
 		problemLabel.usesSingleLineMode = true
+		// The line is one line and truncates, and what is in it is exactly what
+		// a report should quote — a path, a slug, a decoder's own words. So it
+		// can be taken: selected and copied like text, right-clicked for the
+		// whole of it at once, and hovered to read the end of a sentence the
+		// window was too narrow for.
+		problemLabel.isSelectable = true
+		let copying = NSMenu()
+		let item = NSMenuItem(title: "Copy Message", action: #selector(copyProblem),
+		                      keyEquivalent: "")
+		item.target = self
+		copying.addItem(item)
+		problemLabel.menu = copying
 		// A message may not decide how wide the window is. A label's intrinsic
 		// width is the width of its whole string whatever its truncation says,
 		// so thirteen warnings joined into one line asked for five thousand
@@ -632,6 +644,17 @@ public final class ComposeWindowController: DocumentEditor,
 		bar?.setStatus(text)
 		guard progressed == nil, !text.isEmpty else { return }
 		toasts.show(Toast(kind, text))
+	}
+
+	/// The message, on the pasteboard. An error that cannot be copied is an
+	/// error that reaches a report from memory, and a decoder's own words are
+	/// worth more in the report than anybody's recollection of them.
+	@objc private func copyProblem() {
+		guard !problemLabel.stringValue.isEmpty else { return }
+		NSPasteboard.general.clearContents()
+		NSPasteboard.general.setString(problemLabel.toolTip ?? problemLabel.stringValue,
+		                               forType: .string)
+		say("copied")
 	}
 
 	private func showProgress(_ fraction: Double?) {
@@ -1145,11 +1168,17 @@ public final class ComposeWindowController: DocumentEditor,
 		if let problem = composeDocument.problem, !composeDocument.project.timeline.isEmpty {
 			problemLabel.stringValue = problem
 			problemLabel.textColor = NSColor(calibratedRed: 0.95, green: 0.5, blue: 0.5, alpha: 1)
+			problemLabel.toolTip = problem
 		} else if !warnings.isEmpty {
+			// One warning per line in the tooltip rather than the joined line:
+			// the joining is for a strip of window fourteen points high, and
+			// thirteen warnings run together are unreadable anywhere else.
 			problemLabel.stringValue = Self.line(from: warnings)
 			problemLabel.textColor = Theme.dimText
+			problemLabel.toolTip = warnings.joined(separator: "\n")
 		} else {
 			problemLabel.stringValue = ""
+			problemLabel.toolTip = nil
 		}
 		renderButton.isEnabled = composeDocument.resolved != nil
 

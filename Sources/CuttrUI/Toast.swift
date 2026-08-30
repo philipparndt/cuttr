@@ -166,7 +166,12 @@ final class ToastView: NSView {
 
 	var onDismiss: (() -> Void)?
 
+	/// What it says, kept so it can be copied. A message somebody has to
+	/// retype into a report is a message that reaches the report from memory.
+	private let said: String
+
 	init(_ toast: Toast) {
+		said = toast.title
 		super.init(frame: .zero)
 		wantsLayer = true
 		layer?.backgroundColor = Theme.cardHigh.cgColor
@@ -206,4 +211,21 @@ final class ToastView: NSView {
 	/// Clicking it puts it away. The only gesture it answers: a toast that
 	/// needed reading has been read by the time somebody reaches for it.
 	override func mouseDown(with event: NSEvent) { onDismiss?() }
+
+	/// Except this one. A refusal is on screen for ten seconds and is often the
+	/// exact sentence a report should quote, so it can be taken rather than
+	/// remembered — and taking it does not put the toast away, because reading
+	/// the words again is the next thing anybody does.
+	override func menu(for event: NSEvent) -> NSMenu? {
+		let menu = NSMenu()
+		let item = NSMenuItem(title: "Copy", action: #selector(copySaid), keyEquivalent: "")
+		item.target = self
+		menu.addItem(item)
+		return menu
+	}
+
+	@objc private func copySaid() {
+		NSPasteboard.general.clearContents()
+		NSPasteboard.general.setString(said, forType: .string)
+	}
 }
