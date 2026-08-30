@@ -841,26 +841,107 @@ public enum Renderer {
 			var moves: [(start: Double, end: Double, from: Float, to: Float)] = []
 		}
 
+		/// Where a move stands at a moment of itself.
+		func along(_ move: (start: Double, end: Double, from: Float, to: Float),
+		           at when: Double) -> Float {
+			let span = move.end - move.start
+			guard span > 0 else { return move.to }
+			let part = Float(min(max((when - move.start) / span, 0), 1))
+			return move.from + (move.to - move.from) * part
+		}
+
 		/// Writes a lane out, turning every held level into a flat ramp that
-		/// runs as far as the next thing that happens on that lane.
+		/// runs as far as the next thing that happens on that lane — and
+		/// deciding, where two instructions land on the same stretch, which of
+		/// them is heard there.
+		///
+		/// The deciding is not tidiness. `setVolumeRamp` raises an
+		/// Objective-C exception the moment two ramps overlap, and an
+		/// Objective-C exception out of a build takes the whole window with it:
+		/// a duck fading back up across a dissolve was a crash, not a mix
+		/// anybody could argue with. Ramps that merely *begin* together are
+		/// accepted — silently, one replacing the other — which is worse than
+		/// the crash, because which of the two survived was down to the order a
+		/// sort happened to leave them in.
+		///
+		/// So the lane is swept rather than written straight out. At every
+		/// moment the instruction that started last is the one heard, for as
+		/// long as it runs; what it interrupted is heard again after it, from
+		/// where it had got to by then. A dissolve laid over a hold therefore
+		/// does the dissolve and then holds, which is what both of them were
+		/// asking for.
 		func write(_ lane: Lane, to input: AVMutableAudioMixInputParameters) {
-			var moves = lane.moves
+			// The holds first and the moves after them, because the sweep reads
+			// the order as the tie: a dissolve and the level it dissolves from
+			// both begin at the cut, and the dissolve is the one that was asked
+			// for there.
+			var instructions: [(start: Double, end: Double, from: Float, to: Float)] = []
 			let changes = (lane.moves.map(\.start) + lane.steps.map(\.at)).sorted()
 			for step in lane.steps {
 				let next = changes.first { $0 > step.at + 1e-6 } ?? end
-				moves.append((step.at, next, step.volume, step.volume))
+				instructions.append((step.at, next, step.volume, step.volume))
 			}
 			// Silent until the first thing happens: a lane carries only what was
 			// laid on it, and what is between must not be heard.
 			if let first = changes.first, first > 0 {
-				moves.append((0, first, 0, 0))
+				instructions.append((0, first, 0, 0))
 			}
-			for move in moves.sorted(by: { $0.start < $1.start }) where move.end > move.start {
+			instructions.append(contentsOf: lane.moves)
+
+			// In the order they win: later beats earlier, and at the same
+			// moment the one written later here beats the one written before.
+			let ordered = instructions.enumerated()
+				.filter { $0.element.end > $0.element.start }
+				.sorted { ($0.element.start, $0.offset) < ($1.element.start, $1.offset) }
+			guard !ordered.isEmpty else { return }
+
+			// Every moment anything starts or stops. Two of them a whisker
+			// apart are one: the times are seconds of somebody's timeline, and
+			// a stretch too short to have a frame in it is not a stretch.
+			var edges: [Double] = []
+			for edge in ordered.flatMap({ [$0.element.start, $0.element.end] }).sorted()
+			where edges.last.map({ edge - $0 > 1e-6 }) ?? true {
+				edges.append(edge)
+			}
+
+			/// What is heard across a stretch nothing else interrupts: of
+			/// everything covering it, whichever started last.
+			func heard(from: Double, to: Double) -> (start: Double, end: Double,
+			                                         from: Float, to: Float)? {
+				ordered.last {
+					$0.element.start <= from + 1e-6 && $0.element.end >= to - 1e-6
+				}?.element
+			}
+
+			// Written as one ramp per run of the same instruction rather than
+			// one per stretch: a move cut in two by something inside it is the
+			// same straight line either side, and a mix that says so is a mix
+			// somebody can read.
+			var pending: (move: (start: Double, end: Double, from: Float, to: Float),
+			              start: Double, end: Double)?
+			func flush() {
+				guard let done = pending else { return }
+				pending = nil
+				let range = CMTimeRange(start: time(done.start),
+				                        duration: time(done.end - done.start))
+				guard range.duration > .zero else { return }
 				input.setVolumeRamp(
-					fromStartVolume: move.from, toEndVolume: move.to,
-					timeRange: CMTimeRange(start: time(move.start),
-					                       duration: time(move.end - move.start)))
+					fromStartVolume: along(done.move, at: done.start),
+					toEndVolume: along(done.move, at: done.end),
+					timeRange: range)
 			}
+			for (index, from) in edges.dropLast().enumerated() {
+				let to = edges[index + 1]
+				guard let move = heard(from: from, to: to) else { flush(); continue }
+				if var carrying = pending, carrying.move == move {
+					carrying.end = to
+					pending = carrying
+				} else {
+					flush()
+					pending = (move, from, to)
+				}
+			}
+			flush()
 		}
 
 		/// What a lane is set to at a moment, before anything ducks it.
