@@ -94,6 +94,11 @@ public class DocumentEditor: NSWindowController {
 
 	public var toasts: ToastPresenter {
 		if let madeToasts, madeToasts.isFor(window) { return madeToasts }
+		// What the one being replaced drew goes with it. Its toasts are in the
+		// content view of the window this document has left, drawn over
+		// whatever is in that window now — a message about a take, sitting in
+		// the corner of the project.
+		madeToasts?.clear()
 		let made = ToastPresenter(window: window)
 		madeToasts = made
 		return made

@@ -98,6 +98,26 @@ import Testing
 		        "a toast offers nothing to copy it with")
 	}
 
+	/// It goes by itself even if the presenter that drew it has been let go.
+	///
+	/// A document that leaves the screen is given a fresh presenter, and the one
+	/// it replaces is released with its timers still to fire — held weakly, so
+	/// what it drew stayed in the corner of the window for good. The toast's few
+	/// seconds are the view's, not the presenter's.
+	@Test func itGoesEvenWithNoPresenterLeft() throws {
+		let window = window()
+		var presenter: ToastPresenter? = ToastPresenter(window: window)
+		presenter?.show(Toast(.news, "and then nobody was watching"))
+		// Held before the presenter goes, because it is the presenter that
+		// knows about it. The run loop keeps it alive until it fires.
+		let goes = try #require(presenter?.goesForTesting)
+		presenter = nil
+
+		#expect(toasts(in: window).count == 1)
+		goes.fire()
+		#expect(toasts(in: window).isEmpty, "it stayed in the corner for good")
+	}
+
 	/// A window going away takes its toasts with it: one hanging over a window
 	/// that has closed outlives what it was about.
 	@Test func clearingTakesThemAll() {

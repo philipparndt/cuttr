@@ -86,6 +86,15 @@ public final class ToastPresenter {
 	/// that a button did nothing. abydos keeps this list for the same reason.
 	public private(set) var saidForTesting: [String] = []
 
+	/// What will take the last toast off again.
+	///
+	/// Weakly, because the run loop holds a pending timer and nothing should
+	/// hold it after it has fired. It is here for a test that wants the end of
+	/// a toast's life without waiting the four seconds out: a test that spins
+	/// the run loop to wait for one blocks the main actor while it does, and
+	/// the suite runs its main-actor tests in parallel around it.
+	private(set) weak var goesForTesting: Timer?
+
 	public init(window: NSWindow?) {
 		self.window = window
 	}
@@ -132,13 +141,31 @@ public final class ToastPresenter {
 			take(away: oldest)
 		}
 
+		// **The toast's few seconds are the view's, not this object's.** A
+		// document that leaves the screen is given a fresh presenter — the old
+		// one's window is gone from under it — and the one it replaces is
+		// released with its timers still to fire. Held only weakly, it is nil
+		// by then and the toast it drew stays in the corner of the window for
+		// good, which is the whole complaint: they stopped going away. So the
+		// view is taken off whether or not there is still a presenter to tell.
+		//
+		// In the common modes, because the default one is not running while a
+		// menu is down or a divider is being dragged, and a toast that waits
+		// for somebody to let go of the mouse is a toast that has outstayed
+		// its welcome.
 		let lifetime = toast.kind.lifetime
-		Timer.scheduledTimer(withTimeInterval: lifetime, repeats: false) { [weak self, weak view] _ in
+		let goes = Timer(timeInterval: lifetime, repeats: false) { [weak self, weak view] _ in
 			MainActor.assumeIsolated {
 				guard let view else { return }
-				self?.take(away: view)
+				if let self {
+					self.take(away: view)
+				} else {
+					view.removeFromSuperview()
+				}
 			}
 		}
+		RunLoop.main.add(goes, forMode: .common)
+		goesForTesting = goes
 	}
 
 	private func take(away view: ToastView) {
