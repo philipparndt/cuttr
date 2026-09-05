@@ -107,6 +107,26 @@ struct TimeWindow: Equatable {
 		zoomed = (start, start + span)
 	}
 
+	/// Keeps a moment on screen: when it has run off the shown stretch, the
+	/// stretch pages along so the moment sits a tenth of the way in. Says
+	/// whether anything moved.
+	///
+	/// A page rather than a glide. The playhead moving across a still view is
+	/// how a person reads where they are; a view sliding under a still
+	/// playhead is a view in which nothing can be aimed at. So the view stays
+	/// put until the playhead reaches its edge, then jumps once, the way every
+	/// editor's timeline follows playback.
+	@discardableResult
+	mutating func follow(_ time: Double) -> Bool {
+		guard isZoomed else { return false }
+		let shown = shown
+		let span = shown.end - shown.start
+		guard span > 0, time < shown.start - 1e-9 || time > shown.end + 1e-9 else { return false }
+		let start = min(max(limits.start, time - span * 0.1), limits.end - span)
+		zoomed = (start, start + span)
+		return true
+	}
+
 	// MARK: - The mapping
 
 	/// Where a moment sits along a track, as a fraction of it.

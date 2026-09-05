@@ -135,10 +135,28 @@ import Testing
 	@Test func aProgrammeWithNothingMissingIsLeftAlone() async throws {
 		let directory = try await fixture()
 		defer { try? FileManager.default.removeItem(at: directory) }
-		let built = try await build("timeline: [loud, loud]\n", in: directory)
+		let built = try await build("timeline: [loud]\n", in: directory)
 		#expect(built.composition.tracks(withMediaType: .audio).count == 1)
 		// Nothing to say: every level is one, there are no holes and no sounds.
 		#expect(built.audioMix == nil)
+	}
+
+	/// Two shots take two lanes, in turn, and so each lane has a hole where
+	/// the other is playing — which wants a mix, so the holes are heard as
+	/// silence. The renderer cannot step a level at a cut; see
+	/// `CutLevelTests` for what the second lane is for.
+	@Test func twoShotsTakeTwoLanesInTurn() async throws {
+		let directory = try await fixture()
+		defer { try? FileManager.default.removeItem(at: directory) }
+		let built = try await build("timeline: [loud, loud, loud]\n", in: directory)
+		let audio = built.composition.tracks(withMediaType: .audio)
+		#expect(audio.count == 2)
+		let starts = audio.map { track in
+			track.segments.filter { !$0.isEmpty }.map { $0.timeMapping.target.start.seconds }
+		}
+		#expect(starts.contains([0, 4]))
+		#expect(starts.contains([2]))
+		#expect(built.audioMix != nil)
 	}
 
 	@Test func aCardLeavesAHoleInTheSound() async throws {
@@ -151,8 +169,8 @@ import Testing
 		  - loud
 		""", in: directory)
 		let audio = built.composition.tracks(withMediaType: .audio)
-		#expect(audio.count == 1)
-		#expect(audio[0].segments.contains { $0.isEmpty })
+		#expect(audio.count == 2)
+		#expect(audio.contains { $0.segments.contains { $0.isEmpty } })
 		#expect(built.audioMix != nil)
 		// And a lane for the card's carrier, which is what keeps a programme
 		// that ends on one the length it says it is.
@@ -187,8 +205,9 @@ import Testing
 		    from: 00:02.000
 		    to:   00:04.000
 		""", in: directory)
-		// One lane holds any number of sounds that are not on at once.
-		#expect(built.composition.tracks(withMediaType: .audio).count == 2)
+		// One lane holds any number of sounds that are not on at once — the
+		// two shots' lanes, and one for both sounds.
+		#expect(built.composition.tracks(withMediaType: .audio).count == 3)
 	}
 
 	@Test func soundsThatOverlapGetALaneEach() async throws {
@@ -204,8 +223,9 @@ import Testing
 		    from: 00:02.000
 		    to:   00:04.000
 		""", in: directory)
-		// A track can only play one thing at a time.
-		#expect(built.composition.tracks(withMediaType: .audio).count == 3)
+		// A track can only play one thing at a time: two lanes for the shots,
+		// and one each for the sounds.
+		#expect(built.composition.tracks(withMediaType: .audio).count == 4)
 	}
 
 	@Test func aSoundOverASilentProgrammeIsStillHeard() async throws {

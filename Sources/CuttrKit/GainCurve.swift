@@ -127,11 +127,13 @@ public enum GainCurve {
 	///
 	/// The range the lane is drawn over, so that dragging cannot put a point
 	/// somewhere it cannot be seen. Deep rather than symmetrical: this is a
-	/// tool for taking a door slam off the top of a sentence, and the lift a
-	/// quiet stretch needs is a couple of decibels where the cut a plosive needs
-	/// is twenty. A number outside it is still legal in the file — somebody who
-	/// types −40 means it — and is drawn against the edge of the lane.
-	public static let editable: ClosedRange<Double> = -24 ... 6
+	/// tool for taking a door slam off the top of a sentence, and the cut a
+	/// plosive needs is twenty. The lift was six, on the theory that a quiet
+	/// stretch needs a couple of decibels; a child who turns away from the
+	/// microphone mid-sentence needs ten, and was found out on a real cut. A
+	/// number outside it is still legal in the file — somebody who types −40
+	/// means it — and is drawn against the edge of the lane.
+	public static let editable: ClosedRange<Double> = -24 ... 12
 
 	/// The steps to hand a mix, over one span: a from-level, a to-level and the
 	/// seconds between them.

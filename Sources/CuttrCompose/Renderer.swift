@@ -79,7 +79,19 @@ public enum Renderer {
 			else { throw RenderError.noVideo }
 			return track
 		}) else { throw RenderError.noVideo }
-		let audioTracks = (0..<lanes).compactMap { _ in
+		// Two sound lanes always, taken in turn — one per clip, whether or
+		// not anything dissolves. Not for overlap: the audio renderer cannot
+		// *step* a volume. Measured on an export: a level written to change
+		// at a cut is smoothed across roughly the next render buffer, some
+		// hundred and ninety milliseconds, so a shot levelled at +20 dB
+		// followed by one at −12 dB played the first fraction of the quiet
+		// shot eight times too loud — a burst at every such cut, and a dip
+		// drawn just after one drowned in it. With the two shots on two lanes
+		// the change is written where a lane is carrying nothing, and there is
+		// no step left for the renderer to smooth. See ``settling``. An empty
+		// audio track costs nothing here: one nothing landed on is dropped
+		// below, the way the video lane is.
+		let audioTracks = (0..<2).compactMap { _ in
 			composition.addMutableTrack(
 				withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
 		}
@@ -105,11 +117,14 @@ public enum Renderer {
 		/// What size each clip's picture arrives at, and when — for the pass
 		/// that fits without filtering.
 		var pictures: [(at: CMTime, size: CGSize)] = []
-		/// Which lane each clip landed on, in the order the clips are in. The
-		/// mix needs it: which lane is going out and which is coming in at a
+		/// Which sound lane each clip landed on, in the order the clips are in.
+		/// The mix needs it: which lane is going out and which is coming in at a
 		/// dissolve is decided here, and guessing it from the clip's position
 		/// was wrong for any programme that mixes cuts and dissolves.
 		var clipLanes: [Int] = []
+		/// And which picture lane, which is a different question: the picture
+		/// changes lane only where a dissolve needs two at once.
+		var videoLanes: [Int] = []
 		/// The stretches whose recording would not load, and the file each of
 		/// them names.
 		///
@@ -126,17 +141,21 @@ public enum Renderer {
 		/// exported — see the hold below.
 		var stills: [(range: CMTimeRange, image: CIImage)] = []
 
-		var lane = 0
+		var videoLane = 0
+		var lane = audioTracks.count - 1
 		for placement in resolved.programme {
 			// A card occupies time and no track. Its instruction is written
 			// with the rest of them below; there is nothing to insert.
 			guard case .clip(let clip) = placement else { continue }
-			// The lane only changes where a dissolve needs it to. A programme of
-			// straight cuts stays on one track, which is what keeps the simple
-			// case simple — and exact.
-			if clip.transition > 0 { lane = (lane + 1) % videoTracks.count }
+			// The picture lane only changes where a dissolve needs it to. A
+			// programme of straight cuts stays on one track, which is what
+			// keeps the simple case simple — and exact. The sound lane changes
+			// at every clip, for the reason given where the tracks are made.
+			if clip.transition > 0 { videoLane = (videoLane + 1) % videoTracks.count }
+			lane = (lane + 1) % max(audioTracks.count, 1)
 			clipLanes.append(lane)
-			let videoTrack = videoTracks[lane]
+			videoLanes.append(videoLane)
+			let videoTrack = videoTracks[videoLane]
 			let audioTrack = audioTracks.indices.contains(lane) ? audioTracks[lane] : nil
 			let at = CMTime(seconds: clip.start, preferredTimescale: scale)
 			grades.append((clip.start, clip.end, clip.look))
@@ -339,7 +358,7 @@ public enum Renderer {
 				// same order, and every placement starts at a different moment,
 				// so the sort that made the list is settled rather than merely
 				// consistent.
-				let track = videoTracks[clipLanes.indices.contains(placed) ? clipLanes[placed] : 0]
+				let track = videoTracks[videoLanes.indices.contains(placed) ? videoLanes[placed] : 0]
 				placed += 1
 				segments.append((range, track.trackID, clip.look,
 				                 clip.transition, clip.blend, nil))
@@ -925,6 +944,17 @@ public enum Renderer {
 		return out
 	}
 
+	/// How long before a clip begins its level is put on its lane.
+	///
+	/// The audio renderer — export and player both — does not step a volume:
+	/// a change written at one moment is smoothed across roughly the next
+	/// render buffer, which was measured at about a hundred and ninety
+	/// milliseconds. A change written this far ahead of the cut, on a lane
+	/// carrying nothing at the time, has settled before anything is heard
+	/// through it. Three hundred was the shortest lead that came out clean;
+	/// a hundred still let a quarter of the old level through.
+	public static let settling = 0.3
+
 	private static func audioMix(
 		_ tracks: [(lane: Int, track: AVMutableCompositionTrack)],
 		levels: [(track: Int, at: CMTime, volume: Float)],
@@ -1096,6 +1126,36 @@ public enum Renderer {
 			for step in mine {
 				if step.volume != 1 { wanted = true }
 				built.steps.append((step.at.seconds, step.volume * duck(at: step.at.seconds)))
+			}
+
+			// Each clip's opening level, put on the lane *before* the clip
+			// begins — while the lane is carrying nothing, so nobody hears the
+			// change happen. The renderer smooths every change of volume over
+			// about a fifth of a second (see where the tracks are made), which
+			// at a cut means the outgoing shot's level bleeding over the top of
+			// the incoming one. Set in the gap, there is nothing to bleed.
+			//
+			// A shot dissolving in is put at nought instead, since that is
+			// where its fade begins. Where the gap is shorter than the settling
+			// — a shot between them shorter than that — the change is a ramp
+			// across what gap there is, which is the best that can be done.
+			var previous: ResolvedClip?
+			for (index, clip) in clips.enumerated()
+			where (index < lanes.count ? lanes[index] : index % 2) == lane {
+				defer { previous = clip }
+				let since = max(previous?.end ?? 0, clip.start - settling)
+				guard since < clip.start - 1e-6 else { continue }
+				let opening: Float = clip.transition > 0 ? 0
+					: Float(Levelling.amplitude(clip.level(at: clip.start))) * duck(at: clip.start)
+				if let previous, previous.end > clip.start - settling + 1e-6 {
+					let closing = Float(Levelling.amplitude(previous.level(at: previous.end)))
+						* duck(at: previous.end)
+					if closing != opening { wanted = true }
+					built.moves.append((since, clip.start, closing, opening))
+				} else {
+					if opening != 1 { wanted = true }
+					built.steps.append((since, opening))
+				}
 			}
 
 			// The gain curves, which arrive as moves already: a clip whose take

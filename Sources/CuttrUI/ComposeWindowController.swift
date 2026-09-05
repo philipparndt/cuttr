@@ -383,7 +383,9 @@ public final class ComposeWindowController: DocumentEditor,
 		// and since nothing else does, they are also what pulls a dragged
 		// divider back. Held on to and followed along as the dividers move.
 		let materialWidth = material.widthAnchor.constraint(equalToConstant: 260)
-		let stripHeight = strip.heightAnchor.constraint(equalToConstant: 200)
+		// Tall enough for the levels lane as well as the bars — see
+		// ``ProgrammeStrip/levelsRowHeight``.
+		let stripHeight = strip.heightAnchor.constraint(equalToConstant: 264)
 		dragged = [(material, materialWidth, true), (strip, stripHeight, false)]
 		materialPaneWidth = materialWidth
 		editing.delegate = self
@@ -637,6 +639,38 @@ public final class ComposeWindowController: DocumentEditor,
 	/// somebody has to already be looking at. See ``Toast``.
 	///
 	/// Nothing is toasted while something is being counted. A transcription
+	/// Puts a gain curve in a take's file, and says so.
+	///
+	/// **Read again, then write.** The take on disk may have been re-cut in
+	/// another tab since this project resolved it, and the curve is one key of
+	/// a file that is somebody else's work — so what goes back is that file
+	/// with this one key changed, through the hand-written emitter, which
+	/// carries the comments and the keys this version does not know through.
+	/// Nothing is written for a curve that has not changed.
+	@discardableResult
+	private func write(_ levels: [LevelPoint], toTakeNamed name: String) -> Bool {
+		guard let entry = composeDocument.takes.first(where: { $0.name == name }) else {
+			say("no take called \(name) in this project", .refusal)
+			return false
+		}
+		do {
+			var take = try TakeReader.read(try String(contentsOf: entry.url, encoding: .utf8))
+			let tidied = GainCurve.tidied(levels)
+			guard take.levels != tidied else { return true }
+			take.levels = tidied
+			try TakeWriter.write(take).write(to: entry.url, atomically: true, encoding: .utf8)
+			NotificationCenter.default.post(name: .cuttrTakeChanged,
+			                                object: entry.url.standardizedFileURL)
+			say(tidied.isEmpty ? "\(name): level curve removed"
+				: "\(name): level curve written, \(tidied.count) point\(tidied.count == 1 ? "" : "s")",
+			    .done)
+			return true
+		} catch {
+			say("could not write \(name) — \(error.localizedDescription)", .refusal)
+			return false
+		}
+	}
+
 	/// says where it has got to many times a minute, and a toast per update is
 	/// a wall of them.
 	private func say(_ text: String, _ kind: Toast.Kind = .news) {
@@ -839,6 +873,14 @@ public final class ComposeWindowController: DocumentEditor,
 			self.onOpenTakeAt?(take.url, item.start)
 		}
 
+		// A point of a take's gain curve dragged on the strip. The curve is
+		// the take's, so it goes to the take's file — read again and written
+		// with this one key changed, the way the levels page writes a gain —
+		// and the project hears about it the way it hears about any re-cut.
+		strip.onSetLevels = { [weak self] clip, levels in
+			self?.write(levels, toTakeNamed: clip.takeName) ?? false
+		}
+
 		// Dragged on the big timeline, written back the way the file says it:
 		// snapped to a clip, kept relative to one, or in programme times —
 		// whichever that range was already using.
@@ -1022,6 +1064,7 @@ public final class ComposeWindowController: DocumentEditor,
 		transport.onTick = { [weak self] time in
 			guard let self else { return }
 			self.playhead = time
+			self.strip.isPlaying = self.transport.isPlaying
 			self.strip.playhead = time
 			self.markers.playhead = time
 			// The overlay tree is paused; this is what puts it at the same

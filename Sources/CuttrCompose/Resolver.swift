@@ -380,6 +380,15 @@ public struct ResolvedProject: Sendable {
 	public var warnings: [String] = []
 	/// Every anchor the takes brought, with its path on the programme's clock.
 	public let anchors: [(anchor: Anchor, path: AnchorPath?)]
+	/// Each take's whole gain curve, by the take's name, on the take's clock.
+	///
+	/// A clip carries its own stretch of the curve already cut to it and put
+	/// on the programme's clock — see ``ResolvedClip/levels`` — which is what
+	/// a mix wants and not what an editor does. Dragging a point of the curve
+	/// from the programme is editing the *take's* curve, so whoever does it
+	/// needs the whole of it: the points outside this clip are somebody's
+	/// work and go back to the file untouched.
+	public var takeCurves: [String: [LevelPoint]] = [:]
 	public var duration: Double { max(clips.last?.end ?? 0, cards.last?.end ?? 0) }
 
 	/// Everything that occupies time, in the order it plays.
@@ -1136,6 +1145,8 @@ public enum Resolver {
 		// an empty rectangle.
 		warnings += ComponentBaker.staleness(project, from: baseURL)
 		resolved.warnings = warnings
+		resolved.takeCurves = Dictionary(takes.map { ($0.name, $0.take.levels) },
+		                                 uniquingKeysWith: { first, _ in first })
 		return resolved
 	}
 }

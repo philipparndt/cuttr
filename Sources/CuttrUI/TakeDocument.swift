@@ -78,6 +78,42 @@ public final class TakeDocument {
 		// title said "Untitled — edited" before anybody had touched it, and
 		// closing an untouched window asked whether to save it.
 		self.savedTake = take
+		// The project window writes to takes now — a level curve dragged on
+		// its strip goes into the take's file — and a tab holding that take
+		// would otherwise keep the file as it was and write it back over the
+		// change at its next save. A tab with nothing of its own unsaved takes
+		// the file as it now is; one with unsaved cuts keeps them, because
+		// those are the work somebody is in the middle of.
+		takeObserver = NotificationCenter.default.addObserver(
+			forName: .cuttrTakeChanged, object: nil, queue: .main
+		) { [weak self] note in
+			MainActor.assumeIsolated {
+				guard let self, let changed = note.object as? URL,
+				      let mine = self.url?.standardizedFileURL,
+				      changed.standardizedFileURL == mine, !self.isDirty
+				else { return }
+				self.takeFileAsItIs()
+			}
+		}
+	}
+
+	private var takeObserver: NSObjectProtocol?
+
+	deinit {
+		if let takeObserver { NotificationCenter.default.removeObserver(takeObserver) }
+	}
+
+	/// Re-reads the take — the cuts, the levels, the look — without touching
+	/// the media, the words or the anchors, which another window's write does
+	/// not change and which cost seconds to load again.
+	private func takeFileAsItIs() {
+		guard let url, let text = try? String(contentsOf: url, encoding: .utf8),
+		      let read = try? TakeReader.read(text), read != take
+		else { return }
+		take = read
+		savedTake = read
+		undoManager.removeAllActions()
+		onChange?()
 	}
 
 	// MARK: - Who is speaking
