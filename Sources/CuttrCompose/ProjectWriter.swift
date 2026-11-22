@@ -571,7 +571,13 @@ public enum ProjectWriter {
 	/// sound's has `ducks:`.
 	private static func range(_ span: Overlay.Span, indent: String, column: Int = 8) -> String {
 		func key(_ name: String) -> String {
-			indent + (name + ":").padding(toLength: column, withPad: " ", startingAt: 0)
+			// Never without a space after the colon. A sound's values line up
+			// at column seven, which is exactly as long as `within:` — so a
+			// sound inside a clip was written `within:intro`, which is not a
+			// key and a value but one word, and the file would not read back.
+			let padded = (name + ":").padding(toLength: max(column, name.count + 2),
+			                                  withPad: " ", startingAt: 0)
+			return indent + padded
 		}
 		switch span {
 		case .within(let mark, let from, let to):
@@ -603,6 +609,15 @@ public enum ProjectWriter {
 			// long as that entry is on, and the point of that spelling is that
 			// there is nothing to write.
 			if let span = sound.span { out += range(span, indent: indent + "  ", column: 7) }
+			// The file's own clock, under the programme's: when it plays, then
+			// which part of it. Left out when it is the whole file from the top,
+			// which is what a sound is without them.
+			if sound.fileStart != 0 {
+				out += "\(indent)  start: \(Timecode.string(sound.fileStart))   # in the file\n"
+			}
+			if let end = sound.fileEnd {
+				out += "\(indent)  end:   \(Timecode.string(end))   # in the file\n"
+			}
 			if sound.gain != 0 { out += "\(indent)  gain:  \(trim(sound.gain))\n" }
 			if case .fade(let over) = sound.arrival {
 				out += "\(indent)  in:    {fade: true, over: \(trim(over))}\n"
