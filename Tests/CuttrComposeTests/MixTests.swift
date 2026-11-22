@@ -192,6 +192,46 @@ import Testing
 		#expect(built.audioMix?.inputParameters.count == 2)
 	}
 
+	/// The part of the file that is laid is the part the sound names: the same
+	/// place on the programme, a different place in the recording. Read off the
+	/// composition, which is what the export and the preview both play.
+	@Test func aSoundIsLaidFromWhereInItsFileItSays() async throws {
+		let directory = try await fixture()
+		defer { try? FileManager.default.removeItem(at: directory) }
+		let built = try await build("""
+		timeline: [quiet]
+		sounds:
+		  - file:  music.wav
+		    from:  00:00.500
+		    to:    00:02.000
+		    start: 00:03.000
+		""", in: directory)
+		let laid = built.composition.tracks(withMediaType: .audio)
+			.flatMap { $0.segments ?? [] }.filter { !$0.isEmpty }
+		#expect(laid.count == 1)
+		let mapping = try #require(laid.first?.timeMapping)
+		#expect(abs(mapping.target.start.seconds - 0.5) < 0.01)
+		#expect(abs(mapping.source.start.seconds - 3.0) < 0.01)
+		#expect(abs(mapping.source.duration.seconds - 1.5) < 0.01)
+	}
+
+	/// The file is eight seconds long. A start past that leaves nothing to lay,
+	/// and the programme still builds.
+	@Test func aStartPastTheEndOfTheFileLaysNothing() async throws {
+		let directory = try await fixture()
+		defer { try? FileManager.default.removeItem(at: directory) }
+		let built = try await build("""
+		timeline: [quiet]
+		sounds:
+		  - file:  music.wav
+		    from:  00:00.500
+		    to:    00:02.000
+		    start: 00:30.000
+		""", in: directory)
+		#expect(built.composition.tracks(withMediaType: .audio)
+			.flatMap { $0.segments ?? [] }.filter { !$0.isEmpty }.isEmpty)
+	}
+
 	@Test func soundsThatDoNotOverlapShareOneLane() async throws {
 		let directory = try await fixture()
 		defer { try? FileManager.default.removeItem(at: directory) }

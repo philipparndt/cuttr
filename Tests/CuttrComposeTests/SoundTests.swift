@@ -69,6 +69,84 @@ import Testing
 		#expect(ProjectWriter.write(try ProjectReader.read(text)) == text)
 	}
 
+	// MARK: - Which part of the file
+
+	/// A sound has two clocks, and `start:` is the file's: where in the
+	/// recording it begins. It is not when it plays — that is still `from:`.
+	@Test func aSoundSaysWhereInItsFileItBegins() throws {
+		let project = try ProjectReader.read("""
+		timeline: [intro]
+		sounds:
+		  - file:  music/song.mp3
+		    from:  04:55.485
+		    to:    06:10.000
+		    start: 00:13.915
+		    end:   75
+		""")
+		let sound = project.sounds[0]
+		#expect(sound.span == .times(from: 295.485, to: 370))
+		#expect(sound.fileStart == 13.915)
+		#expect(sound.fileEnd == 75)
+		#expect(sound.fileLength == 75 - 13.915)
+
+		// From the top and to the end when it says neither, as it always was.
+		let plain = try ProjectReader.read("sounds:\n  - file: a.wav\n    from: 00:01.000\n    to: 00:02.000\n")
+		#expect(plain.sounds[0].fileStart == 0)
+		#expect(plain.sounds[0].fileEnd == nil)
+		#expect(plain.sounds[0].fileLength == nil)
+	}
+
+	@Test func theFilesClockRoundTripsUnderTheProgrammes() throws {
+		let project = Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"))],
+			sounds: [Sound(file: "music/song.mp3", span: .times(from: 295.485, to: 370),
+			               gain: -6, fileStart: 13.915, fileEnd: 75)])
+		let text = ProjectWriter.write(project)
+		#expect(try ProjectReader.read(text) == project)
+		// When it plays, then which part, then how loud.
+		#expect(text.contains("""
+		  - file:  music/song.mp3
+		    from:  04:55.485
+		    to:    06:10.000
+		    start: 00:13.915   # in the file
+		    end:   01:15.000   # in the file
+		    gain:  -6
+
+		"""))
+		#expect(ProjectWriter.write(try ProjectReader.read(text)) == text)
+		// And a sound from the top says nothing about it.
+		var whole = project
+		whole.sounds[0].fileStart = 0
+		whole.sounds[0].fileEnd = nil
+		#expect(!ProjectWriter.write(whole).contains("start:"))
+	}
+
+	/// `within:` is as long as the column a sound's values line up at, and was
+	/// written with no space after it: `within:intro`, which is one word. A
+	/// sound placed inside a clip made a project that could not be read back.
+	@Test func aSoundInsideAClipIsWrittenSoThatItReadsBack() throws {
+		let project = Project(
+			timeline: [TimelineEntry(clip: ClipReference("intro"), sounds: [
+				Sound(file: "sting.wav", span: .within(.init("intro"), from: 0.25, to: 1)),
+			])],
+			sounds: [Sound(file: "bed.wav", span: .within(.init("intro"), from: 1, to: 2), fileStart: 3)])
+		let text = ProjectWriter.write(project)
+		#expect(text.contains("    within: intro\n    from:  00:01.000\n    to:    00:02.000\n    start: 00:03.000"))
+		#expect(try ProjectReader.read(text) == project)
+		#expect(ProjectWriter.write(try ProjectReader.read(text)) == text)
+	}
+
+	/// A stretch of nothing is refused, not read as a silent track.
+	@Test func aStretchOfTheFileThatIsNoStretchIsRefused() {
+		func read(_ lines: String) throws -> Project {
+			try ProjectReader.read("sounds:\n  - file: a.wav\n    from: 00:01.000\n    to: 00:09.000\n" + lines)
+		}
+		#expect(throws: ProjectError.self) { try read("    start: -1\n") }
+		#expect(throws: ProjectError.self) { try read("    start: 00:05.000\n    end: 00:05.000\n") }
+		#expect(throws: ProjectError.self) { try read("    start: 00:05.000\n    end: 00:02.000\n") }
+		#expect(throws: ProjectError.self) { try read("    start: soon\n") }
+	}
+
 	@Test func aFadeIsWrittenTheWayAnOverlaysIs() {
 		let text = ProjectWriter.fragment(for: Sound(
 			file: "bed.wav", span: .times(from: 0, to: 10),
@@ -137,6 +215,34 @@ import Testing
 		#expect(resolved.sounds[0].end == 15)
 		// Resolved against the project file, the same as take media is.
 		#expect(resolved.sounds[0].url.lastPathComponent == "music.wav")
+	}
+
+	/// A start in the file moves nothing on the programme. An end in the file
+	/// stops the sound there, however much room its span had left — and that is
+	/// settled here, so the fade, the ducking and the lane all end with it.
+	@Test func whereItBeginsInTheFileDoesNotMoveItAndWhereItEndsStopsIt() throws {
+		let from = try resolve("""
+		timeline: [intro, demo]
+		sounds:
+		  - file:  music.wav
+		    from:  00:02.000
+		    to:    00:12.000
+		    start: 00:13.915
+		""")
+		#expect(from.sounds.map(\.start) == [2])
+		#expect(from.sounds.map(\.end) == [12])
+
+		let to = try resolve("""
+		timeline: [intro, demo]
+		sounds:
+		  - file:  music.wav
+		    from:  00:02.000
+		    to:    00:12.000
+		    start: 00:10.000
+		    end:   00:13.000
+		""")
+		#expect(to.sounds.map(\.start) == [2])
+		#expect(to.sounds.map(\.end) == [5])
 	}
 
 	@Test func aSoundOverASectionMovesWithIt() throws {

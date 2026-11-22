@@ -95,8 +95,16 @@ final class AssistantTools: ChatToolHost {
 			[("document", document),
 			 ("offset", .string("The new offset: `+00:01.234`, or seconds.")),
 			 ("shift", .number("Or: seconds to move it by. Positive is later."))]),
+		ToolDefinition("trim_audio",
+			"Writes a stretch of an audio file out as a new file, leaving the original untouched. Only for when a copy is really wanted: to start a sound part-way into its file, set `start:` on it in the project instead — see reference “Sounds”.",
+			[("source", .string("The audio file: a path, or one relative to the project.")),
+			 ("start", .string("Where the copy begins in the file: `MM:SS.mmm` or seconds.")),
+			 ("end", .string("Where it ends. Left out: the end of the file.")),
+			 ("target", .string("Where to write it, inside the project's folder or beside the source. Left out: beside the source, named after it.")),
+			 ("document", document)],
+			required: ["source", "start"]),
 		ToolDefinition("shift_sound",
-			"Moves a sound of the project — music, an atmosphere — earlier or later in the programme.",
+			"Moves a sound of the project — music, an atmosphere — earlier or later in the programme. This moves *when* it plays; which part of the file is heard is its `start:`, changed with edit_document.",
 			[("document", document),
 			 ("sound", .string("Which sound: its file, or its number in get_context.")),
 			 ("by", .number("Seconds. Positive starts it later."))],
@@ -156,6 +164,10 @@ final class AssistantTools: ChatToolHost {
 	writing syntax you have not seen in the document — the project format is \
 	large, and a guessed key is refused or, worse, kept as an unknown key that \
 	does nothing.
+	- Two clocks on a sound of a project: `from:`/`to:`/`within:`/`group:` say \
+	when it plays, on the programme; `start:` and `end:` say which part of the \
+	file is heard. To begin a song at its chorus, set `start:` — do not move \
+	the sound and do not cut a copy.
 	- If an edit is refused, the result says why. Fix that; do not retry unchanged.
 	- Anything with no tool of its own is a menu command: list_commands, then \
 	run_command.
@@ -271,6 +283,9 @@ final class AssistantTools: ChatToolHost {
 		switch name {
 		case "save_all":
 			return "Save every document that has changed?"
+		case "trim_audio":
+			guard let plan = try? trimPlan(arguments) else { return nil }
+			return "Write \(plan.target.lastPathComponent) into \(plan.target.deletingLastPathComponent().path)? It is a copy of part of \(plan.source.lastPathComponent); the original is not changed."
 		case "edit_document", "write_document", "add_clip", "set_audio_offset":
 			// A take that is not open has no undo stack to put the change on.
 			guard case .file(let url)? = try? target(arguments) else { return nil }
@@ -327,6 +342,7 @@ final class AssistantTools: ChatToolHost {
 			case "add_clip": return try addClip(arguments)
 			case "set_audio_offset": return try setOffset(arguments)
 			case "shift_sound": return try shiftSound(arguments)
+			case "trim_audio": return try await trimAudio(arguments)
 			case "read_transcript": return try transcript(arguments)
 			case "seek": return try seek(arguments)
 			case "play": return try play(arguments)
@@ -417,9 +433,7 @@ final class AssistantTools: ChatToolHost {
 			out.append(head)
 			if let resolved = document.resolved {
 				out.append("  programme \(Timecode.string(resolved.duration)) · \(resolved.clips.count) clips placed · playhead \(Timecode.string(project.playheadTime))")
-				for (index, sound) in resolved.sounds.enumerated() {
-					out.append("  sound \(index + 1): \(sound.sound.file) plays \(Timecode.string(sound.start))–\(Timecode.string(sound.end)), gain \(sound.sound.gain) dB")
-				}
+				out += soundLines(document)
 				for warning in resolved.warnings.prefix(8) { out.append("  warning: \(warning)") }
 			}
 			if let problem = document.problem { out.append("  problem: \(problem)") }
@@ -507,6 +521,10 @@ final class AssistantTools: ChatToolHost {
 			said += " — ⌘Z takes it back."
 			if let resolved = document.resolved {
 				said += "\nThe programme is now \(Timecode.string(resolved.duration)) long."
+				// The sounds as cuttr now understands them, so that what was
+				// written can be checked against what it means: a key that was
+				// read shows here, and one that was not does not.
+				for line in soundLines(document) { said += "\n" + line.trimmingCharacters(in: .whitespaces) }
 				for warning in resolved.warnings.prefix(8) { said += "\nwarning: \(warning)" }
 			}
 			if let problem = document.problem { said += "\nPROBLEM: \(problem)" }
@@ -625,57 +643,183 @@ final class AssistantTools: ChatToolHost {
 		}
 	}
 
+	/// Every sound of a project, in the order the file has them: the top-level
+	/// list, then the ones written inside timeline entries.
+	///
+	/// One list, numbered once. get_context numbers the sounds and shift_sound
+	/// is asked for one by that number, so the two have to be counting the same
+	/// things — and a sound written inside a group is a sound.
+	private func sounds(of document: ComposeDocument) -> [(origin: Origin, sound: Sound)] {
+		// The nested ones come from the resolved programme, which has them by
+		// when they play. Put back in the order the file has them, so a number
+		// means the same sound before and after it is moved.
+		var nested: [(path: [Int], index: Int)] = []
+		for placed in document.resolved?.sounds ?? [] {
+			guard case .entry(let path, let index) = placed.origin,
+			      !nested.contains(where: { $0.path == path && $0.index == index }) else { continue }
+			nested.append((path, index))
+		}
+		nested.sort { $0.path == $1.path ? $0.index < $1.index : $0.path.lexicographicallyPrecedes($1.path) }
+		let origins = document.project.sounds.indices.map { Origin.project($0) }
+			+ nested.map { Origin.entry(path: $0.path, index: $0.index) }
+		return origins.compactMap { origin in
+			document.project.sound(at: origin).map { (origin, $0) }
+		}
+	}
+
+	private func soundLines(_ document: ComposeDocument) -> [String] {
+		sounds(of: document).enumerated().map { index, entry in
+			var line = "  sound \(index + 1): \(entry.sound.file)"
+			if Project.home(of: entry.origin) != nil { line += " (inside a timeline entry)" }
+			let placed = (document.resolved?.sounds ?? []).filter { $0.origin == entry.origin }
+			if placed.isEmpty {
+				line += " does not play"
+			} else {
+				line += " plays " + placed.prefix(4)
+					.map { "\(Timecode.string($0.start))–\(Timecode.string($0.end))" }
+					.joined(separator: " and ")
+			}
+			if entry.sound.fileStart > 0 || entry.sound.fileEnd != nil {
+				line += ", from \(Timecode.string(entry.sound.fileStart)) of the file"
+				if let end = entry.sound.fileEnd { line += " to \(Timecode.string(end))" }
+			} else {
+				line += ", from the top of the file"
+			}
+			if entry.sound.gain != 0 { line += ", gain \(entry.sound.gain) dB" }
+			return line
+		}
+	}
+
 	private func shiftSound(_ arguments: JSONObject) throws -> ToolResult {
 		guard case .project(let controller) = try target(arguments) else {
 			throw Refusal(text: "Sounds belong to a project. A take's own audio is moved with set_audio_offset.")
 		}
 		let document = controller.composeDocument
 		guard let by = number(arguments["by"]), by != 0 else { throw Refusal(text: "Give `by`, in seconds.") }
-		var project = document.project
+		let all = sounds(of: document)
+		let listed = all.enumerated().map { "\($0.offset + 1): \($0.element.sound.file)" }.joined(separator: ", ")
 		let asked = (arguments["sound"] as? String) ?? (arguments["sound"] as? Int).map(String.init) ?? ""
-		let index: Int
-		if let number = Int(asked), project.sounds.indices.contains(number - 1) {
-			index = number - 1
+		let chosen: (origin: Origin, sound: Sound)
+		if let number = Int(asked), all.indices.contains(number - 1) {
+			chosen = all[number - 1]
 		} else {
-			let matches = project.sounds.indices.filter {
-				project.sounds[$0].file == asked
-					|| (project.sounds[$0].file as NSString).lastPathComponent == asked
+			let matches = all.filter {
+				$0.sound.file == asked || ($0.sound.file as NSString).lastPathComponent == asked
 			}
 			guard matches.count == 1 else {
-				let files = project.sounds.enumerated().map { "\($0.offset + 1): \($0.element.file)" }
 				throw Refusal(text: matches.isEmpty
-					? "No top-level sound “\(asked)”. There are: \(files.joined(separator: ", "))."
-					: "“\(asked)” is used \(matches.count) times; say which by number: \(files.joined(separator: ", ")).")
+					? "No sound “\(asked)” in this project. There are: \(listed.isEmpty ? "none" : listed)."
+					: "“\(asked)” is used \(matches.count) times; say which by number: \(listed).")
 			}
-			index = matches[0]
+			chosen = matches[0]
 		}
-		let file = project.sounds[index].file
-		switch project.sounds[index].span {
+		let file = chosen.sound.file
+		func plays() -> String {
+			let placed = (document.resolved?.sounds ?? []).filter { $0.origin == chosen.origin }
+			guard let first = placed.first else { return "" }
+			return " It plays \(Timecode.string(first.start))–\(Timecode.string(first.end))."
+		}
+		let moved: Overlay.Span
+		switch chosen.sound.span {
 		case .times(let from, let to)?:
-			let moved = max(-from, by)
-			project.sounds[index].span = .times(from: from + moved, to: to + moved)
+			let step = max(-from, by)
+			moved = .times(from: from + step, to: to + step)
 		case .within(let clip, let from, let to)?:
-			let moved = max(-from, by)
-			project.sounds[index].span = .within(clip, from: from + moved, to: to + moved)
+			let step = max(-from, by)
+			moved = .within(clip, from: from + step, to: to + step)
+		case nil:
+			throw Refusal(text: "\(file) is written inside a timeline entry with no range of its own, so it plays for exactly as long as that entry is on and has no time to shift.\(plays()) To start it later, give it `within:` that clip with `from:` and `to:` — see reference “Sounds”. To start it further into its *file*, set `start:`.")
 		default:
 			// Bound to marks: it plays where a clip or a group is, and has no
 			// time of its own to add to. Unbinding it is a decision, so it is
 			// handed back rather than made.
-			var where_ = ""
-			if let resolved = document.resolved?.sounds.first(where: { $0.sound.file == file }) {
-				where_ = " It currently plays \(Timecode.string(resolved.start))–\(Timecode.string(resolved.end))."
-			}
-			throw Refusal(text: "\(file) is bound to a clip or a group rather than to times, so it moves when they do and has no time to shift.\(where_) To start it later, edit its entry under `sounds:` — see reference “Sounds” — and tell the person it will no longer follow a re-cut.")
+			throw Refusal(text: "\(file) is bound to a clip or a group rather than to times, so it moves when they do and has no time to shift.\(plays()) To start it later, edit its entry under `sounds:` — see reference “Sounds” — and tell the person it will no longer follow a re-cut. To start it further into its *file*, set `start:`.")
 		}
 		let direction = by > 0 ? "later" : "earlier"
 		let action = "Move Sound \(direction.prefix(1).uppercased())\(direction.dropFirst())"
+		var project = document.project
+		project.editSound(at: chosen.origin) { $0.span = moved }
 		document.apply(project, actionName: action)
 		if document.url != nil { try document.write() }
-		var said = "\(file) starts \(String(format: "%.3f", abs(by))) s \(direction)."
-		if let resolved = document.resolved?.sounds.first(where: { $0.sound.file == file }) {
-			said += " It now plays \(Timecode.string(resolved.start))–\(Timecode.string(resolved.end))."
-		}
+		let said = "\(file) starts \(String(format: "%.3f", abs(by))) s \(direction).\(plays())"
 		return ToolResult(said + " ⌘Z takes it back.", summary: said)
+	}
+
+	// MARK: Cutting a copy
+
+	private struct TrimPlan {
+		var source: URL
+		var target: URL
+		var start: Double
+		var end: Double?
+		/// The folder paths are said against, when there is a project.
+		var base: URL?
+	}
+
+	/// Where a trimmed copy comes from and where it goes — worked out once,
+	/// for the question that is asked first and for the writing after it.
+	///
+	/// The copy lands in one of two places and nowhere else: under the folder
+	/// the project is in, or beside the file it was cut from. Those are the two
+	/// folders a sound of this project could sensibly live in, and a tool that
+	/// would write wherever it was told is one prompt away from writing
+	/// somewhere it should not.
+	private func trimPlan(_ arguments: JSONObject) throws -> TrimPlan {
+		var base: URL?
+		if case .project(let controller)? = try? target(arguments) { base = controller.composeDocument.baseURL }
+		base = base ?? projects.first?.composeDocument.baseURL
+		func url(_ path: String) -> URL {
+			let expanded = (path as NSString).expandingTildeInPath
+			if expanded.hasPrefix("/") { return URL(fileURLWithPath: expanded).standardizedFileURL }
+			return URL(fileURLWithPath: expanded, relativeTo: base ?? URL(fileURLWithPath: "/")).standardizedFileURL
+		}
+		guard let named = arguments["source"] as? String, !named.isEmpty else {
+			throw Refusal(text: "trim_audio needs the `source` file.")
+		}
+		let source = url(named)
+		guard FileManager.default.fileExists(atPath: source.path) else {
+			throw Refusal(text: "There is no file at \(source.path).")
+		}
+		guard let start = time(arguments["start"]), start >= 0 else {
+			throw Refusal(text: "`start` is not a time.")
+		}
+		let end = time(arguments["end"])
+		if let end, end <= start { throw Refusal(text: "`end` has to be after `start`.") }
+
+		let target: URL
+		if let asked = arguments["target"] as? String, !asked.isEmpty {
+			target = url(asked)
+		} else {
+			let stamp = Timecode.string(start).replacingOccurrences(of: ":", with: "-")
+			target = source.deletingLastPathComponent().appendingPathComponent(
+				"\(source.deletingPathExtension().lastPathComponent)-from-\(stamp).\(AudioTrim.kind(for: source))")
+		}
+		func inside(_ folder: URL?) -> Bool {
+			guard let folder else { return false }
+			let root = folder.standardizedFileURL.resolvingSymlinksInPath().path
+			let there = target.deletingLastPathComponent().resolvingSymlinksInPath().path
+			return there == root || there.hasPrefix(root.hasSuffix("/") ? root : root + "/")
+		}
+		guard inside(base) || inside(source.deletingLastPathComponent()) else {
+			throw Refusal(text: "A copy is written inside the project's folder or beside the file it is cut from, and \(target.path) is neither.")
+		}
+		guard ["wav", "aif", "aiff", "caf", "m4a"].contains(target.pathExtension.lowercased()) else {
+			throw Refusal(text: "The copy is written as .wav, .aiff, .caf or .m4a — \(AudioTrim.kind(for: source)) for this file.")
+		}
+		return TrimPlan(source: source, target: target, start: start, end: end, base: base)
+	}
+
+	private func trimAudio(_ arguments: JSONObject) async throws -> ToolResult {
+		let plan = try trimPlan(arguments)
+		// Off the main thread: a song is tens of megabytes to read and write,
+		// and the window should not stop while it happens.
+		let seconds = try await Task.detached(priority: .userInitiated) {
+			try AudioTrim.write(plan.source, from: plan.start, to: plan.end, at: plan.target)
+		}.value
+		let path = plan.base.map { MediaPath.relative(plan.target, toFolder: $0) } ?? plan.target.path
+		return ToolResult(
+			"Wrote \(plan.target.path): \(Timecode.string(seconds)) of \(plan.source.lastPathComponent), from \(Timecode.string(plan.start)). The original is unchanged. In the project it is `file: \(path)`.",
+			summary: "Wrote \(plan.target.lastPathComponent), \(Timecode.string(seconds)) from \(Timecode.string(plan.start))")
 	}
 
 	// MARK: Words

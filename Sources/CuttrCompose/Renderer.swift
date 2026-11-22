@@ -447,10 +447,19 @@ public enum Renderer {
 			// As much of the file as the span asks for, or as much as there is.
 			// A sound shorter than its span simply stops; looping it would be a
 			// decision the file did not make.
-			let available = (try? await source.load(.timeRange).duration) ?? .zero
+			//
+			// From where in the file the sound says it begins. That moves which
+			// part of the recording is heard and nothing else: it still lands
+			// at the same programme time. A start past the end of the file
+			// leaves nothing to lay, and the lane is left empty rather than
+			// given a range the composition would refuse.
+			let whole = (try? await source.load(.timeRange).duration) ?? .zero
+			let from = CMTime(seconds: sound.sound.fileStart, preferredTimescale: scale)
+			let available = whole - from
+			guard available > .zero else { continue }
 			let wanted = CMTime(seconds: sound.duration, preferredTimescale: scale)
 			try? soundLanes[lane].track.insertTimeRange(
-				CMTimeRange(start: .zero, duration: min(available, wanted)), of: source,
+				CMTimeRange(start: from, duration: min(available, wanted)), of: source,
 				at: CMTime(seconds: sound.start, preferredTimescale: scale))
 			soundLanes[lane].sounds.append(sound)
 		}

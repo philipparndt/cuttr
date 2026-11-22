@@ -695,6 +695,24 @@ goes down as the sound fades up and comes back as it fades away, so it reads as
 room being made rather than as a drop. A sound shorter than its span stops
 rather than starting again.
 
+**Which part of the file is a second clock**, and it has keys of its own:
+
+```yaml
+sounds:
+  - file:  music/song.mp3
+    from:  04:55.485
+    to:    06:10.000
+    start: 00:13.915   # in the file
+    end:   01:15.000   # in the file
+```
+
+`from:`/`to:` are when it plays, on the programme. `start:` is where in the
+*file* it begins — a song from its chorus, without cutting a copy — and `end:`,
+if there is one, where in the file it stops. `start:` moves nothing: the sound
+still comes in at the same moment and plays from further into the recording.
+The gain, the fades and the ducking apply to the part that is heard. An `end:`
+that comes before the span is up ends the sound there, fade and all.
+
 Sounds that are not on at once share one lane; two that overlap get one each.
 Paths are relative to the project file, the same as the takes, and a file that
 is not there is named rather than left as a silent track.
@@ -1292,9 +1310,10 @@ would say it and hands back the text it wants. So every change it makes is one
 step in the document's own undo, `⌘Z` takes it back, a take is not written
 until you save, and nothing it writes is in a shape the app would not have
 written itself. Beyond the files it can move the playhead, switch documents,
-read the transcript, and run any command in the menu bar by name. Saving,
-closing, sharing, and writing a take that is not open are asked about first, in
-the chat, and do not happen until you press Allow.
+read the transcript, write part of an audio file out as a copy, and run any
+command in the menu bar by name. Saving, closing, sharing, writing a take that
+is not open, and writing that copy are asked about first, in the chat, and do
+not happen until you press Allow.
 
 It answers through **your own AI**. [ai-connector][connector] runs Claude Code
 and local models on your Mac, and cuttr finds it by the file it keeps while it

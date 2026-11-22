@@ -29,6 +29,27 @@ public struct Sound: Sendable, Equatable {
 	/// when it plays or it is not read.
 	public var span: Overlay.Span?
 
+	/// Where in the *file* it begins, in seconds from the file's first sample.
+	///
+	/// The other clock a sound has. ``span`` says when it plays, on the
+	/// programme; this says which part of the recording is heard then. Without
+	/// it the only way to start a song at its chorus was to cut a second file,
+	/// which is a copy of somebody's music kept for the sake of fourteen
+	/// seconds — and a second file to lose.
+	///
+	/// It does not move the sound. `start: 00:13.915` plays from that point in
+	/// the file at exactly the programme time it played from before, and the
+	/// fades, the gain and the ducking apply to what is heard.
+	public var fileStart: Double = 0
+
+	/// Where in the file it stops, when that is before the file's end. `nil`
+	/// for as much of it as the span asks for.
+	public var fileEnd: Double?
+
+	/// How much of the file there is to play from ``fileStart``, when the file
+	/// says where it stops. `nil` when it is the file's own length that decides.
+	public var fileLength: Double? { fileEnd.map { max(0, $0 - fileStart) } }
+
 	/// Decibels, applied to the file as it is. Nought leaves it alone.
 	public var gain: Double
 
@@ -48,10 +69,14 @@ public struct Sound: Sendable, Equatable {
 		gain: Double = 0,
 		arrival: Overlay.Transition = .cut,
 		departure: Overlay.Transition = .cut,
-		ducks: Double = 0
+		ducks: Double = 0,
+		fileStart: Double = 0,
+		fileEnd: Double? = nil
 	) {
 		self.file = file
 		self.span = span
+		self.fileStart = fileStart
+		self.fileEnd = fileEnd
 		self.gain = gain
 		self.arrival = arrival
 		self.departure = departure

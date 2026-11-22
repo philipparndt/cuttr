@@ -74,10 +74,19 @@ private final class Desk: AssistantDesk {
 		return controller
 	}
 
-	private func project(_ sounds: [Sound] = []) throws -> ComposeWindowController {
+	/// An empty file where a recording or a piece of music would be. Finding
+	/// the file is all that resolving a project asks of it.
+	private func touch(_ path: String) throws {
+		let url = folder.appendingPathComponent(path)
+		try FileManager.default.createDirectory(
+			at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+		try Data().write(to: url)
+	}
+
+	private func project(_ sounds: [Sound] = [], inside nested: [Sound] = []) throws -> ComposeWindowController {
 		let url = folder.appendingPathComponent("programme.cuttrproj")
 		var made = Project(takes: ["mia-take-1.cuttr"], output: Output(file: "out.mov"))
-		made.timeline = [TimelineEntry(clip: ClipReference("mia-intro"))]
+		made.timeline = [TimelineEntry(clip: ClipReference("mia-intro"), sounds: nested)]
 		made.sounds = sounds
 		try ProjectWriter.write(made).write(to: url, atomically: true, encoding: .utf8)
 		let document = ComposeDocument()
@@ -221,6 +230,152 @@ private final class Desk: AssistantDesk {
 
 		let unknown = await tools.call("shift_sound", arguments: ["sound": "nope.wav", "by": 1])
 		#expect(unknown.text.contains("1: music/bed.wav"))
+	}
+
+	/// The request this came from: start the song fourteen seconds in. That is
+	/// a key on the sound, and the answer says what cuttr now takes it to mean —
+	/// which is the only way to tell a key that was read from one that was not.
+	@Test func aSoundIsStartedPartWayIntoItsFileAndTheAnswerSaysSo() async throws {
+		_ = try take(open: false)
+		for path in ["media/clip.mov", "media/clip-mic.wav", "music/song.mp3"] { try touch(path) }
+		let controller = try project([Sound(file: "music/song.mp3", span: .times(from: 1, to: 2))])
+		desk.showing = controller
+		let document = controller.composeDocument
+		#expect(document.resolved != nil, "\(document.problem ?? "")")
+
+		let before = await tools.call("get_context", arguments: [:])
+		#expect(before.text.contains("sound 1: music/song.mp3 plays 00:01.000–00:02.000, from the top of the file"))
+
+		let edited = await tools.call("edit_document", arguments: [
+			"old": "    to:    00:02.000\n", "new": "    to:    00:02.000\n    start: 00:13.915\n",
+			"summary": "Start the song at the chorus",
+		])
+		#expect(!edited.isError, "\(edited.text)")
+		#expect(document.project.sounds[0].fileStart == 13.915)
+		// Where it plays has not moved; which part of the file is heard has.
+		#expect(document.project.sounds[0].span == .times(from: 1, to: 2))
+		#expect(edited.text.contains("sound 1: music/song.mp3 plays 00:01.000–00:02.000, from 00:13.915 of the file"))
+		#expect(try String(contentsOf: #require(document.url), encoding: .utf8)
+			.contains("    start: 00:13.915   # in the file\n"))
+
+		// A key cuttr does not have changes nothing, and the answer shows that
+		// it changed nothing rather than leaving it to be assumed.
+		let guessed = await tools.call("edit_document", arguments: [
+			"old": "    start: 00:13.915   # in the file\n", "new": "    skip: 00:20.000\n",
+		])
+		#expect(guessed.text.contains("from the top of the file"))
+
+		let refused = await tools.call("edit_document", arguments: [
+			"old": "    to:    00:02.000\n", "new": "    to:    00:02.000\n    start: 00:09.000\n    end: 00:03.000\n",
+		])
+		#expect(refused.isError)
+	}
+
+	/// A sound written inside a timeline entry is a sound: it is in the list
+	/// under the same numbering, and it can be moved.
+	@Test func aSoundInsideATimelineEntryIsFoundAndMoved() async throws {
+		_ = try take(open: false)
+		for path in ["media/clip.mov", "media/clip-mic.wav", "bed.wav", "sting.wav", "whole.wav"] { try touch(path) }
+		let controller = try project(
+			[Sound(file: "bed.wav", span: .times(from: 0, to: 1))],
+			inside: [
+				Sound(file: "sting.wav", span: .within(.init("mia-intro"), from: 0.25, to: 1)),
+				Sound(file: "whole.wav", span: nil),
+			])
+		desk.showing = controller
+		let document = controller.composeDocument
+		#expect(document.resolved != nil, "\(document.problem ?? "")")
+
+		let context = await tools.call("get_context", arguments: [:])
+		#expect(context.text.contains("sound 1: bed.wav plays"))
+		#expect(context.text.contains("sound 2: sting.wav (inside a timeline entry) plays 00:00.250–00:01.000"))
+		#expect(context.text.contains("sound 3: whole.wav (inside a timeline entry) plays 00:00.000–00:02.000"))
+
+		let moved = await tools.call("shift_sound", arguments: ["sound": "sting.wav", "by": 0.5])
+		#expect(!moved.isError, "\(moved.text)")
+		#expect(document.project.timeline[0].sounds[0].span == .within(.init("mia-intro"), from: 0.75, to: 1.5))
+		#expect(document.project.sounds[0].span == .times(from: 0, to: 1))
+
+		// By the number the context gave it, too.
+		_ = await tools.call("shift_sound", arguments: ["sound": 2, "by": -0.25])
+		#expect(document.project.timeline[0].sounds[0].span == .within(.init("mia-intro"), from: 0.5, to: 1.25))
+
+		// One with no range of its own plays for its placement and has no time
+		// to shift — said, with the two things that can be done instead.
+		let whole = await tools.call("shift_sound", arguments: ["sound": "whole.wav", "by": 1])
+		#expect(whole.isError)
+		#expect(whole.text.contains("no range of its own"))
+		#expect(whole.text.contains("`start:`"))
+		#expect(document.project.timeline[0].sounds[1].span == nil)
+	}
+
+	// MARK: - A copy of part of a file
+
+	private func wave(_ path: String, seconds: Double) throws {
+		let rate = 8000, count = Int(Double(rate) * seconds)
+		var data = Data()
+		func put(_ text: String) { data.append(contentsOf: Array(text.utf8)) }
+		func put32(_ value: UInt32) { withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) } }
+		func put16(_ value: UInt16) { withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) } }
+		put("RIFF"); put32(UInt32(36 + count * 2)); put("WAVE")
+		put("fmt "); put32(16); put16(1); put16(1)
+		put32(UInt32(rate)); put32(UInt32(rate * 2)); put16(2); put16(16)
+		put("data"); put32(UInt32(count * 2))
+		for sample in 0..<count { put16(UInt16(bitPattern: Int16(sample % 20000))) }
+		let url = folder.appendingPathComponent(path)
+		try FileManager.default.createDirectory(
+			at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+		try data.write(to: url)
+	}
+
+	@Test func aCopyOfPartOfAFileIsWrittenOnlyWhereASoundCouldLive() async throws {
+		_ = try take(open: false)
+		try wave("music/song.wav", seconds: 3)
+		let controller = try project()
+		desk.showing = controller
+		let source = folder.appendingPathComponent("music/song.wav")
+		let before = try Data(contentsOf: source)
+
+		// Asked first: it puts a file on disk.
+		let arguments: JSONObject = ["source": "music/song.wav", "start": "00:01.000", "end": 2.5]
+		let question = try #require(tools.question(before: "trim_audio", arguments: arguments))
+		#expect(question.contains("song-from-00-01.000.wav"))
+		#expect(question.contains("the original is not changed"))
+
+		let written = await tools.call("trim_audio", arguments: arguments)
+		#expect(!written.isError, "\(written.text)")
+		let copy = folder.appendingPathComponent("music/song-from-00-01.000.wav")
+		#expect(FileManager.default.fileExists(atPath: copy.path))
+		// Said the way the project file wants it.
+		#expect(written.text.contains("`file: music/song-from-00-01.000.wav`"))
+		#expect(written.text.contains("00:01.500 of song.wav"))
+		#expect(try Data(contentsOf: source) == before)
+
+		// Not twice over the same name, not over the original, and not anywhere
+		// that is neither the project's folder nor the file's own.
+		let again = await tools.call("trim_audio", arguments: arguments)
+		#expect(again.isError)
+		let outside = await tools.call("trim_audio", arguments: [
+			"source": "music/song.wav", "start": 1, "target": NSTemporaryDirectory() + "elsewhere-\(UUID().uuidString).wav",
+		])
+		#expect(outside.isError)
+		#expect(outside.text.contains("is neither"))
+		let climbing = await tools.call("trim_audio", arguments: [
+			"source": "music/song.wav", "start": 1, "target": "../\(UUID().uuidString).wav",
+		])
+		#expect(climbing.isError)
+		let odd = await tools.call("trim_audio", arguments: [
+			"source": "music/song.wav", "start": 1, "target": "music/copy.sh",
+		])
+		#expect(odd.isError)
+		let missing = await tools.call("trim_audio", arguments: ["source": "music/nope.wav", "start": 1])
+		#expect(missing.isError)
+		// A place in the project's folder that is not beside the source is fine.
+		let elsewhere = await tools.call("trim_audio", arguments: [
+			"source": "music/song.wav", "start": 2, "target": "cuts/tail.wav",
+		])
+		#expect(!elsewhere.isError, "\(elsewhere.text)")
+		#expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("cuts/tail.wav").path))
 	}
 
 	// MARK: - A project, and the takes it lists

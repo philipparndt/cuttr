@@ -1152,6 +1152,31 @@ public final class PropertiesPanel: NSView {
 				note: "a sound shorter than that stops rather than starting again")
 		}
 
+		// The file's own clock, apart from the programme's: which part of the
+		// recording is heard. Under "when", because the two are read together —
+		// it starts *then*, from *there* — and above the level, which is about
+		// whatever part that turns out to be.
+		section("which part of the file")
+		field("from", [
+			text(Timecode.string(sound.fileStart), width: 96, placeholder: "00:00.000") { value in
+				guard let seconds = Timecode.parse(value), seconds >= 0 else { return }
+				change {
+					$0.fileStart = seconds
+					// An end the new start has passed is an end of nothing.
+					if let end = $0.fileEnd, end <= seconds { $0.fileEnd = nil }
+				}
+			},
+			label("to"),
+			text(sound.fileEnd.map(Timecode.string) ?? "", width: 96, placeholder: "its end") { value in
+				let typed = value.trimmingCharacters(in: .whitespaces)
+				if typed.isEmpty { change { $0.fileEnd = nil }; return }
+				guard let seconds = Timecode.parse(typed), seconds > sound.fileStart else { return }
+				change { $0.fileEnd = seconds }
+			},
+		], note: sound.fileStart > 0
+			? "it plays from there in the file, at the same moment in the programme as before"
+			: "from the top — a time here starts a song at its chorus without cutting a copy")
+
 		section("how it sounds")
 		field("gain", [number(sound.gain, width: 72) { value in
 			change { $0.gain = value }

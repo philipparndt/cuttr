@@ -1097,6 +1097,15 @@ public enum Resolver {
 			guard FileManager.default.fileExists(atPath: url.path) else {
 				throw ResolveError.missingSound(sound.file)
 			}
+			// A sound that says where in its file it stops is no longer than
+			// that, whatever its span has room for. Settled here rather than in
+			// the mix, because everything downstream reads the same two
+			// numbers: the fade out, the ducking, the lane it takes and the bar
+			// drawn for it all end where the sound does.
+			func stops(_ start: Double, _ end: Double) -> Double {
+				guard let length = sound.fileLength else { return end }
+				return min(end, start + length)
+			}
 			guard let span = sound.span else {
 				guard let covering, covering.end > covering.start else {
 					warnings.append("The sound `\(sound.file)` is written on a timeline entry "
@@ -1105,13 +1114,13 @@ public enum Resolver {
 				}
 				sounds.append(ResolvedSound(
 					sound: sound, origin: origin, url: url,
-					start: covering.start, end: covering.end))
+					start: covering.start, end: stops(covering.start, covering.end)))
 				return
 			}
 			for where_ in try when(span) where where_.end > where_.start {
 				sounds.append(ResolvedSound(
 					sound: sound, origin: origin, url: url,
-					start: where_.start, end: where_.end))
+					start: where_.start, end: stops(where_.start, where_.end)))
 			}
 		}
 

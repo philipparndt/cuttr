@@ -582,13 +582,26 @@ public enum ProjectReader {
 		// and repeating four lines is cheaper than a grammar that hides how
 		// many of them there are.
 		let where_ = span(m) ?? (m["when"] as? [Any])?.compactMap(mapping).compactMap(span).first
+		// The file's own clock: where in it the sound begins and, optionally,
+		// where it stops. Refused rather than tidied when they make no sense —
+		// a start before the beginning or an end at or before the start is a
+		// sound that plays nothing, and one of those read without complaint is
+		// a silent track somebody has to go looking for.
+		let start = try time(m["start"], key: "start") ?? 0
+		guard start >= 0 else { throw ProjectError.badValue(key: "start", value: describe(m["start"] as Any)) }
+		let end = try time(m["end"], key: "end")
+		if let end, end <= start {
+			throw ProjectError.badValue(key: "end", value: describe(m["end"] as Any))
+		}
 		return Sound(
 			file: file,
 			span: where_,
 			gain: number(m["gain"]) ?? 0,
 			arrival: try fade(m["in"], key: "in"),
 			departure: try fade(m["out"], key: "out"),
-			ducks: number(m["ducks"]) ?? 0)
+			ducks: number(m["ducks"]) ?? 0,
+			fileStart: start,
+			fileEnd: end)
 	}
 
 	private static func cutTransition(_ value: Any?) throws -> Transition {
