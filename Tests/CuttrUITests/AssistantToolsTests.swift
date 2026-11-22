@@ -369,6 +369,9 @@ private final class Desk: AssistantDesk {
 	@Test func everyCommandInTheMenuBarIsThere() async {
 		// The menu bar is the application's, so there has to be one.
 		_ = NSApplication.shared
+		// Listing the commands fills Open Recent, and a test does not ask the
+		// system what was open lately.
+		RecentProjects.remembered = { [] }
 		let bar = MainMenu.build()
 		let tools = AssistantTools(desk: desk, menu: { bar })
 		let listed = await tools.call("list_commands", arguments: [:])

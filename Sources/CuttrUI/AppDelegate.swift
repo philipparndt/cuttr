@@ -460,6 +460,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		self.composers = composers
 		self.controllers = controllers
 		self.scenes = scenes
+		// A test has no recent documents, rather than the system's — see
+		// ``RecentProjects/remembered``.
+		RecentProjects.remembered = { [] }
 		// Wired as the application wires them, so a double click in a takes list
 		// arrives here rather than stopping at a `nil` callback.
 		for composer in composers { wire(composer) }
@@ -571,7 +574,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		// switcher rather than an archive: past the first handful somebody is
 		// looking for a file rather than for the thing they had open on
 		// Tuesday, and `⌘O` is the better door.
-		let recent = NSDocumentController.shared.recentDocumentURLs
+		let recent = RecentProjects.remembered()
 			.filter { !alreadyOpen.contains($0.standardizedFileURL.path) }
 			.prefix(8)
 			.map { url -> DocumentSwitcher.Entry in

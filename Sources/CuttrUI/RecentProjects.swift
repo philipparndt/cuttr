@@ -30,8 +30,20 @@ enum RecentProjects {
 
 	/// The list, most recent first. `limit` of nought is all of them.
 	static func entries(limit: Int = 0) -> [Entry] {
-		entries(from: NSDocumentController.shared.recentDocumentURLs, limit: limit)
+		entries(from: remembered(), limit: limit)
 	}
+
+	/// What was open lately, as the system keeps it — and the one place this
+	/// program asks.
+	///
+	/// A property so that the tests can have none. Asking is a synchronous
+	/// wait, on the main thread, for a list another process keeps; from a test
+	/// process, one run in several, the answer never came. The suite sat in
+	/// `recentDocumentURLs` for over an hour, and a release was refused over a
+	/// run like it without saying why. Nothing a test asserts is in that list
+	/// anyway: what it would find there is whatever the last test happened to
+	/// open.
+	static var remembered: () -> [URL] = { NSDocumentController.shared.recentDocumentURLs }
 
 	/// The same, from a list handed in.
 	///
