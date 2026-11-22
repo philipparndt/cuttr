@@ -58,7 +58,17 @@ fi
 # release a minute later, and the decode test in there is the one that says the
 # aligner still recovers a known offset.
 echo "==> Testing"
-xcrun swift test >/dev/null || { echo "the tests fail — not releasing"; exit 1; }
+# Kept, not thrown away. A release refused over a test that fails one run in
+# six said only "the tests fail", and finding out which meant running four
+# minutes of suite again and hoping it failed the same way.
+mkdir -p build
+TEST_LOG="build/release-tests.log"
+xcrun swift test > "$TEST_LOG" 2>&1 || {
+	echo "the tests fail — not releasing"
+	grep -E "recorded an issue|error:|Fatal error" "$TEST_LOG" | head -20
+	echo "    the whole run is in $TEST_LOG"
+	exit 1
+}
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 echo "==> Releasing $TAG from $BRANCH"
