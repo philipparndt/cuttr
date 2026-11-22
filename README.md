@@ -1279,11 +1279,50 @@ waits for any take window open on that repository to be closed, for the same
 reason a checkout does: a take window holds its cuts in memory and would write
 them straight back over the version.
 
+## The assistant
+
+`⌃⌘A`, or the speech bubble at the end of the bar, opens a chat down the side
+of the window. Ask it about the cut or tell it what to change — "make a clip of
+the sentence about the driver", "start the music two seconds later", "the
+recorder is half a second late" — and it does it in the open documents, where
+you can watch.
+
+It works the way this program does: it reads a take or a project as the file
+would say it and hands back the text it wants. So every change it makes is one
+step in the document's own undo, `⌘Z` takes it back, a take is not written
+until you save, and nothing it writes is in a shape the app would not have
+written itself. Beyond the files it can move the playhead, switch documents,
+read the transcript, and run any command in the menu bar by name. Saving,
+closing, sharing, and writing a take that is not open are asked about first, in
+the chat, and do not happen until you press Allow.
+
+It answers through **your own AI**. [ai-connector][connector] runs Claude Code
+and local models on your Mac, and cuttr finds it by the file it keeps while it
+runs — there is nothing to enter. When it is not there, the panel shows one
+command that installs and starts it. A connector elsewhere on your network is
+found by Bonjour and linked with a PIN you approve on that machine; local
+models can be used from there, Claude Code only on this Mac, because it reaches
+the app through a server the app opens on the loopback interface for the length
+of a turn. Any OpenAI-compatible address works as well, named in the settings
+file:
+
+```yaml
+ai:
+  url: https://openrouter.ai/api/v1
+  key: sk-…
+```
+
+The conversation is kept in `~/.config/cuttr/chat.json`, on this computer and
+not in the project.
+
+[connector]: https://github.com/philipparndt/ai-connector
+
 ## Layout
 
     Sources/CuttrKit/       takes: clips, slugs, tags, timecode, waveforms, alignment
     Sources/CuttrCompose/   projects: queries, groups, overlays, anchors, renderer
-    Sources/CuttrUI/        both tabs of the one window
+    Sources/CuttrChat/      the assistant: finding an AI, talking to it, the MCP server
+    Sources/CuttrUI/        both tabs of the one window, and the assistant's tools
     Sources/cuttr/          the app
     Sources/cuttr-render/   the renderer, without a window
 

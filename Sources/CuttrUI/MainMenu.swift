@@ -248,6 +248,16 @@ enum MainMenu {
 		                     "-", [.command, .option]))
 		view.addItem(command("Actual Audio Height", #selector(MainWindowController.resetAudioZoom(_:)),
 		                     "0", [.command, .option]))
+		view.addItem(.separator())
+		// Last, and aimed at the application rather than at a window: the
+		// column belongs to whichever window is in front and is the same
+		// conversation in all of them. ⌃⌘A — ⌘A is Select All and ⇧⌘A adds a
+		// take.
+		let assistant = command("Assistant", #selector(AppDelegate.toggleAssistant(_:)), "a",
+		                        [.command, .control])
+		assistant.toolTip = "A chat down the side of the window that works in your documents,\n"
+			+ "through your own AI. Nothing is sent anywhere you have not set up."
+		view.addItem(assistant)
 		viewItem.submenu = view
 		main.addItem(viewItem)
 
@@ -457,6 +467,12 @@ enum MainMenu {
 	               one, on refs/cuttr/saves, and this is the way back to one
 	  ⇧⌘I          import subclips from a Resolve EDL or XML
 	               (or drop the .edl / .xml on the window)
+
+	The assistant
+	  ⌃⌘A          a chat down the side of the window. Ask it about the cut or
+	               tell it what to change; it works in the open documents, and
+	               every change it makes is one ⌘Z
+	  ⏎            send — ⇧⏎ for a new line
 
 	Looking
 	  F            fit the whole take

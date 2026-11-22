@@ -23,7 +23,7 @@ help: ## Show this help
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: build
-build: ## Build the .app bundle (CONFIG=debug|release, default release)
+build: reference ## Build the .app bundle (CONFIG=debug|release, default release)
 	@Scripts/bundle.sh $(CONFIG)
 
 .PHONY: run
@@ -43,8 +43,19 @@ open: ## Build and open a take: make open TAKE=path/to/take.cuttr
 	@$(MAKE) build CONFIG=debug
 	@open -a $(abspath $(APP)) $(TAKE)
 
+# The assistant's reference for the two file formats is the README, and a
+# package can only bundle a file inside its own target — a link to the one up
+# here is copied as a link and arrives pointing at nothing. So there is a copy,
+# and this is what keeps it one: brought up to date before anything is built,
+# and `referenceIsTheReadme` goes red if it ever is not.
+REFERENCE := Sources/CuttrUI/Reference/README.md
+
+.PHONY: reference
+reference:
+	@cmp -s README.md $(REFERENCE) || cp README.md $(REFERENCE)
+
 .PHONY: test
-test: ## Run the test suite (FILTER=name)
+test: reference ## Run the test suite (FILTER=name)
 	@$(SWIFT) test $(if $(FILTER),--filter $(FILTER))
 
 .PHONY: xcode

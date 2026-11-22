@@ -1461,6 +1461,39 @@ public final class MainWindowController: DocumentEditor, NSMenuItemValidation {
 	/// working from the list or from the timeline.
 	/// Put the playhead on a moment of this take, and select the clip that is
 	/// there — how the composing window hands over.
+	// MARK: - For the assistant
+
+	/// Where the playhead is, and what is selected, for something outside this
+	/// window that has to describe it.
+	var playheadTime: Double { playhead }
+	var selectedSlug: String? {
+		takeDocument.take.clips.first { $0.id == selectedClip }?.slug
+	}
+	var pendingSpan: (start: Double, end: Double)? { pending }
+
+	/// Selects a clip without taking the keyboard.
+	///
+	/// ``select(_:)`` hands the keyboard to the timeline, which is right when a
+	/// person clicked a clip and wrong here: somebody is typing in the chat,
+	/// and their next letter would be a cut.
+	func show(clip slug: String) -> Bool {
+		guard let clip = takeDocument.take.clips.first(where: { $0.slug == slug }) else { return false }
+		selectedClip = clip.id
+		clipTable.reload(takeDocument.take.clips, selected: clip.id)
+		timeline.selectedClip = clip.id
+		timeline.reveal(from: clip.start, to: clip.end)
+		move(to: clip.start)
+		return true
+	}
+
+	/// Puts the playhead somewhere, and nothing else.
+	func go(to time: Double) { move(to: time) }
+
+	var isPlaying: Bool { transport.isPlaying }
+	func setPlaying(_ playing: Bool) {
+		if playing != transport.isPlaying { transport.togglePlay() }
+	}
+
 	public func reveal(at time: Double) {
 		let clip = takeDocument.take.clips.last { $0.contains(time) }
 		if let clip {

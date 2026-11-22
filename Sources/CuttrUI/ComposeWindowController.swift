@@ -472,6 +472,14 @@ public final class ComposeWindowController: DocumentEditor,
 	/// thing only a test that asks whether they are installed can see.
 	var transportForTesting: Transport { transport }
 	var playheadForTesting: Double { playhead }
+
+	// For the assistant: where the playhead is, and a way to put it somewhere.
+	var playheadTime: Double { playhead }
+	func go(to time: Double) { seek(to: time) }
+	var isPlaying: Bool { transport.isPlaying }
+	func setPlaying(_ playing: Bool) {
+		if playing != transport.isPlaying { transport.togglePlay() }
+	}
 	/// For the tests: the project page's panel, so the frame in its head can be
 	/// waited for.
 	var projectPanelForTesting: PropertiesPanel { projectPanel }

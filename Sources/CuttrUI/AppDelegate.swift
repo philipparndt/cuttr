@@ -876,8 +876,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 				holding.show(document)
 			}
 		} else {
+			let first = wanted == nil && current == nil
 			let place = wanted ?? current ?? makePlace(for: document)
 			place.adopt(document)
+			// The assistant comes back where it was left, in the first window
+			// of a session and without taking the keyboard: somebody who opens
+			// a take to cut it should find the timeline under their hands.
+			if first, UserDefaults.standard.bool(forKey: DocumentPlace.chatShownKey) {
+				place.setAssistantShown(true, remember: false, focus: false)
+			}
 		}
 		lastPlace = document.place
 		NSApp.activate(ignoringOtherApps: true)
@@ -1046,6 +1053,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 	@objc func showVersions(_ sender: Any?) { currentComposer?.showVersions(sender) }
 	@objc func shareProject(_ sender: Any?) { currentComposer?.shareProject(sender) }
 	@objc func importSubclips(_ sender: Any?) { currentTake?.importSubclips(sender) }
+
+	/// ⌃⌘A: the assistant's column, in the window somebody is in.
+	@objc func toggleAssistant(_ sender: Any?) { current?.toggleAssistant(sender) }
 
 	@objc func showShortcuts(_ sender: Any?) {
 		ShortcutsPanel.present(MainMenu.shortcutSheet)

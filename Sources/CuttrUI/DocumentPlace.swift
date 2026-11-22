@@ -182,22 +182,14 @@ public class DocumentEditor: NSWindowController {
 	func appear(in window: NSWindow) {
 		self.window = window
 		window.windowController = self
-		window.minSize = minimumSize
-		// A window handed a document with a larger minimum than the one it was
-		// showing has to grow to it, or AppKit resizes it for us and the frame
-		// somebody arranged is gone.
-		if window.frame.width < minimumSize.width || window.frame.height < minimumSize.height {
-			var frame = window.frame
-			frame.size.width = max(frame.width, minimumSize.width)
-			frame.size.height = max(frame.height, minimumSize.height)
-			window.setFrame(frame, display: false)
-		}
+		if let place { place.fit(to: self) } else { window.minSize = minimumSize }
 		window.title = documentTitle
 		window.representedURL = documentFile
 		window.isDocumentEdited = documentIsEdited
 		if let bar = place?.bar {
 			bar.reset()
 			furnish(bar)
+			place?.furnishAssistant()
 		}
 		place?.host(contentRoot)
 		// Said to the window as well as done, because AppKit picks a first
@@ -282,6 +274,18 @@ final class DocumentPlace: NSObject, NSWindowDelegate {
 	private let body = NSView()
 	private var barHeight: NSLayoutConstraint!
 
+	/// The assistant's column, down the right of the window, and how wide it is
+	/// — nothing, until somebody opens it. The panel itself is made then and
+	/// not before: most windows never have one.
+	private let side = NSView()
+	private var sideWidth: NSLayoutConstraint!
+	private var chat: ChatPanel?
+	private let chatButton = NSButton()
+	/// Makes the panel. A test hands over one of its own, so that opening the
+	/// column in a test does not go looking for somebody's AI.
+	var makeChat: () -> ChatPanel = { Assistant.makePanel() }
+	static let chatShownKey = "assistantShown"
+
 	init(size: NSSize) {
 		window = NSWindow(
 			contentRect: NSRect(origin: .zero, size: size),
@@ -318,11 +322,12 @@ final class DocumentPlace: NSObject, NSWindowDelegate {
 		let content = NSView()
 		content.wantsLayer = true
 		content.layer?.backgroundColor = Theme.background.cgColor
-		for view in [bar, body] as [NSView] {
+		for view in [bar, body, side] as [NSView] {
 			view.translatesAutoresizingMaskIntoConstraints = false
 			content.addSubview(view)
 		}
 		barHeight = bar.heightAnchor.constraint(equalToConstant: DocumentBar.height)
+		sideWidth = side.widthAnchor.constraint(equalToConstant: 0)
 		NSLayoutConstraint.activate([
 			bar.topAnchor.constraint(equalTo: content.topAnchor),
 			bar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -330,10 +335,111 @@ final class DocumentPlace: NSObject, NSWindowDelegate {
 			barHeight,
 			body.topAnchor.constraint(equalTo: bar.bottomAnchor),
 			body.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-			body.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+			body.trailingAnchor.constraint(equalTo: side.leadingAnchor),
 			body.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+			// Under the bar and beside the document, not over either: the bar
+			// says which document you are in and the column is not one.
+			side.topAnchor.constraint(equalTo: bar.bottomAnchor),
+			side.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+			side.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+			sideWidth,
 		])
+		side.isHidden = true
 		window.contentView = content
+
+		chatButton.image = NSImage(systemSymbolName: "bubble.left.and.text.bubble.right",
+		                           accessibilityDescription: "Assistant")?
+			.withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
+		chatButton.isBordered = false
+		chatButton.target = self
+		chatButton.action = #selector(toggleAssistant(_:))
+		chatButton.toolTip = "Assistant (⌃⌘A)"
+		chatButton.setAccessibilityLabel("Assistant")
+	}
+
+	// MARK: - The assistant
+
+	var assistantShown: Bool { !side.isHidden }
+
+	/// How much of the window's width the column takes, for whoever works out
+	/// how narrow the window may get.
+	var sideRoom: CGFloat { assistantShown ? ChatPanel.width : 0 }
+
+	/// The button that opens the column, at the end of the bar. Put back every
+	/// time a document furnishes the bar, because furnishing starts by clearing
+	/// it.
+	func furnishAssistant() {
+		chatButton.contentTintColor = assistantShown ? Theme.text : Theme.dimText
+		bar.addTrailing(chatButton)
+	}
+
+	@objc func toggleAssistant(_ sender: Any?) { setAssistantShown(!assistantShown) }
+
+	/// Opens the column or closes it.
+	///
+	/// The document keeps its width where it can: the window grows by the
+	/// column when there is screen to grow into, and gives the room back when
+	/// the column closes. A document squeezed into what is left of a window
+	/// somebody had sized for it is a timeline forty per cent shorter, for the
+	/// sake of a question.
+	func setAssistantShown(_ shown: Bool, remember: Bool = true, focus: Bool = true) {
+		guard shown != assistantShown else {
+			if shown, focus { chat?.focus() }
+			return
+		}
+		if shown, chat == nil {
+			let panel = makeChat()
+			panel.onClose = { [weak self] in self?.setAssistantShown(false) }
+			side.addSubview(panel)
+			NSLayoutConstraint.activate([
+				panel.topAnchor.constraint(equalTo: side.topAnchor),
+				panel.bottomAnchor.constraint(equalTo: side.bottomAnchor),
+				panel.leadingAnchor.constraint(equalTo: side.leadingAnchor),
+				panel.widthAnchor.constraint(equalToConstant: ChatPanel.width),
+			])
+			chat = panel
+		}
+		let fullScreen = window.styleMask.contains(.fullScreen)
+		var frame = window.frame
+		if shown {
+			side.isHidden = false
+			sideWidth.constant = ChatPanel.width
+			if !fullScreen {
+				let room = (window.screen?.visibleFrame.maxX ?? frame.maxX) - frame.maxX
+				frame.size.width += max(0, min(ChatPanel.width, room))
+			}
+		} else {
+			if window.firstResponder is ComposerView { window.makeFirstResponder(nil) }
+			side.isHidden = true
+			sideWidth.constant = 0
+			if !fullScreen { frame.size.width -= ChatPanel.width }
+		}
+		if let showing {
+			fit(to: showing, frame: frame)
+		} else if !fullScreen {
+			window.setFrame(frame, display: true)
+		}
+		chatButton.contentTintColor = shown ? Theme.text : Theme.dimText
+		if remember { UserDefaults.standard.set(shown, forKey: Self.chatShownKey) }
+		if shown, focus { chat?.focus() }
+		showing?.placeDidResize()
+	}
+
+	/// Makes the window at least as big as a document needs, with the column
+	/// beside it counted.
+	///
+	/// A window handed a document with a larger minimum than the one it was
+	/// showing has to grow to it, or AppKit resizes it for us and the frame
+	/// somebody arranged is gone.
+	func fit(to document: DocumentEditor, frame wanted: NSRect? = nil) {
+		let least = NSSize(width: document.minimumSize.width + sideRoom,
+		                   height: document.minimumSize.height)
+		window.minSize = least
+		var frame = wanted ?? window.frame
+		guard wanted != nil || frame.width < least.width || frame.height < least.height else { return }
+		frame.size.width = max(frame.width, least.width)
+		frame.size.height = max(frame.height, least.height)
+		if frame != window.frame { window.setFrame(frame, display: wanted != nil) }
 	}
 
 	/// Puts a document's view under the bar. Called by the document itself, on
@@ -361,7 +467,21 @@ final class DocumentPlace: NSObject, NSWindowDelegate {
 	func setBarHidden(_ hidden: Bool) {
 		bar.isHidden = hidden
 		barHeight.constant = hidden ? 0 : DocumentBar.height
+		// The column goes with it, and comes back with it: a picture that asked
+		// for the whole screen did not mean the whole screen less a conversation.
+		if hidden {
+			guard assistantShown else { return }
+			hiddenForPreview = true
+			side.isHidden = true
+			sideWidth.constant = 0
+		} else if hiddenForPreview {
+			hiddenForPreview = false
+			side.isHidden = false
+			sideWidth.constant = ChatPanel.width
+		}
 	}
+
+	private var hiddenForPreview = false
 
 	/// The documents in this place, and the one showing, in the order they
 	/// arrived.

@@ -274,6 +274,38 @@ public final class TakeDocument {
 		if mediaChanged { loadMedia() }
 	}
 
+	/// The take, replaced by what a text says: one step, and one undo.
+	///
+	/// How the assistant edits. It reads the take as the file would say it and
+	/// hands back the file it wants, which is the same thing somebody does in a
+	/// text editor — except that here it lands in the open document, so it can
+	/// be seen, taken back with ⌘Z, and is not written until somebody saves.
+	///
+	/// Two things a parse alone would lose, and both are about slugs being
+	/// references. A clip read from text has a new identity, so every clip is
+	/// matched to the one that had its slug and keeps that one's: the selection
+	/// stays on it, and so does the answer to "did somebody type this slug". And
+	/// a slug that is *new* in the text was written by somebody — the assistant,
+	/// on the person's behalf — exactly as one in a file opened from disk was,
+	/// so it is claimed and a later rename will not re-derive it.
+	public func applyText(_ text: String, actionName: String) throws {
+		var next = try TakeReader.read(text)
+		var known = Dictionary(take.clips.map { ($0.slug, $0.id) }, uniquingKeysWith: { first, _ in first })
+		next.clips = next.clips.map { clip in
+			guard let id = known.removeValue(forKey: clip.slug) else {
+				manualSlugs.insert(clip.id)
+				return clip
+			}
+			var kept = Clip(id: id, slug: clip.slug, name: clip.name, start: clip.start, end: clip.end,
+			                note: clip.note, color: clip.color, order: clip.order, gain: clip.gain)
+			// Assigned rather than passed in: the initialiser turns tags into
+			// slugs, and these already are.
+			kept.tags = clip.tags
+			return kept
+		}
+		apply(next, actionName: actionName)
+	}
+
 	/// The take, changed, with no undo step of its own.
 	///
 	/// For the middle of a drag. A slider moved across its range is one

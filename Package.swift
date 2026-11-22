@@ -30,6 +30,7 @@ let package = Package(
 		.library(name: "CuttrKit", targets: ["CuttrKit"]),
 		.library(name: "CuttrCompose", targets: ["CuttrCompose"]),
 		.library(name: "CuttrRecord", targets: ["CuttrRecord"]),
+		.library(name: "CuttrChat", targets: ["CuttrChat"]),
 		// The renderer without a window: rendering a project is minutes of
 		// encoding, and the machine doing it does not need a screen.
 		.executable(name: "cuttr-render", targets: ["cuttr-render"]),
@@ -95,6 +96,24 @@ let package = Package(
 			dependencies: ["CuttrCompose"],
 			swiftSettings: [.swiftLanguageMode(.v5)]
 		),
+		// The assistant, without a window: finding somebody's own AI, talking to
+		// it, and the loopback server its agent calls the app's tools through.
+		//
+		// Foundation and Network and nothing else, and nothing of cuttr's own —
+		// it does not know what a take is. What the assistant can *do* is handed
+		// to it as a list of tools by the window layer, which is the only part of
+		// the program that has documents to do it to. That keeps the half with
+		// right answers — a stream decoded, a request answered — testable against
+		// a fake server with no application running.
+		.target(
+			name: "CuttrChat",
+			swiftSettings: [.swiftLanguageMode(.v5)]
+		),
+		.testTarget(
+			name: "CuttrChatTests",
+			dependencies: ["CuttrChat"],
+			swiftSettings: [.swiftLanguageMode(.v5)]
+		),
 		// AppKit shell: window, player, timeline, clip list.
 		//
 		// A library rather than the executable itself, so an Xcode application
@@ -102,7 +121,13 @@ let package = Package(
 		// dependency graph a second time.
 		.target(
 			name: "CuttrUI",
-			dependencies: ["CuttrKit", "CuttrCompose", "CuttrRecord"],
+			dependencies: ["CuttrKit", "CuttrCompose", "CuttrRecord", "CuttrChat"],
+			// The README, as the assistant's reference for the two file formats.
+			// The one people read rather than a second description written for
+			// a model: a second description is a second thing to be wrong. It
+			// is a copy only because a target cannot reach outside itself, and
+			// `make reference` and a test keep the copy honest.
+			resources: [.copy("Reference/README.md")],
 			swiftSettings: [.swiftLanguageMode(.v5)]
 		),
 		// Four lines: make an application, give it the delegate, run it.

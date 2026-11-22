@@ -52,6 +52,15 @@
 	     who records in Ghostty is never asked. -->
 	<key>NSAppleEventsUsageDescription</key>
 	<string>cuttr opens a Terminal window and sizes it for a screencast. It does not read or change anything else.</string>
+	<!-- Finding an ai-connector server on the network, for the assistant. Asked
+	     only when there is no AI on this Mac: the one here is found by a file
+	     it keeps, and somebody whose connector is running never sees this. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>cuttr looks for an ai-connector server on your network, so the assistant can use an AI you run on another computer.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ai-connector._tcp</string>
+	</array>
 	<!-- The cut list. Declared so that a double-click opens it here and so
 	     that the open panel can filter to it; it is UTF-8 YAML, and the
 	     conformance says so rather than pretending it is opaque. -->
