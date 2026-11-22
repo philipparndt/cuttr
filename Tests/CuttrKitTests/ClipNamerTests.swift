@@ -93,7 +93,7 @@ import Testing
 			// This Mac has one. The name still has to be something.
 			#expect(!naming.name.isEmpty)
 		case .invented, .firstWords:
-			#expect(naming.name == "Am liebsten tut sie")
+			#expect(naming.name == "Am liebsten geht es")
 		}
 	}
 
